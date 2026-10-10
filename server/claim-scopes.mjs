@@ -6,13 +6,20 @@ export class ClaimScopeError extends Error {
   constructor(message) { super(message); this.status = 422; this.code = 'invalid_claim_scope'; }
 }
 
+function composed(value) {
+  try { return value.normalize('NFC'); }
+  catch { return value; }
+}
+
 function pathScope(value) {
   if (typeof value !== 'string' || !value || value !== value.trim() || /[\x00-\x1f\x7f\\]/.test(value)) {
     throw new ClaimScopeError('Use explicit relative paths or a folder followed by /**.');
   }
   if (value === '**') return { path: '', subtree: true };
   const subtree = value.endsWith('/**');
-  const path = (subtree ? value.slice(0, -3) : value).replace(/^\.\//, '');
+  // Compose so an NFD spelling of café reserves the same file as NFC.
+  // Case stays distinct. ".." is still rejected, not resolved.
+  const path = composed((subtree ? value.slice(0, -3) : value).replace(/^\.\//, ''));
   if (!path || /[*?\[\]{}]/.test(path) || path.split('/').some(part => !part || part === '.' || part === '..')) {
     throw new ClaimScopeError('Use explicit relative paths, folder/**, or ** for the whole repository.');
   }
