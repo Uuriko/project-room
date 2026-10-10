@@ -1142,13 +1142,30 @@ $("#room-leave-button").addEventListener("click", async () => {
     dialogNotice("#room-about-status", error.code === "room_archived" ? "This room is archived; leaving is not recorded." : "Couldn’t leave the room. Refresh and try again.", true);
   } finally { button.disabled = false; }
 });
+// New-room form: the first missing field is marked invalid, focused and named.
+// Whitespace-only values pass the native `required` check, so this is the check
+// that catches them.
+const ROOM_FORM_FIELDS = Object.freeze([
+  { key: "title", selector: "#account-room-title", message: "room.create.missing.title" },
+  { key: "purpose", selector: "#account-room-purpose", message: "room.create.missing.purpose" },
+  { key: "displayName", selector: "#account-room-name", message: "room.create.missing.name" }
+]);
+const missingRoomFormFields = values => ROOM_FORM_FIELDS.filter(field => typeof values?.[field.key] !== "string" || values[field.key].trim() === "");
 $("#account-room-form").addEventListener("submit", async event => {
   event.preventDefault();
   const form = $("#account-room-form"), status = $("#account-room-status"), owned = accountClient.session;
-  if (!owned?.authenticated || form.dataset.busy === "true" || invitationIsCommitting() || signoutLoading) return;
+  if (form.dataset.busy === "true") return;
+  if (!owned?.authenticated || invitationIsCommitting() || signoutLoading) { setFormStatus(status, uiText("room.create.loading"), true); return; }
   const title = $("#account-room-title").value.trim(), purpose = $("#account-room-purpose").value.trim(), displayName = $("#account-room-name").value.trim();
   const kind = $("#account-room-kind").value;
-  if (!title || !purpose || !displayName) { setFormStatus(status, "Room name, purpose and your name are required.", true); return; }
+  for (const input of form.querySelectorAll("[aria-invalid]")) input.removeAttribute("aria-invalid");
+  const missing = missingRoomFormFields({ title, purpose, displayName });
+  if (missing.length) {
+    for (const field of missing) $(field.selector).setAttribute("aria-invalid", "true");
+    $(missing[0].selector).focus();
+    setFormStatus(status, uiText(missing[0].message), true);
+    return;
+  }
   // One id per attempt: a retry after a lost response finds the same room instead of creating a twin.
   const roomId = form.dataset.roomId || (form.dataset.roomId = "room-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12));
   // --- GR2: a chosen template uses the same room id and the same retry. ---
@@ -1168,12 +1185,13 @@ $("#account-room-form").addEventListener("submit", async event => {
     if (accountClient.session !== owned) return;
     if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) { endAccountAccess(); return; }
     if (error.code === "room_exists") delete form.dataset.roomId; // A lost response created it under another shape; the next attempt gets a fresh id.
-    setFormStatus(status, error.code === "room_creation_denied" ? "Your first room is free to create, but more rooms need membership administration in one of your rooms."
+    setFormStatus(status, error.code === "room_creation_denied" ? uiText("room.create.denied")
       : error.code === "room_exists" ? "A room with that id already exists. Choose Rooms to refresh, then try again."
       : error.status === 429 ? "Too many rooms just now. Try again in a minute."
         : error.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.", true);
   } finally { delete form.dataset.busy; $("#account-room-submit").disabled = false; }
 });
+$("#account-room-form").addEventListener("input", event => event.target.removeAttribute?.("aria-invalid"));
 $("#choose-room").addEventListener("click", () => inboxUI.showRoomList(true));
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
