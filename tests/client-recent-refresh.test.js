@@ -13,6 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomClient } from "../src/client.js";
 
+const FULL = "/api/rooms/commons", RECENT = "/api/rooms/commons?messages=recent";
 const response = body => ({ ok: true, status: 200, json: async () => body });
 const owner = { roomId: "commons", cursor: 0, viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "session-human" };
 const identity = () => ({ account: { id: "account-human", authEpoch: 0 }, member: { id: "human" }, roomId: "commons", csrf: "c", sessionBinding: "session-human" });
@@ -27,25 +28,34 @@ function fixture(t, route) {
   let stream;
   class Events extends EventTarget { constructor() { super(); stream = this; } close() {} }
   const reads = [], seen = [];
+  let calls = 0; // route(url, n): the window read and its background fill both count as the first read
+  const nth = () => calls <= 2 ? 1 : calls - 1;
   const client = new RoomClient({ events: Events, onSnapshot: value => seen.push(value), fetcher: async (url, options) => {
     if (url === "/api/rooms/commons/commands" && options.method === "POST") return response(route.receipt);
     assert.equal(options.method, "GET");
-    reads.push(url);
-    return response(route(url, reads.length));
+    reads.push(url); calls += 1;
+    // A fresh client's first read is the newest window; answer it from the same room the full read would show.
+    if (calls === 1 && url === RECENT) {
+      const whole = route(FULL, 1), shown = whole.state.messages.slice(-3);
+      return response({ ...whole, state: { ...whole.state, messages: shown },
+        messagesWindow: { mode: "recent", limit: 3, omitted: whole.state.messages.length - shown.length, older: "conversation" } });
+    }
+    return response(route(url, nth()));
   } });
   client.session = identity();
   t.after(() => client.disconnect());
   const notify = value => stream.dispatchEvent(new MessageEvent("room-event", { data: JSON.stringify(value) }));
   const settle = async () => { await new Promise(resolve => setImmediate(resolve)); await client.flight?.promise; };
-  return { client, reads, seen, notify, settle, route, connect: () => client.connect() };
+  // The first read is windowed; the background fill (250ms) then reads in full.
+  const warm = async () => { await client.refresh(); await new Promise(resolve => setTimeout(resolve, 320)); await client.flight?.promise; reads.length = 0; };
+  return { client, reads, seen, notify, settle, route, warm, connect: () => client.connect() };
 }
 
-const FULL = "/api/rooms/commons", RECENT = "/api/rooms/commons?messages=recent";
 const history = ["m1", "m2", "m3", "m4", "m5"].map(message);
 
 test("a new message on the stream re-reads only the newest messages and keeps older history", async t => {
   const f = fixture(t, url => url === FULL ? full(9, history) : recent(10, [message("m4"), message("m5"), message("m6")], 3));
-  await f.client.refresh();
+  await f.warm();
   f.connect(); await f.settle();
   const opened = f.reads.length;
   f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
@@ -63,7 +73,7 @@ test("anything that can change an older message reads the full snapshot", async 
   for (const type of ["message.edited", "message.deleted", "message.redacted", "message.reaction_set", "member.removed", "some.future_event"]) {
     await t.test(type, async t => {
       const f = fixture(t, url => url === FULL ? full(9, history) : assert.fail(`windowed read for ${type}`));
-      await f.client.refresh();
+      await f.warm();
       f.connect(); await f.settle();
       const opened = f.reads.length;
       f.notify(hint(10, type, { messageId: "m1" })); await f.settle();
@@ -79,7 +89,7 @@ test("a window that does not line up with held history falls back to one full re
     ["malformed window", { ...recent(10, [message("m4")], 3), messagesWindow: { mode: "recent", omitted: -1 } }]]) {
     await t.test(label, async t => {
       const f = fixture(t, (url, n) => url === RECENT ? window : full(n === 1 ? 9 : 10, n === 1 ? history : [...history, message("m6")]));
-      await f.client.refresh();
+      await f.warm();
       f.connect(); await f.settle();
       const opened = f.reads.length, applied = f.seen.length;
       f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
@@ -92,7 +102,7 @@ test("a window that does not line up with held history falls back to one full re
 
 test("a server that ignores ?messages=recent answers with a full snapshot, used as is", async t => {
   const f = fixture(t, (url, n) => full(n === 1 ? 9 : 10, n === 1 ? history : [...history, message("m6")]));
-  await f.client.refresh();
+  await f.warm();
   f.connect(); await f.settle();
   f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
   assert.equal(f.reads.at(-1), RECENT);
@@ -105,7 +115,7 @@ test("an edit receipt that arrives after a newer windowed read still reads the f
   const f = fixture(t, (url, n) => n === 1 ? full(8, history)
     : url === RECENT ? recent(10, [message("m4"), message("m5"), message("m6")], 3)
     : full(10, [{ ...message("m1"), body: "edited" }, ...history.slice(1), message("m6")]));
-  await f.client.refresh();
+  await f.warm();
   f.connect(); await f.settle();
   f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
   assert.equal(f.reads.at(-1), RECENT);
@@ -118,19 +128,20 @@ test("an edit receipt that arrives after a newer windowed read still reads the f
 
 test("a new session never merges with the previous session's history", async t => {
   const f = fixture(t, url => url === FULL ? full(9, history) : recent(10, [message("m4"), message("m5"), message("m6")], 3));
-  await f.client.refresh();
+  await f.warm();
   f.client.endAccess();
   f.client.session = identity();
   const before = f.reads.length;
   await f.client.refresh(hint(10, "message.posted", { messageId: "m6" }));
-  assert.deepEqual(f.reads.slice(before), [FULL]);
+  // Nothing is held for the new session, so it opens with the window like any fresh client.
+  assert.deepEqual(f.reads.slice(before), [RECENT]);
 });
 
 test("a mutation that joins a windowed read in flight gets its own full read", async t => {
   let release;
   const f = fixture(t, (url, n) => url === FULL ? full(n === 1 ? 9 : 11, history)
     : new Promise(resolve => { release = () => resolve(recent(11, [message("m4"), message("m5"), message("m6")], 3)); }));
-  await f.client.refresh();
+  await f.warm();
   f.connect(); await f.settle();
   const opened = f.reads.length;
   f.notify(hint(11, "message.posted", { messageId: "m6" }));
@@ -143,8 +154,8 @@ test("a mutation that joins a windowed read in flight gets its own full read", a
 
 test("a stream open or error re-reads with the recent window once history is held", async t => {
   const f = fixture(t, url => url === FULL ? full(9, history) : recent(9, [message("m3"), message("m4"), message("m5")], 2));
-  await f.client.refresh();
-  assert.deepEqual(f.reads, [FULL], "opening reads in full");
+  await f.warm();
+  assert.deepEqual(f.reads, [], "warm-up reads are cleared");
   f.connect();
   for (const type of ["open", "error"]) {
     const before = f.reads.length;
@@ -158,10 +169,10 @@ test("a stream open or error re-reads with the recent window once history is hel
   assert.deepEqual(f.reads.slice(before), [FULL]);
 });
 
-test("after a failed read, the next read of any kind is full", async t => {
+test("after a failed read, the retry is a cheap window and a quiet full fill follows", async t => {
   let fail = false;
   const f = fixture(t, url => { if (fail) throw new Error("offline"); return url === FULL ? full(9, history) : recent(10, [message("m4"), message("m5"), message("m6")], 3); });
-  await f.client.refresh();
+  await f.warm();
   f.connect(); await f.settle();
   // The edit's read fails; the stream will not replay that event.
   fail = true;
@@ -169,18 +180,34 @@ test("after a failed read, the next read of any kind is full", async t => {
   fail = false;
   const before = f.reads.length;
   f.client.stream.dispatchEvent(new Event("open")); await f.settle();
-  assert.deepEqual(f.reads.slice(before), [FULL]);
+  assert.deepEqual(f.reads.slice(before), [RECENT]);
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.deepEqual(f.reads.slice(before), [RECENT, FULL]);
+  assert.equal(ids(f.seen.at(-1).state.messages).includes("m1"), true);
+});
+
+test("a failing background fill retries quietly and never changes the status", async t => {
+  let fail = false;
+  const f = fixture(t, url => { if (url === FULL && fail) throw new Error("offline"); return url === FULL ? full(9, history) : recent(9, [message("m4"), message("m5"), message("m6")], 3); });
+  await f.client.refresh();
+  fail = true;
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(f.reads.filter(u => u === FULL).length >= 1, true);
+  assert.equal(f.client.heldMessages().partial, true);
+  fail = false;
+  await new Promise(resolve => setTimeout(resolve, 1400));
+  assert.equal(f.client.heldMessages().partial, false);
 });
 
 test("a replaced stream resumes from the last full read, so an edit a window read passed is replayed", async t => {
   const urls = [];
-  let stream;
+  let stream, windows = 0;
   class Events extends EventTarget { constructor(url) { super(); urls.push(url); stream = this; this.readyState = 1; } close() {} }
   const client = new RoomClient({ events: Events, onSnapshot: () => {}, fetcher: async url => response(url === FULL ? full(9, history)
-    : recent(12, [message("m4"), message("m5"), message("m6")], 3)) });
+    : recent(++windows === 1 ? 9 : 12, [message("m4"), message("m5"), message("m6")], 3)) });
   client.session = identity();
   t.after(() => client.disconnect());
-  await client.refresh(); client.connect();
+  await client.refresh(); await new Promise(resolve => setTimeout(resolve, 320)); client.connect();
   stream.dispatchEvent(new Event("open")); await client.flight?.promise;
   stream.readyState = 2; stream.dispatchEvent(new Event("error")); await new Promise(resolve => setImmediate(resolve)); await client.flight?.promise;
   await new Promise(resolve => setTimeout(resolve, 1500));
