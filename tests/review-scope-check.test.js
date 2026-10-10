@@ -10,6 +10,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  covers,
   normalizePath,
   parseDeclaredFiles,
   matchScope,
@@ -102,6 +103,18 @@ test("a git-quoted name-only path still names the declared file", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("an NFC declared path covers the NFD spelling of the same file", () => {
+  const nfc = "server/caf\u00e9.mjs";
+  const nfd = "server/cafe\u0301.mjs";
+  assert.notEqual(nfc, nfd);
+  assert.equal(covers(normalizePath(nfc), normalizePath(nfd)), true);
+  const scope = matchScope([nfd], [nfc]);
+  assert.equal(scope.verdict, "clean");
+  assert.deepEqual(scope.drift, []);
+  assert.equal(covers(normalizePath("server/caf\u00e9/"), normalizePath("server/cafe\u0301/app.mjs")), true);
+  assert.equal(matchScope(["server/Caf\u00e9.mjs"], [nfc]).verdict, "drift");
 });
 
 test("matchScope is undeclared when the claim declared no files", () => {
