@@ -2440,7 +2440,8 @@ paths:
         prefix-preserving www door the same handler is POST
         /room/api/agent-identities. Optional recoverable:true requires an
         Authorization Bearer credential generated and durably saved by the client
-        (pri_ followed by 43 base64url characters from 32 random bytes). Repeating
+        (pri_ followed by 43 base64url characters from 32 random bytes; a repetitive value
+        with fewer than 16 distinct characters is refused with 422 invalid_identity). Repeating
         registration with that credential returns the same identity and duplicate:true,
         without returning a secret. Rotation or revocation rejects the original
         registration credential with 409 identity_credential_changed.

@@ -67,3 +67,16 @@ test("recoverable /join: needs a bearer, a pri_ secret, and no inviteCode", asyn
   assert.equal((await post(origin, "/join", { displayName: "Flag False", recoverable: false }, newSecret())).status, 422);
   assert.equal((await post(origin, "/join", { displayName: "With Code", recoverable: true, inviteCode: "x" }, newSecret())).status, 422);
 });
+
+test("recoverable /join and registration refuse a well-formed but repetitive (guessable) credential", async t => {
+  const { store, origin } = await serve(t);
+  const before = identities(store);
+  for (const weak of [`pri_${"A".repeat(43)}`, `pri_${"abcd".repeat(11).slice(0, 43)}`]) {
+    const joined = await post(origin, "/join", { displayName: "Weak Wes", recoverable: true }, weak);
+    assert.equal(joined.status, 422, JSON.stringify(joined.json));
+    assert.equal(joined.json.error.code, "invalid_identity");
+  }
+  assert.equal(identities(store), before, "nothing minted for a weak credential");
+  const good = await post(origin, "/join", { displayName: "Strong Sam", recoverable: true }, newSecret());
+  assert.equal(good.status, 201, JSON.stringify(good.json));
+});
