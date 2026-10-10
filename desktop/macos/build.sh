@@ -5,10 +5,12 @@ swift build -c release --product ProjectRoom
 swift build -c release --product ProjectRoomTools
 app="$PWD/build/Project Room.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" build/ProjectRoom.iconset
+# Pre-drawn per size (scripts/build-desktop-icon.mjs): small sizes use a
+# simpler drawing instead of a scaled-down large one.
 for size in 16 32 128 256 512; do
-  sips -z "$size" "$size" ../../icons/icon-512.png --out "build/ProjectRoom.iconset/icon_${size}x${size}.png" >/dev/null
   double=$((size * 2))
-  sips -z "$double" "$double" ../../icons/icon-512.png --out "build/ProjectRoom.iconset/icon_${size}x${size}@2x.png" >/dev/null
+  cp "icon/icon-${size}.png" "build/ProjectRoom.iconset/icon_${size}x${size}.png"
+  cp "icon/icon-${double}.png" "build/ProjectRoom.iconset/icon_${size}x${size}@2x.png"
 done
 iconutil -c icns build/ProjectRoom.iconset -o "$app/Contents/Resources/ProjectRoom.icns"
 cp .build/release/ProjectRoom "$app/Contents/MacOS/ProjectRoom"

@@ -1,4 +1,5 @@
 import { connectSnippets } from "../server/connect-snippets.mjs";
+import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 
 export const comparisonSlugs = Object.freeze([
   "project-room-vs-slack",
@@ -39,12 +40,27 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Page not found</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{color-scheme:dark;${DARK_DECLARATIONS}}
+[data-theme="light"]{color-scheme:light;${LIGHT_DECLARATIONS}}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:16px/1.6 var(--font-sans)}
+main{width:min(100% - 40px,420px);text-align:center}
+img{display:block;margin:0 auto 24px;border-radius:12px}
+h1{margin:0 0 8px;font-size:28px;font-weight:600;letter-spacing:-.03em}
+p{margin:0 0 20px;color:var(--muted)}
+a{color:var(--muted)}a:focus-visible{outline:2px solid var(--blue);outline-offset:4px;border-radius:2px}
+.home{display:inline-flex;align-items:center;min-height:44px;padding:0 20px;border-radius:var(--radius-md);background:var(--blue-strong);color:var(--on-accent);font-weight:600;text-decoration:none}
+.more{font-size:14px}
+</style>
 </head>
 <body>
 <main>
+<img src="/favicon.svg" alt="" width="56" height="56">
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
-<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
+<p><a class="home" href="/">Go home</a></p>
+<p class="more"><a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
 </main>
 </body>
 </html>
