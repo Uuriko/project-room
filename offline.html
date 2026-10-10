@@ -3,14 +3,24 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#202127">
+    <link rel="icon" href="/icons/icon-192.png">
     <title>Room is offline</title>
     <style>
-      body { margin: 2rem; background: #202127; color: #f4f4f5; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-      a { color: #c7c7ff; }
+      body { margin: 0; min-height: 100svh; display: grid; place-items: center; box-sizing: border-box; padding: 1.5rem; background: #202127; color: #f4f4f5; font-family: Inter, ui-sans-serif, system-ui, sans-serif; text-align: center; }
+      main { max-width: 26rem; }
+      img { width: 4.5rem; height: 4.5rem; border-radius: 1rem; }
+      h1 { margin: 1rem 0 .5rem; font-size: 1.4rem; }
+      p { margin: 0; color: #b9b9c7; line-height: 1.5; }
+      a.retry { display: inline-block; margin-top: 1.25rem; padding: .7rem 1.5rem; border-radius: .7rem; background: #5555bd; color: #fff; font-weight: 600; text-decoration: none; }
     </style>
   </head>
   <body>
-    <h1>Room is offline</h1>
-    <p>The connection dropped. Room loads again when the network is back.</p>
+    <main>
+      <img src="/icons/icon-192.png" alt="" width="72" height="72">
+      <h1>Room is offline</h1>
+      <p>The connection dropped. Room loads again when the network is back.</p>
+      <a class="retry" href="">Try again</a>
+    </main>
   </body>
 </html>

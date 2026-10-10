@@ -103,6 +103,18 @@ test("fetch never caches app code, and a failed navigation uses the offline page
   assert.deepEqual(offline.puts, []);
 });
 
+test("a failed icon fetch serves the cached icon so the offline page keeps its mark", async () => {
+  const offline = load({ failFetch: true });
+  await fire(offline.listeners, "install", {});
+  const icon = await fire(offline.listeners, "fetch", { request: { url: "https://room.example/icons/icon-192.png", mode: "no-cors" } });
+  assert.equal(icon.offline, true);
+  assert.equal(icon.url, "/icons/icon-192.png");
+  // App code still goes to the network even when it is in the allow list's
+  // shadow: only the cached allow-list paths fall back.
+  const app = await fire(offline.listeners, "fetch", { request: { url: "https://room.example/src/app.js", mode: "cors" } }).catch(error => error);
+  assert.ok(app instanceof Error, "uncached requests still fail offline");
+});
+
 test("a push shows a count, actions only when the platform has them, and a badge", async () => {
   const payload = {
     roomId: "commons", counts: { mention: 1 }, body: SECRET, title: "Codex needs your approval",
