@@ -118,3 +118,28 @@ test("verified account owner can still mint GX guest invites (no regression)", t
   assert.equal(minted.duplicate, false);
   assert.match(minted.code, /^GX-/);
 });
+
+const inviteDetails = () => ({
+  requestId: randomUUID(),
+  guestLabel: "demo guest",
+  expectedOwnerRevision: 0,
+});
+
+test("guest-invite mint refuses unverified accounts when verification is achievable", t => {
+  const store = fixture(t);
+  const { token, binding } = ownerAccountSession(store, { verified: false });
+  assert.throws(
+    () => store.guestInvites.mint(token, "commons", inviteDetails(), binding),
+    err => err.code === "email_unverified",
+    "guestInvites.mint keeps the f520ca69 gate when mail works",
+  );
+});
+
+test("A16: guest-invite mint bypasses the gate when the mailer is unconfigured", t => {
+  const store = fixture(t);
+  const { token, binding } = ownerAccountSession(store, { verified: false });
+  // Same deadlock escape as agent-invites.create: an unverifiable account
+  // (no mailer) must not be blocked from minting forever.
+  const result = store.guestInvites.mint(token, "commons", inviteDetails(), binding, { emailVerificationUnachievable: true });
+  assert.ok(result && typeof result === "object" && !result.duplicate, "mint succeeds");
+});

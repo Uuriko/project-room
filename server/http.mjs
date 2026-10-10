@@ -4695,7 +4695,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // top-level /api/guest-invites/* routes above.
       if (route === "guest-invites" && req.method === "POST") {
         rate(`guest-invite-mint:${remoteAddress}`, 30);
-        const result = store.guestInvites.mint(selected.token, roomId, await body(req), fence);
+        const result = store.guestInvites.mint(selected.token, roomId, await body(req), fence, { emailVerificationUnachievable: !magicMailer.isConfigured() });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "guest-invites-list" && req.method === "POST") {
