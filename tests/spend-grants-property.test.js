@@ -45,6 +45,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
+import { registerBareTransactions } from "./helpers/bare-db-transactions.mjs";
 import fc from "fast-check";
 import {
   ensureSpendGrantsSchema,
@@ -82,7 +83,7 @@ let roomSeq = 0;
 const freshRoom = () => `prop-room-${roomSeq++}`;
 
 function database(t) {
-  const db = new DatabaseSync(":memory:");
+  const db = registerBareTransactions(new DatabaseSync(":memory:"));
   ensureGrantsSchema(db);
   ensureAutonomyTiersSchema(db);
   ensureSpendGrantsSchema(db);
