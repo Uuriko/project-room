@@ -57,6 +57,19 @@ test("a longer handle is not an already asked shorter agent", () => {
   assert.equal(askAgentSuggestion(asked("@Builder, where is the log?"), { members: people, now: later }), null);
 });
 
+test("an email address is not an already asked agent", () => {
+  assert.deepEqual(
+    askAgentSuggestion(asked("Is the log at ops@Builder?"), { members: people, now: later }),
+    { memberId: "builder", name: "Builder" },
+  );
+  assert.deepEqual(
+    askAgentSuggestion(asked("Ping lee.ops@Builder?"), { members: people, now: later }),
+    { memberId: "builder", name: "Builder" },
+    "a dot before @ is still an address, not a mention",
+  );
+  assert.equal(askAgentSuggestion(asked("See (@Builder) for the log?"), { members: people, now: later }), null);
+});
+
 test("askAgentSuggestion offers a working agent once a person's question waits", () => {
   assert.deepEqual(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later }), { memberId: "builder", name: "Builder" });
   assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later - 1 }), null, "not before the wait");
