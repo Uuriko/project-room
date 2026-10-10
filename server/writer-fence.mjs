@@ -486,7 +486,21 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "seeker_declarations",
   "work_offer_terms",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
+// herdr_sessions + herdr_session_journal + herdr_lane_optin +
+// herdr_backend_state (herdr redesign B14, worker-side session lifecycle,
+// server/session-lifecycle.mjs): created on first use by the lifecycle
+// module via herdrLifecycleSchema (the module is not wired into the store
+// constructor yet — see scripts/reachability.mjs KEEP). Purely additive and
+// intentionally NOT fenced — older writers have no code path to them, and
+// the lifecycle module verifies its own schema on open. Allowed by the
+// recovery audit but not required in every DB.
+const HERDR_SESSION_TABLES = Object.freeze([
+  "herdr_sessions",
+  "herdr_session_journal",
+  "herdr_lane_optin",
+  "herdr_backend_state",
+]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...HERDR_SESSION_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
