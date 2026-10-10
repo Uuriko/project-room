@@ -512,6 +512,9 @@ export function stampClaimHistory(work, agentId, { action, note, now } = {}) {
 // with the rest counted in historyOmitted. Board lists use it; the
 // single-claim read returns the stored history.
 export function summarizeClaimHistory(item, keep) {
+  // keep must be a whole number of entries; -1 or 1.5 used to inflate the
+  // omitted count on every call (7547).
+  if (!Number.isInteger(keep) || keep < 0) throw new RangeError("summarizeClaimHistory: keep must be a non-negative integer");
   const history = Array.isArray(item?.history) ? item.history : [];
   if (history.length <= keep) return item;
   const dropped = history.length - keep;
