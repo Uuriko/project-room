@@ -5,7 +5,6 @@
 .human-experience:not(.human-advanced) .work-begin-limit,
 .human-experience:not(.human-advanced) .member-avatar.agent ~ div .member-status,
 .human-experience:not(.human-advanced) #invite-agents-button { display: none; }
-.human-experience:not(.human-advanced) .presence-member:has(.member-avatar.agent) { display: none; }
 .human-single-conversation:not(.human-advanced) #room-sidebar nav[aria-label="Channels"] { display: none; }
 .human-composer-actions { display: contents; }
 .human-experience .human-composer-actions { display: flex; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
