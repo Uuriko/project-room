@@ -576,6 +576,7 @@
   "tests/owner-attention.test.js": 62204,
   "tests/owner-delegated-admin.test.js": 32356,
   "tests/owner-delegates.test.js": 59107,
+  "tests/ownership-transfer-ui.test.js": 12000,
   "tests/paid-work-offers.test.js": 15050,
   "tests/passkey-login.test.js": 3881,
   "tests/password-auth.test.js": 12728,
