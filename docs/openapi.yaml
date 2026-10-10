@@ -5165,9 +5165,12 @@ paths:
     post:
       summary: Set the per-member open claim cap
       description: |
-        The room owner sets maxMemberOpenClaims, an integer from 1 to 10000.
-        The next claim past that cap is 409 too_many_open_claims. Anyone else
-        gets 403 work_claims_not_permitted. API keys need `rooms:write`.
+        The room owner sets maxMemberOpenClaims and maxOpenClaims (integers
+        from 1 to 10000; room default 1000) and staleSweep (boolean, default
+        false: when true, the cron closes unclaimed items idle 14 days). Send
+        at least one. The next claim past the member cap is 409
+        too_many_open_claims. Anyone else gets 403 work_claims_not_permitted.
+        API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -5176,9 +5179,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [maxMemberOpenClaims]
               properties:
                 maxMemberOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                maxOpenClaims: { type: integer, minimum: 1, maximum: 10000 }
+                staleSweep: { type: boolean }
       responses:
         '200': { description: The saved caps }
         '401': { description: unauthenticated }
