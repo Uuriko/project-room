@@ -4,8 +4,9 @@ const stable = (...parts) => createHash("sha256").update(parts.join("\u0000")).d
 
 export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
   const base = `${origin.replace(/\/$/, "")}/api/rooms/${encodeURIComponent(roomId)}`;
-  async function call(method, path, body) {
+  async function call(method, path, body, signal) {
     const response = await fetchImpl(`${base}${path}`, {
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
       method, headers: { authorization: `Bearer ${token}`, origin, ...(body ? { "content-type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {})
     });
@@ -16,7 +17,7 @@ export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
   }
   return {
     roomId,
-    assistant: () => call("GET", "/assistant"),
+    assistant: ({ signal } = {}) => call("GET", "/assistant", undefined, signal),
     act: input => call("POST", "/assistant", input),
     message: async id => (await call("GET", `/conversation?messageId=${encodeURIComponent(id)}`)).messages?.find(m => m.id === id) ?? null,
     recent: async (limit = 100) => (await call("GET", `/conversation?limit=${limit}`)).messages ?? [],

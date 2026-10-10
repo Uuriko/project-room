@@ -100,9 +100,12 @@ test("an addition that lands after the answer is drafted is answered, never drop
   assert.equal((await owner.recent()).filter(m => m.authorId === "producer").length, 1, "the late addition is folded in before anything is posted");
 });
 
-// Wrap a client so a step runs just before the host's public post: the
-// narrowest boundary a client can reach without a server publication fence.
-const beforePost = (client, step) => ({ ...client, post: async (...args) => { await step(); return client.post(...args); } });
+// Inject a real human action immediately before the final network write.
+// Support the old post path for the fail-before control as well as publish.
+const beforePost = (client, step) => ({ ...client,
+  post: async (...args) => { await step(); return client.post(...args); },
+  act: async input => { if (input.action === "publish") await step(); return client.act(input); }
+});
 
 test("an addition at the publication boundary is refused for done and answered again", async t => {
   const { owner, friend, producer } = await setup(t);
@@ -118,6 +121,7 @@ test("an addition at the publication boundary is refused for done and answered a
   assert.equal(outcomes[0].state, "done");
   assert.deepEqual(outcomes[0].applied, ["ask", "add", "edge"]);
   assert.deepEqual((await runOf(owner)).inputs.map(i => i.status), ["applied", "applied", "applied"]);
+  assert.equal((await owner.recent()).filter(message => message.authorId === "producer").length, 1, "no stale draft leaks before the revised answer");
 });
 
 test("Stop or Pause while the executor is still running publishes nothing", async t => {
@@ -147,7 +151,7 @@ test("Stop or Pause while the executor is still running publishes nothing", asyn
   });
 });
 
-test("a Stop at the publication boundary is acknowledged and the posted answer is reported", async t => {
+test("a Stop at the publication boundary leaves no answer in chat", async t => {
   const { owner, friend, producer } = await setup(t);
   await ask(owner, friend);
   const host = beforePost(producer, async () => {
@@ -156,7 +160,7 @@ test("a Stop at the publication boundary is acknowledged and the posted answer i
   });
   const { outcomes } = await runHostOnce(host, { memberId: "producer" });
   assert.equal(outcomes[0].state, "cancelled");
-  assert.match(outcomes[0].postedBeforeStop, /^result-/, "the residual race is surfaced, not hidden");
+  assert.equal((await friend.recent()).filter(message => message.authorId === "producer").length, 0, "a Stop before publication must leave no answer");
   const final = await runOf(friend);
   assert.equal(final.status, "cancelled");
   assert.equal(final.resultMessageId, undefined, "a stopped run never claims a result");
@@ -217,4 +221,40 @@ test("demo runs the two-person flow end to end", async () => {
   assert.equal(final.status, "done");
   assert.equal(answer.replyToId, "demo-ask");
   assert.ok(lines.some(line => line.includes("guest:applied")));
+});
+
+
+test("a lost committed publish response is recovered without repeating execution", async t => {
+  const { owner, friend, producer } = await setup(t);
+  await ask(owner, friend);
+  let executions = 0, lost = false;
+  const host = { ...producer, act: async input => {
+    const response = await producer.act(input);
+    if (input.action === "publish" && !lost) { lost = true; throw new TypeError("Connection lost after commit"); }
+    return response;
+  } };
+  const result = await runHostOnce(host, { memberId: "producer", execute: async brief => { executions++; return scriptedExecute(brief); } });
+  assert.equal(lost, true, "host uses the server publication fence");
+  assert.equal(result.outcomes[0].state, "done");
+  assert.equal(executions, 1);
+  assert.equal((await owner.recent()).filter(message => message.authorId === "producer").length, 1);
+  assert.equal(result.outcomes[0].resultMessageId, (await runOf(owner)).resultMessageId);
+});
+
+test("Stop while the host reads its brief prevents executor launch", async t => {
+  const { owner, friend, producer } = await setup(t);
+  await ask(owner, friend);
+  let stopped = false, executions = 0;
+  const host = { ...producer, message: async id => {
+    const message = await producer.message(id);
+    if (!stopped) {
+      stopped = true;
+      await owner.act({ action: "cancel", requestId: "stop-reading", runId: "run", expectedRevision: (await runOf(owner)).revision });
+    }
+    return message;
+  } };
+  const result = await runHostOnce(host, { memberId: "producer", execute: async () => { executions++; return "Unwanted work"; } });
+  assert.equal(executions, 0, "do not launch execution after observing a stop during preparation");
+  assert.equal(result.outcomes[0].state, "cancelled");
+  assert.equal((await owner.recent()).filter(message => message.authorId === "producer").length, 0);
 });
