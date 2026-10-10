@@ -4191,18 +4191,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // order like the other kinds. Backlog 11: messages by an author the caller
   // muted (E4) are excluded for every kind, server-side (mutedEvent), so
   // agents and other API readers match the UI.
-  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50 } = {}) {
+  search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50, before = null } = {}) {
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
+    const needle = query.trim().toLowerCase();
+    // REST search paging: `before` is the opaque cursor a previous page
+    // returned as nextCursor. It is bound to the same query and kind, so it
+    // cannot carry a page from one search into another.
+    const cursor = before == null ? null : decodeSearchCursor(before, needle, kind);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
-      const needle = query.trim().toLowerCase();
       const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
       if (kind === "all" || kind === "messages" || kind === "pinned") {
-        for (const m of room.state.messages ?? []) {
+        const all = room.state.messages ?? [];
+        let stop = all.length;
+        if (cursor) {
+          stop = all.findIndex(m => m.id === cursor.anchor);
+          if (stop < 0) fail(422, "invalid_search_cursor", "This search cursor no longer matches the room; start the search again");
+        }
+        let olderMatches = 0;
+        for (let index = 0; index < all.length; index += 1) {
+          const m = all[index];
           if (m.body == null) continue; // tombstone
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
@@ -4214,13 +4226,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
           if (m.body.toLowerCase().includes(needle)) {
             result.total += 1;
+            // The page holds matches strictly before the cursor anchor (all of
+            // them without a cursor). total stays the full count either way.
+            if (index >= stop) continue;
             result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
-            // Keep the newest `limit` matches (still chronological). Keeping the first
-            // ones left every newer match unreachable: there is no offset, and limit
-            // tops out at 200.
-            if (result.messages.length > limit) result.messages.shift();
+            // Keep the newest `limit` matches (still chronological); older ones
+            // are reached through nextCursor.
+            if (result.messages.length > limit) { result.messages.shift(); olderMatches += 1; }
           }
         }
+        if (kind !== "all" && olderMatches > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
       }
       if (kind === "all" || kind === "work") {
         const workHits = [];
@@ -5359,4 +5374,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return chips;
   }
+}
+
+// REST search paging cursor: base64url JSON {v, q, k, a}. q and k bind it to
+// one query and kind; a is the oldest message id of the page it continues.
+// The cursor grants nothing: every filter (history floor, DMs, mutes,
+// tombstones) runs again on each page, so an edited cursor can only move
+// the page inside results the caller may already read.
+function encodeSearchCursor(needle, kind, anchor) {
+  return Buffer.from(JSON.stringify({ v: 1, q: needle, k: kind, a: anchor }), "utf8").toString("base64url");
+}
+function decodeSearchCursor(value, needle, kind) {
+  const bad = () => fail(422, "invalid_search_cursor", "Search cursor is not valid for this query and kind");
+  if (kind !== "messages" && kind !== "pinned") fail(422, "invalid_search_cursor", "Search cursors page kind=messages or kind=pinned only");
+  if (typeof value !== "string" || !value || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value)) bad();
+  let parsed;
+  try { parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); } catch { bad(); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.v !== 1 || parsed.q !== needle || parsed.k !== kind || typeof parsed.a !== "string" || !parsed.a) bad();
+  return { anchor: parsed.a };
 }
