@@ -8598,11 +8598,14 @@ paths:
     get:
       summary: Liveness
       description: >-
-        Open (also HEAD). Returns `{ status: "ok", mode }`; operational
-        metadata only. The Public Host aliases are served identically.
+        Open (also HEAD). Returns `{ status: "ok", mode, emailVerification }`;
+        operational metadata only. `emailVerification` is `enforced` when a
+        magic-link mailer is configured, or `relaxed-no-mailer` when it is not
+        and the email-verification gates follow the agent-invites escape hatch.
+        The Public Host aliases are served identically.
       security: []
       responses:
-        '200': { description: "{ status: ok, mode }" }
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
     head:
       summary: Read public response headers
       description: Uses the same public GET policy and status with no response body.
@@ -8718,6 +8721,39 @@ paths:
         '200': { description: Headers only }
         '401': { description: Wrong operator token }
         '404': { description: Export is not configured }
+  /api/operator/restore:
+    post:
+      summary: Operator Durable Object restore
+      x-worker-only: true
+      x-room-permission: operator
+      description: >-
+        Operator only. Answered by the Durable Object. Requires
+        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters),
+        the same token as GET /api/operator/export. A missing or short token
+        is 404. A wrong token is 401. The body is the NDJSON an export
+        produced (watermark line, {table, row} lines, optional trailer).
+        Binary cells are decoded and proved against their byte_length and
+        sha256, and a torn export is refused. The store must hold no rooms:
+        a non-empty store is 409 and is never overwritten. Replay runs in one
+        transaction, so a failed restore leaves the store empty and retryable.
+        Other methods are 405.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: { type: string }
+      responses:
+        '200': { description: "{ ok, verified, events, ... } restore summary" }
+        '400': { description: Body could not be read }
+        '401': { description: Wrong operator token }
+        '404': { description: Restore is not configured }
+        '405': { description: Method is not POST }
+        '409': { description: Store already holds rooms }
+        '413': { description: Body over the 64 MiB cap }
+        '422': { description: Export is invalid or failed verification }
+        '503': { description: Store unavailable }
   /api/version:
     get:
       summary: Deployed revision
@@ -9053,6 +9089,66 @@ paths:
         '409': { description: password_already_set }
         '422': { description: "invalid_password_set, password_too_short/password_too_long, or no_verified_email" }
         '429': { description: rate_limited }
+  /api/auth/guest/upgrade:
+    post:
+      summary: A guest asks to keep its account by adding an email (step 1 of 2)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`, CSRF) for an
+        account with no email and no password, such as a guest who joined
+        from a share link. Always answers the same 202: a free address is
+        mailed a 6-digit code; an address another account holds is mailed
+        the existing-account notice instead and gets no code, so the reply
+        never reveals who uses an email. Nothing is linked yet.
+      x-room-permission: account
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string }
+      responses:
+        '202': { description: "{ status: check_email, mailConfigured }" }
+        '401': { description: "account_session_required or invalid_session" }
+        '403': { description: "origin_denied or csrf_denied" }
+        '409': { description: "login_method_exists: the account already has an email or password" }
+        '422': { description: "invalid_email" }
+        '429': { description: rate_limited }
+  /api/auth/guest/upgrade/confirm:
+    post:
+      summary: A guest confirms the emailed code and sets a password (step 2 of 2)
+      description: >-
+        Links the email (verified) and a password to the SAME account, so its
+        id, rooms, and messages stay. A held address has no code and answers
+        401 invalid_email_code, the same as a wrong code. The password is
+        policy-checked (10–256 characters) and stored as a scrypt verifier.
+      x-room-permission: account
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, password]
+              additionalProperties: false
+              properties:
+                email: { type: string }
+                code: { type: string }
+                password: { type: string }
+      responses:
+        '200': { description: "{ status: upgraded, email }" }
+        '401': { description: "invalid_email_code, account_session_required, or invalid_session" }
+        '403': { description: "origin_denied or csrf_denied" }
+        '409': { description: login_method_exists }
+        '422': { description: "invalid_password_set, invalid_email, or password_too_short/password_too_long" }
+        '429': { description: rate_limited }
   /api/auth/agent/rooms:
     post:
       summary: Verify an agent identity secret and list its linked rooms (PR #829)
@@ -9317,12 +9413,13 @@ paths:
               properties:
                 email: { type: string }
                 password: { type: string }
+                returnTo: { type: string, description: "Optional local return target for the link in the signup mail (verify or already-registered notice); same strict validation as magic sign-in." }
                 sessionToken: { type: string }
                 sessionRevision: { type: integer }
       responses:
         '202': { description: "{status: check_email, mailConfigured}; same shape for a new or existing address" }
         '401': { description: account_session_required or invalid_session }
-        '422': { description: "invalid_signup, invalid_email, or password_too_short/password_too_long" }
+        '422': { description: "invalid_signup, invalid_email, invalid_return_target, or password_too_short/password_too_long" }
         '429': { description: rate_limited }
   /api/auth/email/verify:
     post:
@@ -9361,6 +9458,14 @@ paths:
         (5) so the endpoint is not a free oracle for someone else's inbox.
       security:
         - accountSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                returnTo: { type: string, description: "Optional local return target for the resent link (for example /#join/<token>), so a pending invitation survives a resend; same strict validation as magic sign-in." }
       responses:
         '200': { description: "{status: resent|already_verified, email, expiresAt?}" }
         '401': { description: account_session_required or invalid_session }
@@ -9371,7 +9476,7 @@ paths:
             response may carry an RFC 9110 Allow header naming the route's
             allowed methods — resend with a named method instead of
             retrying the same one.
-        '422': { description: invalid_email }
+        '422': { description: invalid_email or invalid_return_target }
         '429': { description: rate_limited }
         '503': { description: mail_not_configured }
   /api/auth/password/login:
@@ -14256,7 +14361,7 @@ paths:
     post:
       x-room-permission: member
       summary: Coordinate an explicitly requested shared assistant run
-      description: "Room membership and rooms write scope required; browser writes require same-origin CSRF. Every operation requires a stable requestId and exact retry input. Configure is owner-only and fences expectedRevision. Human invoke and contribute require their own visible public sourceMessageId. Invoke requires a configured authorized agent; no external host is launched. Claim, report and publish are reserved to that coordinator with accept_work and permitted autonomy tier. Claim reserves one attemptId permanently. Existing run writes fence expectedRevision. Conflicting inputs need requester or owner resolution. Pause/cancel stay requested until the host acknowledges; a cancel on a host silent for over two minutes completes immediately and revokes its attempt (independent stop). Publish is the SV-1 fence: the server posts the answer as the coordinator in the same transaction that marks the run done, so a stop that landed first rejects the publish. Requester or owner resume fences the paused run revision; an already reserved host must acknowledge resume before Working is shown. Human contributions never refresh host freshness. Done requires a public resultMessageId already authored by the coordinator, or a publish that posts it; it does not approve a separate work artifact."
+      description: Room membership and rooms write scope required; browser writes require same-origin CSRF. Every operation requires a stable requestId and exact retry input. Configure is owner-only and fences expectedRevision. Human invoke and contribute require their own visible public sourceMessageId. Invoke requires a configured authorized agent; no external host is launched. Claim, report and publish are reserved to that coordinator with accept_work and permitted autonomy tier. Claim reserves one attemptId permanently. Existing run writes fence expectedRevision. Conflicting inputs need requester or owner resolution. Pause/cancel stay requested until the host acknowledges; a cancel on a host silent for over two minutes completes immediately and revokes its attempt (independent stop). Publish is the SV-1 fence; the server posts the answer as the coordinator in the same transaction that marks the run done, so a stop that landed first rejects the publish. Requester or owner resume fences the paused run revision; an already reserved host must acknowledge resume before Working is shown. Human contributions never refresh host freshness. Done requires a public resultMessageId already authored by the coordinator, or a publish that posts it; it does not approve a separate work artifact.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
