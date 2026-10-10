@@ -4,6 +4,7 @@
 // action buttons zero in-flight feedback.
 import test from "node:test";
 import assert from "node:assert/strict";
+import sanitizeHtml from "sanitize-html";
 import { boardHtml, boardSkeletonHtml, pendingOutcome, installWorkBoard } from "../src/board-ui.js";
 
 const NOW = Date.now();
@@ -108,7 +109,12 @@ async function completionFixture(t) {
   } });
   const field = strict({
     name: "q", selectionStart: 5, selectionEnd: 5,
-    closest(selector) { assert.equal(selector, "[data-board-filter]"); return form; },
+    dataset: { focusKey: "board-filter-q" },
+    closest(selector) {
+      if (selector === "[data-board-filter]") return form;
+      if (selector === "[data-focus-key]") return field;
+      assert.equal(selector, "article"); return null;
+    },
     focus() { globalThis.document.activeElement = field; }, setSelectionRange() {},
   });
   const button = strict({
@@ -131,6 +137,7 @@ async function completionFixture(t) {
     querySelector(selector) {
       if (selector === "#board-status") return line;
       if (selector === '[data-focus-key="board-filter-q"]') return field;
+      if (selector === '[data-board-filter] [name="mine"]') return null;
       assert.match(selector, /^(\[data-focus-key=|article\[data-claim-id=)/);
       return null;
     },
@@ -226,4 +233,145 @@ for (const phase of ["write", "readback"]) test(`Board reset retires completion 
   assert.equal(f.html(), "");
   assert.equal(f.status(), "");
   assert.equal(f.posts(), 1);
+});
+
+// Parse the controller's real markup, replacing node identities on innerHTML.
+// HTML removing steps reset focus to the document viewport/body when the
+// focused node is removed. A text-only innerHTML double cannot expose this.
+// https://html.spec.whatwg.org/multipage/infrastructure.html#html-element-removing-steps
+// This models node removal/restoration, not browser Tab order or modal layout.
+function focusDom(t) {
+  let nodes = [], active;
+  const gates = [];
+  const body = { closest: () => null };
+  active = body;
+  const previous = { document: globalThis.document, CSS: globalThis.CSS };
+  const matches = (node, selector) => {
+    const match = /^(?:([\w-]+)|#([\w-]+))?(?:\[([\w-]+)(?:="([^"]*)")?\])?$/.exec(selector);
+    assert.ok(match && selector, `Unsupported selector: ${selector}`);
+    const [, tag, id, attribute, value] = match;
+    return (!tag || node.tag === tag) && (!id || node.attrs.id === id)
+      && (!attribute || (Object.hasOwn(node.attrs, attribute) && (value === undefined || node.attrs[attribute] === value)));
+  };
+  const query = selector => {
+    const parts = selector.split(" ");
+    assert.ok(parts.length <= 2, `Unsupported selector: ${selector}`);
+    return nodes.find(node => matches(node, parts.at(-1))
+      && (parts.length === 1 || node.parent?.closest(parts[0]))) ?? null;
+  };
+  const root = {
+    addEventListener(type) { assert.ok(["input", "click", "submit"].includes(type)); },
+    contains: node => nodes.includes(node),
+    querySelector: query,
+    set innerHTML(html) {
+      if (nodes.includes(active)) active = body;
+      nodes = [];
+      const stack = [];
+      sanitizeHtml(html, {
+        onOpenTag(tag, attrs) {
+          const node = { tag, attrs, parent: stack.at(-1),
+            get dataset() {
+              return Object.fromEntries(Object.entries(attrs).filter(([key]) => key.startsWith("data-"))
+                .map(([key, value]) => [key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), value]));
+            },
+            closest(selector) {
+              for (let ancestor = this; ancestor; ancestor = ancestor.parent) if (matches(ancestor, selector)) return ancestor;
+              return null;
+            },
+            setAttribute(name, value) { attrs[name] = value; },
+            focus() { assert.ok(nodes.includes(this), "a removed node cannot receive focus"); active = this; },
+          };
+          nodes.push(node); stack.push(node);
+        },
+        onCloseTag() { stack.pop(); },
+      });
+    },
+  };
+  globalThis.document = { body, get activeElement() { return active; }, querySelector(selector) {
+    assert.equal(selector, "#work-board"); return root;
+  } };
+  globalThis.CSS = { escape: value => value };
+  t.after(async () => {
+    for (const gate of gates) gate.resolve({ claims: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  });
+  return { root, query, active: () => active, drain: gate => gates.push(gate) };
+}
+
+const STATIC_FOCUS_CONTROLS = [
+  ["Save cap", '[data-claim-cap] button'],
+  ["claim cap", '[data-claim-cap] input'],
+  ["new title", '#board-new-item [name="title"]'],
+  ["new note", '#board-new-item [name="note"]'],
+  ["new files", '#board-new-item [name="files"]'],
+  ["Add item", '#board-new-item button'],
+  ["Close stale", '#board-close-stale'],
+];
+
+for (const [label, selector] of STATIC_FOCUS_CONTROLS) test(`initial Board read preserves focus on ${label}`, async t => {
+  const dom = focusDom(t), gate = held(), arrived = held();
+  dom.drain(gate);
+  const board = focusBoard(gate, arrived);
+  board.sync(); await arrived.promise;
+  const before = dom.query(selector);
+  assert.ok(before, "control exists while the initial read is held");
+  before.focus();
+  gate.resolve({ claims: [] }); await board.whenReady();
+  const after = dom.query(selector);
+  assert.ok(after, "equivalent control exists in the loaded board");
+  assert.notEqual(after, before, "the renderer replaced the node");
+  assert.equal(dom.active(), after, "focus follows the replacement control, not the body");
+});
+
+function focusBoard(gate, arrived, state = { room: { ownerId: "owner" }, members: { owner: { id: "owner", active: true } }, eventLog: [] }) {
+  const client = { generation: 1, path: path => path, request(path, options) {
+    assert.equal(options, undefined, "focus navigation sends no mutation");
+    if (path === "/work-claims?limit=200") { arrived.resolve(); return gate.promise; }
+    if (path === "/work-claims/status") return Promise.resolve({ behind: 0 });
+    if (path === "/work-claims/config") return Promise.resolve({ maxMemberOpenClaims: 20 });
+    throw new Error(`Unexpected request: ${path}`);
+  } };
+  return installWorkBoard({ client, getState: () => state, getSession: () => ({ roomId: "commons", member: { id: "owner" } }) });
+}
+
+for (const name of ["mine", "q"]) test(`Board refresh preserves ${name === "mine" ? "Mine only" : "already-keyed search"} focus`, async t => {
+  const dom = focusDom(t), gate = held(), arrived = held();
+  dom.drain(gate);
+  const state = { room: { ownerId: "owner" }, members: { owner: { id: "owner", active: true } }, eventLog: [] };
+  const board = focusBoard(gate, arrived, state);
+  const claims = [claim("focus-card")];
+  gate.resolve({ claims }); await board.whenReady();
+  const selector = `[name="${name}"]`, before = dom.query(selector);
+  assert.ok(before); before.focus();
+  const refresh = held();
+  dom.drain(refresh);
+  gate.promise = refresh.promise;
+  state.eventLog.push({ type: "work_claim.updated", id: "refresh" });
+  board.sync();
+  assert.equal(dom.active(), dom.query(selector), "loading paint retains focus while the response is held");
+  refresh.resolve({ claims }); await board.whenReady();
+  const after = dom.query(selector);
+  assert.notEqual(after, before);
+  assert.equal(dom.active(), after, "both loading and completed paints retain the focused control");
+});
+
+test("Board refresh follows the current static control after focus moves from a previously restored control", async t => {
+  const dom = focusDom(t), gate = held(), arrived = held();
+  dom.drain(gate);
+  const state = { room: { ownerId: "owner" }, members: { owner: { id: "owner", active: true } }, eventLog: [] };
+  const board = focusBoard(gate, arrived, state);
+  board.sync(); await arrived.promise;
+  dom.query('[data-claim-cap] button').focus();
+  gate.resolve({ claims: [] }); await board.whenReady();
+  const title = '#board-new-item [name="title"]';
+  dom.query(title).focus();
+  const refresh = held(); dom.drain(refresh); gate.promise = refresh.promise;
+  state.eventLog.push({ type: "work_claim.updated", id: "next-refresh" });
+  board.sync();
+  assert.equal(dom.active(), dom.query(title), "loading does not jump back to Save cap");
+  refresh.resolve({ claims: [] }); await board.whenReady();
+  assert.equal(dom.active(), dom.query(title), "completion retains the user's newer focus choice");
 });
