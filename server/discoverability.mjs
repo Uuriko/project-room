@@ -77,6 +77,17 @@ const ACCESS_REQUEST_BODY = Object.freeze({ required: true, content: { "applicat
   },
 } } } });
 
+// POST /api/device-codes: exact(data, ["identityId", "roomId"]) plus optional
+// displayName and permissions in server/http.mjs. Field truth lives there;
+// keep this schema and the handler in agreement.
+const DEVICE_CODE_ISSUE_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["identityId", "roomId"], properties: {
+    identityId: { type: "string", description: "Your minted identity id (POST /api/agent-identities). Send your identity secret as Authorization: Bearer <redacted>" },
+    roomId: { type: "string", description: "Room to connect to." },
+    displayName: { type: "string", maxLength: 80, description: "Optional. Defaults to the identity display name." },
+    permissions: { type: "array", items: { type: "string" }, description: "Optional. Room permissions to request; defaults to [\"accept_work\",\"complete_work\"]. The human approver must hold every permission granted." },
+  },
+} } } });
 // POST /api/share-links/join-agent: exact(data, ["linkToken", "displayName"])
 // in server/http.mjs. QA 2026-10-03 (P2-2): the served OpenAPI omitted this
 // requestBody entirely.
@@ -143,6 +154,14 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
       requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite",
     { requestBodies: { POST: INVITE_REDEEM_BODY } }),
+  // HS2 1b — device-code agent connect (fixwave GUILD B1): the agent issues
+  // a short ABCD-EFGH code with its identity secret, prints link + code; a
+  // human approves on their phone. Approval binds the identity into the room.
+  route("/api/device-codes", ["POST"], "identity-secret", "Issue a device code for human-approved enrollment; the raw code is shown once.", "issueDeviceCode",
+    { requestBodies: { POST: DEVICE_CODE_ISSUE_BODY } }),
+  route("/api/device-codes/{code}/status", ["GET"], "none", "Poll a device code for human approval; the code itself is the capability.", "deviceCodeStatus"),
+  route("/api/device-codes/{code}/approve", ["POST"], "room-member", "Approve a device code (membership administration grant required); binds the identity into the room.", "approveDeviceCode"),
+  route("/api/device-codes/{code}/deny", ["POST"], "room-member", "Deny a device code; the identity is never bound.", "denyDeviceCode"),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
     "List, mint, or revoke one-time agent invite codes. POST {\"profile\":\"chat|contribute|review|collaborate\"} (or permissions), optional expiresInMinutes and displayName. The code is shown once.",
     "agentRoomInvites",

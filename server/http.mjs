@@ -2790,6 +2790,52 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // (lang, title, h1, links home / about / receipts, X-Robots-Tag: noindex).
       // /api/, /mcp and /.well-known/ keep the JSON body, as does any client
       // whose Accept does not prefer text/html.
+      // HS2 1b — device-code approval page. Mounted before the /api/ 404
+      // guard (like /join): it is a human-facing page, not an API route.
+      const approvePageMatch = /^\/approve\/([^/]{1,64})$/.exec(url.pathname);
+      if (approvePageMatch && req.method === "GET") {
+        rate(`device-code-page:${remoteAddress}`, 60);
+        const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        let view;
+        try { view = store.deviceCodes.status(approvePageMatch[1]); }
+        catch (error) {
+          if (!(error instanceof ServiceError) || error.status !== 404) throw error;
+          res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+          res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          return res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Unknown code</title></head>`
+            + `<body><h1>Unknown device code</h1><p>This link is invalid or has already been used. Ask your agent to issue a new code.</p></body></html>`);
+        }
+        const roomTitle = (() => { try { return store.room(view.roomId).state.room.title ?? view.roomId; } catch { return view.roomId; } })();
+        const perms = view.permissions.map(p => `<li>${esc(p)}</li>`).join("");
+        const expires = new Date(view.expiresAt).toLocaleString();
+        const decided = view.status !== "pending";
+        const bodyHtml = decided
+          ? `<p>This code is <strong>${esc(view.status)}</strong>${view.memberId ? ` — the agent is connected as <strong>${esc(view.memberId)}</strong>` : ""}.</p>`
+          : `<p class="code">${esc(view.code)}</p>
+             <p class="check">Your agent should have shown you this exact code. <strong>Only approve if it matches</strong> — a different code means this page is not your agent's request.</p>
+             <p>Agent <strong>${esc(view.displayName)}</strong> wants to connect to room <strong>${esc(roomTitle)}</strong> with these permissions:</p>
+             <ul>${perms}</ul>
+             <p>Code expires ${esc(expires)}.</p>
+             <button id="approve">Approve</button> <button id="deny">Deny</button>
+             <p id="result"></p>
+             <script>
+             const act = action => fetch("/api/device-codes/${esc(view.code)}/" + action, { method: "POST", credentials: "same-origin" })
+               .then(r => r.json().then(j => ({ status: r.status, body: j })))
+               .then(({ status, body }) => {
+                 document.getElementById("result").textContent = status === 200
+                   ? "Done: " + body.status + "."
+                   : "Failed (" + status + "): " + (body.error ? body.error.message : "unknown error") + (status === 401 ? " Sign in to this room first, then retry." : "");
+                 if (status === 200) { document.getElementById("approve").disabled = true; document.getElementById("deny").disabled = true; }
+               });
+             document.getElementById("approve").onclick = () => act("approve");
+             document.getElementById("deny").onclick = () => act("deny");
+             </script>`;
+        res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+        return res.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+          + `<title>Approve agent connection</title><style>body{font-family:system-ui,sans-serif;max-width:34rem;margin:2rem auto;padding:0 1rem}.code{font-size:2.5rem;letter-spacing:.35rem;font-family:ui-monospace,monospace}.check{background:#fff8e1;padding:.75rem;border-radius:.5rem}button{font-size:1.1rem;padding:.6rem 1.2rem;margin-right:.5rem}#deny{background:#f5f5f5}</style></head>`
+          + `<body><h1>Connect agent?</h1>${bodyHtml}</body></html>`);
+      }
       if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(req.headers.accept)) {
         const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
         res.setHeader("X-Robots-Tag", "noindex");
@@ -2950,6 +2996,58 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // auth challenge (401): there is nothing to authenticate.
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
+      // HS2 1b — device-code agent connect (fixwave GUILD B1). The agent
+      // (holding its identity's pri_ secret) issues a short ABCD-EFGH code
+      // and prints link + code; a human approves on their phone. No secret
+      // is ever pasted. Approval binds the identity into the room under the
+      // approver's authority through identities.link(). /approve/<code> is
+      // the human-facing page; it shows the code the agent displayed so the
+      // human can verify it matches (anti-phishing).
+      if (url.pathname === "/api/device-codes" && req.method === "POST") {
+        rate(`device-code-issue:${remoteAddress}`, 20);
+        const data = await body(req);
+        const fields = ["identityId", "roomId"];
+        if (data && Object.hasOwn(data, "displayName")) fields.push("displayName");
+        if (data && Object.hasOwn(data, "permissions")) fields.push("permissions");
+        if (!data || !exact(data, fields) || typeof data.identityId !== "string" || typeof data.roomId !== "string") {
+          reject(422, "invalid_device_code", "Send {identityId, roomId} with optional displayName and permissions");
+        }
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret required");
+        // Holder proof-of-possession: the issue IS the holder's consent.
+        store.identities.authenticateIdentitySecret(data.identityId, secret);
+        const issued = store.deviceCodes.issue({
+          identityId: data.identityId, roomId: data.roomId,
+          displayName: data.displayName, permissions: data.permissions,
+        });
+        return json(res, 201, { ...issued, approveUrl: `${expectedOrigin()}/approve/${issued.code}` });
+      }
+      if (url.pathname === "/api/device-codes" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
+      const deviceStatusMatch = /^\/api\/device-codes\/([^/]{1,64})\/status$/.exec(url.pathname);
+      if (deviceStatusMatch && req.method === "GET") {
+        // The agent's poll: the code itself is the capability, so no auth —
+        // a wrong code is 404 either way.
+        rate(`device-code-status:${remoteAddress}`, 60);
+        return json(res, 200, store.deviceCodes.status(deviceStatusMatch[1]));
+      }
+      const deviceApproveMatch = /^\/api\/device-codes\/([^/]{1,64})\/approve$/.exec(url.pathname);
+      const deviceDenyMatch = /^\/api\/device-codes\/([^/]{1,64})\/deny$/.exec(url.pathname);
+      if ((deviceApproveMatch || deviceDenyMatch) && req.method === "POST") {
+        // Origin is a CSRF defense for cookie/browser sessions. A request
+        // presenting an Authorization: Bearer <redacted> is not an ambient-auth
+        // browser flow — the Bearer <redacted> IS the authentication — so the
+        // browser-Origin requirement is waived for it (same as checkPreviewOrigin).
+        if (!carriesBearer(req)) checkOrigin(req, true);
+        rate(`device-code-decide:${remoteAddress}`, 30);
+        const selected = roomCredentials(req, url);
+        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
+        const result = deviceApproveMatch
+          ? store.deviceCodes.approve(selected.token, deviceApproveMatch[1], fence)
+          : store.deviceCodes.deny(selected.token, deviceDenyMatch[1], fence);
+        return json(res, 200, result);
       }
       // Agent invite codes: redemption is unauthenticated (the code is the
       // bearer credential); issuance is owner-only per room.

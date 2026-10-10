@@ -97,6 +97,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-i
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { DeviceCodes, deviceCodeSchema, ensureDeviceCodeSchema } from "./device-codes.mjs";
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -1038,6 +1039,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
   [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureDeviceCodeSchema, "ensureDeviceCodeSchema@1"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
@@ -1080,7 +1082,7 @@ function roomSchemaStamp() {
     // must be hashed here or a room stamped by an older deploy never gets it
     // (the priced-tool 500: spend_authorizations missing on muse-room).
     updatesSchema, GRANTS_SCHEMA, SPEND_GRANTS_SCHEMA, AUTONOMY_TIERS_SCHEMA, identityLinkCodeSchema,
-    guestLinkExchangeSchema
+    deviceCodeSchema, guestLinkExchangeSchema
   ];
   for (const part of parts) hash.update("\0").update(part ?? "");
   for (const [, label] of ADDITIVE_SCHEMA_ENSURES) hash.update("\0").update(label);
@@ -1195,6 +1197,7 @@ export class RoomStore {
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
+    this.deviceCodes = new DeviceCodes(this); // HS2 1b: device-code agent connect.
     this.delegation = new MembershipDelegation(this);
     this.delegationJournal = new MembershipDelegationJournal(this);
     this.ownerDelegates = new OwnerDelegates(this);
@@ -1428,6 +1431,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // EXISTS is idempotent, no schema version bump, intentionally
       // outside the writer fence (see unfencedAdditiveTables).
       ensureIdentityLinkCodeSchema(this.db);
+      // HS2 1b (fixwave B1): device-code agent connect — purely additive
+      // table, IF NOT EXISTS is idempotent, no schema version bump,
+      // intentionally outside the writer fence (see unfencedAdditiveTables).
+      ensureDeviceCodeSchema(this.db);
       // Graduated autonomy tiers (#928 rescope): purely additive table —
       // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
       // slice 1/3 agent_operator_controls table (module removed).

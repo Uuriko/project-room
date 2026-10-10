@@ -315,6 +315,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // NOT fenced — older writers have no code path to it, and the
   // mint/consume module verifies its own schema on open.
   "identity_link_codes",
+  // device_codes (HS2 1b: device-code agent connect). Hash-only rows with a
+  // 10-minute TTL, minted by the identity holder and consumed atomically on
+  // human approval, which binds the identity into the room. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to it,
+  // and the schema converges via ensureDeviceCodeSchema in the boot pass.
+  "device_codes",
   // inbox_attachment_bytes (identity-scoped staged inbox files for hosted
   // MCP). Purely additive and intentionally NOT fenced — older writers have
   // no code path to it, rows are scoped to one agent identity, and
