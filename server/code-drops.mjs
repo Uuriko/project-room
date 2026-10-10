@@ -82,6 +82,103 @@ function ref(value, field) {
   return value;
 }
 
+// Git C-quotes a path that is not plain ASCII. Octal escapes are UTF-8
+// bytes. A still-quoted `diff --git` line does not match `a/<path> b/<path>`,
+// so a format-patch whose only special path is rejected and a later quoted
+// path's hunks are counted on the previous file.
+function unquoteGitPath(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    if (next === "n") { bytes.push(0x0a); i += 2; continue; }
+    if (next === "t") { bytes.push(0x09); i += 2; continue; }
+    if (next === "r") { bytes.push(0x0d); i += 2; continue; }
+    if (next === "\\" || next === '"') { bytes.push(next.charCodeAt(0)); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+function readQuoted(text, start) {
+  if (text[start] !== '"') return null;
+  let j = start + 1;
+  while (j < text.length) {
+    if (text[j] === "\\") { j += 2; continue; }
+    if (text[j] === '"') return { token: text.slice(start, j + 1), end: j + 1 };
+    j += 1;
+  }
+  return null;
+}
+
+function stripAB(path) {
+  return path.startsWith("a/") || path.startsWith("b/") ? path.slice(2) : path;
+}
+
+// `undefined` means this is not a diff --git line. `null` means the line is
+// a file header but names no new path, so the previous file must not keep
+// the following hunks.
+function bPathFromDiffGit(line) {
+  if (!line.startsWith("diff --git ")) return undefined;
+  const rest = line.slice("diff --git ".length);
+  let sides = null;
+  if (rest.startsWith('"')) {
+    const first = readQuoted(rest, 0);
+    if (first) {
+      let i = first.end;
+      while (rest[i] === " ") i += 1;
+      const second = rest[i] === '"' ? readQuoted(rest, i) : null;
+      const plainEnd = rest.indexOf(" ", i);
+      const plain = second ? null : (plainEnd === -1 ? rest.slice(i) : rest.slice(i, plainEnd));
+      if (second || plain) sides = [first.token, second ? second.token : plain];
+    }
+  } else {
+    const quotedB = rest.indexOf(' "');
+    const plainB = rest.indexOf(" b/");
+    if (quotedB !== -1 && (plainB === -1 || quotedB < plainB)) {
+      const second = readQuoted(rest, quotedB + 1);
+      if (second) sides = [rest.slice(0, quotedB), second.token];
+    } else if (plainB !== -1) sides = [rest.slice(0, plainB), rest.slice(plainB + 1)];
+  }
+  if (!sides) return null;
+  const path = stripAB(unquoteGitPath(sides[1]));
+  return path && path !== "/dev/null" ? path : null;
+}
+
+function pathFromPlus(line) {
+  if (!line.startsWith("+++ ")) return null;
+  let raw = line.slice(4);
+  const tab = raw.indexOf("\t");
+  if (tab !== -1) raw = raw.slice(0, tab);
+  raw = raw.trim();
+  if (!raw || raw === "/dev/null") return null;
+  const path = stripAB(unquoteGitPath(raw));
+  return path && path !== "/dev/null" ? path : null;
+}
+
 // What the bytes say, read by the server so nobody has to trust a caption.
 export function summarizePatch(kind, bytes) {
   if (kind === "bundle") return summarizeBundle(bytes);
@@ -108,19 +205,18 @@ export function summarizePatch(kind, bytes) {
     if (inHeader && line === "") { inHeader = false; continue; }
     const base_ = /^base-commit: ([0-9a-f]{7,64})$/.exec(line);
     if (base_) { base = base_[1]; continue; }
-    const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-    if (header) {
-      const path = header[2];
-      current = files.get(path) ?? { path, adds: 0, dels: 0 };
-      files.set(path, current);
+    const gitPath = bPathFromDiffGit(line);
+    if (gitPath !== undefined) {
       hunk = null;
+      current = gitPath ? (files.get(gitPath) ?? { path: gitPath, adds: 0, dels: 0 }) : null;
+      if (current) files.set(gitPath, current);
       continue;
     }
     if (!current || !hunk) {
-      const plain = /^\+\+\+ (?:b\/)?(.+?)(?:\t.*)?$/.exec(line);
-      if (plain && !current && kind === "diff" && plain[1] !== "/dev/null") {
-        current = files.get(plain[1]) ?? { path: plain[1], adds: 0, dels: 0 };
-        files.set(plain[1], current);
+      const plusPath = pathFromPlus(line);
+      if (plusPath && !current && kind === "diff") {
+        current = files.get(plusPath) ?? { path: plusPath, adds: 0, dels: 0 };
+        files.set(plusPath, current);
       }
     }
     // Count only inside hunks, by the hunk's own line counts, so mail
