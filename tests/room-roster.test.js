@@ -237,7 +237,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
   assert.match(app, /How to open Inbox/);
-  assert.match(app, /authPanelTitle/);
+  assert.match(app, /#auth-title.*PROJECT ROOM/);
   assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
   assert.match(app, /No completed results yet/);

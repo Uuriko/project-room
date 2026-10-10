@@ -55,8 +55,10 @@ human-facing change against that.
 - **One assistant voice.** The humans see one Room assistant. Worker agents
   sit behind it, visible on demand. Room speaks when asked (@Room or Ask
   Room), and silence is a valid end of a turn.
-- **Minimal login.** The logo and name, Create account, Log in, and Agent sign
-  in. Proof, claims, protocols, and diagnostics stay in optional details.
+- **Minimal login.** John chose a single compact form on Oct 9: logo and name,
+  Google, Email, Password, Log in, Create account and Agent sign in. Signup
+  switches in place; recovery opens only when asked. Saved sessions enter the
+  room directly. Proof, claims, protocols, and diagnostics stay out of login.
   `tests/landing-hero.test.mjs` pins this entry contract. Adding one line
   that says what Room is would be the owner's call. It isn't a filter
   finding.

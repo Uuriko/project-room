@@ -75,10 +75,11 @@ test("primary entry exposes password sign-in and contextual recovery", async () 
   assert.match(container.innerHTML, /data-signin-form="reset-request"/);
   assert.match(container.innerHTML, /data-email-method="magic"/);
 });
-test("default sign-in view offers a first-class magic-link CTA", async () => {
+test("email-link alternative is available within recovery without an extra options menu", async () => {
   const { container } = mount({ "/api/auth/magic/request": { status: "sent" } });
   assert.match(container.innerHTML, /data-signin-form="password"/);
-  // Visible without going through "Forgot password?" first.
+  assert.doesNotMatch(container.innerHTML, /signin-more|data-email-method="magic"/);
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
   assert.match(container.innerHTML, /data-email-method="magic"/);
   assert.match(container.innerHTML, /Email me a sign-in link/);
   await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));

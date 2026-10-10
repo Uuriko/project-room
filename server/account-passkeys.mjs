@@ -135,7 +135,8 @@ export function createPasskeyAuth({ store, challenges = createChallengeStore({ n
       user: { id: accountId, name: userName, displayName: userName },
       challenge: issued.challenge,
       excludeCredentials,
-      ...(authenticatorSelection !== undefined ? { authenticatorSelection } : {})
+      // Login discovers the account from its credential, without an id list.
+      authenticatorSelection: { ...authenticatorSelection, residentKey: "required", requireResidentKey: true }
     });
     return { ...options, challengeId: issued.id };
   }
