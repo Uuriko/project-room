@@ -160,3 +160,17 @@ test("latest:true over several scan windows returns the newest N with none skipp
     assert.deepEqual(page.messages.map(m => m.messageId), ids.slice(-limit), `latest ${limit}`);
   }
 });
+
+test("latest:true is a snapshot, so following next as after does not repeat the page", async t => {
+  const f = fixture(t);
+  await f.ready;
+  for (const id of ["a", "b", "c", "d"]) f.post(id, id);
+  await f.ready;
+  for (const read of [args => f.hosted(args), args => f.clientFor("worker1").roomMessages(args)]) {
+    const page = await read({ latest: true, limit: 3 });
+    assert.deepEqual(page.messages.map(m => m.messageId), ["b", "c", "d"]);
+    assert.equal(page.hasMore, true);
+    const again = await read({ latest: true, limit: 3, after: page.next });
+    assert.deepEqual(again.messages.map(m => m.messageId), []);
+  }
+});
