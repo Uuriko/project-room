@@ -668,6 +668,7 @@
   "tests/reply-composer.test.js": 4662,
   "tests/reply-request-audit-edits.test.js": 44475,
   "tests/reply-request-audit-ownership.test.js": 31345,
+  "tests/reply-mention-notify.test.js": 12000,
   "tests/reply-requests.test.js": 48758,
   "tests/report-test-failures.test.js": 5905,
   "tests/reputation.test.js": 3268,
