@@ -4046,9 +4046,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (req.method === "POST") {
           const data = await body(req);
-          const allowed = { introduce: ["externalRef", "displayName", "origin", "reach", "note"], knows: ["fromRef", "toRef"], link: ["externalRef", "memberId"] };
+          const allowed = { introduce: ["externalRef", "displayName", "origin", "reach", "note"], knows: ["fromRef", "toRef"], link: ["externalRef", "memberId"], verify: ["externalRef", "decision"] };
           if (!data || Array.isArray(data) || !Object.hasOwn(allowed, data.action) || Object.keys(data).some(key => key !== "action" && !allowed[data.action].includes(key)))
-            reject(422, "invalid_outside_agent", "Choose introduce, knows or link with public fields only");
+            reject(422, "invalid_outside_agent", "Choose introduce, knows, link or verify with public fields only");
           const { action, ...input } = data;
           const method = action === "introduce" ? "record" : action;
           return json(res, 200, network[method](selected.token, roomId, input, fence));
