@@ -339,6 +339,7 @@ const dx1aAssets = ["scripts/install.sh", "docs/agents/index.html", "docs/agents
 optional.push(...dx1aAssets, "server/connect-snippets.mjs");
 // CP-ADMIN-1: operator console (unlinked, token-only).
 const operatorConsoleAssets = ["operator.html", "src/operator-ui.js", "src/operator.css"];
+optional.push("project-room-mark.svg", "src/login-polish.css");
 
 optional.push(...operatorConsoleAssets);
 // DX-1a end
