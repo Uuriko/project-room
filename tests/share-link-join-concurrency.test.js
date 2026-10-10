@@ -55,7 +55,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let store;
 for (let i = 0; i < 60; i++) {
   try { store = new RoomStore(process.argv[2]); break; }
-  catch (error) { if (i === 59) { log({ phase: "open", message: String(error?.message).slice(0,120) }); process.exit(0); } await sleep(50 + Math.random() * 150); }
+  catch (error) { if (i === 59) { log({ phase: "open" }); process.exit(0); } await sleep(50 + Math.random() * 150); }
 }
 for (let i = 0; i < 15; i++) {
   try {
@@ -65,7 +65,7 @@ for (let i = 0; i < 15; i++) {
   } catch (error) {
     const busy = /database is locked|SQLITE_BUSY/i.test(String(error?.message));
     if (busy && i < 14) { await sleep(25 + Math.random() * 100); continue; }
-    log({ ok: false, status: error?.status ?? null, code: error?.code ?? null, message: String(error?.message ?? error).slice(0, 160) });
+    log({ ok: false, status: Number.isInteger(error?.status) ? error.status : null, code: /^[a-z][a-z0-9_]{2,40}$/.test(String(error?.code)) ? error.code : null, other: !(error?.status > 0) });
     break;
   }
 }
@@ -105,13 +105,38 @@ function setup(t, { maxJoins }) {
   return { dir, dbPath, linkId, linkToken };
 }
 
+// Child arguments carry secrets (identity secret, link token, session binding), and
+// both error.message ("Command failed: node child.mjs <args>") and free-form stderr can
+// echo them. A failed child is described only from FINITE sets: every value below is a
+// constant from this file, never text taken from the child, the command or an error
+// message. Anything that matches a pattern but is not in a set is reported as "other".
+const KNOWN_SIGNALS = new Set(["SIGKILL", "SIGTERM", "SIGSEGV", "SIGABRT", "SIGBUS", "SIGINT", "SIGHUP", "SIGPIPE"]);
+const KNOWN_ECODES = new Set(["ENOMEM", "EMFILE", "ENFILE", "EAGAIN", "EPERM", "EACCES", "ENOENT", "EPIPE", "ENOSPC", "ETIMEDOUT", "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"]);
+const KNOWN_ERROR_NAMES = ["SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_FULL", "SQLITE_CANTOPEN", "SQLITE_IOERR", "SQLITE_CONSTRAINT", "SQLITE_READONLY", "SQLITE_CORRUPT",
+  "ERR_MODULE_NOT_FOUND", "ERR_INVALID_ARG_TYPE", "ERR_UNHANDLED_ERROR", "ERR_OUT_OF_RANGE", "ENOMEM", "EMFILE", "ENFILE", "EAGAIN", "ENOSPC",
+  "RangeError", "TypeError", "ReferenceError", "SyntaxError", "AssertionError", "heap out of memory"];
+const ERROR_SHAPED = /\b(?:SQLITE_[A-Z0-9_]+|ERR_[A-Z0-9_]+|E[A-Z]{3,12}|[A-Za-z]+Error)\b/g;
+export function describeChildFailure(error, stderr) {
+  const text = String(stderr ?? "");
+  const known = KNOWN_ERROR_NAMES.filter(name => new RegExp(`(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`).test(text));
+  const unknownShaped = (text.match(ERROR_SHAPED) ?? []).some(token => !KNOWN_ERROR_NAMES.includes(token));
+  const code = error?.code;
+  return {
+    code: Number.isInteger(code) && code >= 0 && code <= 255 ? code : typeof code === "string" ? (KNOWN_ECODES.has(code) ? code : "other") : null,
+    signal: typeof error?.signal === "string" ? (KNOWN_SIGNALS.has(error.signal) ? error.signal : "other") : null,
+    killed: error?.killed === true,
+    stderrBytes: Buffer.byteLength(text),
+    errorNames: [...known.slice(0, 5), ...(unknownShaped ? ["other"] : [])],
+  };
+}
+
 function runRacers(dir, childFile, argSets) {
   return Promise.all(argSets.map(args => new Promise(resolve => {
-    execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout) => {
+    execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout, stderr) => {
       const line = String(stdout).split("\n").find(l => l.startsWith("RESULT "));
       let parsed = null;
       try { parsed = JSON.parse(line.slice("RESULT ".length)); } catch { /* leave null */ }
-      resolve({ parsed, execError: error ? String(error.message).slice(0, 120) : null });
+      resolve({ parsed, ...(parsed ? {} : { failure: describeChildFailure(error, stderr) }) });
     });
   })));
 }
@@ -309,4 +334,34 @@ test("HTTP thundering herd: 50 concurrent share-link joins -> one guest, clean 4
   assert.equal(byStatus[409] + (byStatus[429] ?? 0), RACERS - 1, "every loser is 409 or 429");
   const members = Object.values(store.room(ROOM).state.members).filter(m => m.displayName === "Herd Guest");
   assert.equal(members.length, 1, "exactly one guest member");
+});
+
+test("a child that dies without a RESULT is described without its command line or argument values", () => {
+  const secret = "pri_" + "S3cr3tValue".repeat(4), token = "tok_" + "A1b2".repeat(11), binding = "b".repeat(64);
+  const error = Object.assign(new Error(`Command failed: node /x/join-agent-child.mjs /db ${secret} ${token} ${binding}`), { code: 1, signal: null, killed: false });
+  // Stderr that echoes the args, split mid-secret, plus a real error class name.
+  const stderr = `Error: bad arg ${secret.slice(0, 20)}\n${secret.slice(20)} ${token}\nSQLITE_BUSY: database is locked ${binding.slice(0, 30)}`;
+  const out = describeChildFailure(error, stderr);
+  assert.deepEqual(out, { code: 1, signal: null, killed: false, stderrBytes: Buffer.byteLength(stderr), errorNames: ["SQLITE_BUSY"] });
+  const text = JSON.stringify(out);
+  for (const piece of [secret.slice(0, 12), secret.slice(20, 32), token.slice(0, 12), binding.slice(0, 12), "join-agent-child", "Command failed"]) {
+    assert.ok(!text.includes(piece), `diagnostic must not contain ${piece.slice(0, 8)}...`);
+  }
+  assert.deepEqual(describeChildFailure(Object.assign(new Error("x"), { code: null, signal: "SIGKILL", killed: true }), ""),
+    { code: null, signal: "SIGKILL", killed: true, stderrBytes: 0, errorNames: [] });
+});
+
+test("unknown but error-shaped names, codes and signals collapse to a constant instead of being copied", () => {
+  const leaks = ["ERR_PRIVATE_TOKEN_VALUE_ABC", "SQLITE_HUNTER_TWO", "EZZSECRET", "PrivateTokenError", "SIGSECRET9"];
+  const stderr = leaks.slice(0, 4).join("\n") + "\nSQLITE_LOCKED";
+  const out = describeChildFailure(Object.assign(new Error("x"), { code: "ERR_PRIVATE_TOKEN_VALUE_ABC", signal: "SIGSECRET9", killed: false }), stderr);
+  assert.deepEqual(out, { code: "other", signal: "other", killed: false, stderrBytes: Buffer.byteLength(stderr), errorNames: ["SQLITE_LOCKED", "other"] });
+  const text = JSON.stringify(out);
+  for (const leak of leaks) assert.ok(!text.includes(leak), `must not contain ${leak}`);
+  assert.deepEqual(describeChildFailure(Object.assign(new Error("x"), { code: 9999 }), "").code, null);
+});
+
+test("the child RESULT line carries no free-form error text", () => {
+  assert.ok(!/message\s*:/.test(JOIN_CHILD + JOIN_AGENT_CHILD), "child result must not include error.message");
+  assert.match(JOIN_CHILD, /log\(\{ ok: false, status:/);
 });
