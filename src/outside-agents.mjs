@@ -6,7 +6,8 @@ import { createHash } from "node:crypto";
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const PREFIX = "outside-agent.v1\n";
-const KINDS = new Set(["introduce", "sighting", "knows", "link"]);
+const KINDS = new Set(["introduce", "sighting", "knows", "link", "verify"]);
+const VERIFY_DECISIONS = new Set(["approved", "denied"]);
 const ORIGINS = new Set(["bus", "host", "product", "mcp", "room", "other"]);
 const REF = /^[a-z][a-z0-9._:-]{1,64}$/;
 const SECRET = /(?:^|[\s"'/])(?:pri_|rak_|ga1\.|ref1\.|Bearer\s)/i;
@@ -29,6 +30,15 @@ export function parseOutsideAgentBody(body) {
       reachOf(value.reach ?? null);
       if (value.note != null) publicText(value.note, "Note", 280);
     } else if (value.kind === "knows") { publicRef(value.fromRef); publicRef(value.toRef); }
+    else if (value.kind === "verify") {
+      // A connect-approval decision. Only honored at assembly when the
+      // record's author is in the caller's verifier set (see
+      // assembleOutsideAgents): the parse only checks the shape.
+      publicRef(value.externalRef);
+      if (!VERIFY_DECISIONS.has(value.decision)) return null;
+      if (!validId(value.decidedBy)) return null;
+      if (typeof value.decidedAt !== "number" || !(value.decidedAt > 0)) return null;
+    }
     else { publicRef(value.externalRef); if (!validId(value.memberId)) return null; }
   } catch { return null; }
   return value;
@@ -54,7 +64,37 @@ export function planOutsideAgentRecord(messages, members, roomId, actorId, input
   return { recorded: kind, externalRef, commandId: commandId(kind, roomId, actorId, externalRef), record, body: outsideAgentBody(record) };
 }
 
-export function assembleOutsideAgents(messages, members = {}) {
+// Plan a connect-approval decision for an outside agent's link (1e
+// hs2-outside-agent-approval). The approver is authenticated by the caller
+// (server/outside-agents.mjs restricts verify to the room owner and
+// membership administrators); the planner checks the decision is well-formed
+// and that there is a link to decide on. Idempotent: repeating the latest
+// decision replays instead of writing a second record. Pass the verifier set
+// so the replay check sees already-honored decisions.
+export function planOutsideAgentVerify(messages, members, roomId, approverId, input, { verifiers = null } = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["externalRef", "decision"].includes(key)))
+    fail(422, "invalid_outside_agent", "Decide with an externalRef and a decision");
+  const externalRef = publicRef(input?.externalRef);
+  if (!VERIFY_DECISIONS.has(input?.decision))
+    fail(422, "invalid_outside_agent", 'decision must be "approved" or "denied"');
+  const decision = input.decision;
+  const existing = assembleOutsideAgents(messages, members, { verifiers }).find(agent => agent.externalRef === externalRef);
+  if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before deciding on its link");
+  if (!existing.linkedMemberId && !existing.verifiedBy)
+    fail(422, "outside_agent_unlinked", "There is no link to decide on for this agent");
+  if (existing.latestDecision === decision) return { recorded: "replay", externalRef, decision };
+  const record = { v: 1, kind: "verify", externalRef, decision, decidedBy: approverId, decidedAt: Date.now() };
+  return { recorded: "verify", externalRef, decision,
+    commandId: commandId("verify", roomId, approverId, externalRef, decision), record, body: outsideAgentBody(record) };
+}
+
+export function assembleOutsideAgents(messages, members = {}, { verifiers = null } = {}) {
+  // verifiers: a Set of memberIds allowed to decide on links (the room owner
+  // and membership administrators, computed by the server). Verify records
+  // are honored only when their author is in this set AND the author matches
+  // the record's decidedBy — a forged raw message from anyone else cannot
+  // mint a verified link. When no set is given, verify records are ignored
+  // (safe default for unprivileged readers).
   const agents = new Map();
   const edges = [];
   const pendingLinks = []; // link records seen before their introduction (L-42)
@@ -67,6 +107,26 @@ export function assembleOutsideAgents(messages, members = {}) {
     }
     return false;
   };
+  // A verify decision is authoritative only from a verifier, and only when
+  // the message author is the recorded decider (the server posts verify
+  // records under the approver's own credential).
+  const applyVerify = (agent, record, authorId) => {
+    if (!agent) return false;
+    if (!(verifiers instanceof Set) || !verifiers.has(authorId) || authorId !== record.decidedBy) return false;
+    agent.latestDecision = record.decision;
+    agent.verifiedBy = record.decidedBy;
+    agent.verifiedAt = record.decidedAt;
+    if (record.decision === "approved") {
+      agent.verified = true;
+    } else {
+      // Denied: the link assertion was rejected — clear it. The member may
+      // link again, which returns the agent to pending.
+      agent.linkedMemberId = null;
+      agent.linkedBy = null;
+      agent.verified = false;
+    }
+    return true;
+  };
   for (const message of messages ?? []) {
     // This is a shared public network, never a projection of targeted messages.
     if (message?.toMemberId || message?.deletedAt) continue;
@@ -78,12 +138,14 @@ export function assembleOutsideAgents(messages, members = {}) {
         agents.set(record.externalRef, {
           externalRef: record.externalRef, displayName: record.displayName, origin: record.origin,
           reach: record.reach ?? null, note: record.note ?? null, introducedBy: message.authorId,
-          sightings: [], knows: [], knownBy: [], linkedMemberId: null, linkedBy: null, verified: false
+          sightings: [], knows: [], knownBy: [], linkedMemberId: null, linkedBy: null, verified: false,
+          verifiedBy: null, verifiedAt: null, latestDecision: null
         });
       } else if (message.authorId !== existing.introducedBy && !existing.sightings.some(row => row.memberId === message.authorId)) {
         existing.sightings.push({ memberId: message.authorId, messageId: message.id });
       }
     } else if (record.kind === "knows") edges.push({ ...record, reportedBy: message.authorId });
+    else if (record.kind === "verify") applyVerify(agents.get(record.externalRef), record, message.authorId);
     else if (record.kind === "link") {
       if (!applyLink(agents.get(record.externalRef), record, message.authorId)) {
         // The introduction may not have been seen yet; buffer the link so
@@ -103,6 +165,10 @@ export function assembleOutsideAgents(messages, members = {}) {
     if (!from || !to || ![from.introducedBy, from.linkedMemberId].includes(edge.reportedBy)) continue;
     if (!from.knows.includes(edge.toRef)) from.knows.push(edge.toRef);
     if (!to.knownBy.includes(edge.fromRef)) to.knownBy.push(edge.fromRef);
+  }
+  // A link waiting on a human decision: linked but never verified.
+  for (const agent of agents.values()) {
+    agent.verificationPending = agent.linkedMemberId !== null && agent.verified !== true;
   }
   return [...agents.values()];
 }

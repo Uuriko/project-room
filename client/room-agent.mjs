@@ -521,11 +521,16 @@ export class RoomAgentClient {
   // the network. It grants no access, mints no identity, and issues no invite.
   async outsideAgents({ signal } = {}) {
     const snapshot = await this.snapshot({ signal });
+    // Conservative verifier set: the client honors verify records from the
+    // room owner only (it cannot see delegation grants). The server's fuller
+    // set is authoritative; this just lets the client display verified links.
+    const ownerId = snapshot.state?.room?.ownerId;
+    const verifiers = typeof ownerId === "string" && ownerId ? new Set([ownerId]) : null;
     return {
       contractVersion: 1,
       grantsAccess: false,
       evaluatedThrough: snapshot.sequence,
-      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {})
+      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, { verifiers })
     };
   }
   // Name an agent who has no seat. The post is an ordinary room message.

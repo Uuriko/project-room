@@ -14202,7 +14202,7 @@ paths:
         '401': { description: Authentication required }
     post:
       summary: Introduce or relate an outside agent through a public room message
-      description: Requires action introduce (externalRef, displayName, origin, optional reach and note), knows (fromRef, toRef), or link (externalRef, memberId of the caller, an unverified self-link). Relationships require the introducer or self-linked member. Unknown fields are refused. Read-only agents cannot write. Repeated introductions cannot change the original public facts. No access or identity is granted.
+      description: Requires action introduce (externalRef, displayName, origin, optional reach and note), knows (fromRef, toRef), link (externalRef, memberId of the caller, an unverified self-link), or verify (externalRef, decision "approved" or "denied"). Verify is the human approve/deny step for an outside agent's connect (link) request: owner or membership-administrator only; approval marks the link verified, denial clears it. Relationships require the introducer or self-linked member. Unknown fields are refused. Read-only agents cannot write. Repeated introductions cannot change the original public facts. No access or identity is granted.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
