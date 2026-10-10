@@ -38,6 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
+  assertEpochFence,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -413,6 +414,29 @@ const verifiersOf = (store, roomId) => {
 const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
+    if (error instanceof ClaimError) reject(422, error.code, error.message);
+    throw error;
+  }
+};
+
+// FIX-20 (WAVE-300): opt-in epoch fence on held-claim mutations. When the
+// body carries expectedEpoch it must name the epoch the client read; a
+// stale epoch (the claim was reaped — lease sweep, release, reassign —
+// since the client read it) is refused with 409 stale_epoch and a
+// read-back hint. Absent expectedEpoch keeps the legacy behavior.
+const fenceEpoch = (reject, roomId, workClaimId, item, data) => {
+  if (!Object.hasOwn(data, "expectedEpoch")) return;
+  try {
+    assertEpochFence(item, data.expectedEpoch);
+  } catch (error) {
+    if (error instanceof ClaimError && error.code === "stale_epoch") {
+      const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(workClaimId)}`;
+      const hint = "Read the current claim and resubmit the write with its epoch.";
+      const refusal = new ServiceError(409, "stale_epoch", error.message);
+      refusal.body = { ...agentErrorBody({ httpStatus: 409, code: "stale_epoch", message: refusal.message, roomId, workItemId: workClaimId }),
+        hint, next: [{ path: href }, { command: hint }] };
+      throw refusal;
+    }
     if (error instanceof ClaimError) reject(422, error.code, error.message);
     throw error;
   }
@@ -1038,7 +1062,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "requestId", "expectedClaimedAt", "expectedHistoryLength", "expectedEpoch"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, requestId?, expectedClaimedAt?, expectedHistoryLength?, expectedEpoch?}");
     if (data.requestId !== undefined
       && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
       invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
@@ -1083,6 +1107,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         throw refusal;
       }
     }
+    // FIX-20: a stale epoch (the claim was reaped since the client read it)
+    // refuses the write with 409 stale_epoch, before any state/note change.
+    fenceEpoch(reject, roomId, workClaimId, item, data);
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     if (data.state === "done") {
       // QA-Sec 2026-09-19: the reviewer must be authenticated. For
@@ -1305,7 +1332,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
     const data = body(req);
-    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
+    if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours", "expectedEpoch"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?, expectedEpoch?}");
     const item = load(claimIdOf(reject, workClaimId));
     // W4 (QA 2026-09-28): a lapsed lease auto-releases the claim (owner
     // cleared), so the ownership check below would misdiagnose it as an
@@ -1320,6 +1347,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     requireWriter();
     requireEventBudget();
+    // FIX-20: a stale epoch (the claim was reaped since the client read it)
+    // refuses the renewal with 409 stale_epoch.
+    fenceEpoch(reject, roomId, workClaimId, item, data);
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });

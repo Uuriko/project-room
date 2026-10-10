@@ -295,6 +295,29 @@ const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed"
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
+// FIX-20 (WAVE-300): server-side epoch fence. Every claim carries a
+// non-negative integer epoch; old rows decode as 0. Any reap/expiry path
+// that releases a claim to a new holder (lease-expiry sweep, release,
+// reassign) bumps it +1, so a partitioned agent returning with a write
+// prepared against an older epoch can be told to re-read first. The epoch
+// is advisory metadata on read and enforced on write: mutation routes
+// accept an opt-in expectedEpoch and refuse a stale one with stale_epoch.
+const epochOf = value => {
+  if (value === undefined || value === null) return 0;
+  check(Number.isSafeInteger(value) && value >= 0, "epoch must be a non-negative integer");
+  return value;
+};
+// Compare the client's expected epoch against the claim's current one.
+// A stale epoch (client read the claim before its last reap) fails with
+// stale_epoch — the caller re-reads the claim and resubmits.
+export function assertEpochFence(work, expectedEpoch) {
+  if (expectedEpoch === undefined || expectedEpoch === null) return;
+  check(Number.isSafeInteger(expectedEpoch) && expectedEpoch >= 0, "expectedEpoch must be a non-negative integer");
+  const epoch = epochOf(work?.epoch);
+  if (expectedEpoch < epoch) {
+    fail("stale_epoch", `work "${work?.id ?? "?"}" was reaped since this write was prepared (expected epoch ${expectedEpoch}, current ${epoch}) — re-read the claim and resubmit`);
+  }
+}
 
 const toMs = value => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -458,6 +481,7 @@ const workOf = value => {
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
+    epoch: epochOf(value.epoch), // FIX-20: old rows decode as 0
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
@@ -563,7 +587,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
   const declared = files === undefined || files === null ? { files: Object.freeze([]), fileBlocks: Object.freeze({}) } : claimedFilesOf(files);
   const links = pullList(pullRequest, pullRequests);
   const item = { id, title: title ?? id, state: "unclaimed", owner: null, history: [],
-    claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null,
+    claimedAt: null, leaseStartAt: null, leaseExpiresAt: null, deliveryMode: null, epoch: 0, // FIX-20
     reviewPolicy: reviewPolicy ?? null, reviewedBy: null, attestations: Object.freeze([]),
     tags: tags === undefined || tags === null ? Object.freeze([]) : tagsOf(tags),
     files: declared.files,
@@ -772,6 +796,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   };
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
+    // FIX-20: a release loses the holder — the epoch moves so a partitioned
+    // agent's write prepared before the release is fenced on return.
+    epoch: released ? item.epoch + 1 : item.epoch,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
     leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
@@ -833,6 +860,8 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
       : `Only the holder of "${item.id}" or a claim manager (room owner or manage_claims) can close it`);
   }
   const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
+    // FIX-20: retiring loses the holder — the epoch moves with it.
+    epoch: item.epoch + 1,
     attestations: Object.freeze([]), reviews: Object.freeze([]),
     files: Object.freeze([]), fileBlocks: Object.freeze({}) };
   return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
@@ -962,7 +991,11 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  return withHistory({ ...item, ...claim, owner: target,
+    // FIX-20: a held transfer is a reap to a new holder — the epoch moves.
+    // A fresh claim of an unclaimed item keeps the item's epoch (monotonic).
+    epoch: fresh ? item.epoch : item.epoch + 1,
+    attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -986,6 +1019,9 @@ export function releaseExpired(items, now) {
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+      // FIX-20: the sweep reaps the claim — the epoch moves so a returning
+      // partitioned agent's stale write is rejected with stale_epoch.
+      epoch: item.epoch + 1,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
