@@ -200,3 +200,33 @@ for(const scenario of [
     assert.match(await page.locator('#work-options-summary').textContent(),/^(Advanced options|Review \+ approval · read only)$/);
   }
 });
+
+// qa9-new-work-no-reviewer: with "Require verification" on and nobody holding
+// the verify permission, Create must disable with an inline explanation
+// pointing at People/permissions — not die in silent HTML validation.
+for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mobile", { width: 390, height: 844 }]]) {
+  test(`no reviewer ${label}: Create disables with an inline People explanation when nobody can review`, { timeout: 60000 }, async t => {
+    const f = await setup(t, viewport), { page } = f;
+    await f.openForm();
+    assert.equal(await f.review.isChecked(), true, "verification is on by default");
+    // Strip the verify permission from every active member while the form is open.
+    for (const member of Object.values(f.store.room("commons").state.members)) {
+      if (member.active === false || !member.permissions.includes("verify")) continue;
+      f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+        data: { memberId: member.id, expectedMemberRevision: member.revision ?? 0,
+          permissions: member.permissions.filter(p => p !== "verify"), active: member.active } });
+    }
+    // The verifier list empties on both old and new code; only the new code
+    // disables Create instead of leaving it to silent validation failure.
+    await page.waitForFunction(() => document.querySelectorAll("#verifier-select option").length <= 1);
+    const create = page.locator("#create-work-button");
+    assert.equal(await create.isDisabled(), true, "Create disables when no reviewer is eligible");
+    assert.equal(await page.locator("#reviewer-unavailable").isVisible(), true, "the reason is inline");
+    assert.match(await page.locator("#reviewer-unavailable-text").textContent(), /People/,
+      "the explanation points at the People/permissions surface");
+    // Negative control: turning review off re-enables Create.
+    await f.review.uncheck();
+    assert.equal(await create.isDisabled(), false, "Create re-enables when review is not required");
+    assert.equal(await page.locator("#reviewer-unavailable").isHidden(), true);
+  });
+}

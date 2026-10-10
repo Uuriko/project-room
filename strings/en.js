@@ -341,5 +341,7 @@ export default {
   "error.status.502": "A connected service is having trouble. Try again in a moment.",
   "error.status.503": "The service is temporarily unavailable. Try again in a moment.",
   "error.status.504": "That took too long. Try again.",
-  "error.unknown": "Something went wrong. Please try again."
+  "error.unknown": "Something went wrong. Please try again.",
+  "work.noReviewer.policy": "Room policy requires review, but no one here has the reviewer permission. Ask the room owner to grant it in People.",
+  "work.noReviewer.optional": "No one can review this yet — nobody here has the reviewer permission. Grant it in People, or turn off “Require verification”."
 };
