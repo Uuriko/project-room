@@ -2357,7 +2357,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const linked = this.db.prepare("SELECT id,sequence,body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
         const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
         const { sequence, members } = this.roomAuthority(stored.room_id);
-        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
+        // Account deletion removes the invitee's member_accounts binding
+        // (account-deletion.mjs, "memberships"), so a deleted invitee has no
+        // live membership to compare. The journal and projection matched above;
+        // the joined event itself is still compared to the recorded invitation.
+        const retiredInvitee = !binding && this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0;
+        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } }, { retiredInvitee });
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
@@ -3385,6 +3390,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.appendInvitationJournal(revoked, "revoked");
       return { invitation: invitationView(revoked, now, { includeScope: true }), duplicate: false };
     });
+  }
+  // Account deletion revokes the account's pending invitations (as issuer or as
+  // the intended invitee) through the same state change revokeInvitation makes:
+  // revision, revoked_* columns and reason satisfy the status CHECK, the audit
+  // event is appended, and the journal entry keeps verifyInvitationRecord
+  // consistent. A bare `SET status='revoked'` violates that CHECK. The
+  // deleting account is the actor; the member is the invitee (self-decline) or
+  // the issuer (self-revoke). Runs inside the caller's transaction.
+  revokePendingInvitationsForAccount(accountId, { reason = "account_deleted" } = {}) {
+    const rows = this.db.prepare(`SELECT * FROM membership_invitations
+      WHERE status='pending' AND (issuer_account_id=? OR intended_account_id=?) ORDER BY id`).all(accountId, accountId);
+    const now = this.now();
+    const epoch = this.db.prepare("SELECT auth_epoch FROM accounts WHERE id=?").get(accountId)?.auth_epoch ?? 0;
+    for (const row of rows) {
+      const memberId = row.issuer_account_id === accountId ? row.issuer_member_id : row.intended_member_id;
+      const revision = row.revision + 1;
+      const changed = this.db.prepare(`UPDATE membership_invitations SET revision=?,status='revoked',revoked_at=?,revoked_by_account_id=?,revoked_by_member_id=?,revoke_reason=?
+        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, accountId, memberId, reason, row.id, row.revision).changes;
+      if (changed !== 1) continue;
+      this.db.prepare(`INSERT INTO membership_invitation_events(
+        invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
+      ) VALUES(?,2,'revoked',?,?,?,0,?,?,NULL,?)`).run(row.id, accountId, memberId, epoch, revision, now, reason);
+      this.appendInvitationJournal(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), "revoked");
+    }
+    return rows.length;
   }
   acceptInvitation(accountSessionToken, token, { redemptionId, expectedRevision, expectedSessionBinding } = {}) {
     if (typeof token !== "string" || !tokenPattern.test(token) || typeof redemptionId !== "string" || !redemptionPattern.test(redemptionId) || expectedRevision !== 0) {
@@ -4569,10 +4599,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // keep the stored marker so an agent never skips its own events on resume.
   catchUpCursor(roomId, memberId) {
     const stored = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+    // since_join readers cannot catch up on the hidden prefix. Keep the
+    // joining event visible, and never rewind a later acknowledged marker.
+    // This only derives the read boundary; it does not store an acknowledgement.
+    const floor = this.historyFloor(roomId, memberId);
+    const after = Math.max(stored, floor ? floor.sequence - 1 : 0);
     const next = this.db.prepare(`SELECT sequence FROM events WHERE room_id=? AND sequence>?
-      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, stored, memberId)?.sequence ?? null;
+      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, after, memberId)?.sequence ?? null;
     return this.db.prepare("SELECT coalesce(max(sequence), ?) AS sequence FROM events WHERE room_id=? AND sequence>? AND (? IS NULL OR sequence<?)")
-      .get(stored, roomId, stored, next, next).sequence;
+      .get(after, roomId, after, next, next).sequence;
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {

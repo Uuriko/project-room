@@ -4746,7 +4746,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         const linkFields = ["requestId", "linkToken", "expiresAt", "maxJoins", "expectedMemberRevision"];
         if (!exact(data, linkFields) && !exact(data, [...linkFields, "access"])) reject(422, "invalid_link", "Supply the exact invitation link settings");
-        const result = store.shareLinks.create(selected.token, roomId, data, fence);
+        // Same escape hatch as agent-invites: with no mailer, verification can never complete.
+        const result = store.shareLinks.create(selected.token, roomId, data, fence, { emailVerificationUnachievable: !magicMailer.isConfigured() });
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (route === "share-links-cancel" && req.method === "POST") {

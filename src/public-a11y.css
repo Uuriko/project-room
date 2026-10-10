@@ -10,6 +10,7 @@
 #agent-local-client > summary { display: flex; align-items: center; min-width: 24px; min-height: 24px; }
 .button.destructive { color: var(--red); background: var(--panel); border: 1px solid var(--red); }
 .deletion-summary { white-space: pre-wrap; }
+.deletion-summary pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .inbox-unread { font-weight: 700; }
 .inbox-thread-depth-0 { margin-left: 0; }
 .inbox-thread-depth-1 { margin-left: 16px; }

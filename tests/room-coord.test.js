@@ -8,7 +8,7 @@ import { RoomLandClient } from '../client/room-land.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { CoordError, claimAndVerify, closeClaim, coordStatus, digest, handoff, isLiveClaim, land, pathCovers, renewWithProgress, verifyClaim } from '../client/room-coord.mjs';
+import { CoordError, claimAndVerify, claimOverlaps, closeClaim, coordStatus, digest, guardConflicts, handoff, isLiveClaim, land, pathCovers, renewWithProgress, verifyClaim } from '../client/room-coord.mjs';
 import { parseArgs, run } from '../scripts/room-coord.mjs';
 
 const PR_SHA = 'd'.repeat(40);
@@ -52,6 +52,28 @@ test('a directory claim covers the files beneath it and nothing beside it', () =
     ['docs', 'docs-site/index.md', false]
   ]) assert.equal(pathCovers(held, file), covered, `${held} vs ${file}`);
   assert.throws(() => pathCovers('../outside', 'server/a.mjs'), coded('invalid_path'));
+});
+
+test('a wanted parent path conflicts with a live file lease beneath it', () => {
+  const now = Date.parse('2026-10-10T03:00:00.000Z');
+  const claims = [{
+    id: 'file-hold',
+    state: 'claimed',
+    owner: 'holder',
+    leaseExpiresAt: '2026-10-10T06:00:00.000Z',
+    files: ['server/http.mjs'],
+    title: 'file lease',
+  }];
+  const conflicts = guardConflicts(claims, ['server'], { memberId: 'other', now });
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].file, 'server');
+  assert.equal(conflicts[0].heldPath, 'server/http.mjs');
+  assert.equal(conflicts[0].claimId, 'file-hold');
+  assert.equal(guardConflicts(claims, ['server2/http.mjs'], { memberId: 'other', now }).length, 0);
+  assert.equal(claimOverlaps(claims.concat([{
+    id: 'dir-hold', state: 'claimed', owner: 'other',
+    leaseExpiresAt: '2026-10-10T06:00:00.000Z', files: ['server'],
+  }]), { now }).length, 1);
 });
 
 test('claims are confirmed by reading the room record back, and held files refuse a second member', async t => {

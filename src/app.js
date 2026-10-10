@@ -3422,8 +3422,8 @@ function workCard(i, now, drafts, messages = []) {
   // Derived read-time signal only: a pause hint, never a block or a dispatch.
   const loops = coordinationLoops(i, messages);
   const loopNotice = loops.length ? `<p class="loop-warning" data-loop-kind="${esc(loops[0].kind)}"><strong>Possible coordination loop.</strong> ${esc(loops[0].label)}</p>` : "";
-  const nextActor = next.memberId ? `${name(next.memberId)} — ` : "";
-  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next:</strong> ${esc(nextActor + status.next)}</p>`;
+  const nextFor = next.memberId ? ` for ${esc(name(next.memberId))}` : "";
+  const nextLine = `<p class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
   const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
@@ -3855,7 +3855,7 @@ $("#account-profile-dialog").addEventListener("close", () => {
 $("#signout-button").addEventListener("click", async () => {
   if (!state && accountClient.session?.authenticated) {
     if (signoutLoading || busy || invitationIsCommitting()) return;
-    if (inboxUI.hasPending() && !window.confirm("Sign out and clear unsent drafts? Saved replies stay.")) return;
+    if (inboxUI.hasPending() && !window.confirm("Log out and clear unsent drafts? Saved replies stay.")) return;
     recovery.clear();
     const operation = ++signoutOperationId;
     signoutLoading = true; $("#signout-button").disabled = true;
@@ -3877,7 +3877,7 @@ $("#signout-button").addEventListener("click", async () => {
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
   if (drafts.hasText() || inboxUI?.hasPending() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
-    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Sign out and clear drafts and the pending retry? The action may already be saved." : "Sign out and clear unsent drafts and private setup on this device?")) return;
+    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Log out and clear drafts and the pending retry? The action may already be saved." : "Log out and clear unsent drafts and private setup on this device?")) return;
   }
   recovery.clear();
   const operationId = ++signoutOperationId;

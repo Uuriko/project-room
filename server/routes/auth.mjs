@@ -39,7 +39,22 @@ function authRoute(row) {
   };
 }
 
-const passwordAccountId = normalized => `email:${createHash("sha256").update(normalized).digest("hex")}`;
+// Accounts provisioned from an email (password signup, magic link) use
+// email:<sha256>. Deleting an account leaves a deactivated tombstone under that
+// id so retained audit rows stay attributable; a later signup for the same email
+// takes the next free suffix (email:<sha256>.2, …) instead of colliding with it.
+// A live account at an id is returned as is, so callers keep their
+// existing-account handling.
+const MAX_EMAIL_ACCOUNT_GENERATIONS = 20;
+export function emailAccountIdFor(store, normalized) {
+  const base = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+  for (let generation = 1; generation <= MAX_EMAIL_ACCOUNT_GENERATIONS; generation++) {
+    const id = generation === 1 ? base : `${base}.${generation}`;
+    const row = store.db.prepare("SELECT active FROM accounts WHERE id=?").get(id);
+    if (!row || row.active === 1) return id;
+  }
+  throw new ServiceError(409, "account_exists", "This email can't start a new account; contact support");
+}
 
 export async function handleAuthGroup(ctx) {
   const {
@@ -147,7 +162,7 @@ export async function handleAuthGroup(ctx) {
       const adopted = store.accountLogins.adoptVerifiedEmail(normalized, { preserveSlotToken: consumeToken });
       let accountId = adopted?.accountId ?? null;
       if (!accountId) {
-        const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+        const derived = emailAccountIdFor(store, normalized);
         try { store.createAccount(derived, "magic-link"); }
         catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
         accountId = derived;
@@ -252,7 +267,7 @@ export async function handleAuthGroup(ctx) {
       if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
       return json(res, 202, signupReply());
     }
-    const accountId = passwordAccountId(normalized);
+    const accountId = emailAccountIdFor(store, normalized);
     try { store.createAccount(accountId, "password-signup"); }
     catch (error) {
       if (!(error instanceof ServiceError) || error.status !== 409) throw error;

@@ -16,7 +16,7 @@
 // (or pin the whole ceremony to one process); otherwise a finish posted to
 // a different process than the options call answers 401.
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import {
   createRegistrationOptions, verifyRegistrationResponse, createAuthenticationOptions, verifyAuthenticationAssertion
@@ -132,7 +132,11 @@ export function createPasskeyAuth({ store, challenges = createChallengeStore({ n
     const { options } = verifiers.createRegistrationOptions({
       rpId,
       rpName: isNonEmptyString(rpName) ? rpName : rpId,
-      user: { id: accountId, name: userName, displayName: userName },
+      // WebAuthn caps user.id at 64 bytes and wants an opaque handle, not an
+      // identifier: email:<sha256 hex> account ids are 70 bytes and made every
+      // email account's registration fail in the browser. A 32-byte digest is
+      // stable per account and never exposes the id.
+      user: { id: createHash("sha256").update(accountId, "utf8").digest(), name: userName, displayName: userName },
       challenge: issued.challenge,
       excludeCredentials,
       // Login discovers the account from its credential, without an id list.

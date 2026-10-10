@@ -125,20 +125,20 @@ const countIssuedAccess = (store, accountId) => {
 };
 
 // Some tables are created on first use; count them only when they exist.
+// A genuinely missing table reads as 0. A real DB error MUST propagate:
+// executeAccountDeletion runs inside one transaction, and a swallowed error
+// here would commit a partial deletion while the receipt reports removed: 0
+// with no error surfaced.
 const countWhereIfExists = (store, table, idColumn, accountId) => {
-  try {
-    const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
-    if (!exists) return 0;
-    return store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${idColumn}=?`).get(accountId)?.n ?? 0;
-  } catch { return 0; }
+  const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+  if (!exists) return 0;
+  return store.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${idColumn}=?`).get(accountId)?.n ?? 0;
 };
 
 const deleteWhereIfExists = (store, table, idColumn, accountId) => {
-  try {
-    const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
-    if (!exists) return 0;
-    return store.db.prepare(`DELETE FROM ${table} WHERE ${idColumn}=?`).run(accountId).changes;
-  } catch { return 0; }
+  const exists = store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+  if (!exists) return 0;
+  return store.db.prepare(`DELETE FROM ${table} WHERE ${idColumn}=?`).run(accountId).changes;
 };
 
 
@@ -452,8 +452,19 @@ export function planAccountDeletion(store, accountId) {
 const EXECUTORS = {
   credentials: (store, accountId) =>
     store.db.prepare("DELETE FROM account_credentials WHERE account_id=?").run(accountId).changes,
-  sessions: (store, accountId) =>
-    store.db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes,
+  // A slot that redeemed a share link is referenced by share_link_joins, which is
+  // immutable history (no UPDATE/DELETE) with a foreign key to the slot. Deleting
+  // it 500s (FOREIGN KEY constraint failed) for every account that joined via a
+  // link. Same rule as sign-out: delete unreferenced slots, and leave the
+  // referenced ones as expired, unauthenticated tombstones that cannot resolve
+  // or authenticate again while the historical receipt stays valid.
+  sessions: (store, accountId) => {
+    const db = store.db, now = typeof store.now === "function" ? store.now() : Date.now();
+    const kept = db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
+      parent_credential_hash=NULL,authenticated_until=NULL,expires_at=?
+      WHERE account_id=? AND EXISTS (SELECT 1 FROM share_link_joins WHERE slot_hash=account_session_slots.hash)`).run(now, accountId).changes;
+    return kept + db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes;
+  },
   login_methods: (store, accountId) => {
     let removed = 0;
     for (const table of ["account_login_methods", "account_magic_codes", "account_recovery_codes", "account_security_events"]) {
@@ -552,8 +563,7 @@ const EXECUTORS = {
     // share_link_scope_immutable forbids touching scope columns; revoked_at /
     // revoked_by_member_id are outside it. Self-revocation attribution.
     revoked += db.prepare("UPDATE share_links SET revoked_at=?, revoked_by_member_id=issuer_member_id WHERE issuer_account_id=? AND revoked_at IS NULL").run(now, accountId).changes;
-    revoked += db.prepare("UPDATE membership_invitations SET status='revoked' WHERE issuer_account_id=? AND status='pending'").run(accountId).changes;
-    revoked += db.prepare("UPDATE membership_invitations SET status='revoked' WHERE intended_account_id=? AND status='pending'").run(accountId).changes;
+    revoked += store.revokePendingInvitationsForAccount(accountId);
     return revoked;
   },
   sponsored_agents: (store, accountId) => {

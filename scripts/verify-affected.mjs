@@ -186,6 +186,48 @@ function git(args, cwd) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
+// git diff --name-only and ls-files C-quote a path that is not plain ASCII.
+// A still-quoted token is not a repo path, so related tests never match it
+// and extname() does not see a code file, so the smoke set stays off too.
+function gitPathToken(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    const simple = { n: 0x0a, t: 0x09, r: 0x0d, a: 0x07, b: 0x08, v: 0x0b, f: 0x0c, "\\": 0x5c, '"': 0x22 };
+    if (Object.hasOwn(simple, next)) { bytes.push(simple[next]); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+export function parseGitPathList(text) {
+  return String(text ?? "").split("\n").map(line => gitPathToken(line.trim())).filter(Boolean);
+}
+
 export function changedFiles(base, cwd) {
   let mergeBase = base;
   try { mergeBase = git(["merge-base", base, "HEAD"], cwd); } catch { /* fall back to the ref itself */ }
@@ -193,7 +235,7 @@ export function changedFiles(base, cwd) {
     git(["diff", "--name-only", `${mergeBase}`, "--"], cwd), // committed + uncommitted tracked changes
     git(["ls-files", "--others", "--exclude-standard"], cwd), // untracked
   ];
-  return [...new Set(lists.join("\n").split("\n").map((s) => s.trim()).filter(Boolean))].sort();
+  return [...new Set(lists.flatMap(parseGitPathList))].sort();
 }
 
 function parseArgs(argv) {
@@ -221,7 +263,7 @@ async function main() {
   const changed = changedFiles(opts.base, root);
   const { discoverUnitTests } = await import("./unit-shards.mjs");
   const tests = discoverUnitTests(".").filter((f) => !f.includes("node_modules"));
-  const tracked = git(["ls-files"], root).split("\n").filter(Boolean);
+  const tracked = parseGitPathList(git(["ls-files"], root));
   const known = new Set([...tracked, ...changed.filter((f) => existsSync(join(root, f)))]);
   const cache = new Map();
   const read = (f) => {
