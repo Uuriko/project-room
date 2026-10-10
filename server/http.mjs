@@ -156,6 +156,12 @@ function securityTxtDocument(contact, now = Date.now()) {
   const expires = new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
   return `Contact: ${contact}\nExpires: ${expires}\n`;
 }
+let emailGatesRelaxedWarned = false;
+function warnEmailGatesRelaxed() {
+  if (emailGatesRelaxedWarned) return;
+  emailGatesRelaxedWarned = true;
+  console.warn("No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer");
+}
 function warnMissingSecurityContact() {
   if (securityContactWarned) return;
   securityContactWarned = true;
@@ -355,6 +361,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Optional-chained: option-validation tests build the server on a stub store
   // with no accountLogins; a real store always has it.
   store.accountLogins?.setVerificationUnachievable?.(() => !magicMailer.isConfigured());
+  // The mailer is fixed when the server is built, so a deploy that lost its mail
+  // secret would otherwise open every email gate without a trace. Say so at boot
+  // and report it in /api/health.
+  const emailVerification = magicMailer.isConfigured() ? "enforced" : "relaxed-no-mailer";
+  if (emailVerification === "relaxed-no-mailer") warnEmailGatesRelaxed();
   // Per-email buckets (hourly) complement the per-address rate() limits below.
   const magicRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
   const resetRequestEmailLimiter = createRateLimiter({ capacity: 3, refillPerSecond: 3 / 3600 });
@@ -1080,7 +1091,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         resolveChannelTransport, directSendFetch,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, { status: "ok", mode: serviceMode, ...deploymentField }, req.method === "HEAD");
+        return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
       }
       if (url.pathname === "/api/version" && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, sourceRevision: SOURCE_REVISION, buildId: BUILD_ID, ...deploymentField }, req.method === "HEAD");
