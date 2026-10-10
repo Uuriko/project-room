@@ -3,6 +3,7 @@ import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
+import { permissionDenial } from "./permission-denials.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -64,7 +65,7 @@ export class AgentConnections {
     // connection sponsorship is account-bound by schema.
     if (!auth.delegate && (auth.member?.id !== this.store.room(roomId).state.room.ownerId
       || !auth.member.permissions.includes("manage_members"))) {
-      fail(403, "owner_required", "Only the room owner can manage agent connections");
+      throw permissionDenial(403, "owner_required", "Only the room owner can manage agent connections", "manage_members");
     }
     if (auth.member.kind === "human" && (!auth.account || auth.kind !== "session")) {
       fail(403, "owner_required", "Only the signed-in room owner can manage agent connections");
