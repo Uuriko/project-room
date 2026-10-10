@@ -77,15 +77,16 @@ test("FIX-46: file-lease contention 409 increments the lease holder's counter", 
   await call(registry, "jill", "claim", "a", {});
   await call(registry, "grokbot", "create", null, { id: "b" });
 
-  // Claim-route file-lease contention.
-  const conflict = await call(registry, "grokbot", "claim", "b", { files: ["server/a.mjs"] }).catch(e => e);
+  // Claim-route file-lease contention. FIX-71: the hard refusal needs an
+  // explicit exclusive upgrade — the holder's counter still increments.
+  const conflict = await call(registry, "grokbot", "claim", "b", { files: ["server/a.mjs"], exclusive: true }).catch(e => e);
   assert.equal(conflict.status, 409);
   assert.equal(conflict.value.error.code, "file_lease_conflict");
   let read = await call(registry, "jill", "read", "a");
   assert.equal(read.value.blockedAttempts, 1, "holder sees the lease-contention attempt");
 
   // Create-with-assignee file-lease contention (item never created — the 409 is atomic).
-  const created = await call(registry, "claude", "create", null, { id: "c", files: ["server/a.mjs"], assignee: "grokbot" }).catch(e => e);
+  const created = await call(registry, "claude", "create", null, { id: "c", files: ["server/a.mjs"], assignee: "grokbot", exclusive: true }).catch(e => e);
   assert.equal(created.status, 409);
   assert.equal(created.value.error.code, "file_lease_conflict");
   read = await call(registry, "jill", "read", "a");

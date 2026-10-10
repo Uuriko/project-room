@@ -455,6 +455,7 @@ const workOf = value => {
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     readingAcks, blockedAttempts: blockedAttemptsOf(value.blockedAttempts),
+    leaseExclusive: leaseExclusiveOf(value.leaseExclusive),
     ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
@@ -481,6 +482,10 @@ const historyOmittedOf = value => (Number.isSafeInteger(value) && value > 0 ? va
 // default 0; corrupt values normalize to 0 rather than failing the read.
 const blockedAttemptsOf = value =>
   (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+// FIX-71 (WAVE-300): advisory-by-default file leases. Whether this claim's
+// file lease is exclusive — only an explicit exclusive: true upgrade sets
+// it; anything else normalizes to false (advisory).
+const leaseExclusiveOf = value => value === true;
 export const claimHistoryLength = item =>
   (Array.isArray(item?.history) ? item.history.length : 0) + historyOmittedOf(item?.historyOmitted);
 const withHistory = (work, atMs, agentId, action, note) => {
@@ -583,14 +588,15 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
     kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]),
-    blockedAttempts: 0 }; // FIX-46: a created item has seen no contention
+    blockedAttempts: 0, // FIX-46: a created item has seen no contention
+    leaseExclusive: false }; // FIX-71: an unclaimed item holds no lease
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }
 // Claim unclaimed work. Refuses already-claimed work (the anti-collision rule).
 // leaseHours: hours until the claim lapses (default: the room's
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
-export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
+export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, exclusive, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   // H4 (QA-200 2026-10-08): distinguish self re-claim from a foreign holder in
   // the message — "release it first" was destructive for the holder and
@@ -626,7 +632,11 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     // FIX-46: a fresh hold starts with no recorded contention — the counter
     // measures contention against the current holder, so it resets on every
     // new claim.
-    blockedAttempts: 0 };
+    blockedAttempts: 0,
+    // FIX-71: advisory-by-default file leases. Only an explicit exclusive:
+    // true upgrade marks the lease exclusive; every other claim lands an
+    // advisory lease that overlaps without refusing.
+    leaseExclusive: exclusive === true };
   return withHistory(claimed, atMs, agent, "claimed",
     effective === null ? note : note ?? `lease: ${effective}h`);
 }
@@ -794,6 +804,9 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // FIX-46: the contention counter belongs to the holder's round — a
     // released claim resets it, a kept hold preserves it.
     blockedAttempts: released ? 0 : item.blockedAttempts,
+    // FIX-71: exclusivity belongs to the lease — a released claim holds no
+    // lease, a kept hold preserves it.
+    leaseExclusive: released ? false : item.leaseExclusive,
     deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
     reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
     tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
@@ -847,7 +860,8 @@ export function closeWork(work, agentId, { verb = "close", reason, now, authorit
   const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
     attestations: Object.freeze([]), reviews: Object.freeze([]),
     files: Object.freeze([]), fileBlocks: Object.freeze({}),
-    blockedAttempts: 0 }; // FIX-46: no holder left to read the counter
+    blockedAttempts: 0, // FIX-46: no holder left to read the counter
+    leaseExclusive: false }; // FIX-71: no lease left to be exclusive
   return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
 }
 // The member who created the item, when the creation stamp is still in history.
@@ -1002,7 +1016,8 @@ export function releaseExpired(items, now) {
     // lapsed owner's round of work, never to whoever claims next).
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]),
-      blockedAttempts: 0 }; // FIX-46: the lapsed hold's contention count does not carry over
+      blockedAttempts: 0, // FIX-46: the lapsed hold's contention count does not carry over
+      leaseExclusive: false }; // FIX-71: the lapsed lease is gone
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
   });

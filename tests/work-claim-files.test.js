@@ -1,8 +1,11 @@
-// Work claims can declare the files they will touch. A claim whose files
-// overlap another live claim is refused: 409 file_lease_conflict names the
-// holder, the files, and the lease expiry, and the refused claim stays
-// unclaimed. advisory: true still claims and returns fileWarnings. Closed
-// claims and claims with no files never conflict.
+// Work claims can declare the files they will touch. File leases are
+// advisory by default (FIX-71): a claim whose files overlap another live
+// claim lands with fileConflicts[] in the 200 body. A hard 409
+// file_lease_conflict — naming the holder, the files, and the lease expiry,
+// with the refused claim staying unclaimed — is reserved for an explicit
+// exclusive: true upgrade that conflicts, or an overlap with an existing
+// exclusive lease. advisory: true still claims and returns fileWarnings.
+// Closed claims and claims with no files never conflict.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createWork } from "../server/work-claims.mjs";
@@ -38,7 +41,8 @@ test("claiming a file another active claim holds is refused with the holder, the
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room", "./docs/x.md"] });
   const held = await call(registry, "jill", "claim", "a", {});
   await call(registry, "claude", "create", null, { id: "b" });
-  const out = await call(registry, "claude", "claim", "b", { files: ["scripts/room", "tests/new.test.js"] });
+  // FIX-71: the hard refusal now needs an explicit exclusive upgrade.
+  const out = await call(registry, "claude", "claim", "b", { files: ["scripts/room", "tests/new.test.js"], exclusive: true });
 
   assert.equal(out.status, 409);
   assert.equal(out.value.error.code, "file_lease_conflict");
@@ -51,13 +55,14 @@ test("claiming a file another active claim holds is refused with the holder, the
 
 // QA200 ch-2037 challenge: create-with-assignee is an acquire path that never
 // touched the claim route — it landed overlapping file leases silently (201).
-// The exclusivity check must run there too; the request is one transaction,
-// so a conflict fails atomically and the item is never created.
+// The file-lease policy must run there too (FIX-71: advisory by default,
+// hard 409 on exclusive upgrade); the request is one transaction, so a hard
+// refusal fails atomically and the item is never created.
 test("create with assignee refuses overlapping file leases (409 file_lease_conflict)", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
-  const out = await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"], assignee: "ada" });
+  const out = await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"], assignee: "ada", exclusive: true });
 
   assert.equal(out.status, 409);
   assert.equal(out.value.error.code, "file_lease_conflict");
@@ -81,11 +86,12 @@ test("create with assignee and disjoint files still claims (201)", async () => {
 
 // QA200 ch-2037 challenge: reassign is an acquire path too — a fresh
 // unclaimed item with declared files lands claimed, and an active claim
-// changes hands, both without touching the claim route. Overlap must 409.
+// changes hands, both without touching the claim route. Overlap with an
+// exclusive lease must 409 (FIX-71: advisory by default).
 test("reassign of an unclaimed file-declared item refuses on overlap (409)", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
-  await call(registry, "jill", "claim", "a", {});
+  await call(registry, "jill", "claim", "a", { exclusive: true });
   await call(registry, "claude", "create", null, { id: "b", files: ["server/a.mjs"] });
   const out = await call(registry, "claude", "reassign", "b", { newOwner: "ada", ...roundOfItem(registry.get("room1", "b")) });
 
@@ -99,7 +105,8 @@ test("reassign of an unclaimed file-declared item refuses on overlap (409)", asy
 test("reassign of an active claim to a holder of overlapping files refuses (409)", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
-  await call(registry, "jill", "claim", "a", {});
+  // the moved lease is exclusive, so landing it on ada's overlapping hold 409s
+  await call(registry, "jill", "claim", "a", { exclusive: true });
   // ada deliberately holds the overlap via advisory warn-and-proceed
   await call(registry, "claude", "create", null, { id: "b" });
   await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"], advisory: true });
@@ -138,8 +145,9 @@ test("advisory true still claims and names the other holder in fileWarnings", as
 test("a lapsed lease frees the files, and a lease that never expires still blocks", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["scripts/room"] });
-  await call(registry, "jill", "claim", "a", { leaseHours: null });
+  await call(registry, "jill", "claim", "a", { leaseHours: null, exclusive: true });
   await call(registry, "claude", "create", null, { id: "b", files: ["scripts/room"] });
+  // FIX-71: the never-expiring lease is exclusive, so it still hard-blocks
   const blocked = await call(registry, "claude", "claim", "b", {});
   assert.equal(blocked.status, 409);
   assert.equal(blocked.value.leaseExpiresAt, null);
@@ -157,7 +165,8 @@ test("the same owner cannot take a second live lease on the same file", async ()
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
   await call(registry, "jill", "claim", "a", {});
   await call(registry, "jill", "create", null, { id: "b" });
-  const out = await call(registry, "jill", "claim", "b", { files: ["server/a.mjs"] });
+  // FIX-71: advisory by default — the hard refusal needs an exclusive upgrade
+  const out = await call(registry, "jill", "claim", "b", { files: ["server/a.mjs"], exclusive: true });
   assert.equal(out.status, 409);
   assert.equal(out.value.holder.claimId, "a");
   assert.equal(registry.get("room1", "b").state, "unclaimed");
@@ -186,12 +195,13 @@ test("different block labels on one file do not conflict, and a whole-file claim
   assert.equal(other.value.state, "claimed");
   assert.deepEqual(other.value.fileBlocks, { "scripts/room": "footer" });
   await call(registry, "ada", "create", null, { id: "c" });
-  const same = await call(registry, "ada", "claim", "c", { files: [{ path: "scripts/room", block: "header" }] });
+  // FIX-71: the hard refusal needs an explicit exclusive upgrade
+  const same = await call(registry, "ada", "claim", "c", { files: [{ path: "scripts/room", block: "header" }], exclusive: true });
   assert.equal(same.status, 409);
   assert.equal(same.value.error.code, "file_lease_conflict");
   assert.deepEqual(same.value.files, ["scripts/room (header)"]);
   await call(registry, "ada", "create", null, { id: "d" });
-  const whole = await call(registry, "ada", "claim", "d", { files: ["scripts/room"] });
+  const whole = await call(registry, "ada", "claim", "d", { files: ["scripts/room"], exclusive: true });
   assert.equal(whole.status, 409);
   assert.equal(whole.value.error.code, "file_lease_conflict");
   assert.equal(registry.get("room1", "d").state, "unclaimed");

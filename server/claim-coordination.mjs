@@ -283,7 +283,10 @@ export function fileLeaseConflicts(items, claimed) {
     conflicts.push(Object.freeze({
       holder: Object.freeze({ claimId: item.id, owner: item.owner ?? null }),
       files: Object.freeze(unique),
-      leaseExpiresAt: item.leaseExpiresAt ?? null
+      leaseExpiresAt: item.leaseExpiresAt ?? null,
+      // FIX-71: advisory-by-default — an exclusive holder lease still
+      // hard-refuses overlapping claims, so the route needs the flag.
+      exclusive: item.leaseExclusive === true
     }));
   }
   conflicts.sort((a, b) => (a.holder.claimId < b.holder.claimId ? -1 : a.holder.claimId > b.holder.claimId ? 1 : 0));

@@ -646,8 +646,10 @@ export async function handleWorkClaims(options) {
   // held claim(s) via noteBlockedAttempt before throwing; the 409 throws
   // inside the request transaction, which rolls back, so the counter bump is
   // applied here in a fresh transaction after the rollback — the failed
-  // attempt is not saved, but the contention signal is. A failed bump must
-  // never change the refusal the caller gets.
+  // attempt is not saved, but the contention signal is. FIX-71 extends the
+  // same signal to advisory overlaps: the lease lands (200) but the holder
+  // still sees the contention, so the flush runs on success too. A failed
+  // bump must never change the refusal the caller gets.
   const blockedAttemptTargets = [];
   const flushBlockedAttempts = () => {
     if (blockedAttemptTargets.length === 0) return;
@@ -671,6 +673,9 @@ export async function handleWorkClaims(options) {
   });
   try {
     const result = registry.transaction ? registry.transaction(run) : run();
+    // FIX-71: advisory overlaps land with a 200, but the holders still get
+    // their contention bump — flush after the request transaction commits.
+    flushBlockedAttempts();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
     flushBlockedAttempts();
@@ -801,18 +806,20 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
-  // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
-  // the claim route. create-with-assignee and reassign are acquire paths
-  // too — they must refuse overlapping leases with the same 409 body, or a
-  // lease can be landed silently around the conflict check. fileLeaseConflicts
-  // already excludes the item itself by id. FIX-46 (WAVE-300): every 409 from
-  // this checker names the holding claims, so each holder's blockedAttempts
-  // counter is bumped — the holding side sees the contention the blocked side
-  // already saw in the 409 body. The bump itself is deferred to the wrapper
-  // (the 409 throws inside the request transaction and rolls it back).
-  const refuseFileLeaseConflict = (item, conflicts = fileLeaseConflicts(registry.list(roomId), item)) => {
-    if (conflicts.length === 0) return;
+  // FIX-71 (WAVE-300): advisory-by-default file leases. Overlaps no longer
+  // hard-refuse: the lease lands and the caller gets the conflict list for
+  // the 200 body. A hard 409 is reserved for two cases — the incoming lease
+  // explicitly upgrades to exclusive (exclusive: true on the claim) and
+  // conflicts with a live lease, or one of the holding leases is already
+  // exclusive (exclusive means exclusive). Every overlap, advisory or
+  // refused, bumps each holder's blockedAttempts (FIX-46 contention
+  // visibility) — the bump is deferred to the wrapper, which flushes on
+  // success as well as on refusal.
+  const applyFileLeasePolicy = (item, conflicts = fileLeaseConflicts(registry.list(roomId), item)) => {
+    if (conflicts.length === 0) return conflicts;
     for (const conflict of conflicts) noteBlockedAttempt(conflict?.holder?.claimId);
+    const hard = item.leaseExclusive === true || conflicts.some(conflict => conflict.exclusive === true);
+    if (!hard) return conflicts;
     const conflict = fileLeaseConflictBody(item, conflicts);
     const body = {
       ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
@@ -929,7 +936,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "exclusive"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, exclusive?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
@@ -943,6 +950,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
+    // FIX-71: exclusive upgrades the landed lease; it must be a real boolean.
+    if (data.exclusive !== undefined && typeof data.exclusive !== "boolean") invalidInput(reject, "exclusive true or false");
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
     const assignee = data.assignee;
     if (assignee !== undefined) {
@@ -969,13 +978,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
           "Release or finish an open claim before assigning another.");
       }
       item = runPure(reject, () => claimWork(item, assignee, {
-        note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
+        note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs,
+        exclusive: data.exclusive === true
       }));
       // QA200 ch-2037: create-with-assignee lands a lease without touching
-      // the claim route, so run the exclusivity check here. The whole request
-      // is one transaction — a conflict fails atomically and the item is
-      // never created.
-      refuseFileLeaseConflict(item);
+      // the claim route, so run the file-lease policy here too (FIX-71:
+      // advisory by default, hard 409 only on exclusive upgrade or an
+      // exclusive holder). The whole request is one transaction — a hard
+      // refusal fails atomically and the item is never created.
+      const fileConflicts = applyFileLeasePolicy(item);
       // Retention ack (research brief 2026-09-28, mechanic #2): every claim
       // gets the bot's immediate structured receipt, so no contribution sits
       // at zero replies from t=0. First-time contributors carry the 24h
@@ -986,7 +997,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, ackedAssignee);
+      return json(res, 201, { ...ackedAssignee, fileConflicts });
     }
     commit(item, "created");
     return json(res, 201, item);
@@ -998,8 +1009,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
+    if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "exclusive", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, exclusive?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
+    if ("exclusive" in data && typeof data.exclusive !== "boolean") invalidInput(reject, "exclusive true or false");
     const item = load(claimIdOf(reject, workClaimId));
     // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
     // The old "release it first" advice destroyed your own claim on self
@@ -1034,15 +1046,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       note: data.note, leaseHours: leaseHoursOfBody(data), files: data.files,
       dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
       pullRequest: data.pullRequest, pullRequests: data.pullRequests,
-      repo: data.repo, branch: data.branch, room: roomLike, now: nowMs
+      repo: data.repo, branch: data.branch, exclusive: data.exclusive === true, room: roomLike, now: nowMs
     }));
-    // Exclusive file lease. Overlap with another live claim is a 409 that
-    // names the holder, the files, and when that lease ends. advisory: true
-    // keeps the older warn-and-proceed behavior. Uses the shared
-    // refuseFileLeaseConflict checker (FIX-46 bumps each holder's
-    // blockedAttempts), not a second inline copy.
-    const conflicts = fileLeaseConflicts(registry.list(roomId), claimed);
-    if (data.advisory !== true) refuseFileLeaseConflict(claimed, conflicts);
+    // FIX-71: advisory-by-default file leases. Overlap with another live
+    // claim lands with fileConflicts[] in the 200 body; a hard 409 is
+    // reserved for an explicit exclusive upgrade or an overlap with an
+    // existing exclusive lease. applyFileLeasePolicy throws the 409 or
+    // returns the advisory conflicts. advisory: true keeps the older
+    // warn-and-proceed behavior and still returns fileWarnings.
+    const conflicts = applyFileLeasePolicy(claimed);
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
     // the bot's immediate structured receipt, so no contribution sits at zero
     // replies from t=0. First-time contributors carry the 24h verdict SLA in
@@ -1057,7 +1069,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+    return json(res, 200, { ...acked, fileConflicts: conflicts,
+      fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
       requiredReading: requiredReadingFor(item.kind) });
   }
   if (workClaimRoute === "update" && req.method === "POST") {
@@ -1314,14 +1327,15 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
     // unclaimed item lands claimed) without touching the claim route — run
-    // the exclusivity check here too.
-    refuseFileLeaseConflict(reassigned);
+    // the file-lease policy here too (FIX-71: advisory by default; the
+    // lease's own exclusivity travels with the item).
+    const reassignedConflicts = applyFileLeasePolicy(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
       attention: "assigned", attentionMemberId: target,
       wakeMemberId: target, wakeReason: "assigned"
     });
-    return json(res, 200, reassigned);
+    return json(res, 200, { ...reassigned, fileConflicts: reassignedConflicts });
   }
   if (workClaimRoute === "renew" && req.method === "POST") {
     // Lease-renewal check-ins: the owner extends their claim's lease only by
