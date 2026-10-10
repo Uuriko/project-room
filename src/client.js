@@ -296,6 +296,8 @@ export class AccountClient {
   }
 }
 
+// Single source for the connected status line; app.js matches this exact text.
+const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
   constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {} } = {}) {
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping });
@@ -902,6 +904,7 @@ export class RoomClient {
   }
   connect() {
     clearTimeout(this.streamRetry); this.streamRetry = null;
+    clearTimeout(this.refreshRetry); this.refreshRetry = null;
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
@@ -913,11 +916,24 @@ export class RoomClient {
     const stream = new this.events(`${this.path("/stream")}?after=${resumeAfter}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
-    const refreshStream = (receipt, options) => this.refresh(receipt, options).catch(error => { if (ownsStream()) this.handleFailure(error); });
+    const markRecovered = () => {
+      if (!ownsStream() || !this.refreshInterrupted) return;
+      this.refreshInterrupted = false;
+      clearTimeout(this.refreshRetry); this.refreshRetry = null;
+      this.refreshRetryDelay = 1000;
+      this.onStatus(CONNECTED_STATUS);
+    };
+    const refreshStream = (receipt, options) => this.refresh(receipt, options).then(value => {
+      markRecovered();
+      return value;
+    }, error => { if (ownsStream()) this.handleFailure(error); });
     stream.addEventListener("open", () => {
       if (!ownsStream()) return;
       this.streamRetryDelay = 1000;
-      this.onStatus("Connected to room service · no peer read or processing receipt");
+      this.refreshRetryDelay = 1000;
+      clearTimeout(this.refreshRetry); this.refreshRetry = null;
+      this.refreshInterrupted = false;
+      this.onStatus(CONNECTED_STATUS);
       refreshStream(null, { revalidate: true });
     });
     stream.addEventListener("room-event", message => {
@@ -950,11 +966,34 @@ export class RoomClient {
     });
   }
   handleFailure(error) {
-    if ([401, 403].includes(error.status) || (this.session?.authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
-    else this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
+    if ([401, 403].includes(error.status) || (this.session?.authMode === "account" && error.code === "session_binding_changed")) {
+      this.endAccess();
+      return;
+    }
+    this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
+    // A closed stream already reconnects. An open stream does not, so a failed
+    // follow-up read would otherwise stay stale until some later event.
+    if (!this.stream || this.stream.readyState !== 1 || this.refreshRetry) return;
+    this.refreshInterrupted = true;
+    const delay = this.refreshRetryDelay || 1000;
+    this.refreshRetry = setTimeout(() => {
+      this.refreshRetry = null;
+      if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
+      this.refresh(null, { revalidate: true }).then(() => {
+        if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
+        this.refreshInterrupted = false;
+        this.refreshRetryDelay = 1000;
+        this.onStatus(CONNECTED_STATUS);
+      }).catch(retryError => {
+        if (this.stream && this.stream.readyState === 1 && this.session) this.handleFailure(retryError);
+      });
+    }, delay + Math.random() * delay / 4);
+    this.refreshRetryDelay = Math.min(delay * 2, 30000);
   }
   disconnect() {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
+    clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
+    this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;
   }
   endAccess() { this.disconnect(); this.session = null; this.sequence = 0; this.accountOwnership = null; this.onAccessEnded(); }
