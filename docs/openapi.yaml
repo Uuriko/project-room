@@ -5555,7 +5555,12 @@ paths:
         the write is refused `409 work_claim_conflict` unless the claim
         still matches the client's last read, so a stale retry cannot
         silently clobber newer state. Without them the update keeps its
-        legacy round-blind behavior. The `done` transition accepts `deliveryMode` (how the
+        legacy round-blind behavior. An update may also carry the optional
+        client-kept idempotency key `requestId`: a retry that carries a
+        requestId already seen on this claim replays the stored outcome
+        (200, the current item) with no new write, no history entry and no
+        room event, so a timed-out retry cannot duplicate the update.
+        The `done` transition accepts `deliveryMode` (how the
         work was delivered: `result`, `merged`, or `production`),
         `reviewedBy` (the attesting member), `tags` (free-form receipt
         labels, no fixed taxonomy) and `blobs` (sha256 evidence pointers) —
@@ -5661,6 +5666,12 @@ paths:
                       minimum: 0
                       description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
                       example: 203
+                    requestId:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      pattern: "^[A-Za-z0-9_-]{1,128}$"
+                      description: Optional client-kept idempotency key (opt-in). A retry that carries a requestId already seen on this claim replays the stored outcome (200, the current item) with no new write, no history entry and no room event - a timed-out retry cannot duplicate the update. Send a fresh requestId per distinct update.
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
