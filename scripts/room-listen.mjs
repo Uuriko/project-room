@@ -67,6 +67,7 @@ export async function listen(argv = process.argv.slice(2), io = {}) {
   }
   const controller = new AbortController();
   const fetchImpl = io.fetchImpl ?? fetch;
+  const pause = io.delay ?? delay;
   const scopedFetch = (url, options = {}) => fetchImpl(url, { ...options,
     signal: options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal });
   const wake = new AgentWakeClient({ connection, fetchImpl: scopedFetch });
@@ -78,6 +79,12 @@ export async function listen(argv = process.argv.slice(2), io = {}) {
     while (!controller.signal.aborted) {
       const result = await wake.wait({ hostId: host, cadenceSeconds, waitMs: started ? 25000 : 0 });
       started = true;
+      // Remember only the current pending page. The durable Room queue and
+      // consumer journal own handling and replay; previously seen pointers
+      // may be delivered again if they leave this page and later reappear.
+      // Historical ids must not exhaust the bounded deduplication set.
+      const pending = new Set(result.pendingWakes.map(signal => signal.signalId));
+      for (const id of delivered) if (!pending.has(id)) delivered.delete(id);
       for (const signal of result.pendingWakes) {
         const pointer = roomEventPointer(signal, connection.roomId);
         if (!pointer || delivered.has(pointer.signalId)) continue;
@@ -85,7 +92,7 @@ export async function listen(argv = process.argv.slice(2), io = {}) {
         await writeLine(output, pointer);
         delivered.add(pointer.signalId);
       }
-      await delay(1000, undefined, { signal: controller.signal });
+      await pause(1000, undefined, { signal: controller.signal });
     }
   } catch (error) {
     if (!controller.signal.aborted) report(connectionDiagnostic(error));
