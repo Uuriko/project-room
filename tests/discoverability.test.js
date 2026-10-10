@@ -470,7 +470,10 @@ test("MCP: errors carry canonical guidance in error.data with valid JSON-RPC sha
   assert.equal(authed.body.error.code, -32001);
   const ad = authed.body.error.data;
   assert.equal(ad.reason, "auth_required");
-  assert.equal(ad.next[0].tool, "room_check_access");
+  // #1551: an anonymous caller must not learn hosted tool names from the
+  // auth_required next[]; recovery points at their own visible catalog.
+  assert.deepEqual(ad.next, [{ command: "tools/list" }]);
+  assert.ok(!JSON.stringify(ad.next).includes("room_check_access"), "anonymous auth_required hides hosted tools");
   assert.ok(!ad.next.some(step => step.method === "POST"), "MCP auth does not direct credential creation");
   assert.ok(Array.isArray(ad.next) && ad.next.length > 0, "auth_required next[] non-empty");
   assert.equal(ad.status, "action_required");
@@ -589,7 +592,10 @@ test("nextActions vocabulary: shared builders are frozen and transport-labeled",
     return { body: await res.json() };
   })();
   const guidance = JSON.stringify(body.error.data.next);
-  assert.ok(guidance.includes("room_check_access"), "MCP guidance shares the room_check_access verb");
+  // #1551: the anonymous MCP auth guidance no longer names the hosted
+  // room_check_access tool; it shares the tools/list discovery verb instead.
+  assert.ok(!guidance.includes("room_check_access"), "anonymous MCP guidance hides hosted tool names");
+  assert.ok(guidance.includes("tools/list"), "anonymous MCP guidance points at the visible catalog");
 });
 
 // ---------------------------------------------------------------------------
