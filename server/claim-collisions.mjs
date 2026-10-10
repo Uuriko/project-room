@@ -17,12 +17,14 @@ const check = (condition, message) => { if (!condition) fail("invalid_collision_
 // Claims in these states no longer hold their files; they are ignored.
 const CLOSED_STATUSES = ["done", "withdrawn", "closed", "expired", "released", "rejected"];
 
-// Normalize a claimed path: trim, drop leading ./, collapse duplicate
-// slashes, drop trailing slashes. Case is preserved (repo paths are
-// case-sensitive).
+// Normalize a claimed path: trim, compose Unicode so NFC and NFD spellings
+// of the same file collide, drop leading ./, collapse duplicate slashes,
+// drop trailing slashes. Case is preserved (repo paths are case-sensitive).
 const normalizeFile = path => {
   check(typeof path === "string" && path.trim().length > 0, "files must be non-empty strings");
-  let p = path.trim().replace(/\/+/g, "/");
+  let p = path.trim();
+  try { p = p.normalize("NFC"); } catch { /* unpaired surrogates stay as given */ }
+  p = p.replace(/\/+/g, "/");
   while (p.startsWith("./")) p = p.slice(2);
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
   const parts = [];
