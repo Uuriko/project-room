@@ -122,6 +122,22 @@ test("a hyphen suffix is not a mention of the shorter display name", () => {
   assert.equal(warnings[0].reason, "not_member");
 });
 
+test("a case fold that expands still names that display name", () => {
+  const members = { "mem-ince": { displayName: "İnce", active: true } };
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @İnce please", "me"), ["mem-ince"]);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @İnce-2 please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @ince please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(
+    { "mem-ince": { displayName: "Other", active: true } },
+    { "mem-ince": "İnce" },
+    "ping @İnce please",
+    "me"
+  ), ["mem-ince"]);
+  const unrelated = { i: { displayName: "Ada", active: true } };
+  assert.deepEqual(resolveMentionTargetsInText(unrelated, {}, "@İ please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(unrelated, {}, "@Ada please", "me"), ["i"]);
+});
+
 // --- Store: tracking ------------------------------------------------------
 
 test("posting @alice creates a delivered mention row; unknown names do not", t => {

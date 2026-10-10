@@ -173,6 +173,21 @@ export function identityNamesForRoom(db, roomId) {
 // A hyphen continues the handle. "@Instinct-3" is not a mention of "Instinct".
 const handleContinues = (text, end) => end < text.length && /[A-Za-z0-9_-]/.test(text[end]);
 
+// toLowerCase can expand a character (İ → i + combining dot). That folded
+// length is not an index into the original text: the boundary check would
+// look past the name, and a shorter id could match the first folded unit.
+function foldedLabelEnd(text, start, targetLower) {
+  let folded = "";
+  let index = start;
+  while (index < text.length && folded.length < targetLower.length) {
+    const piece = text[index].toLowerCase();
+    if (!targetLower.startsWith(folded + piece)) return null;
+    folded += piece;
+    index += 1;
+  }
+  return folded === targetLower ? index : null;
+}
+
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous
 // longer label to a shorter recipient. Silent @_mentions, email addresses,
@@ -180,18 +195,19 @@ const handleContinues = (text, end) => end < text.length && /[A-Za-z0-9_-]/.test
 export function resolveMentionTargetsInText(members, identityNames, text, senderMemberId) {
   if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
   const candidates = mentionCandidates(members, identityNames);
-  const lowerText = text.toLowerCase(), found = [];
+  const found = [];
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
     if (text[at + 1] === "_") continue;
     const nameAt = at + 1;
     let matches = [], longest = 0;
     for (const candidate of candidates) {
-      const end = nameAt + candidate.lower.length;
-      if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
+      const end = foldedLabelEnd(text, nameAt, candidate.lower);
+      if (end === null) continue;
       if (handleContinues(text, end)) continue;
-      if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
-      if (candidate.lower.length === longest) matches.push(candidate);
+      const span = end - nameAt;
+      if (span > longest) { matches = []; longest = span; }
+      if (span === longest) matches.push(candidate);
     }
     const targets = uniqueTargets(matches, senderMemberId);
     for (const target of targets) {
@@ -221,18 +237,19 @@ export function mentionTargetWarnings(members, identityNames, text, senderMember
     const name = members?.[memberId]?.displayName;
     return typeof name === "string" && name.trim() ? name : memberId;
   };
-  const lowerText = text.toLowerCase(), warnings = [], seen = new Set();
+  const warnings = [], seen = new Set();
   for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
     if (at > 0 && /[A-Za-z0-9_.@]/.test(text[at - 1])) continue;
     if (text[at + 1] === "_") continue;
     const nameAt = at + 1;
     let matches = [], longest = 0;
     for (const candidate of candidates) {
-      const end = nameAt + candidate.lower.length;
-      if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
+      const end = foldedLabelEnd(text, nameAt, candidate.lower);
+      if (end === null) continue;
       if (handleContinues(text, end)) continue;
-      if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
-      if (candidate.lower.length === longest) matches.push(candidate);
+      const span = end - nameAt;
+      if (span > longest) { matches = []; longest = span; }
+      if (span === longest) matches.push(candidate);
     }
     if (longest === 0) {
       // No member label matches here: take the raw handle text for the
