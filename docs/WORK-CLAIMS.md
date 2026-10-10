@@ -82,6 +82,18 @@ keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
 
+## Claim arbitration (timestamp fallback)
+
+The live board grants a claim to whoever arrives first — a second claim on
+the same item is 409 `work_claim_conflict`. For any *future* timestamp-based
+fallback path (e.g. reconciling claims recorded on two replicas), the
+deterministic rule lives in `server/claim-arbitration.mjs` and is documented
+in [CLAIM-ARBITRATION.md](CLAIM-ARBITRATION.md): earliest UTC-minute bucket
+wins, and same-minute ties break on lexicographic claim-id order. The rule is
+pure (no randomness, no wall-clock reads) and does not touch the arrival-order
+path. No timestamp-fallback call site exists today; the module ships unwired
+until one does.
+
 ## Renew
 
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.
