@@ -64,3 +64,17 @@ test("acquiring in a missing directory surfaces a coded io error", t => {
     return true;
   });
 });
+
+test("a stale lock naming our own pid is reclaimed (container restart, REL-23/A14)", t => {
+  const dir = lockDir(t);
+  const lockPath = join(dir, ".project-room.lock");
+  // A previous boot of this same container wrote the lock; the restart
+  // reused the pid, so pidAlive alone would refuse every future boot.
+  writeFileSync(lockPath, JSON.stringify({ pid: process.pid, startedAt: "2026-10-08T00:00:00.000Z" }), { mode: 0o600 });
+  const lock = acquireInstanceLock(lockPath);
+  t.after(() => lock.release());
+  assert.ok(existsSync(lockPath));
+  const payload = JSON.parse(readFileSync(lockPath, "utf8"));
+  assert.equal(payload.pid, process.pid);
+  assert.notEqual(payload.startedAt, "2026-10-08T00:00:00.000Z", "our boot republished the lock");
+});
