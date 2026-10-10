@@ -377,6 +377,7 @@
   "tests/i18n-harness.test.js": 48594,
   "tests/id-sec-http.test.js": 37539,
   "tests/identity-link-code.test.js": 40706,
+  "tests/identity-link-proof.test.js": 21000,
   "tests/identity-mint-adaptive-pow.test.js": 2000,
   "tests/identity-mint-capacity.test.js": 51164,
   "tests/identity-ratelimit.test.js": 4895,
