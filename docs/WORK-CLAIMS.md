@@ -82,6 +82,29 @@ keeps the state and names a current active member. Like release, it binds the
 claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
 a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
 
+## Epoch fencing
+
+Every claim carries a server-side `epoch` (non-negative integer; rows
+written before this field existed decode as 0). Any reap/expiry path that
+releases a claim to a new holder — the lease-expiry sweep, release,
+reassign, close — bumps `epoch + 1`. The epoch is monotonic: a fresh claim
+keeps the item's epoch, so a partitioned agent can always tell whether its
+view of the claim predates the last reap.
+
+On read the epoch is advisory metadata: every `GET work-claims` response
+carries the claim's current epoch. On write it is enforced: `POST
+.../update` (notes, state transitions, and `complete` via `state: done`)
+and `POST .../renew` accept an opt-in `expectedEpoch` naming the epoch the
+client read. When present and older than the claim's current epoch the
+write is refused with **409** `stale_epoch` — the claim was reaped since
+the client read it. Without `expectedEpoch` the write keeps its legacy
+round-blind behavior, so old clients keep working unchanged.
+
+Client recovery: re-read the claim (`GET .../work-claims/{id}`), take the
+fresh `epoch`, and resubmit the write with it. Never release/reclaim to
+bypass a `stale_epoch` refusal — the fence is what protects a returning
+partitioned agent from clobbering the claim's current holder.
+
 ## Renew
 
 `POST .../renew` with `{ "progressMessageId"?, "note"?, "leaseHours"? }`.

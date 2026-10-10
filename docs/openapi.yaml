@@ -5555,7 +5555,11 @@ paths:
         the write is refused `409 work_claim_conflict` unless the claim
         still matches the client's last read, so a stale retry cannot
         silently clobber newer state. Without them the update keeps its
-        legacy round-blind behavior. The `done` transition accepts `deliveryMode` (how the
+        legacy round-blind behavior. A note/state update may also carry the
+        optional `expectedEpoch` (the claim's `epoch` as the client last read
+        it); when present and older than the current epoch the write is
+        refused `409 stale_epoch` — the claim was reaped since the client
+        read it. Re-read the claim and resubmit with the fresh epoch. The `done` transition accepts `deliveryMode` (how the
         work was delivered: `result`, `merged`, or `production`),
         `reviewedBy` (the attesting member), `tags` (free-form receipt
         labels, no fixed taxonomy) and `blobs` (sha256 evidence pointers) —
@@ -5661,6 +5665,10 @@ paths:
                       minimum: 0
                       description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
                       example: 203
+                    expectedEpoch:
+                      type: integer
+                      minimum: 0
+                      description: Optional epoch fence (opt-in) - the claim's epoch from the same read. When present and older than the claim's current epoch the write is refused 409 stale_epoch (the claim was reaped since the read); re-read and resubmit with the fresh epoch. Absent, the update stays round-blind for backward compatibility.
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -5691,7 +5699,7 @@ paths:
         '403': { description: work_not_owner, work_claims_not_permitted, work_review_rejected, insufficient_scope, guest_scope_denied, or existing membership/autonomy refusal }
         '404': { description: work_claim_not_found }
         '409':
-          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, claim_lease_lapsed for an expired lease, room_archived, or room_event_budget_low. Read the current item before deciding whether a fresh same-round request is appropriate
+          description: Append or preconditioned update refused with work_claim_conflict for stale basis or inactive/superseded work, stale_epoch when expectedEpoch is older than the claim's current epoch (re-read and resubmit), claim_lease_lapsed for an expired lease, room_archived, or room_event_budget_low. Read the current item before deciding whether a fresh same-round request is appropriate
         '422': { description: invalid_claim_input, including mixed append/state bodies, non-string PR input, malformed preconditions, or a seventeenth distinct URL }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/{claimId}/provenance:
@@ -6707,6 +6715,9 @@ paths:
         optional evidence: when present it must be the holder's own public
         message posted after the current lease window began. Refused on
         claims without a lease and on lapsed leases (claim again instead).
+        The optional `expectedEpoch` (the claim's `epoch` as the client last
+        read it) fences the renewal: a stale epoch is refused `409
+        stale_epoch` — re-read the claim and resubmit with the fresh epoch.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6724,6 +6735,10 @@ paths:
                 progressMessageId: { type: string }
                 leaseHours: { type: number }
                 note: { type: string }
+                expectedEpoch:
+                  type: integer
+                  minimum: 0
+                  description: Optional epoch fence (opt-in) - the claim's epoch from the client's last read. A stale epoch is refused 409 stale_epoch; absent, the renewal keeps its legacy behavior.
       responses:
         '200':
           description: The renewed item
@@ -6734,7 +6749,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: work_not_owner, claim_renewal_source_foreign (the progress message must be the holder's own), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
-        '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. Also room_event_budget_low. }
+        '409': { description: claim_lease_lapsed — the lease already lapsed and the claim auto-released; claim it again instead of renewing. stale_epoch — the expectedEpoch is older than the claim's current epoch; re-read and resubmit. Also room_event_budget_low. }
         '422': { description: claim_renewal_source_required | claim_renewal_source_stale | invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/feedback:
@@ -17299,6 +17314,10 @@ components:
         title: { type: string }
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
         owner: { type: [string, 'null'] }
+        epoch:
+          type: integer
+          minimum: 0
+          description: Server-side fencing epoch. Bumped +1 by every reap/expiry path that releases the claim to a new holder (lease-expiry sweep, release, reassign, close); monotonic, old rows read as 0. Advisory metadata on read; the update and renew routes enforce it when the client sends expectedEpoch (409 stale_epoch on a stale epoch).
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }
