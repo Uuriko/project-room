@@ -59,7 +59,7 @@ const browser = await chromium.launch();
 async function render(html, w, h, out, transparent = false) {
   const p = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
   await p.setContent(html, { waitUntil: "load" });
-  await p.evaluate(() => document.fonts.ready);
+  await p.evaluate(() => globalThis.document.fonts.ready);
   mkdirSync(dirname(join(root, out)), { recursive: true });
   await p.screenshot({ path: join(root, out), omitBackground: transparent, type: "png" });
   await p.close();
