@@ -1969,8 +1969,11 @@ function render() {
   syncRecipePreview();
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
-  const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
-  const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with you.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
+  // People member controls follow the server's rule (changeMemberAccess:
+  // requirePermission manage_members): room admins get what the owner gets.
+  // The owner always holds manage_members, so the permission check covers both.
+  const ownerView = Boolean(session && can("manage_members"));
+  const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with the room owner.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
   // H4: agents that joined through a room link arrive with no permissions, so
   // they never appear as assignees. The click handler leaves owner-connected
   // agents alone, because changing their access retires their connection key.
@@ -4425,7 +4428,7 @@ $("#emoji-list")?.addEventListener("mousedown", e => {
 // C6: the owner's pause roster is one read when People opens and after each
 // action; the row buttons never appear for non-owners or inactive agents.
 async function refreshAgentPauses() {
-  if (!state || !session || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (!state || !session || !can("manage_members")) return;
   const generation = client.generation;
   try {
     const view = await client.request(client.path("/agent-pause"));
@@ -4457,7 +4460,7 @@ document.addEventListener("toggle", event => {
 }, true);
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-work]");
-  if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
+  if (!button || !ownsRoomActions(null) || memberActionBusy || !can("manage_members")) return;
   e.preventDefault();
   const member = state.members[button.dataset.memberWork];
   if (!member || member.kind !== "agent" || member.active === false) return;
@@ -4483,7 +4486,7 @@ $("#presence-list").addEventListener("click", async e => {
 });
 $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-admin]");
-  if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
+  if (!button || !ownsRoomActions(null) || memberActionBusy || !can("manage_members")) return;
   e.preventDefault();
   const member = state.members[button.dataset.memberAdmin];
   if (!member || member.active === false || member.id === state.room.ownerId) return;
@@ -4513,7 +4516,7 @@ $("#presence-list").addEventListener("click", async e => {
   const focusAction = selector => $(`#presence-list [${selector}="${CSS.escape(memberId)}"]`)?.focus();
   if (keepButton) { armedRemoval = null; render(); focusAction("data-member-remove"); return; }
   const member = state.members[memberId];
-  if (!member || member.kind !== "agent" || member.active === false || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (!member || member.kind !== "agent" || member.active === false || !can("manage_members")) return;
   if (removeButton && armedRemoval !== memberId) { armedRemoval = memberId; render(); focusAction("data-member-remove"); return; }
   memberActionBusy = true;
   const generation = client.generation;
