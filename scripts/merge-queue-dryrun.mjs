@@ -18,12 +18,18 @@
 // whether required status checks are strict (incompatible with the queue;
 // the queue owns freshness — see docs/MERGE-QUEUE-DESIGN.md §2.3).
 //
-// Usage: node scripts/merge-queue-dryrun.mjs [--repo owner/name]
+// Usage: node scripts/merge-queue-dryrun.mjs [--repo owner/name] [--gh-timeout-ms 30000]
 // Requires: gh CLI authenticated (read-only scopes suffice).
 import { execFileSync } from "node:child_process";
 
 const REPO = argValue("--repo") || "Uuriko/project-room";
 const BASE = "main";
+const timeoutArg = process.argv.includes("--gh-timeout-ms") ? argValue("--gh-timeout-ms") : "30000";
+if (!/^[1-9][0-9]*$/.test(timeoutArg ?? "") || Number(timeoutArg) > 2147483647) {
+  console.error("merge-queue-dryrun: --gh-timeout-ms must be a positive integer at most 2147483647");
+  process.exit(2);
+}
+const ghTimeoutMs = Number(timeoutArg);
 
 function argValue(name) {
   const i = process.argv.indexOf(name);
@@ -35,8 +41,12 @@ function ghApi(path, jq, paginate = false) {
   if (jq) args.push("--jq", jq);
   if (paginate) args.push("--paginate");
   try {
-    return execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: ghTimeoutMs, killSignal: "SIGKILL" });
   } catch (e) {
+    if (e.code === "ETIMEDOUT") {
+      console.error(`gh api ${path} timed out after ${ghTimeoutMs}ms; retry the read-only check.`);
+      process.exit(2);
+    }
     const msg = (e.stderr || e.message || "").toString().split("\n")[0];
     console.error(`gh api ${path} failed: ${msg}`);
     process.exit(2);

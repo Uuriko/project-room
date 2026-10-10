@@ -16,7 +16,7 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, claimHistoryLength, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
@@ -30,6 +30,23 @@ const MAX_BODY_CHARS = 65_536;
 // Not a room id (room ids start with a letter or digit). One row remembers
 // the shared GitHub reset so the next tick does not call GitHub at all.
 const BUDGET_ROOM = "_claim-pr-budget";
+
+// Bind a provider observation before awaiting GitHub. History length catches
+// release/reclaim in the same millisecond, even when the owner is unchanged.
+const observationRound = item => ({ owner: item?.owner, claimedAt: item?.claimedAt,
+  historyLength: claimHistoryLength(item) });
+
+function observationStillCurrent(item, observed) {
+  if (!item || item.owner !== observed.owner || item.claimedAt !== observed.claimedAt) return false;
+  const omitted = item.historyOmitted ?? 0;
+  if (observed.historyLength < omitted || observed.historyLength > claimHistoryLength(item)) return false;
+  // Progress, renewal and CI notes do not change ownership. A round-ending
+  // or acquisition stamp does. If intervening history was trimmed, refuse
+  // above rather than guessing that a same-owner round did not change.
+  return !(item.history ?? []).slice(observed.historyLength - omitted).some(entry =>
+    entry.action === "claimed" || entry.action.startsWith("reassigned:")
+    || ["state:unclaimed", "lease_expired", "pr_closed", "pr_merged", "closed", "cancelled"].includes(entry.action));
+}
 
 function githubToken(env) {
   if (!env || typeof env !== "object") return null;
@@ -207,11 +224,12 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
   let rateLimitedUntil = null;
   let budgetExceeded = false;
   for (const item of due) {
+    const observedRound = observationRound(item);
     const url = item.pullRequest.url;
     const prior = seen.get(url);
     if (prior) {
       // Room-scoped: the result is re-attributed to this item's room.
-      results.push({ ...prior, claimId: item.id, roomId: item.roomId });
+      results.push({ ...prior, claimId: item.id, roomId: item.roomId, observedRound });
       continue;
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
@@ -243,7 +261,7 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       }
       if (signals.budget) {
         const result = {
-          claimId: item.id, roomId: item.roomId, url,
+          claimId: item.id, roomId: item.roomId, url, observedRound,
           delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
           ...looked
         };
@@ -255,6 +273,7 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     const result = {
       claimId: item.id,
       roomId: item.roomId,
+      observedRound,
       url,
       delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
       ...looked
@@ -292,6 +311,7 @@ function ciReadDue(item, nowMs) {
 // already stamped, so `linked` misses and the function returns false.
 export function commitPullRequestLookup(store, registry, roomId, item, result, nowMs) {
   const current = registry?.get?.(roomId, item?.id) ?? item;
+  if (!observationStillCurrent(current, result.observedRound ?? observationRound(item))) return false;
   const linked = pullLinks(current).find(pull => pull.url === result.url && !pull.outcome);
   if (!linked) return false;
   const fresh = current.pullRequest?.url !== result.url ? { ...current, pullRequest: linked } : current;

@@ -20,6 +20,7 @@
 //   --out <dir>        output directory (default: ./claims-index-out)
 //   --format           which outputs to write (default: both)
 //   --now <iso>        override "now" for lease-expiry computation (tests)
+//   --gh-timeout-ms    positive per-request deadline (default: 30000)
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -48,6 +49,12 @@ const commentsFile = opt("--comments");
 const outDir = opt("--out", "./claims-index-out");
 const format = opt("--format", "both");
 const nowIso = opt("--now") || new Date().toISOString();
+const timeoutArg = args.includes("--gh-timeout-ms") ? opt("--gh-timeout-ms") : "30000";
+if (!/^[1-9][0-9]*$/.test(timeoutArg ?? "") || Number(timeoutArg) > 2147483647) {
+  console.error("claims-index: --gh-timeout-ms must be a positive integer at most 2147483647");
+  process.exit(2);
+}
+const ghTimeoutMs = Number(timeoutArg);
 if (!["json", "md", "both"].includes(format)) {
   console.error(`claims-index: --format must be json|md|both, got ${format}`);
   process.exit(2);
@@ -71,9 +78,13 @@ function fetchComments() {
     out = execFileSync(
       "gh",
       ["api", `repos/${REPO}/issues/${ISSUE}/comments`, "--paginate"],
-      { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+      { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: ghTimeoutMs, killSignal: "SIGKILL" },
     );
   } catch (err) {
+    if (err.code === "ETIMEDOUT") {
+      console.error(`claims-index: gh api timed out after ${ghTimeoutMs}ms; retry or pass --comments <file>.`);
+      process.exit(3);
+    }
     console.error(
       "claims-index: failed to fetch #266 comments via `gh api`. " +
         "Is gh installed and authenticated? (Or pass --comments <file>.)\n" +
