@@ -8,6 +8,17 @@ The shippable integration today is the custom-connector brief at
 for the eventual directory listing, which requires OAuth per Meta's
 partnership process.
 
+**Status (D-4 audit): the provider surface is gated.** With no connector
+client registered, GET `/.well-known/oauth-authorization-server`,
+POST `/oauth/token`, and POST `/oauth/revoke` answer 404 - nothing
+authenticates an `oat_` bearer token today, so the routes could never
+succeed for anyone. `createRoomServer` turns the surface back on as soon
+as `connectorClients` is non-empty, i.e. when a real connector exists.
+The desktop Mac sign-in is unaffected: `/oauth/authorize` stays live and
+`server/routes/desktop-auth.mjs` keeps its internal
+exchange/verify/revoke calls. The account surfaces
+(`/api/oauth/sessions*`) are unchanged.
+
 ## Scopes
 
 - `rooms:read` — read room metadata and events

@@ -552,6 +552,7 @@
   "tests/notify-relays.test.js": 4249,
   "tests/oauth-authorize-http.test.js": 58668,
   "tests/oauth-consent-http.test.js": 50565,
+  "tests/oauth-connector-provider-flag.test.js": 12000,
   "tests/oauth-persist.test.js": 24586,
   "tests/oauth-provider-attack-cases.test.js": 4696,
   "tests/oauth-provider-durable.test.js": 32858,

@@ -490,6 +490,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     }
     throw new ServiceError(409, "account_exists", "This sign-in can't start a new account; contact support");
   };
+  // D-4: the public provider surface (discovery doc, /oauth/token,
+  // /oauth/revoke) exists only while a real connector client is registered.
+  // Nothing authenticates an oat_ bearer token today, and the desktop app
+  // never touches these routes (its /oauth/authorize consent + the internal
+  // exchange in routes/desktop-auth.mjs stay unconditional).
+  const oauthConnectorProvider = connectorClients.length > 0;
   // GitHub subject -> account linking order (slice 4): an existing OAuth
   // link wins; otherwise a primary verified email links to the account that
   // already owns it; otherwise a github:<id> account is provisioned (with
@@ -1396,7 +1402,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // OAuth2 authorization server for third-party connectors (RFC 6749).
       // GET /.well-known/oauth-authorization-server — server metadata (RFC 8414).
-      if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET") {
+      if (url.pathname === "/.well-known/oauth-authorization-server" && req.method === "GET" && oauthConnectorProvider) {
         const issuer = expectedOrigin();
         return json(res, 200, {
           issuer,
@@ -1570,7 +1576,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return res.end();
       }
       // POST /oauth/token — exchange codes and refresh tokens (RFC 6749 §4.1.3, §6).
-      if (url.pathname === "/oauth/token" && req.method === "POST") {
+      if (url.pathname === "/oauth/token" && req.method === "POST" && oauthConnectorProvider) {
         rate(`oauth-token-exchange:${remoteAddress}`, 60);
         const data = await body(req);
         const grantType = data.grant_type;
@@ -1617,7 +1623,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // every access token derived from the grant dies immediately (this
       // is what the consent screen promises). Revoking an access token
       // stays surgical — only that token dies.
-      if (url.pathname === "/oauth/revoke" && req.method === "POST") {
+      if (url.pathname === "/oauth/revoke" && req.method === "POST" && oauthConnectorProvider) {
         rate(`oauth-revoke:${remoteAddress}`, 60);
         const data = await body(req);
         oauthProvider.revoke(data.token);
