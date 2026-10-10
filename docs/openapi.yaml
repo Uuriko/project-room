@@ -11409,6 +11409,11 @@ paths:
         RC-2026-09-19-078. Browser account-session route. New accounts are
         created un-onboarded and land here until they complete onboarding:
         `{ accountId, completed, steps: [{ id, title, detail, done }] }`.
+        Caller note (verified 2026-10-09): the in-repo web app never calls
+        this route - it reads the same flag as `onboardingComplete` on
+        GET /api/account/profile. Kept as the documented first-run
+        contract for external browser clients; covered by
+        tests/account-management.test.js.
       security:
         - accountSession: []
       responses:
