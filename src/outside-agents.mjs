@@ -68,9 +68,13 @@ export function planOutsideAgentRecord(messages, members, roomId, actorId, input
 // hs2-outside-agent-approval). The approver is authenticated by the caller
 // (server/outside-agents.mjs restricts verify to the room owner and
 // membership administrators); the planner checks the decision is well-formed
-// and that there is a link to decide on. Idempotent: repeating the latest
-// decision replays instead of writing a second record. Pass the verifier set
-// so the replay check sees already-honored decisions.
+// and that there is a link to decide on. Idempotent per link: repeating the
+// latest decision ON THE SAME link replays instead of writing a second
+// record, while the same decision on a re-linked agent is a new decision -
+// the command id carries the pending link's message id, so a
+// approve -> deny -> re-link -> approve sequence can never collide with the
+// first approval's id and drop silently (A34). Pass the verifier set so the
+// replay check sees already-honored decisions.
 export function planOutsideAgentVerify(messages, members, roomId, approverId, input, { verifiers = null } = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some(key => !["externalRef", "decision"].includes(key)))
     fail(422, "invalid_outside_agent", "Decide with an externalRef and a decision");
@@ -82,10 +86,16 @@ export function planOutsideAgentVerify(messages, members, roomId, approverId, in
   if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before deciding on its link");
   if (!existing.linkedMemberId && !existing.verifiedBy)
     fail(422, "outside_agent_unlinked", "There is no link to decide on for this agent");
-  if (existing.latestDecision === decision) return { recorded: "replay", externalRef, decision };
+  // A decision belongs to the link it was made on. Replay only when the
+  // same decision already covers the CURRENT pending link; after a re-link
+  // the same verdict is a new decision and must record (A34).
+  const pendingLinkId = existing.linkMessageId ?? null;
+  if (existing.latestDecision === decision && existing.decidedLinkMessageId === pendingLinkId)
+    return { recorded: "replay", externalRef, decision };
   const record = { v: 1, kind: "verify", externalRef, decision, decidedBy: approverId, decidedAt: Date.now() };
   return { recorded: "verify", externalRef, decision,
-    commandId: commandId("verify", roomId, approverId, externalRef, decision), record, body: outsideAgentBody(record) };
+    commandId: commandId("verify", roomId, approverId, externalRef, decision, pendingLinkId ?? "none"),
+    record, body: outsideAgentBody(record) };
 }
 
 export function assembleOutsideAgents(messages, members = {}, { verifiers = null } = {}) {
@@ -98,11 +108,12 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
   const agents = new Map();
   const edges = [];
   const pendingLinks = []; // link records seen before their introduction (L-42)
-  const applyLink = (agent, record, authorId) => {
+  const applyLink = (agent, record, authorId, messageId = null) => {
     if (agent && authorId === record.memberId && Object.hasOwn(members, record.memberId)
         && members[record.memberId].active !== false && agent.linkedMemberId === null) {
       agent.linkedMemberId = record.memberId;
       agent.linkedBy = authorId;
+      agent.linkMessageId = messageId;
       return true;
     }
     return false;
@@ -116,6 +127,9 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
     agent.latestDecision = record.decision;
     agent.verifiedBy = record.decidedBy;
     agent.verifiedAt = record.decidedAt;
+    // The decision covers the link in effect when it was honored (A34):
+    // replay compares against this, not the latest-ever verdict.
+    agent.decidedLinkMessageId = agent.linkMessageId ?? null;
     if (record.decision === "approved") {
       agent.verified = true;
     } else {
@@ -123,6 +137,7 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
       // link again, which returns the agent to pending.
       agent.linkedMemberId = null;
       agent.linkedBy = null;
+      agent.linkMessageId = null;
       agent.verified = false;
     }
     return true;
@@ -139,7 +154,8 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
           externalRef: record.externalRef, displayName: record.displayName, origin: record.origin,
           reach: record.reach ?? null, note: record.note ?? null, introducedBy: message.authorId,
           sightings: [], knows: [], knownBy: [], linkedMemberId: null, linkedBy: null, verified: false,
-          verifiedBy: null, verifiedAt: null, latestDecision: null
+          verifiedBy: null, verifiedAt: null, latestDecision: null,
+          linkMessageId: null, decidedLinkMessageId: null
         });
       } else if (message.authorId !== existing.introducedBy && !existing.sightings.some(row => row.memberId === message.authorId)) {
         existing.sightings.push({ memberId: message.authorId, messageId: message.id });
@@ -147,18 +163,18 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
     } else if (record.kind === "knows") edges.push({ ...record, reportedBy: message.authorId });
     else if (record.kind === "verify") applyVerify(agents.get(record.externalRef), record, message.authorId);
     else if (record.kind === "link") {
-      if (!applyLink(agents.get(record.externalRef), record, message.authorId)) {
+      if (!applyLink(agents.get(record.externalRef), record, message.authorId, message.id)) {
         // The introduction may not have been seen yet; buffer the link so
         // it isn't silently dropped when it arrives first (L-42).
         if (!agents.has(record.externalRef)) {
-          pendingLinks.push({ record, authorId: message.authorId });
+          pendingLinks.push({ record, authorId: message.authorId, messageId: message.id });
         }
       }
     }
   }
   // Backfill links buffered before their introductions (L-42).
-  for (const { record, authorId } of pendingLinks) {
-    applyLink(agents.get(record.externalRef), record, authorId);
+  for (const { record, authorId, messageId } of pendingLinks) {
+    applyLink(agents.get(record.externalRef), record, authorId, messageId);
   }
   for (const edge of edges) {
     const from = agents.get(edge.fromRef), to = agents.get(edge.toRef);
