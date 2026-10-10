@@ -1,0 +1,10 @@
+# CODEOWNERS — Project Room
+#
+# Workflow files are security-critical: several workflows run on push to main
+# with access to the Cloudflare API token and the room signing key
+# (recon 2026-10-09 item #1). A PR rewriting a workflow file can exfiltrate
+# those secrets on the post-merge run while reviews stay advisory.
+#
+# Rule: any change under .github/workflows/ requires the repo owner's
+# explicit review before merge.
+.github/workflows/** @Uuriko

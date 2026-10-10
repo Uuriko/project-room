@@ -350,7 +350,7 @@ export class ShareLinks {
     // personal link (the board still loads, as for a member without invite
     // rights). Without this the Invite dialog handed out a working guest
     // link while "Create invite link" answered 403 email_unverified.
-    if (auth.account && this.store.accountLogins.emailStatus(auth.account.id) === "unverified") return null;
+    if (auth.account && this.store.accountLogins.emailGateBlocks(auth.account.id)) return null;
     const memberId = auth.member.id;
     const rows = auth.account
       ? this.db.prepare("SELECT * FROM share_links WHERE room_id=? AND issuer_account_id=? AND issuer_member_id=? AND request_id LIKE ? ORDER BY created_at DESC, id DESC")

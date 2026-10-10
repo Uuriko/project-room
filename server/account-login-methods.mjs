@@ -176,6 +176,21 @@ export class AccountLoginMethods {
     this.db = store.db;
     this.random = random;
     this.now = now ?? (() => store.now());
+    this.verificationUnachievable = () => false;
+  }
+
+  // The HTTP layer installs `() => !mailer.isConfigured()`. With no mailer no
+  // code can ever be delivered, so a verification gate would deadlock the
+  // account permanently rather than nudge it (agent-invites.create's escape
+  // hatch, applied to every email-verification gate).
+  setVerificationUnachievable(predicate) {
+    if (typeof predicate !== "function") throw new TypeError("predicate must be a function");
+    this.verificationUnachievable = predicate;
+  }
+
+  // True when the email gate should refuse this account right now.
+  emailGateBlocks(accountId) {
+    return this.emailStatus(accountId) === "unverified" && !this.verificationUnachievable();
   }
 
   #now() { return this.now(); }
@@ -247,7 +262,7 @@ export class AccountLoginMethods {
   }
 
   assertEmailVerified(accountId) {
-    if (this.emailStatus(accountId) === "unverified") {
+    if (this.emailGateBlocks(accountId)) {
       fail(403, "email_unverified", "Verify your email before this action");
     }
   }
