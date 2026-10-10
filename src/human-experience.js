@@ -1,6 +1,22 @@
 import { uiText } from './strings.js';
 import { currentResult } from './work-selectors.js';
 // Human presentation and explicitly PUBLIC assistant invocation. No private request reuse.
+// HS2 3a: the ask card face. The request people are waiting on shows its
+// state on the card itself, not only under the collapsed Activity list.
+export const NOT_PICKED_UP_MS = 10000;
+const CLOSED = ['done', 'failed', 'cancelled'];
+export function faceRun(runs) {
+  const list = Object.values(runs ?? {}).filter(run => !run.sourceDeleted);
+  const latest = items => items.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0] ?? null;
+  return latest(list.filter(run => !CLOSED.includes(run.status))) ?? latest(list);
+}
+export function askFaceStatus(run, now = Date.now()) {
+  if (!run) return null;
+  const waited = Math.max(0, now - (run.createdAt ?? now));
+  const key = run.status === 'queued' ? (waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
+  const textKey = ({ asked: 'asked', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
+  return { key, text: textKey ? uiText(`human.face.${textKey}`) : run.status };
+}
 export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, selectResult, refreshTranscript }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -14,6 +30,15 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   section.setAttribute('aria-label', 'Room assistant');
   section.innerHTML = uiText("human.copy.001");
   $('#typing-indicator').before(section);
+  // The status line is a persistent polite live region, so each state change
+  // is announced once (R5-2); request text and buttons are rebuilt quietly.
+  const face = document.createElement('div'); face.id = 'assistant-face'; face.hidden = true;
+  const faceRequest = document.createElement('p'); faceRequest.className = 'assistant-face-request';
+  const faceStatus = document.createElement('p'); faceStatus.className = 'assistant-face-status'; faceStatus.setAttribute('role', 'status'); faceStatus.setAttribute('aria-live', 'polite'); faceStatus.tabIndex = -1;
+  const faceActions = document.createElement('div'); faceActions.className = 'assistant-face-actions';
+  face.append(faceRequest, faceStatus, faceActions);
+  $('#assistant-activity').before(face);
+  const faceButton = (label, data) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = label; Object.assign(button.dataset, data); return button; };
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'ask-room'; ask.className = 'button ghost';
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
@@ -66,6 +91,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     section.querySelector('strong').textContent = assistant.name || 'Room';
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
+    $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     const runs = Object.values(projection.runs ?? {});
     $('#assistant-activity').hidden = !runs.length;
     const runsHtml = runs.map(run => {
@@ -79,6 +105,25 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const editable = !sourceDeleted && !['done','failed','cancelled','cancel_requested'].includes(run.status);
       return ["<article class=\"assistant-run\" data-assistant-run=\"", esc(run.id), "\"><strong>", esc(sourceDeleted ? uiText('human.deletedRequest') : source?.body?.slice(0,160) || 'Shared request'), "</strong><p>", esc(({ queued: uiText("human.copy.010"), working: 'Working', unknown: 'Connection interrupted', paused: 'Paused', resume_requested: uiText("human.copy.011"), pause_requested: uiText("human.copy.012"), cancel_requested: uiText("human.copy.013"), done: 'Result ready', failed: "Couldn't finish", needs_input: 'Needs input', cancelled: 'Cancelled' })[run.status] || run.status), "</p>", sourceDeleted ? '' : ["<button type=\"button\" class=\"text-button\" data-assistant-message=\"", esc(run.sourceMessageId), "\">Original prompt</button>"].join(''), !sourceDeleted && run.resultMessageId ? `<button type="button" class="text-button" data-assistant-message="${esc(run.resultMessageId)}">Open result</button>` : '', "", (sourceDeleted ? [] : run.activity ?? []).slice(-5).map(a => `<p>${esc(a.summary)}</p>`).join(''), "", inputs, "", editable ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Add context</button>"].join('') : '', "", editable && run.status !== 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-conflict=\"true\" data-revision=\"", run.revision, "\">Change direction</button>"].join('') : '', "", controls && !sourceDeleted && run.status === 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-resolve=\"true\" data-revision=\"", run.revision, "\">Resolve direction</button>"].join('') : '', "", controls && ['queued', 'working', 'unknown'].includes(run.status) ? ["<button type=\"button\" class=\"text-button\" data-pause-run=\"", esc(run.id), "\" data-revision=\"", run.revision, "\">Pause</button>"].join('') : controls && !sourceDeleted && run.status === 'paused' ? ["<button type=\"button\" class=\"text-button\" data-pause-run=\"", esc(run.id), "\" data-resume=\"true\" data-revision=\"", run.revision, "\">Resume</button>"].join('') : '', controls && !['done','failed','cancelled','cancel_requested'].includes(run.status) ? uiText("human.stopRequest", { runId: esc(run.id), revision: run.revision }) : '', "</article>"].join('');
     }).join('');
+    const current = faceRun(Object.values(projection.runs ?? {}).filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current);
+    const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
+    const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
+    const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.resultMessageId, faceControls, faceSource?.body?.slice(0, 120)]) : '';
+    if (face._key !== faceKey) {
+      face._key = faceKey;
+      const focusedData = faceActions.contains(document.activeElement) ? { ...document.activeElement.dataset } : null;
+      faceActions.replaceChildren();
+      if (current) {
+        faceRequest.textContent = faceSource?.body?.slice(0, 120) || uiText('human.face.sharedRequest');
+        if (current.resultMessageId) faceActions.append(faceButton(uiText('human.face.openResult'), { assistantMessage: current.resultMessageId }));
+        if (!CLOSED.includes(current.status) && !['cancel_requested', 'needs_input'].includes(current.status)) faceActions.append(faceButton(uiText('human.face.addContext'), { contributeRun: current.id, revision: String(current.revision) }));
+        if (faceControls && !CLOSED.includes(current.status)) faceActions.insertAdjacentHTML('beforeend', uiText('human.stopRequest', { runId: esc(current.id), revision: current.revision }));
+        // R5-1: keep keyboard focus on the same control (or the card) across a repaint.
+        if (focusedData) ([...faceActions.querySelectorAll('button')].find(button => button.dataset.pauseRun === focusedData.pauseRun && button.dataset.cancel === focusedData.cancel && button.dataset.contributeRun === focusedData.contributeRun) || faceStatus).focus({ preventScroll: true });
+      }
+    }
+    if (current && faceStatus.dataset.faceStatus !== status.key) { faceStatus.dataset.faceStatus = status.key; faceStatus.textContent = status.text; }
+    face.hidden = !current;
     if ($('#assistant-runs')._html !== runsHtml) {
       const panel = $('#assistant-runs'), focused = panel.contains(document.activeElement) ? document.activeElement : null;
       const runId = focused?.closest('[data-assistant-run]')?.dataset.assistantRun, label = focused?.textContent, scroll = panel.scrollTop;
@@ -128,9 +173,10 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (operation) return;
     operation = { action: button.dataset.cancel ? 'cancel' : button.dataset.resume ? 'resume' : 'pause', requestId: crypto.randomUUID(), runId: button.dataset.pauseRun, expectedRevision: Number(button.dataset.revision) };
     // Save the exact operation before dispatch; a lost response cannot create a second stop/resume.
-    persistOperation(); button.disabled = true; await invoke();
+    persistOperation(); button.setAttribute('aria-disabled', 'true'); await invoke(); // aria-disabled keeps focus (R5-1); `if (operation)` already blocks a second submit
 
   };
+  face.onclick = $('#assistant-runs').onclick;
   const resultDialog = document.createElement('dialog'); resultDialog.id = 'human-share-result'; resultDialog.setAttribute('aria-labelledby', 'human-share-title');
   resultDialog.innerHTML = uiText("human.copy.017");
   document.body.append(resultDialog); let resultEntry = null;
