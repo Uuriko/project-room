@@ -152,7 +152,7 @@
   "profile.title": "Profile",
   "profile.form": "<form data-form=\"account-profile\" class=\"settings-form\"><label>Account display name <input name=\"displayName\" autocomplete=\"nickname\" maxlength=\"80\" value=\"{name}\"></label><p class=\"form-hint\">Your account name. Names you use in rooms stay the same.</p><button type=\"submit\" class=\"button primary\">Save</button></form>",
   "deletion.plain.intro": "This permanently deletes your account and its sign-in methods, and signs you out on every device.",
-  "deletion.plain.archive": "Rooms you own that will be archived: {titles}.",
+  "deletion.plain.archive": "These rooms will be archived, and their messages and files permanently deleted: {titles}.",
   "deletion.plain.transfer": "Rooms that pass to another owner: {titles}.",
   "deletion.plain.leave": "You'll leave the other rooms you're in: {titles}.",
   "deletion.plain.kept": "Security and access history is kept, as the Privacy Policy describes.",
@@ -363,5 +363,6 @@
   "human.face.sharedRequest": "Shared request",
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
-  "human.assistantChange": "Change"
+  "human.assistantChange": "Change",
+  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
 }
