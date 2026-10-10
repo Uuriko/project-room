@@ -1,0 +1,12 @@
+{
+ "version": "settlement-receipt/1",
+ "jobId": "job-settle-1",
+ "envelopeId": "env_abc123",
+ "providerId": "provider:mac-mini-07",
+ "chainId": "solana-mock",
+ "assetMint": "0xmockUSDC",
+ "amountRaw": "50000",
+ "issuedAtIso": "2026-10-07T16:33:24.640Z",
+ "nonce": "dddddddddddddddddddddddddddddddd",
+ "signature": "6a25734a4b69450d60eede09e2e7896ed8c09eb246bea7ade698b2ce64371e4b231c00113c21d5a3c95a33b23bf89fbb65147852d08a0c4af244a1eee136e002"
+}
