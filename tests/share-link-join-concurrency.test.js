@@ -105,13 +105,30 @@ function setup(t, { maxJoins }) {
   return { dir, dbPath, linkId, linkToken };
 }
 
+// Child arguments carry secrets (identity secret, link token, session binding), and
+// both error.message ("Command failed: node child.mjs <args>") and free-form stderr can
+// echo them. A failed child is described only by fields built here from an allowlist:
+// numeric exit code, signal name, killed flag, stderr size, and error-class names
+// matched from a fixed pattern. No raw text from the child or the command is kept.
+const CHILD_ERROR_NAME = /\b(SQLITE_[A-Z_]{2,30}|ERR_[A-Z_]{2,40}|E(?:NOMEM|MFILE|NFILE|AGAIN|PERM|ACCES|NOENT|PIPE|NOSPC)|(?:Range|Type|Reference|Syntax|Eval|URI)Error|AssertionError|FATAL ERROR|heap out of memory)\b/g;
+function describeChildFailure(error, stderr) {
+  const text = String(stderr ?? "");
+  return {
+    code: Number.isInteger(error?.code) ? error.code : typeof error?.code === "string" && /^E[A-Z]{2,12}$/.test(error.code) ? error.code : null,
+    signal: typeof error?.signal === "string" && /^SIG[A-Z0-9]{2,10}$/.test(error.signal) ? error.signal : null,
+    killed: error?.killed === true,
+    stderrBytes: Buffer.byteLength(text),
+    errorNames: [...new Set(text.match(CHILD_ERROR_NAME) ?? [])].slice(0, 5),
+  };
+}
+
 function runRacers(dir, childFile, argSets) {
   return Promise.all(argSets.map(args => new Promise(resolve => {
-    execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout) => {
+    execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout, stderr) => {
       const line = String(stdout).split("\n").find(l => l.startsWith("RESULT "));
       let parsed = null;
       try { parsed = JSON.parse(line.slice("RESULT ".length)); } catch { /* leave null */ }
-      resolve({ parsed, execError: error ? String(error.message).slice(0, 120) : null });
+      resolve({ parsed, ...(parsed ? {} : { failure: describeChildFailure(error, stderr) }) });
     });
   })));
 }
@@ -309,4 +326,21 @@ test("HTTP thundering herd: 50 concurrent share-link joins -> one guest, clean 4
   assert.equal(byStatus[409] + (byStatus[429] ?? 0), RACERS - 1, "every loser is 409 or 429");
   const members = Object.values(store.room(ROOM).state.members).filter(m => m.displayName === "Herd Guest");
   assert.equal(members.length, 1, "exactly one guest member");
+});
+
+test("a child that dies without a RESULT is described without its command line or argument values", () => {
+  const secret = "pri_" + "S3cr3tValue".repeat(4), token = "tok_" + "A1b2".repeat(11), binding = "b".repeat(64);
+  const error = Object.assign(new Error(`Command failed: node /x/join-agent-child.mjs /db ${secret} ${token} ${binding}`), { code: 1, signal: null, killed: false });
+  // Stderr that echoes the args, split mid-secret, plus a real error class name.
+  const stderr = `Error: bad arg ${secret.slice(0, 20)}\n${secret.slice(20)} ${token}\nSQLITE_BUSY: database is locked ${binding.slice(0, 30)}`;
+  const out = describeChildFailure(error, stderr);
+  assert.deepEqual(out, { code: 1, signal: null, killed: false, stderrBytes: Buffer.byteLength(stderr), errorNames: ["SQLITE_BUSY"] });
+  const text = JSON.stringify(out);
+  for (const piece of [secret.slice(0, 12), secret.slice(20, 32), token.slice(0, 12), binding.slice(0, 12), "join-agent-child", "Command failed"]) {
+    assert.ok(!text.includes(piece), `diagnostic must not contain ${piece.slice(0, 8)}...`);
+  }
+  const killed = describeChildFailure(Object.assign(new Error("x"), { code: null, signal: "SIGKILL", killed: true }), "");
+  assert.deepEqual(killed, { code: null, signal: "SIGKILL", killed: true, stderrBytes: 0, errorNames: [] });
+  assert.deepEqual(describeChildFailure(Object.assign(new Error("x"), { code: "weird code with spaces " + secret, signal: "not a signal " + token }), undefined),
+    { code: null, signal: null, killed: false, stderrBytes: 0, errorNames: [] });
 });
