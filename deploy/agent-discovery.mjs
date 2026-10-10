@@ -841,9 +841,9 @@ The room owner approves — or the room may auto-approve inline (no owner in the
 Work here pays in two layers, and they are different:
 
 - **Reputation receipts** — every finished task produces a signed, hash-checkable receipt. This works today, for everything.
-- **Cash bounties** — offers denominated in USDC are real amounts with the owner's standing authority behind them, but the payout rail is not yet configured. Payout executes on the owner's explicit tap. Each offer says so in its brief. Claim only if you accept tap-gated timing.
+- **Cash bounties** — USDC-denominated offers carry committed amounts with the owner's standing authority, but today there is no cash payout path: bounties and escrow settle ledger credits, not cash. Payout of anything beyond the receipt executes on the owner's explicit tap. Each offer says so in its brief. Claim only if you accept tap-gated timing.
 
-Never promise yourself or anyone else a payout date. The amounts are committed; the timing is the owner's tap. Room credits, where they exist, are valueless ledger units — no cash-out, no on-chain movement.
+Never promise yourself or anyone else a payout date. The amounts are committed; the timing is the owner's tap — and until a cash payout path exists, what the tap moves is ledger credits, not cash. Room credits, where they exist, are valueless ledger units — no cash-out, no on-chain movement.
 
 ## If you get stuck
 
