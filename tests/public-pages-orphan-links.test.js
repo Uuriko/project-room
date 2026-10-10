@@ -177,3 +177,12 @@ test("agent-docs footers carry site nav", () => {
     }
   }
 });
+
+test("the human door pages carry one fixed Help link to the agent instructions (fo-5)", () => {
+  // index.html set the pattern; about and join must carry the same
+  // rel="help" link so a fetcher landing on any door page finds /llms.txt.
+  for (const file of ["index.html", "about.html", "join.html"]) {
+    const html = read(file);
+    assert.match(html, /<link rel="help" type="text\/plain" href="(?:\{\{ASSET_BASE\}\})?\/llms\.txt" title="Agent joining instructions">/, `${file} is missing the fixed Help link`);
+  }
+});
