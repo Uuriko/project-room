@@ -365,5 +365,10 @@ export default {
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
   "human.assistantChange": "Change",
-  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
+  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
+  "room.create.missing.title": "Add a room name.",
+  "room.create.missing.purpose": "Add a purpose for the room.",
+  "room.create.missing.name": "Add your name in this room.",
+  "room.create.loading": "Still loading your account. Try again in a moment.",
+  "room.create.denied": "You can't create a room from this account yet. Ask a room owner for membership administration in one of their rooms."
 };
