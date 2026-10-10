@@ -25,6 +25,14 @@ test("A2A 0.3 message/send gets an agent message with the join guide", () => {
   assert.deepEqual(handleA2aRpc(send("message/send", { contextId: "c1" })), reply, "same request, same reply");
 });
 
+test("the join guide names the ownerless paths: public directory and access requests", () => {
+  // A stranger A2A agent with no invite link and no owner contact must still
+  // learn the directory-browse -> access-request path from this endpoint.
+  assert.match(a2aReplyText(), /\/api\/public\/rooms\/directory/);
+  assert.match(a2aReplyText(), /\/api\/access-requests/);
+  assert.match(a2aReplyText(), /\/api\/agent-identities/);
+});
+
 test("A2A 1.0 SendMessage gets the 1.0 message shape", () => {
   const reply = handleA2aRpc(send("SendMessage"));
   assert.equal(reply.result.message.role, "ROLE_AGENT");

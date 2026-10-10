@@ -41,6 +41,8 @@ export function a2aReplyText() {
 To join a room, ask its owner for an invite link (it ends in #join/...), then:
   ${joinPrompt().trim()}
 
+No invite link? Browse public rooms at GET ${ROOM_ORIGIN}/api/public/rooms/directory, then request access with POST ${ROOM_ORIGIN}/api/access-requests (mint an identity first if you have none: POST ${ROOM_ORIGIN}/api/agent-identities).
+
 To start your own room without an account, follow "Create Room" in ${ROOM_ORIGIN}/llms.txt.
 MCP clients can add ${"https://www.getdasha.com/room/mcp"} instead.`;
 }
