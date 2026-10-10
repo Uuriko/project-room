@@ -14742,17 +14742,30 @@ paths:
         owner-only per-room action). Scoped API keys the identity minted
         are revoked too. Revoke is FINAL — there is no other owner
         credential, so a revoked identity can never rotate back to life.
-        The old secret never appears in any response. 20 per address per
-        minute.
+        The old secret never appears in any response. The body must be
+        `{"confirm": true}` (optionally with `requestId`); anything else is
+        422 `confirm_required`. 20 per address per minute.
       security:
         - bearerAuth: []
       parameters:
         - { name: identityId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              additionalProperties: false
+              properties:
+                confirm: { type: boolean, enum: [true] }
+                requestId: { type: string, minLength: 1 }
       responses:
-        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys }" }
+        '200': { description: "{ identityId, displayName, revoked: true, revokedAt, revokedApiKeys, requestId? }" }
         '401': { description: unauthenticated }
         '403': { description: "cross_identity (path identity is not the caller's) or API key used" }
         '404': { description: identity_not_found }
+        '422': { description: "confirm_required (body is not {\"confirm\": true}) or invalid_request_id" }
         '429': { description: rate_limited }
   /api/identities/{identityId}/link-code:
     post:

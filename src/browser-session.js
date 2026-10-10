@@ -11,7 +11,7 @@ export const HAD_ACCOUNT_KEY = "pr-had-account";
 export const AUTH_KIND_KEY = "pr-auth-kind";
 export const GUIDE_DISMISSED_KEY = "pr-guide-dismissed";
 
-export const SESSION_HINT_COPY = "This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not sign you out. Room-key sessions and account sessions each stay signed in for up to 8 hours. Sign out clears the cookie. The last room for this account stays in this browser so the next sign-in can return there.";
+export const SESSION_HINT_COPY = "This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not log you out. Room-key sessions and account sessions each stay signed in for up to 8 hours. Log out clears the cookie. The last room for this account stays in this browser so the next sign-in can return there.";
 
 function safeRoomTitle(title) {
   const value = typeof title === "string" ? title.trim() : "";
