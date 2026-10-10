@@ -158,7 +158,7 @@ export function storeTheme(preference) {
 export function organizeRoomSettings(dialog, doc = globalThis.document) {
   if (!dialog || dialog.dataset?.settingsGrouped === "true" || !doc?.createElement) return;
   const groups = [
-    ["Room", ["create-room-details", "room-about"], "The room’s name, purpose, and instructions."],
+    ["Room", ["create-room-details", "room-about", "room-transfer"], "The room’s name, purpose, and instructions."],
     ["Agents & connections", ["room-permissions", "room-tools"], "Who can assign agents, and the room’s suggestions."],
     ["Billing / plan", ["usage-panel", "spend-panel"], "Usage is what agents reported. Spend is this room’s allowance, not a subscription."],
     ["Advanced", ["advanced-room-tools", "record-panel", "room-health"], "Landing, referrals, history, and owner-only health."]

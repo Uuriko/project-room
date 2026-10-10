@@ -610,6 +610,16 @@
             </div>
             <p id="room-about-status" class="status form-status" role="status"></p>
           </details>
+          <details id="room-transfer" class="panel room-transfer" hidden>
+            <summary class="section-summary"><span class="section-label"><strong>Transfer ownership</strong></span><span class="summary-note">Owner only</span></summary>
+            <p class="form-hint">Hand the room to another active member. They gain full authority, including managing members; you stay a member. The transfer is recorded in the room history.</p>
+            <form id="room-transfer-form">
+              <label>New owner <select id="room-transfer-member" required></select></label>
+              <label>Reason (optional) <input id="room-transfer-reason" type="text" maxlength="280" autocomplete="off"></label>
+              <button type="submit" class="button ghost">Transfer ownership</button>
+              <p id="room-transfer-status" class="status form-status" role="status"></p>
+            </form>
+          </details>
           <details id="results-panel" class="panel">
             <summary class="section-summary"><span class="section-label"><strong>Results</strong></span></summary>
             <ol id="room-results-list" tabindex="-1" class="results-list" aria-label="Completed work results"></ol>
