@@ -21,6 +21,9 @@ export function rewardLine(reward) {
   const credits = (reward.credits ?? 0) + (reward.welcomeCredit ?? 0);
   const next = reward.next ? ` · ${reward.next.remaining} to ${reward.next.name}` : "";
   const active = reward.activeCount ?? 0;
+  // antislop #4: "Member · 0 active · 0 room credits" means nothing yet.
+  // Show the line once the person has an active invitee or a credit.
+  if (active === 0 && credits === 0) return "";
   return `${reward.tier} · ${active} active · ${credits} room credit${credits === 1 ? "" : "s"}${next}`;
 }
 // Invite copy uses publicJoinInviteHref (origin + /room path). Never `${location.origin}/#join/`.
