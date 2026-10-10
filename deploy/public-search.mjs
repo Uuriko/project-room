@@ -50,6 +50,59 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 </html>
 `;
 
+// Browser-facing error page for non-404 failures on public (non-API) paths.
+// Same plain document shape as the 404: it says what happened, says what to
+// do next, and links home — never machine codes, never "Unknown error", never
+// internals. 5xx pages quote the request's operation id so a human can mention
+// it when asking for help; it is already in the JSON envelope, so showing it
+// discloses nothing new.
+const PUBLIC_ERROR_COPY = new Map([
+  [400, ["That didn't make sense", "The room couldn't understand that request.", "Check the link or button you used and try again."]],
+  [401, ["Sign in first", "This needs you to be signed in.", "Sign in, then try again."]],
+  [403, ["Not allowed", "You don't have access to that.", "If you think you should, ask the room owner for access."]],
+  [404, ["Page not found", "This address is not a page on Project Room.", "Check the address, or start over from home."]],
+  [405, ["That doesn't work here", "This page doesn't accept that action.", "Go back and use the page's own buttons."]],
+  [409, ["Something changed", "That conflicts with a newer change.", "Reload the page and try again."]],
+  [413, ["Too big", "That was too big for the room to take.", "Try a smaller file."]],
+  [415, ["Wrong format", "The room can't use that format here.", "Check what the page accepts and try again."]],
+  [422, ["We couldn't use that", "Something you sent isn't quite right.", "Check the form and try again."]],
+  [429, ["Too many tries", "You're doing that a bit too fast.", "Wait a minute, then try again."]],
+  [503, ["The room is having trouble", "The room is having trouble right now and couldn't finish that.", "Try again in a moment."]],
+]);
+
+function escapeHtmlAttr(text) {
+  return String(text).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+}
+
+export function publicErrorHtml({ status, operationId } = {}) {
+  const code = Number.isInteger(status) ? status : 500;
+  const copy = PUBLIC_ERROR_COPY.get(code)
+    ?? (code >= 500
+      ? ["Something went wrong", "The room hit a problem and couldn't finish that.", "Try again in a moment."]
+      : ["Something wasn't right", "The room couldn't do that with what it was given.", "Check what you sent and try again."]);
+  const [title, what, next] = copy;
+  const support = code >= 500 && operationId
+    ? `<p>If it keeps happening, mention this code when you ask for help: <code>${escapeHtmlAttr(operationId)}</code></p>`
+    : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtmlAttr(title)}</title>
+</head>
+<body>
+<main>
+<h1>${escapeHtmlAttr(title)}</h1>
+<p>${escapeHtmlAttr(what)}</p>
+<p>${escapeHtmlAttr(next)}</p>
+${support}<p><a href="/">Home</a> &middot; <a href="/about">About</a></p>
+</main>
+</body>
+</html>
+`;
+}
+
 // text/html wins only when its quality is higher than application/json.
 // */* alone does not prefer HTML, so API clients keep the JSON body.
 export function acceptPrefersHtml(header) {

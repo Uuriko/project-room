@@ -2,7 +2,7 @@
 import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "../deploy/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { acceptPrefersHtml, publicErrorHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
@@ -5087,6 +5087,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ? { error: { code, message }, ...errorOverride, operationId, category }
         : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
       error.detail);
+      // HD-08: a browser on a public (non-API) path gets a plain-language HTML
+      // error page — what happened, what to do next — instead of the JSON
+      // envelope. 404 reuses the byte-identical public 404 document. Machine
+      // prefixes (/api, /mcp, /.well-known), explicit .json twins, and JSON
+      // clients keep the envelope.
+      const errorPathname = requestPathname(req.url);
+      if (errorPathname && acceptPrefersHtml(req.headers.accept) && publicHtmlNotFoundPath(errorPathname) && !errorPathname.endsWith(".json")) {
+        const page = httpStatus === 404 ? PUBLIC_NOT_FOUND_HTML : publicErrorHtml({ status: httpStatus, operationId });
+        const body = Buffer.from(page);
+        res.setHeader("X-Robots-Tag", "noindex");
+        res.writeHead(httpStatus, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+        return res.end(req.method === "HEAD" ? undefined : body);
+      }
       json(res, httpStatus, errorBody);
     }
   });
