@@ -237,9 +237,10 @@ const ERROR_STATUS = {
   merge_queue_unknown_entry: 404,
 };
 
-// HTTP handler mounted by server/http.mjs inside the authenticated room block
-// (mount pending: server/http.mjs is file-leased to claude-code-drops until
-// 2026-10-07T00:23Z; the mount is a 3-line add — see the ASK in the room).
+// HTTP handler, NOT MOUNTED: server/http.mjs never routes to it, so these
+// paths return 404 in production. The in-process registry is also not safe
+// across Workers isolates. Until a durable registry is mounted, the merge-slot
+// is the Board claim MERGE-SLOT (docs/ROOM-COORDINATION.md, "Land and deploy").
 // Routes: POST /api/rooms/{roomId}/merge-queue/{enqueue,heartbeat,adopt,release,sweep}
 //         GET  /api/rooms/{roomId}/merge-queue/status
 export async function handleMergeQueue({

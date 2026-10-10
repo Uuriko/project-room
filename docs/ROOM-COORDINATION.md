@@ -52,6 +52,13 @@ Run relevant checks, then verify the final head's required hosted CI. Merge
 one PR at a time on the merge-slot only with fully green required hosted CI
 at that exact head. Never push directly to `main`.
 
+The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it, read it
+back, merge one PR, post the LAND receipt, then release it or hand it to the
+next lander. If someone else holds it, wait or ask them. The HTTP merge-queue
+routes in `server/merge-queue.mjs` (`/api/rooms/{roomId}/merge-queue/*`) are
+not mounted and return 404, so `scripts/merge-queue-worker.mjs` cannot run
+against production. GitHub's native merge queue is not enabled on `main`.
+
 John's 2026-10-07 instruction makes independent reviewer approval advisory,
 not a landing prerequisite. Assess review findings and fix actual correctness,
 security or data-loss blockers. A missing approval or CHANGES REQUESTED status

@@ -28,6 +28,8 @@ start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
    tested, merged, deployed and live-verified outcomes.
 4. **Land through PRs.** Never push directly to `main`. Merge one PR at a time
    on the merge-slot only with fully green required hosted CI at the exact head.
+   The slot is the Board claim `MERGE-SLOT`; the merge-queue HTTP route is not
+   mounted (see [docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)).
    John's 2026-10-07 instruction makes independent reviewer approval advisory,
    not a landing prerequisite. Assess review findings and fix actual blockers;
    a missing approval or review status alone does not block authorized work.
