@@ -102,5 +102,5 @@ test("join-agent tells the agent what its link granted", async t => {
   };
   assert.match(await say(undefined), /guest pass grants read\+chat/);
   assert.match(await say("member"), /accept_work, complete_work, verify/);
-  assert.match(await say("co_admin"), /every room permission/);
+  assert.match(await say("co_admin"), /co-admin.*stay with the room creator/);
 });
