@@ -39,18 +39,27 @@ const lease = value => {
   check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24');
   return hours;
 };
+const composed = value => {
+  try { return value.normalize('NFC'); }
+  catch { return value; }
+};
 const filesOf = input => {
   check(Array.isArray(input) && input.length > 0 && input.length <= 64, 'Declare 1..64 repository paths');
   const files = input.map(raw => {
     check(typeof raw === 'string', 'Invalid repository path');
-    const path = raw.trim().replace(/\/+/g, '/').replace(/^(\.\/)+/, '').replace(/\/$/, '');
+    // Compose so an NFD spelling of café is stored as the same file as NFC.
+    // Case stays distinct. ".." is still rejected, not resolved.
+    const path = composed(raw.trim().replace(/\/+/g, '/').replace(/^(\.\/)+/, '').replace(/\/$/, ''));
     check(path && path.length <= 512 && !path.startsWith('/') && !path.split('/').some(segment => !segment || segment === '..' || segment === '.')
       && !/[\\*\x00-\x1f\x7f]/.test(path), 'Paths must be normalized repository-relative paths');
     return path;
   });
   return [...new Set(files)].sort();
 };
-const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
+const overlaps = (left, right) => {
+  const a = composed(left), b = composed(right);
+  return a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+};
 
 export class PublicWorkClaims {
   constructor(store) { this.store = store; this.db = store.db; }
