@@ -60,8 +60,13 @@ export function parseConnectionBudgets(raw) {
   return out;
 }
 
+// An empty-string connection id is the same logical scope as a missing one:
+// without this, "" and null mint two independent budgets for one connection.
+const connectionSegment = connectionId =>
+  connectionId === null || connectionId === undefined || connectionId === "" ? "direct" : String(connectionId);
+
 const budgetKey = ({ channel, accountId, connectionId }) =>
-  [channel, accountId, connectionId === null || connectionId === undefined ? "direct" : String(connectionId)].join(":");
+  [channel, accountId, connectionSegment(connectionId)].join(":");
 
 // A registry of per-connection token buckets. limiterCache is bounded (LRU
 // eviction) so a long-lived process cannot accumulate a limiter per stale
@@ -69,7 +74,10 @@ const budgetKey = ({ channel, accountId, connectionId }) =>
 export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), connectionBudget = null, cacheSize = 512 } = {}) {
   if (typeof connectionBudget !== "function" && connectionBudget !== null)
     throw new TypeError("connectionBudget must be a function or null");
-  const limiters = new Map(); // budgetKey -> { limiter, signature }
+  const limiters = new Map(); // budgetKey -> { limiter, signature, buckets }
+  // Evicted scopes' bucket state, bounded like the live cache: a scope that
+  // cycles back in resumes its consumed burst instead of a silent refill.
+  const retiredBuckets = new Map(); // budgetKey -> { buckets, signature }
   const connectionOverrides = parseConnectionBudgets(env.CHANNEL_SEND_BUDGETS);
   const storedBudget = (channel, accountId, connectionId) => {
     try {
@@ -80,7 +88,7 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
     return null;
   };
   const configFor = (channel, accountId, connectionId) => {
-    const key = `${channel}:${connectionId ?? "direct"}`;
+    const key = `${channel}:${connectionSegment(connectionId)}`;
     const override = connectionOverrides[key] ?? storedBudget(channel, accountId, connectionId);
     const base = resolveSendBudget({ channel, env });
     if (!base) return null;
@@ -94,15 +102,33 @@ export function createSendBudgetRegistry({ env = {}, now = () => Date.now(), con
     const signature = `${config.rate}/${config.burst}`;
     const cached = limiters.get(key);
     if (cached && cached.signature === signature) { limiters.delete(key); limiters.set(key, cached); return cached.limiter; }
-    const limiter = createLimiter({ rate: config.rate, burst: config.burst });
-    limiters.delete(key); limiters.set(key, { limiter, signature });
-    while (limiters.size > Math.max(1, cacheSize)) limiters.delete(limiters.keys().next().value);
+    // Resume an evicted scope's bucket state so LRU eviction does not hand
+    // back a silently refilled burst. A config change still starts fresh.
+    const buckets = new Map();
+    const retired = retiredBuckets.get(key);
+    if (retired && retired.signature === signature) {
+      retiredBuckets.delete(key);
+      for (const [bucketKey, bucket] of retired.buckets) buckets.set(bucketKey, { ...bucket });
+    }
+    const limiter = createLimiter({ rate: config.rate, burst: config.burst, store: buckets });
+    limiters.delete(key);
+    limiters.set(key, { limiter, signature, buckets });
+    while (limiters.size > Math.max(1, cacheSize)) {
+      const oldest = limiters.keys().next().value;
+      const evicted = limiters.get(oldest);
+      limiters.delete(oldest);
+      // Park the evicted bucket state (bounded): a scope that cycles back in
+      // resumes where it left off instead of regaining a full burst for free.
+      retiredBuckets.delete(oldest);
+      retiredBuckets.set(oldest, { buckets: evicted.buckets, signature: evicted.signature });
+      while (retiredBuckets.size > Math.max(1, cacheSize)) retiredBuckets.delete(retiredBuckets.keys().next().value);
+    }
     return limiter;
   };
   const validateScope = scope => {
     if (!scope || typeof scope !== "object" || typeof scope.channel !== "string" || !scope.channel
       || typeof scope.accountId !== "string" || !scope.accountId)
-      throw new ServiceError(500, "invalid_send_budget_scope", "Send-budget scope must name a channel and account.");
+      throw new ServiceError(400, "invalid_send_budget_scope", "Send-budget scope must name a channel and account.");
   };
   // Consume one send token. Returns { remaining } on success; throws an HTTP
   // 429 ServiceError with a Retry-After header when the budget is exhausted.
