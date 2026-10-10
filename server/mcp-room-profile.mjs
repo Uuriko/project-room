@@ -154,7 +154,8 @@ function validRoomArgs(name, args) {
     const kindOk = args.kind === undefined || ROOM_KINDS.includes(args.kind);
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.trim().length > 0 && args.displayName.length <= 80;
     const requestOk = args.requestId === undefined || validId(args.requestId) && args.requestId.length <= 64;
-    return titleOk && purposeOk && roomOk && kindOk && nameOk && requestOk;
+    const starterOk = args.starter === undefined || typeof args.starter === "boolean";
+    return titleOk && purposeOk && roomOk && kindOk && nameOk && requestOk && starterOk;
   }
   if (name === "room_join") {
     const link = args.linkToken !== undefined;
@@ -470,7 +471,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};
-    for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId"]) {
+    for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId", "starter"]) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return agentRooms.create(secret, request);

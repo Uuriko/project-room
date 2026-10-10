@@ -120,7 +120,7 @@
       }
     },
     "room_create": {
-      "inputSchema": "fcd3fcc092fd2a06",
+      "inputSchema": "444144a16951754c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -734,7 +734,7 @@
       }
     },
     "room_create": {
-      "inputSchema": "fcd3fcc092fd2a06",
+      "inputSchema": "444144a16951754c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

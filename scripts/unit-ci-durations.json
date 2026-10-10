@@ -502,6 +502,7 @@
   "tests/mcp-integration.test.js": 32404,
   "tests/mcp-land-queue-autonomy-tier.test.js": 27761,
   "tests/mcp-lifecycle.test.js": 148587,
+  "tests/mcp-room-create-starter.test.js": 12000,
   "tests/mcp-openapi-drift.test.js": 24333,
   "tests/mcp-registry-publish.test.js": 55253,
   "tests/mcp-registry-server-json.test.js": 6393,
