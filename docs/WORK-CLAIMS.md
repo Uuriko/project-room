@@ -101,9 +101,10 @@ Open claims are everything that is not `done`.
   Close stale claims (close or cancel) to free a slot. Releasing a claim
   leaves it `unclaimed`, which still counts while anyone touches it.
 - Dormant items do not count. An `unclaimed` item with no activity for
-  **14 days** is dormant; the cron's stale sweep closes it (at most 25 per
-  room per pass, every 15 minutes or slower) with a `stale_sweep:` note in
-  its history. Held work is never swept: it ends through its lease (24h
+  **14 days** is dormant. Rooms whose owner turns on `staleSweep` (off by
+  default) also have dormant items closed by the cron's stale sweep (at
+  most 25 per room per pass, every 15 minutes or slower) with a
+  `stale_sweep:` note in their history. Held work is never swept: it ends through its lease (24h
   default, renew to keep it) or its linked PR merging or closing.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
@@ -111,8 +112,8 @@ Open claims are everything that is not `done`.
 
 These are not `file_lease_conflict`. The room owner sets either cap, or both,
 with `POST /api/rooms/{roomId}/work-claims/config` and
-`{ "maxMemberOpenClaims": 20, "maxOpenClaims": 1000 }` (each an integer
-1..10000; send at least one). MCP: `room_set_member_claim_cap` takes the same
+`{ "maxMemberOpenClaims": 20, "maxOpenClaims": 1000, "staleSweep": false }`
+(caps are integers 1..10000, `staleSweep` is a boolean; send at least one). MCP: `room_set_member_claim_cap` takes the same
 fields. The board's owner form sets both. `GET` on that path reads
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.

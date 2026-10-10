@@ -177,10 +177,10 @@ test("attestWork: caller-bound attestations, one per member, cleared on handoff"
 test("roomWorkClaimConfig: the documented config hook", () => {
   assert.equal(DEFAULT_LEASE_HOURS, 24);
   assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: 6, reviewPolicy: "distinct_member" } }),
-    { defaultLeaseHours: 6, reviewPolicy: "distinct_member", maxOpenClaims: 1000, maxMemberOpenClaims: 20 });
+    { defaultLeaseHours: 6, reviewPolicy: "distinct_member", maxOpenClaims: 1000, maxMemberOpenClaims: 20, staleSweep: false });
   // invalid values fall back to defaults, never throw
   assert.deepEqual(roomWorkClaimConfig({ workClaims: { defaultLeaseHours: -2, reviewPolicy: "nope", maxOpenClaims: 0, maxMemberOpenClaims: 10001 } }),
-    { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested", maxOpenClaims: 1000, maxMemberOpenClaims: 20 });
+    { defaultLeaseHours: DEFAULT_LEASE_HOURS, reviewPolicy: "self_attested", maxOpenClaims: 1000, maxMemberOpenClaims: 20, staleSweep: false });
   assert.ok(Object.isFrozen(roomWorkClaimConfig({})));
 });
 

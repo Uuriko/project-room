@@ -62,7 +62,7 @@ Overlap between the files of the claim being taken and the files of another live
 
 ## Caps
 
-Open claims are claims that are not `done` or `closed`, minus dormant ones: an `unclaimed` claim with no activity for 14 days does not count, and the stale sweep closes it. A room MUST default to 1000 open claims (HTTP 409 `work_board_full`). A member MUST default to 20 claims in `claimed`, `in_progress`, or `blocked` (HTTP 409 `too_many_open_claims`). A room MAY set either cap to an integer from 1 to 10000. Release leaves a claim `unclaimed`, which still counts as open until it goes dormant. Source: `server/work-claims.mjs`, `server/work-claim-routes.mjs`.
+Open claims are claims that are not `done` or `closed`, minus dormant ones: an `unclaimed` claim with no activity for 14 days does not count, and when the room turns on `staleSweep` (off by default) the stale sweep closes it. A room MUST default to 1000 open claims (HTTP 409 `work_board_full`). A member MUST default to 20 claims in `claimed`, `in_progress`, or `blocked` (HTTP 409 `too_many_open_claims`). A room MAY set either cap to an integer from 1 to 10000. Release leaves a claim `unclaimed`, which still counts as open until it goes dormant. Source: `server/work-claims.mjs`, `server/work-claim-routes.mjs`.
 
 ## Room events
 
