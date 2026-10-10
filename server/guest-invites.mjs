@@ -67,6 +67,10 @@ export const GUEST_INVITE_REDEEM_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 // Concurrent external guests per room. The existing ga1. ceiling
 // (GUEST_AGENT_MAX_JOINS = 10) stays as the absolute member cap.
 export const GUEST_INVITE_MAX_ACTIVE_PER_ROOM = 5;
+// Retention bound on minted invites: at most this many LIVE (active, not yet
+// past redeem_by) GX invites per room. Redeemed, revoked and expired rows
+// stay in the table as the owner's invite history but do not count.
+export const GUEST_INVITE_LIVE_LIMIT_PER_ROOM = 5000;
 const GUEST_ACCESS_TEXT = "Read the room and its history, post messages, and react. Drafts only with the contributor tier. No work lifecycle, invites, polls, or administration.";
 
 const RESERVED_GUEST_NAMES = ["guest", "guest agent", "owner", "room owner", "admin", "administrator", "system", "moderator"];
@@ -261,6 +265,13 @@ export class GuestInvites {
 
   liveInvite(row) {
     return row && row.status === "active" && row.redeem_by > this.store.now();
+  }
+
+  // Same predicate as liveInvite(), counted in SQL for one room (served by
+  // the guest_invite_room_status index).
+  liveInviteCount(roomId) {
+    return this.db.prepare("SELECT count(*) n FROM guest_invites WHERE room_id=? AND status='active' AND redeem_by>?")
+      .get(roomId, this.store.now()).n;
   }
 
   // One active seat per identity per room: faces are cheap, seats are not.
@@ -470,7 +481,15 @@ export class GuestInvites {
       const prior = this.db.prepare("SELECT * FROM guest_invites WHERE room_id=? AND minted_by_member_id=? AND issue_request_id=?")
         .get(roomId, auth.member.id, requestId);
       if (prior) return { ...this.issued(prior, roomId), duplicate: true };
-      if (this.db.prepare("SELECT count(*) n FROM guest_invites").get().n >= 5000) fail(409, "pilot_limit", "Invite retention limit reached");
+      // D-7 (week audit, room seq 7032): the cap counts this room's LIVE
+      // invites only (active and still redeemable). It used to count every
+      // row ever minted across the whole deployment, and nothing prunes
+      // redeemed, revoked or expired rows, so after 5,000 lifetime mints no
+      // room anywhere could invite a guest. Per-room, like the sibling
+      // credential caps in guest-agent-links.mjs and agent-connections.mjs.
+      if (this.liveInviteCount(roomId) >= GUEST_INVITE_LIVE_LIMIT_PER_ROOM) {
+        fail(409, "pilot_limit", "This room has too many unredeemed guest invites. Revoke some or wait for them to expire, then try again.");
+      }
       const code = newInviteCode();
       const now = this.store.now();
       const inviteId = `gx-${hash(`${roomId}:${auth.member.id}:${requestId}`).slice(0, 24)}`;
