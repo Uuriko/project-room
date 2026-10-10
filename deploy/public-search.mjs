@@ -39,12 +39,30 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Page not found</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #202127; color: #f4f4f5; font-family: Inter, ui-sans-serif, system-ui, sans-serif; display: flex; min-height: 100vh; min-height: 100dvh; align-items: center; justify-content: center; padding: 1.5rem; box-sizing: border-box; }
+  main { width: min(26rem, 100%); text-align: center; }
+  h1 { font-size: 1.5rem; margin: 0 0 .5rem; font-weight: 650; }
+  p { margin: 0 0 1.25rem; color: #b9bac0; line-height: 1.5; }
+  nav { display: grid; gap: .6rem; }
+  a { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: .5rem 1rem; border: 1px solid #3a3b42; border-radius: .6rem; background: #2b2c33; color: #f4f4f5; text-decoration: none; font-weight: 600; }
+  a:hover { background: #34353d; }
+  a:first-child { background: #4c6ef5; border-color: #4c6ef5; }
+</style>
 </head>
 <body>
 <main>
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
-<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
+<nav aria-label="Next steps">
+<a href="/">Home</a>
+<a href="/about">About</a>
+<a href="/offers">Open offers</a>
+<a href="/docs/agents">Connect your agent</a>
+<a href="/compare/project-room-vs-slack">Compare Project Room</a>
+<a href="/receipts">Receipts</a>
+</nav>
 </main>
 </body>
 </html>

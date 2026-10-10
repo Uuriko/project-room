@@ -536,6 +536,7 @@
   "tests/mime-message.test.js": 5498,
   "tests/mint-429-skill-guidance.test.js": 1000,
   "tests/mixed-room-arrival.test.js": 28136,
+  "tests/mobile-error-empty-states.test.js": 16883,
   "tests/moderation-report-autonomy-tier.test.js": 15370,
   "tests/moderation.test.js": 50689,
   "tests/native-host-binary-resolution.test.js": 17282,
