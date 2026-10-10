@@ -200,7 +200,52 @@ function methodRowHtml(method) {
     + "</li>";
 }
 
+// "Keep this account" for a guest (auth audit 2026-10-09, path 13).
+//
+// An account with no email and no password (a guest who joined from a link)
+// sees this in Account settings instead of a dead-end "Set a password".
+// Step 1 sends a code to the email; step 2 takes the code and a password.
+// The account, its rooms, and messages stay the same. The server answers
+// step 1 the same way whether or not the email is free, so this copy never
+// says whether someone else uses it.
+
+const isGuestLike = methods => !methods.some(method => method.email || method.type === "password");
+
+function guestUpgradeHtml(pendingEmail = null) {
+  if (!pendingEmail) {
+    return `<form data-form="guest-upgrade" class="settings-form" autocomplete="on">`
+      + `<p class="form-hint">You\u2019re signed in as a guest, which ends after 8 hours. Add your email to keep this account and its rooms.</p>`
+      + `<label>Email <input type="email" name="email" autocomplete="email" required></label>`
+      + `<button type="submit" class="button">Send code</button></form>`;
+  }
+  return `<form data-form="guest-upgrade-confirm" class="settings-form" autocomplete="off">`
+    + `<p class="form-hint">If ${escapeHtml(pendingEmail)} can be used, a 6-digit code is on its way. Enter it and choose a password.</p>`
+    + `<input type="hidden" name="email" value="${escapeHtml(pendingEmail)}">`
+    + `<label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" required minlength="6" maxlength="6"></label>`
+    + `<label>Password <input type="password" name="password" autocomplete="new-password" required minlength="10"></label>`
+    + `<button type="submit" class="button">Keep account</button> `
+    + `<button type="button" class="text-button" data-action="guest-upgrade-restart">Use a different email</button>`
+    + `<p class="form-hint">Passwords are 10\u2013256 characters.</p></form>`;
+}
+
+// Returns the next pending email (or null) and a status line for the caller.
+async function submitGuestUpgrade(form, { accountClient, session }) {
+  const fields = Object.fromEntries(new FormData(form).entries());
+  const email = String(fields.email ?? "").trim();
+  if (form.dataset.form === "guest-upgrade") {
+    const reply = await accountClient.request("/api/auth/guest/upgrade", { method: "POST", session, data: { email } });
+    return { pendingEmail: email, message: reply?.mailConfigured === false
+      ? "Email delivery isn\u2019t configured on this Room, so no code can be sent."
+      : "Check your email for a 6-digit code. It can take a minute; check spam too." };
+  }
+  await accountClient.request("/api/auth/guest/upgrade/confirm", { method: "POST", session,
+    data: { email, code: String(fields.code ?? "").trim(), password: String(fields.password ?? "") } });
+  return { pendingEmail: null, message: "Account kept. Sign in with this email and password next time.", done: true };
+}
+
 function passwordSectionHtml(methods) {
+  // A guest keeps its account (email + password) from Profile instead.
+  if (isGuestLike(methods)) return "";
   const hasPassword = methods.some(method => method.type === "password");
   if (hasPassword) {
     return `<h3>Password</h3><form data-form="password-change" class="settings-form" autocomplete="off">`
@@ -295,7 +340,7 @@ function deletionSectionHtml() {
     + `<div id="delete-account-summary" class="form-hint deletion-summary" data-deletion-summary>Loading what deletion will remove…</div>`
     + `<div data-deletion-blocked hidden></div>`
     + `<form data-form="delete-account" class="settings-form" hidden>`
-    + `<label>Type your account email to confirm <input type="email" name="confirmEmail" autocomplete="off" spellcheck="false" required></label>`
+    + `<label><span data-delete-confirm-label>Type your account email to confirm</span> <input type="email" name="confirmEmail" autocomplete="off" spellcheck="false" required></label>`
     + `<button type="submit" class="button destructive" disabled>Delete account</button>`
     + `</form>`
     + `<button type="button" class="button" data-action="delete-account-cancel">Cancel</button>`
@@ -319,11 +364,11 @@ function appearanceHtml() {
   return `<fieldset class="settings-appearance"><legend>Appearance</legend>${option("dark", "Dark")}${option("light", "Light")}${option("system", "Match system")}</fieldset>`;
 }
 
-function profileSectionHtml(methods) {
+function profileSectionHtml(methods, pendingEmail = null) {
   const emails = [...new Set(methods.map(method => method.email).filter(Boolean))];
   const identity = emails.length
     ? `<ul class="settings-identity">${emails.map(email => `<li>${escapeHtml(email)}</li>`).join("")}</ul>`
-    : `<p class="settings-empty">No email on this account yet. Add a sign-in method under Advanced.</p>`;
+    : (isGuestLike(methods) ? guestUpgradeHtml(pendingEmail) : `<p class="settings-empty">No email on this account yet. Add a sign-in method under Advanced.</p>`);
   return section("settings-profile-title", "Profile", identity + appearanceHtml());
 }
 
@@ -343,7 +388,7 @@ function emailVerificationHtml(emailVerification, providers) {
   return verify + banner;
 }
 
-export function settingsHtml({ methods = [], providers = null, emailVerification = null } = {}) {
+export function settingsHtml({ methods = [], providers = null, emailVerification = null, pendingEmail = null } = {}) {
   const rows = methods.map(methodRowHtml).join("");
   const methodsBody = methods.length > 0
     ? `<ul class="settings-methods">${rows}</ul><p class="form-hint">Keep at least one active method \u2014 the last one can\u2019t be disabled or removed.</p>`
@@ -351,7 +396,7 @@ export function settingsHtml({ methods = [], providers = null, emailVerification
   return `<div class="account-settings">`
     + `<p class="form-hint" role="status" data-settings-status hidden></p>`
     + emailVerificationHtml(emailVerification, providers)
-    + profileSectionHtml(methods)
+    + profileSectionHtml(methods, pendingEmail)
     + section("settings-notifications-title", "Notifications",
       `<p class="form-hint">Browser push preferences live per room in Catch up → Notifications — choose mentions, direct messages, or both. Push delivery turns on from there once the room's push keys are provisioned; until then nothing leaves this tab.</p>`)
     + section("settings-agents-title", "Agents &amp; connections", oauthSectionHtml(providers) + mailSectionHtml(providers))
@@ -377,6 +422,12 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     .map(method => typeof method.email === "string" ? method.email.trim().toLowerCase() : "")
     .filter(Boolean))];
 
+  // An account with no email (a guest) confirms by typing DELETE instead.
+  const deleteConfirmed = typed => {
+    const emails = accountEmails();
+    return emails.length ? emails.includes(typed) : typed === "delete";
+  };
+
   const deletionDialog = () => container?.querySelector("[data-deletion-dialog]") ?? null;
 
   const syncDeleteConfirm = () => {
@@ -385,7 +436,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     const submit = form?.querySelector('button[type="submit"]');
     if (!input || !submit) return;
     const typed = input.value.trim().toLowerCase();
-    submit.disabled = !deletionToken || !accountEmails().includes(typed);
+    submit.disabled = !deletionToken || !deleteConfirmed(typed);
   };
 
   const focusables = dialog => [...dialog.querySelectorAll("button, input, a[href], select, textarea, summary")]
@@ -449,7 +500,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
       const data = await accountClient.request("/api/auth/methods", { session });
       state = { methods: Array.isArray(data.methods) ? data.methods : [], providers: data.providers ?? null,
         // The unverified-email form and the password-reset banner render from this.
-        emailVerification: data.emailVerification ?? null };
+        emailVerification: data.emailVerification ?? null, pendingEmail: state.pendingEmail ?? null };
       paint();
       status("");
     } catch (error) {
@@ -535,6 +586,24 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     } catch (error) { status(error?.message || "Could not change the password."); }
   };
 
+  const submitGuest = async form => {
+    const session = accountClient.currentSession("keeping this account", { authenticated: true });
+    const button = form.querySelector('button[type="submit"]');
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    status("Working\u2026");
+    try {
+      const next = await submitGuestUpgrade(form, { accountClient, session });
+      state = { ...state, pendingEmail: next.pendingEmail };
+      if (next.done) await refresh(); else paint();
+      status(next.message);
+      if (!next.done) container?.querySelector('form[data-form="guest-upgrade-confirm"] [name="code"]')?.focus();
+    } catch (error) {
+      if (button) button.disabled = false;
+      status(error?.message || "Could not keep this account.");
+    }
+  };
+
   const openDeletion = async () => {
     const dialog = deletionDialog();
     if (!dialog) return;
@@ -565,13 +634,10 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
           return item;
         }));
         form.hidden = true;
-      } else if (!emails.length) {
-        blocked.hidden = false;
-        const item = globalThis.document.createElement("p");
-        item.textContent = "Add an email sign-in method before deleting this account. Deletion asks you to type that email.";
-        blocked.append(item);
-        form.hidden = true;
       } else {
+        const input = form.elements.confirmEmail, label = form.querySelector("[data-delete-confirm-label]");
+        if (input) input.type = emails.length ? "email" : "text";
+        if (label) label.textContent = emails.length ? "Type your account email to confirm" : "Type DELETE to confirm";
         form.hidden = false;
         form.reset();
         syncDeleteConfirm();
@@ -584,7 +650,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
 
   const submitDeletion = async form => {
     const typed = String(new FormData(form).get("confirmEmail") ?? "").trim().toLowerCase();
-    if (!deletionToken || !accountEmails().includes(typed)) { syncDeleteConfirm(); return; }
+    if (!deletionToken || !deleteConfirmed(typed)) { syncDeleteConfirm(); return; }
     const session = accountClient.currentSession("deleting this account", { authenticated: true });
     status("Deleting account…");
     try {
@@ -620,6 +686,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     if (action === "enable") return mutate("/api/auth/methods/enable", id);
     if (action === "remove") return mutate("/api/auth/methods/remove", id, "Remove this sign-in method? You\u2019ll sign in with your remaining methods.");
     if (action === "email-verify-resend") return resendVerification();
+    if (action === "guest-upgrade-restart") { state = { ...state, pendingEmail: null }; paint(); return; }
     if (action === "passkey-add") return addPasskey();
     if (action === "recovery-generate") {
       return generateRecoveryCodes(state.methods.some(method => method.type === "recovery-code-set" && !method.disabled));
@@ -632,6 +699,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
     event.preventDefault();
     if (form.dataset.form === "account-profile") return submitProfile(form);
     if (form.dataset.form === "delete-account") return submitDeletion(form);
+    if (form.dataset.form.startsWith("guest-upgrade")) return submitGuest(form);
     submitPasswordForm(form);
   };
 
