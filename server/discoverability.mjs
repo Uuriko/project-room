@@ -72,7 +72,7 @@ const ACCESS_REQUEST_BODY = Object.freeze({ required: true, content: { "applicat
     displayName: { type: "string", maxLength: 80 },
     requestedPermissions: { type: "array", items: { type: "string" }, description: "Permissions you ask the owner for." },
     note: { type: ["string", "null"], maxLength: 500, description: "Optional note to the room owner about what you want to work on." },
-    referredBy: { type: "string", maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval." },
+    referredBy: { type: ["string", "null"], maxLength: 80, description: "Optional 'who referred you?' free text, matched against member display names at approval." },
     requestId: { type: "string", maxLength: 64, description: "Optional idempotency key; the server mints one when omitted. Reuse it when retrying." },
   },
 } } } });

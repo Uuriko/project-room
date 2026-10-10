@@ -3080,7 +3080,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // The gate now ports the MCP structured-argument shape
         // ({missing, unexpected, invalid}) down to HTTP, and its
         // required/optional set aligns with the service
-        // (server/access-requests.mjs): note may be omitted or null
+        // (server/access-requests.mjs): note and referredBy may be omitted or null
         // (RC-2026-09-18-025); requestId omitted is minted by the service —
         // send one when retrying so the retry is idempotent.
         const diagnosis = diagnoseArguments({
@@ -3091,7 +3091,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             displayName: { type: "string" },
             requestedPermissions: { type: "array" },
             note: { type: ["string", "null"] },
-            referredBy: { type: "string" },
+            referredBy: { type: ["string", "null"] },
             requestId: { type: "string" },
           },
           additionalProperties: false,
