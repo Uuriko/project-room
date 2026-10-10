@@ -142,3 +142,26 @@ for (const touch of [false, true]) {
     assert.deepEqual(errors, []);
   });
 }
+
+test('the Invite dialog still opens when the creator-only Access control is missing from the page', { timeout: 40000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(10000);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator('#main').waitFor({ state: 'visible' });
+  await page.evaluate(() => document.querySelector('#share-link-access-label').remove());
+  await clickChrome(page, '#invite-people-button');
+  await page.locator('#share-link-dialog').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#share-link-create').evaluate(node => node === document.activeElement), true, 'focus lands on Create');
+  assert.deepEqual(errors, [], 'opening the dialog throws nothing');
+});
