@@ -37,6 +37,7 @@
   "tests/agent-card-wellknown.test.js": 15295,
   "tests/agent-connect-page.test.js": 33845,
   "tests/agent-connection.test.js": 53999,
+  "tests/agent-connection-allowed.test.js": 12000,
   "tests/agent-connections-identityid.test.js": 11356,
   "tests/agent-discovery-transport.test.js": 3438,
   "tests/agent-discovery.test.js": 27669,
