@@ -5873,7 +5873,7 @@ function renderRoomOverview() {
   if (!state || !$("#room-overview-dialog").open) return;
   setText("#room-overview-title", `${state.room.title} · Overview`);
   const orientation = roomOrientation(state);
-  setText("#room-overview-purpose", orientation.purpose || "No purpose recorded yet.");
+  setText("#room-overview-purpose", orientation.purpose || "No purpose recorded yet. The room owner sets the purpose in the room instructions — it tells everyone why this room exists.");
   const link = (kind, id, title, key) => `<a href="${esc(recordHref(kind, id))}" data-open-${kind}="${esc(id)}" data-focus-key="overview:${esc(key)}">${esc(title)}</a>`;
   const steps = contributionSteps(state, session.member.id).slice(0, 3);
   const decisions = orientation.recentDecisions;
@@ -5881,10 +5881,10 @@ function renderRoomOverview() {
   const section = (heading, rows, empty) => `<section><h3>${heading}</h3><ul>${rows.join("") || `<li class="form-hint">${empty}</li>`}</ul></section>`;
   renderContent("#room-overview-content",
     (orientation.purposeSource.kind === "instructions" ? `<p class="form-hint">Room instructions · version ${orientation.purposeSource.revision} · ${esc(time(orientation.purposeSource.updatedAt))}</p>` : "")
-    + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
-    + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
-    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
-    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet."));
+    + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now. When you claim work on the Board or someone @-mentions you, your next steps land here.")
+    + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work right now. Work you claim on the Board shows up here — claim a task to get started.")
+    + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet. When the room owner records a decision, it lands here with a link to the discussion that led to it.")
+    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No finished results yet. A result is finished work with a reputation receipt — when work you claimed on the Board is completed and verified, it lands here. Today this pays in reputation receipts; cash comes later."));
 }
 $("#room-overview-open").addEventListener("click", () => {
   if (!state || busy) return;
