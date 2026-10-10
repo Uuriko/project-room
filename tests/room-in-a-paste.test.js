@@ -7,6 +7,13 @@
 // remainder is claimed for B1 (see the TODO in server/room-in-a-paste.mjs).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { agentRoomSchema } from "../server/agent-rooms.mjs";
 import {
   buildSetupLine, parseSetupLine, provisionFromPaste, SetupLineError,
 } from "../server/room-in-a-paste.mjs";
@@ -60,6 +67,62 @@ test("parseSetupLine rejects malformed lines with coded errors", () => {
 test("parseSetupLine ignores unknown future params (forward-compat for B1)", () => {
   const parsed = parseSetupLine("pr-setup://v1?title=T&purpose=P&futureParam=1");
   assert.equal(parsed.title, "T");
+});
+
+// ---- HTTP route ------------------------------------------------------------
+
+async function httpFixture(t) {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-from-paste-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom("commons"));
+  store.db.exec(agentRoomSchema);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close(); rmSync(directory, { recursive: true, force: true });
+  });
+  const post = (path, { token, data } = {}) => fetch(`${origin}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(data ?? {})
+  }).then(async res => ({ status: res.status, body: await res.json().catch(() => null) }));
+  return { store, post };
+}
+
+test("HTTP: POST /api/agent-rooms/from-paste provisions from one pasted line", async t => {
+  const { store, post } = await httpFixture(t);
+  const identity = store.identities.create("Paste Agent");
+  const line = buildSetupLine({ title: "Paste Room", purpose: "http test",
+    roomId: "paste-http-room", deviceCode: "HTTP-1" });
+
+  const res = await post("/api/agent-rooms/from-paste", { token: identity.secret, data: { setupLine: line } });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.equal(res.body.roomId, "paste-http-room");
+  assert.equal(res.body.identityId, identity.identityId);
+  assert.equal(res.body.duplicate, false);
+  assert.equal(res.body.wakeSubscribed, false);
+  assert.deepEqual(res.body.device, { code: "HTTP-1", approval: "pending" });
+
+  // Re-pasting the same line is idempotent: the same room, flagged duplicate.
+  const again = await post("/api/agent-rooms/from-paste", { token: identity.secret, data: { setupLine: line } });
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+  assert.equal(again.body.roomId, "paste-http-room");
+  assert.equal(again.body.duplicate, true);
+
+  // A malformed line fails 422 before any room is created.
+  const bad = await post("/api/agent-rooms/from-paste",
+    { token: identity.secret, data: { setupLine: "pr-setup://v1?title=&purpose=P" } });
+  assert.equal(bad.status, 422, JSON.stringify(bad.body));
+  assert.equal(bad.body.error.code, "invalid_setup_line");
+
+  // Missing setupLine fails 422; missing identity secret fails 401.
+  const missing = await post("/api/agent-rooms/from-paste", { token: identity.secret, data: {} });
+  assert.equal(missing.status, 422);
+  const anon = await post("/api/agent-rooms/from-paste", { data: { setupLine: line } });
+  assert.equal(anon.status, 401);
 });
 
 // ---- provisioning ----------------------------------------------------------
@@ -122,13 +185,11 @@ test("provisionFromPaste subscribes the 1c counts-only wake webhook when the lin
 
 test("provisionFromPaste carries the device code through as pending — never resolved here", async () => {
   const calls = [];
-  let resolved = false;
   const line = buildSetupLine({ title: "D", purpose: "P", roomId: "device-room", deviceCode: "WXYZ-9999" });
   const result = await provisionFromPaste({ createRoom: fakeCreateRoom(calls),
     setupLine: line, identitySecret: "pri_testsecret" });
   assert.equal(result.roomId, "device-room");
   assert.deepEqual({ ...result.device }, { code: "WXYZ-9999", approval: "pending" });
-  assert.equal(resolved, false, "no device-code resolution attempted without B1's module");
 });
 
 test("provisionFromPaste parses before any side effect", async () => {
