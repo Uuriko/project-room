@@ -11,7 +11,9 @@ const FILTERS = [
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
-const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions", later: "saved" };
+// "Saved for later" is the saved-messages list (openLater), not Updates' Saved
+// filter, which is the read-state alias.
+const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
 export function queryFor(filter) {
   if (filter === "mentions") return "state=actionable&kinds=mention";

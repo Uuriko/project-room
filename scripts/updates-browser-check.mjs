@@ -122,12 +122,26 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.getByText("Nothing needs you.").waitFor();
   assert.equal(await page.locator("#updates-count").textContent(), "");
 
+  // A pasted link is one unbroken token; it must wrap inside the row at 390px.
+  const longLink = "https://example.invalid/" + "averyverylongpathsegment".repeat(6);
+  store.command(agent, "commons", command(T.MESSAGE_POSTED, { messageId: "updates-long-link", body: longLink, toMemberId: "owner" }));
+  await selectUpdatesFilter("Mentions", "mentions");
+  await selectUpdatesFilter("Needs me", "needs");
+  await page.locator(".updates-row", { hasText: "averyverylong" }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   const box = await page.locator("#updates-dialog").boundingBox();
   assert.ok(box.width <= 390);
   const overflow = await page.locator("#updates-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1);
   assert.equal(overflow, true);
   await page.locator("#updates-close").click();
+  // Go to… → Saved for later opens saved messages (as g l and More do), not Updates' read filter.
+  await clickChrome(page, "#room-actions-open");
+  await page.locator("#room-actions-query").fill("saved for later");
+  await page.locator("[data-room-action=later]").click();
+  await page.locator("#later-dialog").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#updates-dialog").evaluate(node => node.open), false, "Saved for later does not open Updates");
+  await page.keyboard.press("Escape");
+  await page.locator("#later-dialog").waitFor({ state: "hidden" });
 
   // Genuine review updates are projected from completed work, not injected rows.
   const signEvidence = makeTestSigner(store);
