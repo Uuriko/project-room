@@ -1,6 +1,6 @@
 import { gmailImportAuth } from './gmail-import-authority.mjs';
 import { createHash } from "node:crypto";
-import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
+import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass, holdsDecisionAuthority } from "../src/events.js";
 import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
 import { ServiceError } from "./store.mjs";
@@ -935,7 +935,7 @@ export class Inbox {
     const status = share.request.sourceRevision !== sourceRevision ? "source_changed"
       : item.supersededBy || item.state === "superseded" ? "superseded"
       : !item.receipt?.nativeText ? "no_native_result"
-      : !hasConfirmedIndependentPass(item) || !currentApproval(item) || state.members[item.decision?.actorId]?.kind !== "human" ? "needs_review" : "ready";
+      : !hasConfirmedIndependentPass(item) || !currentApproval(item) || !holdsDecisionAuthority(state.members[item.decision?.actorId]) ? "needs_review" : "ready";
     if (status !== "ready") return { ...base, status, resultVersion: null };
     const evidence = storedText(this.db, state, item.id, item.receipt.nativeText.messageId, item.receipt.nativeText.messageEventId);
     if (evidence.body.length > 4000) return { ...base, status: "too_long", resultVersion: null };
