@@ -20,7 +20,7 @@ import { ACTIVE_CLAIM_STATES, closeStaleUnclaimed, closeWhenLive, notePullMerged
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
-  batchPullOutcome, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
+  batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
   pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest, usableEtag
 } from "./claim-coordination.mjs";
 
@@ -429,86 +429,151 @@ function loadDueClaims(store, nowMs) {
   return due;
 }
 
-// Search batch (bug-claim-pr-sync-rate-limited-no-settle-20261010). Prod polls
-// without a token, so the per-pull REST lookups share 60 core requests an hour
-// per egress IP and the shared reset can hold every claim for an hour. GitHub's
-// search API has its own quota (10 a minute without a token), so one search per
-// repo per tick finds recently merged or closed pulls for every held claim at
-// once and settles them through the same commitPullRequestLookup path. land and
-// deploy claims need the merge sha, so a merged one stays with the REST lookup.
+// Search fallback (bug-claim-pr-sync-rate-limited-no-settle-20261010). Prod
+// polls without a token, so the per-pull REST lookups share 60 core requests
+// an hour per egress IP, and the shared reset can hold every claim for an hour.
+// GitHub's search API has its own quota (10 a minute without a token). While
+// the core budget is spent, one search per tick walks the repo's merged pulls
+// oldest-created first from a stored cursor, so every held pull is reached
+// within a bounded number of ticks, and settles matching claims through the
+// same commitPullRequestLookup path.
+// - Only a merge settles here. A merge is final; an unmerged close can be
+//   reopened, so a close waits for the REST lookup.
+// - land and deploy claims need the merge sha, so they also wait for REST.
+// - Each hit must name the same repo and pull number; the body is bounded.
+// - A search 403 or 429 backs the search off on its own row.
 // CLAIM_PR_SEARCH_BATCH=0 turns this off.
-const SEARCH_REPOS_PER_TICK = 2;
-const SEARCH_CLAIM_CAP = 200;
+const SEARCH_ROOM = "_claim-pr-search";
+const SEARCH_PAGE = 50;
 const SEARCH_WINDOW_MS = 14 * 24 * 3600 * 1000;
 const SEARCH_BODY_CHARS = 1_000_000;
+const SEARCH_BACKOFF_MS = 60_000;
 
-function loadHeldPullClaims(store) {
+function readSearchState(store) {
+  try {
+    const row = store.db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?").get(SEARCH_ROOM);
+    const parsed = row ? JSON.parse(row.config_json) : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+
+function writeSearchState(store, state, nowMs) {
+  store.db.prepare(`INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)
+    ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
+    .run(SEARCH_ROOM, JSON.stringify(state), nowMs);
+}
+
+// Held claims with an unsettled pull, read as (room, claim, url) columns only:
+// no row is decoded unless a search hit names its pull.
+function heldPullIndex(store) {
   let rows = [];
   try {
     rows = store.db.prepare(`
-      SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+      SELECT room_id AS roomId, claim_id AS claimId,
+        COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) AS state,
+        COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'), '[]') AS links,
+        COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url')) AS url
+      FROM work_claims
       WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
-        AND typeof(COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url'))) = 'text'
-      LIMIT ?
-    `).all(SEARCH_CLAIM_CAP);
+    `).all();
   } catch (error) {
-    if (/no such table/i.test(error?.message ?? "")) return [];
+    if (/no such table/i.test(error?.message ?? "")) return new Map();
     throw error;
   }
-  const held = [];
+  const index = new Map();
   for (const row of rows) {
-    const item = store.workClaims.get(row.roomId, row.claimId);
-    if (!item || !["claimed", "in_progress", "blocked"].includes(item.state)) continue;
-    const open = pullLinks(item).filter(pull => pull?.url && pull.repo && Number.isSafeInteger(pull.number) && !pull.outcome);
-    if (open.length) held.push({ roomId: row.roomId, item, open });
+    let urls = [];
+    try { urls = (JSON.parse(row.links) ?? []).map(pull => pull?.url); } catch { /* fall back to the primary link */ }
+    if (typeof row.url === "string") urls.push(row.url);
+    for (const url of new Set(urls.filter(value => typeof value === "string"))) {
+      const parsed = parsePullRequestUrl(url);
+      if (!parsed) continue;
+      const repo = parsed.repo.toLowerCase();
+      const byRepo = index.get(repo) ?? Object.assign(new Map(), { name: parsed.repo });
+      const list = byRepo.get(parsed.number) ?? [];
+      list.push({ roomId: row.roomId, claimId: row.claimId, url: parsed.url });
+      byRepo.set(parsed.number, list);
+      index.set(repo, byRepo);
+    }
   }
-  return held;
+  return index;
 }
 
-async function searchClosedPulls(repo, { fetchImpl, token, nowMs, deadline }) {
+async function searchMergedPulls(repo, cursor, { fetchImpl, token, deadline }) {
   const budgetMs = deadline - Date.now();
-  if (!(budgetMs > 0)) return null;
-  const since = new Date(nowMs - SEARCH_WINDOW_MS).toISOString().slice(0, 10);
-  const q = `repo:${repo} is:pr is:closed updated:>=${since}`;
-  const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=50`;
+  if (!(budgetMs > 0)) return { kind: "deadline" };
+  const q = `repo:${repo} is:pr is:merged created:>=${cursor}`;
+  const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}&sort=created&order=asc&per_page=${SEARCH_PAGE}`;
   let response;
   try {
     response = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(Math.min(5000, budgetMs)) });
-  } catch { return null; }
-  if (response.status !== 200) return null;
-  const length = responseHeader(response, "content-length");
-  if (length && /^\d+$/.test(length) && Number(length) > SEARCH_BODY_CHARS) return null;
-  let body;
-  try { body = typeof response.text === "function" ? JSON.parse(await response.text()) : await response.json(); } catch { return null; }
-  const found = new Map();
-  for (const hit of Array.isArray(body?.items) ? body.items : []) {
-    if (!Number.isSafeInteger(hit?.number) || hit.state !== "closed" || !hit.pull_request) continue;
-    found.set(hit.number, hit.pull_request.merged_at ? "merged" : "closed");
+  } catch { return { kind: "error" }; }
+  if (response.status === 403 || response.status === 429) {
+    const retryAfter = Number(responseHeader(response, "retry-after"));
+    const reset = Number(responseHeader(response, "x-ratelimit-reset"));
+    return { kind: "rateLimited", retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null, resetMs: Number.isFinite(reset) && reset > 0 ? reset * 1000 : null };
   }
-  return found;
+  if (response.status !== 200) return { kind: "error" };
+  const length = responseHeader(response, "content-length");
+  if (length && /^\d+$/.test(length) && Number(length) > SEARCH_BODY_CHARS) return { kind: "error" };
+  let body;
+  try {
+    const text = typeof response.text === "function" ? await response.text() : JSON.stringify(await response.json());
+    if (text.length > SEARCH_BODY_CHARS) return { kind: "error" };
+    body = JSON.parse(text);
+  } catch { return { kind: "error" }; }
+  const items = Array.isArray(body?.items) ? body.items : [];
+  const merged = new Set();
+  let lastCreated = null;
+  const repoUrl = `https://api.github.com/repos/${repo}`.toLowerCase();
+  for (const hit of items) {
+    if (typeof hit?.created_at === "string") lastCreated = hit.created_at;
+    if (!Number.isSafeInteger(hit?.number) || hit.state !== "closed") continue;
+    if (String(hit.repository_url ?? "").toLowerCase() !== repoUrl) continue;
+    const pull = hit.pull_request;
+    if (!pull || typeof pull.merged_at !== "string" || !pull.merged_at) continue;
+    if (!String(pull.html_url ?? "").toLowerCase().endsWith(`/${repo.toLowerCase()}/pull/${hit.number}`)) continue;
+    merged.add(hit.number);
+  }
+  return { kind: "ok", merged, full: items.length >= SEARCH_PAGE, lastCreated };
 }
 
 export async function settleFromSearch(store, { env = null, fetchImpl = fetch, token = null, nowMs = Date.now(), deadline = Infinity } = {}) {
   if (String((env ?? {}).CLAIM_PR_SEARCH_BATCH ?? "").trim() === "0") return 0;
-  const held = loadHeldPullClaims(store);
-  if (!held.length) return 0;
-  const repos = [...new Set(held.flatMap(entry => entry.open.map(pull => pull.repo)))].slice(0, SEARCH_REPOS_PER_TICK);
-  let settled = 0;
-  for (const repo of repos) {
-    const found = await searchClosedPulls(repo, { fetchImpl, token, nowMs, deadline });
-    if (!found || !found.size) continue;
-    store.workClaims.transaction(() => {
-      for (const { roomId, item, open } of held) {
-        for (const pull of open) {
-          if (pull.repo !== repo || !found.has(pull.number)) continue;
-          const kind = found.get(pull.number);
-          if (kind === "merged" && (item.kind === "land" || item.kind === "deploy")) continue;
-          const current = store.workClaims.get(roomId, item.id);
-          if (commitPullRequestLookup(store, store.workClaims, roomId, current, { url: pull.url, kind, mergedSha: null }, nowMs)) settled += 1;
-        }
-      }
-    });
+  const state = readSearchState(store);
+  if (Number(state.rateLimitedUntil) > nowMs) return 0;
+  const index = heldPullIndex(store);
+  if (!index.size) return 0;
+  // One repo per tick, in turn.
+  const repos = [...index.keys()].sort();
+  const repo = repos[(Number.isSafeInteger(state.turn) ? state.turn : 0) % repos.length];
+  const byNumber = index.get(repo);
+  const windowStart = new Date(nowMs - SEARCH_WINDOW_MS).toISOString().slice(0, 19) + "Z";
+  const saved = state.cursors?.[repo];
+  const cursor = typeof saved === "string" && saved >= windowStart ? saved : windowStart;
+  const found = await searchMergedPulls(byNumber.name, cursor, { fetchImpl, token, deadline });
+  const next = { ...state, turn: ((Number.isSafeInteger(state.turn) ? state.turn : 0) + 1) % 1_000_000, cursors: { ...(state.cursors ?? {}) } };
+  if (found.kind === "rateLimited") {
+    const until = Math.max(nowMs + SEARCH_BACKOFF_MS, found.retryAfterMs ? nowMs + found.retryAfterMs : 0, found.resetMs ?? 0);
+    writeSearchState(store, { ...next, rateLimitedUntil: until }, nowMs);
+    return 0;
   }
+  if (found.kind !== "ok") return 0;
+  // A full page continues from its last created time next turn (the same
+  // second can repeat, never skip); a short page starts the window again.
+  next.cursors[repo] = found.full && found.lastCreated && found.lastCreated > cursor ? found.lastCreated : windowStart;
+  delete next.rateLimitedUntil;
+  let settled = 0;
+  store.workClaims.transaction(() => {
+    writeSearchState(store, next, nowMs);
+    for (const number of found.merged) {
+      for (const { roomId, claimId, url } of byNumber.get(number) ?? []) {
+        const current = store.workClaims.get(roomId, claimId);
+        if (!current || current.kind === "land" || current.kind === "deploy") continue;
+        if (commitPullRequestLookup(store, store.workClaims, roomId, current, { url, kind: "merged", mergedSha: null }, nowMs)) settled += 1;
+      }
+    }
+  });
   return settled;
 }
 
