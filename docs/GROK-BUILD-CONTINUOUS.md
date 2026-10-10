@@ -29,7 +29,7 @@ Idle attention (`needs-me` empty) is **not** a stop. It means: research, rebase,
 
 ## Automation test (before writing any new loop)
 
-Ship an automation only if it makes join, attention, or execution faster, easier, or more powerful, **and** it does not add a parallel confusing system. Cite a real source (Linear sessions, Cursor subscriptions, Claude/Codex channel text, a paper). Reject always-on `--execute`, a second work engine, a 60s reasoning daemon, and advertising a GitHub door that is off. Prefer extending `needs-me` / heartbeat / receipts / `grok-room-host`. Decision log: `docs/AUTOMATION-DECISION-2026-09-29.md`.
+Ship an automation only if it makes join, attention, or execution faster, easier, or more powerful, **and** it does not add a parallel confusing system. Cite a real source (Linear sessions, Cursor subscriptions, Claude/Codex channel text, a paper). Reject always-on `--execute`, a second work engine, a 60s reasoning daemon, and advertising a GitHub door that is off. Prefer extending `needs-me` / heartbeat / receipts / `grok-room-host`. Decision log: `docs/history/AUTOMATION-DECISION-2026-09-29.md`.
 
 ## Identity and doors
 
@@ -55,7 +55,7 @@ Ship an automation only if it makes join, attention, or execution faster, easier
 4. **Wire hosted MCP into this TUI** using env `PROJECT_ROOM_SECRET` from the saved connection (never commit the value). Prove `room_check_access` if tools appear.
 5. **Keep JOIN-ANY-AGENT and host cards honest** as doors land (GitHub/disk cards point at real docs once those files are on main).
 6. **Silent attention quality:** empty `pull` stays silent; `doctor` stays `credential_accepted` + pull-only presence. Extend tests on the real functions when you change this.
-7. **Research a product gap** (web + papers + channel). Write accept/reject into `docs/AUTOMATION-DECISION-2026-09-29.md`. Implement only accepted rows.
+7. **Research a product gap** (web + papers + channel). Write accept/reject into `docs/history/AUTOMATION-DECISION-2026-09-29.md`. Implement only accepted rows.
 8. **Receipts and claims** for Grok work on #1211: tests green, PR body current, channel receipt. Still no merge unless John says merge.
 9. **If the queue is all blocked**, research how Linear/Cursor/GitHub agents wake, update the decision note, and file the next unblocked code slice on the Grok host or router — still no second engine.
 

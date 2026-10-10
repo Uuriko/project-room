@@ -34,10 +34,18 @@ actually missing or an unresolved collision requires coordination.
 ## When the Room is unavailable
 
 John explicitly authorized issue [#266](https://github.com/Uuriko/project-room/issues/266)
-as the incident fallback on 2026-10-07. Use a CLAIM/progress/DONE comment there
-and read it back when the Room cannot accept writes. State whether the live
-board was readable and whether the lease was verified; a comment is not a
-server lease. Issues #11 and #1160 remain historical, not active boards.
+as the incident fallback on 2026-10-07. A fresh check on 2026-10-09 found it
+closed with 2,500 comments, at GitHub's comment limit. It cannot accept new
+receipts. Read its historical receipts when relevant, but do not report a
+fallback post there as delivered or assume another issue is its successor.
+Issues #11 and #1160 also remain historical, not active boards.
+
+When the Room cannot accept writes, use an authorized successor only after
+verifying that it can accept and return the receipt. If no writable fallback
+is verified, preserve the scope, evidence, blocker and next step in the work
+branch and report the coordination outage. State whether the live board was
+readable and whether the lease was verified; a fallback comment is not a
+server lease.
 
 If the board cannot be read, inspect current PRs and fallback receipts and
 prepare bounded work on a separate branch without altering a peer's branch.
