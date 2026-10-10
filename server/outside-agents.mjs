@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { memberCan } from "../src/events.js";
-import { outsideAgentBody, planOutsideAgentRecord, planOutsideAgentVerify, assembleOutsideAgents, publicRef } from "../src/outside-agents.mjs";
+import { outsideAgentBody, parseOutsideAgentBody, planOutsideAgentRecord, planOutsideAgentVerify, assembleOutsideAgents, publicRef } from "../src/outside-agents.mjs";
 export { outsideAgentBody, parseOutsideAgentBody, planOutsideAgentRecord, planOutsideAgentVerify, assembleOutsideAgents } from "../src/outside-agents.mjs";
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const commandId = (kind, ...parts) => `oa-${kind}-` + createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32);
@@ -95,7 +95,16 @@ export class OutsideAgents {
     if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before linking a joined member");
     if (existing.linkedMemberId === memberId) return { ...this.#view(roomId, room), recorded: "replay", externalRef, memberId };
     if (existing.linkedMemberId) fail(409, "outside_agent_changed", "This agent is already linked to a member");
-    this.#post(token, roomId, commandId("link", roomId, externalRef), { v: 1, kind: "link", externalRef, memberId }, expectedSessionBinding);
+    // A34: the link command id carries the member and a per-ref link
+    // sequence, so a re-link after a denial is a fresh command - a bare
+    // (room, ref) id made store.command drop the re-link as a duplicate of
+    // the first, and the API answered recorded:"link" for nothing.
+    const priorLinks = (room.state.messages ?? []).reduce((count, message) => {
+      const parsed = parseOutsideAgentBody(message?.body);
+      return count + (parsed?.kind === "link" && parsed.externalRef === externalRef ? 1 : 0);
+    }, 0);
+    this.#post(token, roomId, commandId("link", roomId, externalRef, memberId, String(priorLinks)),
+      { v: 1, kind: "link", externalRef, memberId }, expectedSessionBinding);
     return { ...this.list(token, roomId, expectedSessionBinding), recorded: "link", externalRef, memberId };
   }
   // 1e hs2-outside-agent-approval: the human decision on an outside agent's
