@@ -51,7 +51,7 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { readFileSync, appendFileSync, mkdirSync } from "node:fs";
+import { readFileSync, appendFileSync, mkdirSync, openSync, writeSync, closeSync, unlinkSync, statSync } from "node:fs";
 
 const TOOL_VERSION = "1";
 
@@ -445,30 +445,123 @@ export function deriveExitCode({ systemic, total, ok, failed }) {
 // persists into herdr_session_journal (D5 §5: B20 owns journal schema support).
 // ---------------------------------------------------------------------------
 
+// Sidecar lock for the journal (<journalPath>.lock). Two operators (or an
+// operator + a retry) running migrate --execute against the same journal
+// must not interleave the read+seq+append in appendJournalEntry: without a
+// lock both can read the same tail, compute the same seq, and both pass the
+// terminal-entry check for one claim. The critical section is tiny (one
+// read + one O_APPEND write), so the lock is only ever held for
+// milliseconds; a lock older than JOURNAL_LOCK_STALE_MS cannot be a live
+// holder and is reclaimed, as is a lock whose recorded pid is dead.
+const JOURNAL_LOCK_TIMEOUT_MS = 30_000;
+const JOURNAL_LOCK_STALE_MS = 60_000;
+const JOURNAL_LOCK_POLL_MS = 50;
+
+const sleepSync = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+function reclaimStaleJournalLock(lockPath) {
+  let pid = NaN;
+  let readable = false;
+  try {
+    pid = Number.parseInt(readFileSync(lockPath, "utf8").trim(), 10);
+    readable = true;
+  } catch { /* unreadable (or just-created and not yet written): decide by age */ }
+  let alive = false;
+  if (readable && Number.isSafeInteger(pid) && pid > 0) {
+    try { process.kill(pid, 0); alive = true; }
+    catch (err) { alive = err?.code === "EPERM"; } // live pid owned by another user
+  }
+  let ageMs = Infinity;
+  try { ageMs = Date.now() - statSync(lockPath).mtimeMs; }
+  catch { return; } // vanished under us; the acquire loop retries
+  const holderDead = readable && Number.isSafeInteger(pid) && pid > 0 && !alive;
+  if (holderDead || ageMs > JOURNAL_LOCK_STALE_MS) {
+    try { unlinkSync(lockPath); } catch { /* raced with the holder; the loop retries */ }
+  }
+}
+
+// Run fn with the journal lock held. Re-entrant within one process is a
+// programming error (deadlock); keep critical sections small instead.
+export function withJournalLock(journalPath, fn, { timeoutMs = JOURNAL_LOCK_TIMEOUT_MS } = {}) {
+  const lockPath = `${journalPath}.lock`;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let fd;
+    try {
+      fd = openSync(lockPath, "wx", 0o600); // atomic: exactly one contender wins
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+      reclaimStaleJournalLock(lockPath);
+      if (Date.now() > deadline) {
+        throw new Error(`herdr-migrate: journal lock contention: ${lockPath} is held by another process`);
+      }
+      sleepSync(JOURNAL_LOCK_POLL_MS);
+      continue;
+    }
+    try { writeSync(fd, `${process.pid}\n`); } catch { /* holder identity is best-effort */ }
+    try {
+      return fn();
+    } finally {
+      try { closeSync(fd); } catch { /* never mask fn's result */ }
+      try { unlinkSync(lockPath); } catch { /* a racing reclaim may have removed it */ }
+    }
+  }
+}
+
 export function appendJournalEntry(journalPath, entry) {
   const dir = dirname(resolve(journalPath));
   mkdirSync(dir, { recursive: true });
-  const existing = readJournal(journalPath);
-  const seq = existing.length + 1;
-  const full = {
-    seq,
-    at: new Date().toISOString(),
-    tool: "herdr-migrate",
-    tool_version: TOOL_VERSION,
-    ...entry,
-  };
-  appendFileSync(journalPath, JSON.stringify(full) + "\n", "utf8");
-  return full;
+  // The read (for seq) and the append are one critical section: without the
+  // lock two concurrent runs compute the same seq and double-journal.
+  return withJournalLock(journalPath, () => {
+    const existing = readJournal(journalPath);
+    const seq = existing.length + 1;
+    const full = {
+      seq,
+      at: new Date().toISOString(),
+      tool: "herdr-migrate",
+      tool_version: TOOL_VERSION,
+      ...entry,
+    };
+    appendFileSync(journalPath, JSON.stringify(full) + "\n", "utf8");
+    return full;
+  });
+}
+
+export function readJournalReport(journalPath) {
+  const empty = () => ({ entries: [], skippedMalformed: 0 });
+  try {
+    const text = readFileSync(journalPath, "utf8");
+    const entries = [];
+    let skipped = 0;
+    const badLines = [];
+    // One torn line (killed process, full disk mid-flush, hand edit) must
+    // not brick the tool: skip it with a warning and keep the rest.
+    text.split("\n").forEach((raw, index) => {
+      if (!raw.trim()) return;
+      try {
+        entries.push(JSON.parse(raw));
+      } catch {
+        skipped += 1;
+        if (badLines.length < 5) badLines.push(index + 1);
+      }
+    });
+    if (skipped > 0) {
+      process.stderr.write(
+        `herdr-migrate: warning: skipped ${skipped} malformed journal line${skipped === 1 ? "" : "s"} ` +
+        `in ${journalPath} (line${badLines.length === 1 ? "" : "s"} ${badLines.join(", ")}` +
+        `${skipped > badLines.length ? ", …" : ""}); the remaining entries are intact.\n`,
+      );
+    }
+    return { entries, skippedMalformed: skipped };
+  } catch (err) {
+    if (err?.code === "ENOENT") return empty();
+    throw err;
+  }
 }
 
 export function readJournal(journalPath) {
-  try {
-    const text = readFileSync(journalPath, "utf8");
-    return text.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
-  } catch (err) {
-    if (err?.code === "ENOENT") return [];
-    throw err;
-  }
+  return readJournalReport(journalPath).entries;
 }
 
 // ---------------------------------------------------------------------------
@@ -1250,7 +1343,7 @@ async function cmdStatus(flags, deps) {
   const bridge = await probeBridge({ bridgeBase: flags.bridgeBase ?? process.env.HERDR_BRIDGE_BASE ?? null, pinnedHerdrPath: flags.pinnedHerdr ?? defaultPinnedHerdrPath() });
   const api = roomApiClient({ base: flags.apiBase ?? process.env.ROOM_API_BASE ?? null, token: flags.token ?? process.env.ROOM_API_TOKEN ?? null });
   const journalPath = flags.journal ?? defaultJournalPath();
-  const journal = readJournal(journalPath);
+  const { entries: journal, skippedMalformed } = readJournalReport(journalPath);
   const nowMs = Date.now();
   const rooms = {};
   for (const roomId of flags.room) {
@@ -1286,7 +1379,7 @@ async function cmdStatus(flags, deps) {
       last_errors: lastErrors,
     };
   }
-  const out = { command: "status", rooms };
+  const out = { command: "status", rooms, journal_skipped_lines: skippedMalformed };
   emit(flags, out, (o) => table(
     Object.entries(o.rooms).map(([id, r]) => [
       id, r.flag_state, String(r.live_claims), String(r.eligible_now),
