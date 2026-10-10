@@ -251,6 +251,40 @@ export function accountDeletedLandingMessage(search = "") {
   return params.get("account-deleted") === "1" ? ACCOUNT_DELETED_MESSAGE : "";
 }
 
+// The plan's own text is an engineering inventory ("18 categories purged (9
+// items) … stitch (0 items)"). People get a plain summary built from the
+// plan's rooms; the full plan stays one tap away for anyone who wants it.
+const MAX_TITLES = 5;
+const titleList = rooms => {
+  const titles = rooms.map(room => room.title || room.id);
+  return titles.length > MAX_TITLES
+    ? uiText("deletion.plain.more", { titles: titles.slice(0, MAX_TITLES).join(", "), count: titles.length - MAX_TITLES })
+    : titles.join(", ");
+};
+export function deletionPlainSummary(planned) {
+  const rooms = planned?.plan?.rooms ?? {};
+  const lines = [uiText("deletion.plain.intro")];
+  if (rooms.archive?.length) lines.push(uiText("deletion.plain.archive", { titles: titleList(rooms.archive) }));
+  if (rooms.transfer?.length) lines.push(uiText("deletion.plain.transfer", { titles: titleList(rooms.transfer) }));
+  if (rooms.retained?.length) lines.push(uiText("deletion.plain.leave", { titles: titleList(rooms.retained) }));
+  lines.push(uiText("deletion.plain.kept"));
+  return lines;
+}
+
+function renderDeletionSummary(summary, planned) {
+  const doc = globalThis.document;
+  const nodes = deletionPlainSummary(planned).map(line => { const p = doc.createElement("p"); p.textContent = line; return p; });
+  const raw = planned?.summary?.text;
+  if (typeof raw === "string" && raw) {
+    const details = doc.createElement("details"), label = doc.createElement("summary"), pre = doc.createElement("pre");
+    label.textContent = uiText("deletion.plain.details");
+    pre.textContent = raw;
+    details.append(label, pre);
+    nodes.push(details);
+  }
+  summary.replaceChildren(...nodes);
+}
+
 function deletionSectionHtml() {
   return `<h3>Delete account</h3>`
     + `<p class="form-hint">Permanently delete this account. Personal rooms you solely own are archived and their messages and files are purged. A shared room needs another owner first.</p>`
@@ -518,7 +552,7 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
       const session = accountClient.currentSession("planning account deletion", { authenticated: true });
       const planned = await accountClient.request("/api/account/deletion/plan", { session });
       deletionToken = typeof planned.confirmationToken === "string" ? planned.confirmationToken : null;
-      summary.textContent = planned.summary?.text || "Review the deletion plan before continuing.";
+      renderDeletionSummary(summary, planned);
       const rooms = planned.plan?.rooms?.blocked ?? [];
       const emails = accountEmails();
       if (rooms.length) {
