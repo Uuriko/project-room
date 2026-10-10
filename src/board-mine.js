@@ -106,6 +106,6 @@ export function needsMeHtml(items, viewer, members = {}, now = Date.now()) {
   const more = rest.length
     ? ["<details class=\"needs-me-more\"><summary>More · ", rest.length, "</summary><ul>", rest.map(([note, item]) => ["<li><button type=\"button\" class=\"needs-me-open\" data-needs-me-open=\"", esc(item.id), "\"><span class=\"needs-me-title\">", esc(item.title || item.id), "</span><span class=\"needs-me-note\">", esc(note), "</span></button></li>"].join('')).join(""), "</ul></details>"].join('')
     : "";
-  const heading = shown.length ? ["", urgent.length, " need", urgent.length === 1 ? "s" : "", " you"].join('') : uiText("board.mine.copy.005");
+  const heading = shown.length ? [urgent.length, " to chase"].join('') : uiText("board.mine.copy.005");
   return ["<section class=\"needs-me\" aria-labelledby=\"needs-me-heading\"><h3 id=\"needs-me-heading\">", heading, "</h3>", shown.length ? `<ul class="needs-me-list">${shown.map(row).join("")}</ul>` : "", "", more, "</section>"].join('');
 }

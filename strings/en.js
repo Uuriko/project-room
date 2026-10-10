@@ -112,7 +112,7 @@ export default {
   "board.mine.copy.002": "Your lease ends in {fragmentA}",
   "board.mine.copy.003": "You are tagged to review · {fragmentA}",
   "board.mine.copy.004": "No update for {fragmentA}",
-  "board.mine.copy.005": "Nothing needs you",
+  "board.mine.copy.005": "Nothing to chase",
   "board.claim.closed": "Closed '{title}'",
   "board.claim.cancelled": "Cancelled '{title}'",
   "board.loading.001": "Loading the board…",
