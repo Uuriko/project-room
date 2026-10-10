@@ -9365,6 +9365,14 @@ paths:
         (5) so the endpoint is not a free oracle for someone else's inbox.
       security:
         - accountSession: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                returnTo: { type: string, description: "Optional local return target for the resent link (for example /#join/<token>), so a pending invitation survives a resend; same strict validation as magic sign-in." }
       responses:
         '200': { description: "{status: resent|already_verified, email, expiresAt?}" }
         '401': { description: account_session_required or invalid_session }
@@ -9375,7 +9383,7 @@ paths:
             response may carry an RFC 9110 Allow header naming the route's
             allowed methods — resend with a named method instead of
             retrying the same one.
-        '422': { description: invalid_email }
+        '422': { description: invalid_email or invalid_return_target }
         '429': { description: rate_limited }
         '503': { description: mail_not_configured }
   /api/auth/password/login:

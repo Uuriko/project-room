@@ -99,7 +99,7 @@ import {
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
 import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
-import { createMagicLinkMailer, attemptMailDelivery } from "./magic-links.mjs";
+import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
 import { createPasskeyAuth, resolvePasskeyParams } from "./account-passkeys.mjs";
@@ -1274,9 +1274,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!magicMailer.isConfigured()) {
           reject(503, "mail_not_configured", "Email delivery is not configured; contact the operator to verify this address");
         }
+        // An optional returnTo (same strict validation as magic sign-in) keeps
+        // a pending invitation in the resent link, like signup's own mail.
+        const data = await body(req);
+        const returnTo = data && Object.hasOwn(data, "returnTo") ? validateMagicReturnTo(data.returnTo) : undefined;
+        if (returnTo === null) reject(422, "invalid_return_target", "A valid local return target is required");
         const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email: normalized });
         const delivered = await attemptMailDelivery(() => magicMailer.sendMagicLink({
-          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+          to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...(returnTo ? { returnTo } : {})
         }), "email-verify resend");
         return json(res, 200, { status: delivered ? "resent" : "not_delivered", email: normalized, expiresAt: issued.expiresAt });
       }
