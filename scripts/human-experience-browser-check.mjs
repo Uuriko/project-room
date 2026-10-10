@@ -469,7 +469,6 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('What is the plan?'));
-  const runsText = () => document.querySelector('#assistant-runs').textContent;
   // A queued run nobody claims for 10s reads not picked up on the card.
   const base = f.store.now(); f.store.now = () => base + 11000;
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Not picked up'));
