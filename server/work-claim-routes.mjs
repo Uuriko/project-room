@@ -61,6 +61,8 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
+// FIX-19 (WAVE-300): correlated-death HOLD — automatic intake park on mass silence.
+import { assertNoCorrelatedDeathHold } from "./correlated-death.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -642,10 +644,21 @@ export async function handleWorkClaims(options) {
       });
     }
   }
-  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
-    auth: reauthorize ? reauthorize() : options.auth,
-    helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
-  });
+  const run = () => {
+    // FIX-19 (WAVE-300): correlated-death HOLD — automatic intake park on mass
+    // silence. New claims only: existing claims keep working (this is the
+    // detector-driven cousin of the FIX-66 kill-switch freeze, which covers
+    // every claim mutation and is owner-driven). The guard throws a 503
+    // correlated_death_hold refusal while parked; the catch below renders it
+    // as the JSON body. Fail-open: a broken detector never blocks intake.
+    if (options.workClaimRoute === "create" && req.method === "POST") {
+      assertNoCorrelatedDeathHold(options.store, options.roomId);
+    }
+    return handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
+      auth: reauthorize ? reauthorize() : options.auth,
+      helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
+    });
+  };
   try {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
