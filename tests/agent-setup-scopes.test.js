@@ -46,5 +46,5 @@ test("a key minted by CLI setup reaches the wake and inbox MCP tools like the on
   }
   // Still room-bound: the setup key reaches its own room and nothing wider.
   const scopes = JSON.parse(f.store.db.prepare("SELECT scopes_json FROM agent_api_keys WHERE identity_id = ?").get(connected.identityId).scopes_json);
-  assert.deepEqual([...scopes].sort(), ["mcp:inbox", "mcp:room:commons", "mcp:wake", "rooms:read", "rooms:write"]);
+  assert.deepEqual([...scopes].sort(), ["heartbeats:read", "heartbeats:report", "mcp:inbox", "mcp:room:commons", "mcp:wake", "rooms:read", "rooms:write"]);
 });
