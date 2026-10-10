@@ -90,6 +90,9 @@ test("browser entry wires both invitation paths and unified catch-up, not two ne
   for (const name of ["installShareLinks", "AccountClient", "ReturnBrief", "draftRecoveryScope", "nextWorkStep"]) assert.ok(app.includes(name));
   assert.equal((app.match(/function renderComposerError\(/g) || []).length, 1);
   assert.ok(!app.includes('next.className = "work-next"'));
+  // The Needs-you list uses contributionSteps' attention-aware labels, never a
+  // raw nextWorkStep recompute that drops the to-chase framing and ownerId.
+  assert.ok(!app.includes('? i.label : nextWorkStep('));
   const scripts = JSON.parse(readFileSync(new URL("../package.json", import.meta.url))).scripts;
   assert.ok(scripts["test:browser"].includes("invitation-check.mjs"));
   assert.ok(scripts["test:browser"].includes("composer-browser-check.mjs"));
