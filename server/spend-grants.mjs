@@ -400,9 +400,10 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
         return { replay: "settled", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
       if (existing.status === "reserved")
         return { replay: "reserved", priceCents: Number(existing.price_cents), toolName: existing.tool_name };
-      refuse(409, "duplicate_nonce", "This spend authorization was already recorded and voided; a new attempt needs a fresh nonce", {
-        tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
-      });
+      // Commit the expired-reservation recovery before refusing this consumed
+      // nonce. Throwing here rolls the reaper back and strands the headroom
+      // when the client only retries its original request.
+      return { replay: "voided" };
     }
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs, includeInactive: true });
     if (!grant) paymentRefusal({ roomId, agentId, toolName, priceCents, reason: "no_spend_grant" });
@@ -470,6 +471,12 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     }
     return { remainingAfter: remaining - priceCents };
   });
+
+  if (outcome.replay === "voided") {
+    refuse(409, "duplicate_nonce", "This spend authorization was already recorded and voided; a new attempt needs a fresh nonce", {
+      tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
+    });
+  }
 
   const transition = (to, settledAt) => {
     const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
