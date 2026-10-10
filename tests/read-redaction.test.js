@@ -26,7 +26,7 @@ async function serve(t) {
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Read redaction");
   store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Reader", permissions: []
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Reader", permissions: []
   });
   const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
   cmd(T.MESSAGE_POSTED, { messageId: "kept", body: PRIOR });

@@ -632,11 +632,27 @@ export class AgentIdentities {
   // RC-2026-09-18-038: a membership-administration delegate may also link,
   // because decide() drives link() with the approver's token — approving an
   // access request is exactly what the delegation exists for.
-  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true }, expectedSessionBinding = null) {
+  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true, identityLinkCode, holderConsentVia }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
     if (typeof identityId !== "string" || !IDENTITY_ID_PATTERN.test(identityId)) fail(422, "invalid_identity", "identityId is not a valid agent identity");
+    // RC-2026-10-09-942-f2 (#942 finding 2): holder proof-of-possession.
+    // Owner-driven linking binds an identity into a room; without a
+    // holder-minted single-use link code (POST /api/identities/{identityId}/
+    // link-code) any owner could bind someone else's identity. The code
+    // shape is checked BEFORE the identity lookup so the gate is
+    // oracle-free (mirrors agent-connections create), and the code is
+    // consumed atomically inside the writer transaction below so a failed
+    // link never burns it. The access-request approval path is exempt: the
+    // holder proved possession of the identity secret when the request was
+    // submitted, and decide() carries that established consent
+    // (holderConsentVia === "access-request").
+    const consentViaRequest = holderConsentVia === "access-request";
+    if (!consentViaRequest && (typeof identityLinkCode !== "string" || !LINK_CODE_RE.test(identityLinkCode))) {
+      fail(422, "identity_link_proof_required",
+        "Present an identity link code minted by the identity holder (POST /api/identities/{identityId}/link-code)");
+    }
     const identity = this.get(identityId);
     if (!identity) fail(404, "identity_not_found", "No such agent identity");
     // RC-2026-09-18-049: rooms that require verified agents deny linking an
@@ -666,6 +682,11 @@ export class AgentIdentities {
       fail(422, "invalid_identity", "referredBy must be a member id");
     }
     return this.store.transaction(() => {
+      // RC-2026-10-09-942-f2: atomic single-use consume. The conditional
+      // UPDATE inside consumeLinkCode makes a concurrent consume win; the
+      // enclosing transaction means a link that fails later (409, 422)
+      // never burns a code it didn't use.
+      if (!consentViaRequest) this.consumeLinkCode(identityId, identityLinkCode);
       const existing = this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identityId);
       if (existing) fail(409, "identity_already_linked", "This identity is already linked to this room");
       // #1004: resolve through the own-property helper, not a bare lookup.

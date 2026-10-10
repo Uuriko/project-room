@@ -271,7 +271,7 @@ test("agent owner passes the owner gate but mint stays account-bound; non-owner 
   // A non-owner agent member fails the owner gate instead.
   const other = store.identities.create("Other Agent");
   store.identities.link(identity.secret, "agent-den", {
-    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work"]
+    identityId: other.identityId, identityLinkCode: store.identities.mintLinkCode(other.identityId, other.secret).linkCode, displayName: "Other Agent", permissions: ["accept_work"]
   });
   const otherMint = await request("/api/rooms/agent-den/guest-agent-links", {
     method: "POST", token: other.secret, data: mintBody()

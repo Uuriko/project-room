@@ -21,9 +21,11 @@ export function mintIdentity(f, name = `invariant-agent-${randomUUID().slice(0, 
 // Returns the receipt plus the freshly issued owner access key —
 // issuing a new key REVOKES f.keys.owner, so use the returned key for
 // any later owner commands in the same scenario.
-export function linkToRoom(f, identityId, permissions = ["accept_work"]) {
+export function linkToRoom(f, identity, permissions = ["accept_work"]) {
   const ownerKey = f.store.issueAccessKey(ROOM, "owner");
-  const link = f.store.identities.link(ownerKey, ROOM, { identityId, permissions });
+  // #942 finding 2: the fixture is the holder, so it mints the link code itself.
+  const link = f.store.identities.link(ownerKey, ROOM, { identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions });
   return { link, ownerKey };
 }
 

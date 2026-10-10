@@ -975,9 +975,10 @@ export class RoomAgentClient {
     if (!wellFormed) throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity response");
     return value;
   }
-  linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
+  linkIdentity({ identityId, memberId, displayName, permissions, identityLinkCode }, { signal } = {}) {
     return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
-      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
+      ...(displayName === undefined ? {} : { displayName }),
+      ...(identityLinkCode === undefined ? {} : { identityLinkCode }), permissions }, { signal });
   }
   identityLinks({ signal } = {}) {
     return this.#identityAdmin("/identity-links", undefined, { signal });

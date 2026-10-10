@@ -29,16 +29,18 @@ const post = (origin, path, body, secret = null) => {
   });
 };
 
-function linkToCommons(f, identityId) {
+function linkToCommons(f, identity) {
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  return f.store.identities.link(ownerKey, "commons", { identityId, permissions: ["accept_work"] });
+  return f.store.identities.link(ownerKey, "commons", { identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
+    permissions: ["accept_work"] });
 }
 
 test("POST /api/auth/agent/rooms verifies secret and lists linked rooms", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Test Agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
 
   const res = await post(origin, "/api/auth/agent/rooms", {
     identityId: agent.identityId
@@ -92,7 +94,7 @@ test("POST /api/auth/agent/session creates browser session for linked agent", as
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Session Agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
 
   const res = await post(origin, "/api/auth/agent/session", {
     identityId: agent.identityId,
@@ -123,7 +125,7 @@ test("POST /api/auth/agent/session rejects bad secret", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Test Agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
 
   const res = await post(origin, "/api/auth/agent/session", {
     identityId: agent.identityId,
@@ -136,7 +138,7 @@ test("POST /api/auth/agent/session rejects secret in JSON body (must use Bearer 
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Test Agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
 
   // Secret in body should be rejected by exact-field validation
   const res = await post(origin, "/api/auth/agent/session", {
@@ -151,7 +153,7 @@ test("Agent browser session is invalidated when secret is rotated", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Rotate Agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
 
   // Create a session with the original secret
   const res = await post(origin, "/api/auth/agent/session", {
@@ -178,7 +180,7 @@ test("Agent browser session is invalidated when secret is revoked", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Revoke Agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
 
   // Create a session with the original secret
   const res = await post(origin, "/api/auth/agent/session", {

@@ -18,7 +18,8 @@ async function setup(t, kind = "agent") {
   if (kind === "agent") {
     identity = store.identities.create("Member Requester");
     memberId = identity.identityId;
-    store.identities.link(owner, "commons", { identityId: memberId, permissions: [] });
+    store.identities.link(owner, "commons", { identityId: memberId,
+    identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: [] });
   } else {
     store.command(owner, "commons", { id: randomUUID(), type: "member.added",
       data: { memberId, displayName: "Human Requester", kind: "human", permissions: [] } });

@@ -713,6 +713,11 @@ export class AccessRequests {
         displayName: row.display_name,
         permissions: grants,
         settleAccessRequests: false,
+        // RC-2026-10-09-942-f2: the holder proved possession of the identity
+        // secret when this request was submitted (request() authenticates
+        // the secret), so the approval carries established consent — no
+        // fresh link code is required at decide time.
+        holderConsentVia: "access-request",
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
       this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")

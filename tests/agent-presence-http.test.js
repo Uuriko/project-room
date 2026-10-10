@@ -99,7 +99,7 @@ test("presence next[] counts a heartbeating pull-only agent as around", async t 
   const origin = await startServer(t, fixture);
   const identity = fixture.store.identities.create("pull-agent");
   fixture.store.identities.link(fixture.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "pullagent",
+    identityId: identity.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "pullagent",
     displayName: "Pull Agent", permissions: ["accept_work"],
   });
   const beat = await post(origin, "/api/agent-heartbeats",
@@ -123,7 +123,7 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
   fixture.store.agentHeartbeats.now = () => now;
   const identity = fixture.store.identities.create("observed-agent");
   fixture.store.identities.link(fixture.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "observed", displayName: "Observed", permissions: ["accept_work"],
+    identityId: identity.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "observed", displayName: "Observed", permissions: ["accept_work"],
   });
   const presence = async () => {
     const res = await get(origin, "/api/rooms/commons/presence", fixture.keys.owner);

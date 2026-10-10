@@ -105,6 +105,7 @@ test("direct link closes the identity's pending access request", async () => {
   });
   store.identities.link(ownerToken, "commons", {
     identityId: identity.identityId,
+    identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
     permissions: ["accept_work"]
   });
   assert.equal(requests.list(ownerToken, "commons").length, 0);
@@ -134,6 +135,7 @@ test("approving an already-linked identity records the decision without a second
   });
   store.identities.link(ownerToken, "commons", {
     identityId: identity.identityId,
+    identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
     permissions: ["accept_work"],
     settleAccessRequests: false
   });

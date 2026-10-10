@@ -86,7 +86,7 @@ test("return brief retains peer-DM identity filtering alongside targeted message
   const f = await fixture(t);
   const a = f.store.identities.create("Audit peer A"), b = f.store.identities.create("Audit peer B");
   for (const [identity, memberId] of [[a, "audit-peer-a"], [b, "audit-peer-b"]]) {
-    f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, memberId, permissions: [] });
+    f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId, permissions: [] });
     setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: f.store.now() });
   }
   f.keys.peerA = a.secret; f.keys.peerB = b.secret;

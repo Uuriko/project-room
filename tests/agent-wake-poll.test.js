@@ -239,7 +239,7 @@ test("a real mention releases a waiting poll: the wakeable-by-default loop", asy
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-poll-agent");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "wakeagent",
     displayName: "Wake Agent", permissions: ["accept_work"],
   });
   const scoped = await (await post(origin, "/api/agent-keys",
@@ -360,7 +360,7 @@ test("room-key poll cannot replace an identity-owned host wait", async t => {
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("isolated-poll-agent");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: identity.identityId,
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: identity.identityId,
     displayName: "Isolated poll agent", permissions: ["accept_work"],
   });
   const roomKey = f.store.issueAccessKey("commons", identity.identityId);
@@ -386,7 +386,7 @@ test("fresh heartbeating host receives a mention through its active poll", async
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("online-poll-agent");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: identity.identityId,
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: identity.identityId,
     displayName: "Online poll agent", permissions: ["accept_work"],
   });
   assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h" }, identity.secret)).status, 200);
@@ -413,7 +413,7 @@ test("fresh wakeable host retains between-poll mention across database restart u
   let store = new RoomStore(filename), server;
   const owner = store.identities.create("Gap owner"), worker = store.identities.create("Gap worker");
   new AgentRooms(store).create(owner.secret, { roomId: "gap-room", title: "Gap", purpose: "Wake interval", kind: "personal" });
-  store.identities.link(owner.secret, "gap-room", { identityId: worker.identityId, memberId: "gap-worker", permissions: [] });
+  store.identities.link(owner.secret, "gap-room", { identityId: worker.identityId, identityLinkCode: store.identities.mintLinkCode(worker.identityId, worker.secret).linkCode, memberId: "gap-worker", permissions: [] });
   const linksBefore = store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all();
   const open = async () => {
     server = createRoomServer({ store });

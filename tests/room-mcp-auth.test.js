@@ -76,10 +76,10 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   });
   // #962 M3: bond.propose resolves only a peer linked into this room.
   store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "MCP peer", permissions: []
+    identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "MCP peer", permissions: []
   });
   const linked = store.identities.link(owner.secret, created.roomId, {
-    identityId: stranger.identityId, displayName: "MCP stranger", permissions: []
+    identityId: stranger.identityId, identityLinkCode: store.identities.mintLinkCode(stranger.identityId, stranger.secret).linkCode, displayName: "MCP stranger", permissions: []
   });
   assert.equal(linked.memberId, stranger.identityId);
   // #953: new agent members default to t1_readonly; peer and stranger need write access for MCP replies/bonds
@@ -290,10 +290,10 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
     roomId: "bond-den", title: "Bond den", purpose: "Hosted bond tools", kind: "personal", displayName: "Bond owner"
   });
   store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Bond peer", permissions: []
+    identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "Bond peer", permissions: []
   });
   store.identities.link(owner.secret, created.roomId, {
-    identityId: stranger.identityId, displayName: "Bond stranger", permissions: []
+    identityId: stranger.identityId, identityLinkCode: store.identities.mintLinkCode(stranger.identityId, stranger.secret).linkCode, displayName: "Bond stranger", permissions: []
   });
   // #953: new agent members default to t1_readonly; peer and stranger need write access for bond actions
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });

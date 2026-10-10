@@ -45,7 +45,7 @@ test("posting @_Agent to an offline agent with push writes no wake, push, or men
   f.store.now = () => at;
   const identity = f.store.identities.create("silent-agent");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "agent",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "agent",
     displayName: "Agent", permissions: [],
   });
   const beat = f.store.agentHeartbeats.heartbeat({
@@ -98,7 +98,7 @@ test("an identity-alias @mention wakes the offline agent like a display-name men
   // Member display name ("Agent") differs from the linked identity display
   // name ("helper-bot"): only the identity alias resolves this mention.
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "agent",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "agent",
     displayName: "Agent", permissions: [],
   });
   const beat = f.store.agentHeartbeats.heartbeat({

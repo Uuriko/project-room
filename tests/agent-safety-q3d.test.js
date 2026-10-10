@@ -52,7 +52,7 @@ const deliveries = (store, subscriptionId) => store.db.prepare(
 test("a guest's message reaches an agent's webhook fenced as untrusted data, and both signatures still verify", async t => {
   const { f, post } = await serve(t);
   const identity = f.store.identities.create("Hook Listener");
-  const { memberId } = f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, permissions: [] });
+  const { memberId } = f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: [] });
   setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const subscribed = await post("/api/agent-webhooks", { url: "https://hooks.example.com/q3d", events: ["message.posted"], secret: SECRET }, identity.secret);
   assert.equal(subscribed.status, 201, JSON.stringify(subscribed.body));

@@ -54,7 +54,7 @@ async function fixture(t) {
     const identity = store.identities.create(name);
     const memberId = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 32);
     store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName: name,
+      identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId, displayName: name,
       permissions: ["accept_work", "complete_work"]
     });
     const beat = await call("POST", "/api/agent-heartbeats", identity.secret, { hostId: "host-1", mode: "pull-only" });

@@ -236,7 +236,7 @@ test("join paths: invite redeem, share link, and access-request approve can post
 
   const linkedIdentity = f.store.identities.create("Linked agent");
   const linked = f.store.identities.link(f.keys.owner, "commons", {
-    identityId: linkedIdentity.identityId, permissions: [],
+    identityId: linkedIdentity.identityId, identityLinkCode: f.store.identities.mintLinkCode(linkedIdentity.identityId, linkedIdentity.secret).linkCode, permissions: [],
   });
   assert.equal(getTier(f.db(), "commons", linked.memberId).autonomyTier, "t2_standard", "access-request approve enrolls t2");
   post(linkedIdentity.secret, "approved agent posts");

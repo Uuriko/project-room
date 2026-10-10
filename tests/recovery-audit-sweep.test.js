@@ -220,10 +220,10 @@ function sweep() {
     const left = fixture.store.identities.create("Sweep bond left");
     const right = fixture.store.identities.create("Sweep bond right");
     fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: left.identityId, displayName: "Sweep bond left", permissions: ["accept_work"]
+      identityId: left.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(left.identityId, left.secret).linkCode, displayName: "Sweep bond left", permissions: ["accept_work"]
     });
     fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: right.identityId, displayName: "Sweep bond right", permissions: ["accept_work"]
+      identityId: right.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(right.identityId, right.secret).linkCode, displayName: "Sweep bond right", permissions: ["accept_work"]
     });
     // Graduated autonomy tiers: linked agent identities enroll at t1_readonly;
     // promote them so the sweep exercises the bond command surface.

@@ -100,7 +100,7 @@ test("deleting a message removes its text from storage and every listed read", a
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Redaction reader");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Reader", permissions: [] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Reader", permissions: [] });
   const cmd = (type, data) => store.command(ownerKey, "commons", { id: randomUUID(), type, data });
   cmd(T.MEMBER_ADDED, { memberId: "agent-priv", displayName: "Priv agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const agentKey = store.issueAccessKey("commons", "agent-priv");
@@ -197,7 +197,7 @@ test("deleting a message removes its text from storage and every listed read", a
   });
   const receiptVars = { roomId: "commons", messageId: "draft-1", needle: "Potter", workItemId: WORK_ITEM };
   const receiptIdentity = fixture.store.identities.create("Receipt reader");
-  fixture.store.identities.link(fixture.keys.owner, "commons", { identityId: receiptIdentity.identityId, displayName: "Receipt", permissions: [] });
+  fixture.store.identities.link(fixture.keys.owner, "commons", { identityId: receiptIdentity.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(receiptIdentity.identityId, receiptIdentity.secret).linkCode, displayName: "Receipt", permissions: [] });
   for (const row of MESSAGE_BODY_READS) {
     if (row.group !== "receipt" && row.group !== "mcp") continue;
     seen.add(row.id);

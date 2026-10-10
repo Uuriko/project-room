@@ -103,7 +103,7 @@ test("incoming pending proposals are capped per recipient", async t => {
   for (let i = 0; i < MAX_INCOMING_PROPOSALS + 2 && lastStatus === 201; i++) {
     const proposer = fixture.store.identities.create(`m3 proposer ${i}`);
     const linked = fixture.store.identities.link(owner.secret, roomId, {
-      identityId: proposer.identityId, displayName: `P${i}`, permissions: ["accept_work"]
+      identityId: proposer.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(proposer.identityId, proposer.secret).linkCode, displayName: `P${i}`, permissions: ["accept_work"]
     });
     // #953: new members default to t1_readonly; proposers need write access for bond.propose
     setTier(fixture.store.db, roomId, linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
@@ -123,7 +123,7 @@ test("expired proposals stop counting toward the incoming cap (they can no longe
  const proposer = i => {
  const identity = fixture.store.identities.create(`m3 expiry proposer ${i}`);
  const linked = fixture.store.identities.link(owner.secret, roomId, {
- identityId: identity.identityId, displayName: `E${i}`, permissions: ["accept_work"]
+ identityId: identity.identityId, identityLinkCode: fixture.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: `E${i}`, permissions: ["accept_work"]
  });
  setTier(fixture.store.db, roomId, linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: fixture.store.now() });
  return identity;

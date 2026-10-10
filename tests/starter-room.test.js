@@ -177,7 +177,7 @@ test("a choice closes the starter with a result card, then the first agent is as
   assert.equal(roomUsageSummary(store, ownerKey, "script-room").members.agents, 0);
   const identity = store.identities.create("Pair Agent");
   store.identities.link(ownerKey, "script-room", {
-    identityId: identity.identityId, displayName: "Pair Agent", permissions: ["accept_work", "complete_work"]
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Pair Agent", permissions: ["accept_work", "complete_work"]
   });
   assert.equal(store.workClaims.get("script-room", "agent-pair-agree").owner, identity.identityId);
   const assign = store.room("script-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
@@ -228,7 +228,7 @@ test("a caught receipt index failure preserves the done claim without a partial 
   assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/claim", ownerKey, {})).status, 200);
   assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/update", ownerKey, { state: "in_progress" })).status, 200);
   const identity = store.identities.create("Receipt observer");
-  store.identities.link(ownerKey, "fault-room", { identityId: identity.identityId, displayName: "Observer", permissions: [] });
+  store.identities.link(ownerKey, "fault-room", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Observer", permissions: [] });
   const { subscription } = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
     url: "https://observer.example/receipt", events: ["message.posted"], secret: "synthetic-receipt-observer-secret" });
   store.db.exec(`CREATE TRIGGER reject_receipt_index BEFORE INSERT ON messages

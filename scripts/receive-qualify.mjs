@@ -22,7 +22,9 @@ async function qualify() {
   const owner = store.identities.create('Qualify owner');
   const agent = store.identities.create('Qualify receiver');
   new AgentRooms(store).create(owner.secret, { roomId, title: 'Qualify', purpose: 'Synthetic receive qualification' });
-  store.identities.link(owner.secret, roomId, { identityId: agent.identityId, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
+  store.identities.link(owner.secret, roomId, { identityId: agent.identityId,
+    identityLinkCode: store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode,
+    memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   store.dmConsents.request(roomId, owner.identityId, 'receiver', 'Synthetic request');
   store.dmConsents.decide(roomId, 'receiver', owner.identityId, 'approve');
   store.dmConsents.request(roomId, 'receiver', owner.identityId, 'Synthetic reply');

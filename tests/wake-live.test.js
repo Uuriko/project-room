@@ -223,7 +223,7 @@ test("GET /api/wake-status?roomId= lists the room's wakeable and not-wakeable me
   const outsider = await keyedAgent(f, origin, "wake-outsider-agent");
   for (const [i, a] of [live, idle, never].entries()) {
     f.store.identities.link(f.keys.owner, "commons", {
-      identityId: a.identity.identityId, memberId: a.identity.identityId,
+      identityId: a.identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(a.identity.identityId, a.identity.secret).linkCode, memberId: a.identity.identityId,
       displayName: `wake test ${i}`, permissions: ["write_external"],
     });
   }

@@ -223,7 +223,7 @@ test("agent room owner can set the existing room-wide allowance and non-owner ma
   const before = f.store.room(agentRoomId).state.room.spendAllowance;
   assert.equal(before, undefined);
   const peerIdentity = f.store.identities.create("Allowance peer");
-  f.store.identities.link(agentKey, agentRoomId, { identityId: peerIdentity.identityId, permissions: [] });
+  f.store.identities.link(agentKey, agentRoomId, { identityId: peerIdentity.identityId, identityLinkCode: f.store.identities.mintLinkCode(peerIdentity.identityId, peerIdentity.secret).linkCode, permissions: [] });
   // A #761 membership-administration grant is deliberately not spend authority.
   f.store.delegation.grant(agentKey, agentRoomId, { identityId: peerIdentity.identityId });
   assert.equal(f.store.delegation.hasGrant(agentRoomId, peerIdentity.identityId), true);

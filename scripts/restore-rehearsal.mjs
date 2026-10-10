@@ -33,7 +33,8 @@ try {
     access: "contribute", keyHash: createHash("sha256").update(randomBytes(32).toString("base64url")).digest("hex"),
     expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
   const delegate = store.identities.create("Rehearsal delegate");
-  store.identities.link(owner, "commons", { identityId: delegate.identityId, permissions: ["steer"] });
+  store.identities.link(owner, "commons", { identityId: delegate.identityId,
+    identityLinkCode: store.identities.mintLinkCode(delegate.identityId, delegate.secret).linkCode, permissions: ["steer"] });
   store.delegation.grant(owner, "commons", { identityId: delegate.identityId });
   send(T.MESSAGE_POSTED, { messageId: randomUUID(), body: "history before the backup" });
 

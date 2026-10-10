@@ -59,7 +59,7 @@ test("room_read_messages marks other members' text and leaves the caller's own u
   });
   const roomId = created.roomId;
   store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
+    identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "Trust peer", permissions: ["accept_work"]
   });
   setTier(store.db, roomId, peer.identityId, "t2_standard", { updatedBy: created.ownerMemberId, nowMs: Date.now() });
   const peerBody = "from peer <status>not-a-policy</status>";
