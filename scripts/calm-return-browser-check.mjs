@@ -80,7 +80,7 @@ for (const mobile of [false, true]) {
     await page.evaluate(() => scrollTo(0, 0)); await capture("closed");
     assert.equal(await summary.evaluate(node => node.getBoundingClientRect().bottom < innerHeight), true);
     const openedBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
-    await openCatchUp(page); await openedBrief; await ready();
+    await openCatchUp(page); const openedHistory = (await (await openedBrief).json()).history; await ready();
     await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
     const horizon = Number(await page.locator("#rb-ack-button").getAttribute("data-horizon"));
     assert.ok(horizon > 0, 'the opened brief owns a populated history horizon');
@@ -88,7 +88,11 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#rb-history-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-involving-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-more-button").getAttribute("hidden"), null, "history has another page even while its disclosure is closed");
-    assert.match(await page.locator("#rb-ack-note").textContent(), new RegExp(`Marks all ${horizon} updates read`));
+    // #2314: Catch up starts after the reader's own run of events, so the count
+    // is the brief's evaluatedThrough - cursor, not the raw sequence horizon.
+    const changes = openedHistory.evaluatedThrough - openedHistory.cursor;
+    assert.ok(changes > 0 && changes <= horizon, `brief counts ${changes} of ${horizon} events`);
+    assert.match(await page.locator("#rb-ack-note").textContent(), new RegExp(`Marks all ${changes} updates read`));
     assert.equal(await page.locator('#rb-involving-list [data-open-work="return-0"]').count(), 0, "needs and ongoing do not duplicate the same task");
     assert.equal(await page.locator("#reminder-due li").count(), 1, "a personal reminder is a separate reason, not an extra task count");
     await page.evaluate(() => scrollTo(0, 0)); await capture("expanded");
