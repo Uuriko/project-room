@@ -1657,6 +1657,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const wikiReply = wikiReadApi.handle(url.pathname, req.method, url.searchParams);
         if (wikiReply) return json(res, wikiReply.status, wikiReply.body, req.method === "HEAD");
       }
+      // --- GR2: apply the /room acquisition-page aliases before the discovery
+      // packets below - /room/agents is also an agents.md short-packet synonym
+      // (deploy/agent-discovery.mjs SHORT_PACKET_SYNONYMS), and without this
+      // ordering the packet won and the page was served as text/plain. The
+      // JSON packet stays at /room/agents.json. ---
+      const gr2Alias = gr2PublicPath(url.pathname);
+      if (gr2Alias) url.pathname = gr2Alias;
+      // --- end GR2 ---
       // Public Hosts (www / lobby / apex) reverse-proxy /room here. Browsers
       // go directly to the canonical workspace app. Packets stay
       // at /llms.txt, /room/llms.txt, /skill.md, /room/skill, agent.json,
@@ -1871,10 +1879,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- GR1 public pages: live receipts and /room/<marketing> aliases ---
       const gr1Alias = gr1PublicPath(url.pathname);
       if (gr1Alias) url.pathname = gr1Alias;
-      // --- GR2 ---
-      const gr2Alias = gr2PublicPath(url.pathname);
-      if (gr2Alias) url.pathname = gr2Alias;
-      // --- end GR2 ---
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
