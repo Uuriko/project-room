@@ -4569,10 +4569,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // keep the stored marker so an agent never skips its own events on resume.
   catchUpCursor(roomId, memberId) {
     const stored = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, memberId)?.sequence ?? 0;
+    // since_join readers cannot catch up on the hidden prefix. Keep the
+    // joining event visible, and never rewind a later acknowledged marker.
+    // This only derives the read boundary; it does not store an acknowledgement.
+    const floor = this.historyFloor(roomId, memberId);
+    const after = Math.max(stored, floor ? floor.sequence - 1 : 0);
     const next = this.db.prepare(`SELECT sequence FROM events WHERE room_id=? AND sequence>?
-      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, stored, memberId)?.sequence ?? null;
+      AND coalesce(json_extract(body, '$.actorId'), '') <> ? ORDER BY sequence LIMIT 1`).get(roomId, after, memberId)?.sequence ?? null;
     return this.db.prepare("SELECT coalesce(max(sequence), ?) AS sequence FROM events WHERE room_id=? AND sequence>? AND (? IS NULL OR sequence<?)")
-      .get(stored, roomId, stored, next, next).sequence;
+      .get(after, roomId, after, next, next).sequence;
   }
   markCaughtUp(token, roomId, sequence, expectedSessionBinding = null) {
     return this.transaction(() => {
