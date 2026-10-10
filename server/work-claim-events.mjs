@@ -14,6 +14,7 @@ import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedW
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { recordPluginFunnelStage } from "./plugin-funnel.mjs"; // Lane 10: plug-in funnel first_claim / first_receipt stages
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -200,6 +201,25 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   if (action === "state_changed" && item.state === "done") {
     try { postReceiptCard(store, roomId, item, stamp); }
     catch (error) { console.error("work claim receipt card failed:", error?.message ?? error); }
+  }
+  // Plug-in funnel (lane 10): first_claim on the claim action, first_receipt
+  // when an owned claim reaches done (the same transition that posts the
+  // in-room receipt card above). Attributed via identity_links from the
+  // claim owner (falling back to the acting member). Runs inside the caller's
+  // claim transaction, so the funnel row commits or rolls back with the
+  // claim; a metrics failure never breaks the claim path.
+  if (action === "claimed" || (action === "state_changed" && item.state === "done")) {
+    try {
+      const memberId = item.owner ?? actorId;
+      const identityId = typeof memberId === "string" ? linkedIdentityId(store, roomId, memberId) : null;
+      if (identityId) {
+        recordPluginFunnelStage(store.db, {
+          identityId,
+          stage: action === "claimed" ? "first_claim" : "first_receipt",
+          atMs: stamp,
+        });
+      }
+    } catch (error) { console.error("plugin funnel record failed:", error?.message ?? error); }
   }
   return { sequence, event: incoming };
 }

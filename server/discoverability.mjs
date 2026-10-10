@@ -131,6 +131,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
+  route("/api/plugin-funnel", ["GET"], "none", "Agent plug-in funnel (doc read -> mint -> join -> first claim -> first receipt -> day-7 active): aggregate counts, drop-off rates, weekly cohorts. No per-agent data.", "getPluginFunnel"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity",
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),
