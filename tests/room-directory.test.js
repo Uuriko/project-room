@@ -124,6 +124,24 @@ test("listing skips rooms whose state is unusable instead of 500ing", () => {
   assert.equal(rooms.length, 0); // blank title -> skipped
 });
 
+test("a skipped listed room does not consume the directory page or the cursor", () => {
+  const store = makeStore({
+    "a-blank": stateFor("a-blank", { title: "   " }),
+    "b-visible": stateFor("b-visible", { title: "Visible room" }),
+    "c-later": stateFor("c-later", { title: "Later room" }),
+  });
+  const dir = new RoomDirectory(store);
+  for (const id of ["a-blank", "b-visible", "c-later"]) dir.set(id, "owner", true);
+  const first = dir.list({ limit: 1 });
+  assert.deepEqual(first.rooms.map(room => room.roomId), ["b-visible"]);
+  assert.equal(first.nextCursor, "b-visible");
+  assert.equal(JSON.stringify(first).includes("a-blank"), false);
+  assert.equal(first.rooms[0].title, "Visible room");
+  const second = dir.list({ after: first.nextCursor, limit: 1 });
+  assert.deepEqual(second.rooms.map(room => room.roomId), ["c-later"]);
+  assert.equal(second.nextCursor, null);
+});
+
 test("pagination cursors and limit clamping", () => {
   const states = {};
   for (let i = 1; i <= 5; i++) states[`r${i}`] = stateFor(`r${i}`, { title: `Room ${i}` });

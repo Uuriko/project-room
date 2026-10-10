@@ -193,22 +193,42 @@ export class RoomDirectory {
     const n = limit == null || limit === "" ? NaN : Number(limit);
     const pageSize = Number.isFinite(n) ? Math.min(Math.max(Math.floor(n), 1), DIRECTORY_PAGE_LIMIT) : DIRECTORY_DEFAULT_LIMIT;
     if (after != null && (typeof after !== "string" || after.length > 384)) fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
-    const rows = this.db.prepare(`
+    // A listed room can still be unpublished or untitled. Dropping it after
+    // the page is cut leaves an empty page and that room id as nextCursor,
+    // so a reader who stops on an empty page never sees the next visible room.
+    // Walk until the page is full of visible rooms, or the listing is exhausted.
+    const select = this.db.prepare(`
         SELECT s.room_id AS roomId, s.listed_at AS listedAt
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
         WHERE s.discoverable = 1 AND r.archived_at IS NULL
           AND (? IS NULL OR s.room_id > ?)
         ORDER BY s.room_id ASC
-        LIMIT ?`).all(after ?? null, after ?? null, pageSize + 1);
-    const page = rows.slice(0, pageSize);
-    const rooms = page.flatMap(row => {
-      const entry = this._publicEntry(row.roomId, row.listedAt);
-      return entry ? [entry] : [];
-    });
+        LIMIT ?`);
+    const rooms = [];
+    let cursor = after ?? null;
+    let exhausted = false;
+    for (let hop = 0; hop < 200 && rooms.length < pageSize; hop += 1) {
+      const rows = select.all(cursor, cursor, pageSize + 1);
+      if (!rows.length) { exhausted = true; break; }
+      for (const row of rows) {
+        cursor = row.roomId;
+        const entry = this._publicEntry(row.roomId, row.listedAt);
+        if (!entry) continue;
+        rooms.push(entry);
+        if (rooms.length === pageSize) break;
+      }
+      if (rooms.length === pageSize) {
+        exhausted = select.all(cursor, cursor, 1).length === 0;
+        break;
+      }
+      if (rows.length <= pageSize) { exhausted = true; break; }
+    }
     return {
       rooms,
-      nextCursor: rows.length > pageSize ? page[page.length - 1].roomId : null,
+      // A full page of skips still advances, so the next read is not stuck on
+      // the same empty page. The cursor is a visible room whenever one fit.
+      nextCursor: exhausted ? null : rooms.at(-1)?.roomId ?? cursor,
     };
   }
 
