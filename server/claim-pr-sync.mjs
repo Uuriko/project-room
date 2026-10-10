@@ -429,6 +429,89 @@ function loadDueClaims(store, nowMs) {
   return due;
 }
 
+// Search batch (bug-claim-pr-sync-rate-limited-no-settle-20261010). Prod polls
+// without a token, so the per-pull REST lookups share 60 core requests an hour
+// per egress IP and the shared reset can hold every claim for an hour. GitHub's
+// search API has its own quota (10 a minute without a token), so one search per
+// repo per tick finds recently merged or closed pulls for every held claim at
+// once and settles them through the same commitPullRequestLookup path. land and
+// deploy claims need the merge sha, so a merged one stays with the REST lookup.
+// CLAIM_PR_SEARCH_BATCH=0 turns this off.
+const SEARCH_REPOS_PER_TICK = 2;
+const SEARCH_CLAIM_CAP = 200;
+const SEARCH_WINDOW_MS = 14 * 24 * 3600 * 1000;
+const SEARCH_BODY_CHARS = 1_000_000;
+
+function loadHeldPullClaims(store) {
+  let rows = [];
+  try {
+    rows = store.db.prepare(`
+      SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
+        AND typeof(COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url'))) = 'text'
+      LIMIT ?
+    `).all(SEARCH_CLAIM_CAP);
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
+  const held = [];
+  for (const row of rows) {
+    const item = store.workClaims.get(row.roomId, row.claimId);
+    if (!item || !["claimed", "in_progress", "blocked"].includes(item.state)) continue;
+    const open = pullLinks(item).filter(pull => pull?.url && pull.repo && Number.isSafeInteger(pull.number) && !pull.outcome);
+    if (open.length) held.push({ roomId: row.roomId, item, open });
+  }
+  return held;
+}
+
+async function searchClosedPulls(repo, { fetchImpl, token, nowMs, deadline }) {
+  const budgetMs = deadline - Date.now();
+  if (!(budgetMs > 0)) return null;
+  const since = new Date(nowMs - SEARCH_WINDOW_MS).toISOString().slice(0, 10);
+  const q = `repo:${repo} is:pr is:closed updated:>=${since}`;
+  const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}&sort=updated&order=desc&per_page=50`;
+  let response;
+  try {
+    response = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(Math.min(5000, budgetMs)) });
+  } catch { return null; }
+  if (response.status !== 200) return null;
+  const length = responseHeader(response, "content-length");
+  if (length && /^\d+$/.test(length) && Number(length) > SEARCH_BODY_CHARS) return null;
+  let body;
+  try { body = typeof response.text === "function" ? JSON.parse(await response.text()) : await response.json(); } catch { return null; }
+  const found = new Map();
+  for (const hit of Array.isArray(body?.items) ? body.items : []) {
+    if (!Number.isSafeInteger(hit?.number) || hit.state !== "closed" || !hit.pull_request) continue;
+    found.set(hit.number, hit.pull_request.merged_at ? "merged" : "closed");
+  }
+  return found;
+}
+
+export async function settleFromSearch(store, { env = null, fetchImpl = fetch, token = null, nowMs = Date.now(), deadline = Infinity } = {}) {
+  if (String((env ?? {}).CLAIM_PR_SEARCH_BATCH ?? "").trim() === "0") return 0;
+  const held = loadHeldPullClaims(store);
+  if (!held.length) return 0;
+  const repos = [...new Set(held.flatMap(entry => entry.open.map(pull => pull.repo)))].slice(0, SEARCH_REPOS_PER_TICK);
+  let settled = 0;
+  for (const repo of repos) {
+    const found = await searchClosedPulls(repo, { fetchImpl, token, nowMs, deadline });
+    if (!found || !found.size) continue;
+    store.workClaims.transaction(() => {
+      for (const { roomId, item, open } of held) {
+        for (const pull of open) {
+          if (pull.repo !== repo || !found.has(pull.number)) continue;
+          const kind = found.get(pull.number);
+          if (kind === "merged" && (item.kind === "land" || item.kind === "deploy")) continue;
+          const current = store.workClaims.get(roomId, item.id);
+          if (commitPullRequestLookup(store, store.workClaims, roomId, current, { url: pull.url, kind, mergedSha: null }, nowMs)) settled += 1;
+        }
+      }
+    });
+  }
+  return settled;
+}
+
 // Poll every room that has an open pull link. A shared reset skips the tick
 // before any request. A missing token does not fail the tick.
 export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined, deadline = Infinity, yieldBetween = null } = {}) {
@@ -442,7 +525,12 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   sweepStaleUnclaimedClaims(store, nowMs);
   const access = token === undefined ? githubToken(env ?? process.env) : token;
   if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
-  if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
+  // While the shared core budget is spent, the REST poll makes no call; the
+  // search batch (separate quota) still settles merged and closed pulls.
+  if (readClaimPullBudget(store) > nowMs) {
+    const searchSettled = await settleFromSearch(store, { env: env ?? process.env, fetchImpl, token: access, nowMs, deadline });
+    return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}) };
+  }
   const due = loadDueClaims(store, nowMs);
   if (due.length === 0) return { checked: 0, updated: 0 };
   // Claim ids are room-scoped, so lookup results carry their room and the

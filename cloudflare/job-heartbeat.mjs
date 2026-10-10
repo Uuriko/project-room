@@ -146,6 +146,9 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
     const stale = enabled && !waiting && (ageSeconds === null || ageSeconds > staleAfterSeconds);
     const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
+    // A tick that succeeded but was held by GitHub's rate limit did no work.
+    // Show it, without turning a recoverable wait into a 503.
+    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited' : null;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
@@ -158,18 +161,20 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
       stale,
+      degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : 'ok'
+      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
-  const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing' : 'ok';
+  const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing'
+    : active.some(job => job.status === 'degraded') ? 'degraded' : 'ok';
   return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
 }
 
 export function jobHealthResponse(view, { head = false } = {}) {
   const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
-  return new Response(head ? null : JSON.stringify(view), { status: view?.status === 'ok' ? 200 : 503, headers });
+  return new Response(head ? null : JSON.stringify(view), { status: view?.status === 'ok' || view?.status === 'degraded' ? 200 : 503, headers });
 }
 
 export function jobHealthUnavailable({ head = false } = {}) {
