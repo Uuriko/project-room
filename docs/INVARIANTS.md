@@ -87,8 +87,8 @@ bounties) are pinned; the room-message path still awaits its proof, and no
 **Escalation when it breaks:** a duplicate that slips through is a
 data-integrity incident. Claim the fix first (first-claim-wins against the
 live work-claim board), write the fail-first regression in
-`tests/invariants/retry-semantics.test.mjs`, and route the PR through the
-merge queue. If the duplicate touched a spend path, flag the room owner the
+`tests/invariants/retry-semantics.test.mjs`, and land the PR from the
+merge-slot. If the duplicate touched a spend path, flag the room owner the
 same day — duplicates near money are security-adjacent.
 
 ---
@@ -133,7 +133,7 @@ storage faults.
 
 **Escalation when it breaks:** same-day room-owner flag (failed actions
 that lose data are trust-destroying by definition), fail-first regression
-that asserts pre/post state equality, fix through the merge queue. G1-class
+that asserts pre/post state equality, fix landed from the merge-slot. G1-class
 findings go to the owner before a fix is written, per the failseq lane's
 standing deferral.
 
@@ -175,7 +175,7 @@ PR is still open. **Until #2088 lands, this invariant is not fully held.**
 **Escalation when it breaks:** stale-write bugs destroy other people's live
 work — the worst failure mode in a shared room. Same-day owner flag,
 fail-first regression at both the state-machine level and the HTTP
-boundary, fix through the merge queue with all in-repo callers migrated
+boundary, fix landed from the merge-slot with all in-repo callers migrated
 (the #2088 breaking-change pattern: every caller reads the round first).
 
 ---
