@@ -277,6 +277,19 @@ test("kill-switch state module: defaults OFF, per-room, in-memory", async t => {
   assert.equal(ks.isEngaged("room-a"), true);
 });
 
+test("assertKillSwitchOpen: throws 503 while engaged, silent otherwise", async t => {
+  const { createKillSwitchState, assertKillSwitchOpen } = await import("../server/kill-switch.mjs");
+  const store = { killSwitch: createKillSwitchState() };
+  assert.doesNotThrow(() => assertKillSwitchOpen(store, "r1"), "open switch passes silently");
+  assert.doesNotThrow(() => assertKillSwitchOpen({}, "r1"), "a store without kill-switch state passes (nothing to enforce)");
+  assert.doesNotThrow(() => assertKillSwitchOpen(null, "r1"));
+  store.killSwitch.engage("r1");
+  assert.throws(() => assertKillSwitchOpen(store, "r1"),
+    error => error.status === 503 && error.code === "kill_switch_engaged",
+    "engaged switch throws the documented code");
+  assert.doesNotThrow(() => assertKillSwitchOpen(store, "r2"), "other rooms unaffected");
+});
+
 test("the in-memory registry fixture stays usable for pure-state tests", t => {
   const registry = createWorkClaimRegistry();
   assert.equal(typeof registry.get, "function");
