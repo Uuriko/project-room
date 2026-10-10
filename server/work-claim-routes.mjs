@@ -62,7 +62,7 @@ import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
 // FIX-66 STORM kill-switch: the room owner's global STOP for the claim plane.
-import { KILL_SWITCH_ENGAGED_CODE, KILL_SWITCH_OWNER_CODE, appendKillSwitchEvent } from "./kill-switch.mjs";
+import { KILL_SWITCH_ENGAGED_CODE, KILL_SWITCH_MESSAGE, KILL_SWITCH_OWNER_CODE, appendKillSwitchEvent, assertKillSwitchOpen } from "./kill-switch.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -512,6 +512,9 @@ export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", r
       reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
     }
     if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    // FIX-66: the MCP tool bypasses handleWorkClaims, so the kill-switch
+    // freeze is enforced here too — an agent-reachable mutation.
+    assertKillSwitchOpen(store, roomId);
     if (verb !== "close" && verb !== "cancel") reject(422, "invalid_claim_input", "verb must be close or cancel");
     const access = resolveWorkClaimAccess(store, roomId, current);
     if (!mayWriteWorkClaims(access)) refuseWorkClaims();
@@ -540,6 +543,9 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     const current = reauthorize ? reauthorize() : auth;
     if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
     if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
+    // FIX-66: the MCP tool bypasses handleWorkClaims, so the kill-switch
+    // freeze is enforced here too — an agent-reachable mutation.
+    assertKillSwitchOpen(store, roomId);
     if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
       scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
       reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
@@ -598,9 +604,8 @@ export async function handleWorkClaims(options) {
   const killSwitch = options.killSwitch ?? options.store?.killSwitch ?? null;
   if (killSwitch && options.workClaimRoute !== "kill-switch"
     && req.method === "POST" && killSwitch.isEngaged(options.roomId)) {
-    const message = "The room owner has engaged the work-claim kill switch; claim writes are frozen while it is engaged.";
     return helpers.json(res, 503, {
-      error: { code: KILL_SWITCH_ENGAGED_CODE, message },
+      error: { code: KILL_SWITCH_ENGAGED_CODE, message: KILL_SWITCH_MESSAGE },
       hint: "Reads still work. The room owner disengages the switch when the flood has passed.",
       next: [{ command: "Ask the room owner to disengage the work-claim kill switch." }],
     });
@@ -746,10 +751,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return item;
   };
   const closeLiveClaims = () => {
-    // FIX-66: while the kill-switch is engaged the board is fully frozen —
-    // no claim state changes from any request path, including the automatic
-    // land/deploy live-close on reads.
-    if (killSwitch?.isEngaged(roomId)) return [];
     const closed = [];
     for (const item of registry.list(roomId)) {
       if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
@@ -760,9 +761,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     return closed;
   };
-  // FIX-66: while the kill-switch is engaged, expired leases are not reaped —
-  // engagement freezes all claim state changes, including housekeeping.
-  const sweptIds = killSwitch?.isEngaged(roomId) ? [] : sweepRoom(registry, roomId, nowMs, (item, before) => {
+  // Lease-expiry reaping is the room's own clock, not an agent mutation:
+  // it keeps running while the kill-switch is engaged — leases keep their
+  // TTLs (docs/KILL-SWITCH.md). Only agent-initiated writes freeze.
+  const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
     const receipt = emitWorkClaimEvent(store, roomId, {
       actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
       atMs: nowMs, paths: before.files ?? []

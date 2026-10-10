@@ -18,6 +18,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
+import { assertKillSwitchOpen } from "./kill-switch.mjs"; // FIX-66 STORM kill-switch: freeze agent-reachable claim writes.
 
 import { prepareWork } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -281,6 +282,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     if (!ownerId || ownerId !== auth.member.id) {
       throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the claim caps.");
     }
+    // FIX-66: claim caps are claim-plane writes — frozen while engaged.
+    assertKillSwitchOpen(store, roomId);
     const patch = {};
     for (const key of ["maxMemberOpenClaims", "maxOpenClaims"]) {
       const value = rest[key];

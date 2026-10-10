@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { handleWorkClaims, createWorkClaimRegistry } from "../server/work-claim-routes.mjs";
+import { handleWorkClaims, createWorkClaimRegistry, closeWorkClaim, linkWorkClaimPullRequest } from "../server/work-claim-routes.mjs";
 
 const ROOM = "kill-switch-room";
 const OWNER = { member: { id: "owner", kind: "human", permissions: [] } };
@@ -190,27 +190,54 @@ test("a fresh in-memory store defaults OFF", async t => {
   }
 });
 
-test("while engaged, expired leases are not reaped — not even by reads", async t => {
+test("while engaged, lapsed leases still expire — leases keep their TTLs", async t => {
   let now = Date.now();
   const store = new RoomStore(":memory:", { now: () => now });
   store.initialize(initialRoom(ROOM));
   t.after(() => store.close());
   await callWith(store, { route: "create", body: { id: "ks-exp", files: ["server/exp.mjs"] } });
   await callWith(store, { route: "claim", id: "ks-exp", body: { leaseHours: 1 } });
-  await killSwitch(store, "engage", { reason: "freeze the board" });
+  await killSwitch(store, "engage", { reason: "freeze agent churn, not the clock" });
   now += 2 * 60 * 60 * 1000; // lease lapses while the switch is engaged
   const list = await callWith(store, { auth: AGENT, route: "list" });
   assert.equal(list.status, 200);
-  assert.deepEqual(list.value.swept, [], "no housekeeping while engaged");
+  assert.deepEqual(list.value.swept, ["ks-exp"], "the room's own clock keeps running while engaged");
   const item = store.workClaims.get(ROOM, "ks-exp");
-  assert.equal(item.state, "claimed", "the lapsed lease is left alone while engaged");
-  assert.equal(item.owner, "owner");
-  // After disengage the next sweep reaps it normally.
-  await killSwitch(store, "disengage");
+  assert.equal(item.state, "unclaimed", "a lapsed lease expires normally; only agent writes freeze");
+  assert.equal(item.history.at(-1).action, "lease_expired");
+  // The member-triggered sweep endpoint is still frozen (agent-initiated).
   const sweep = await callWith(store, { route: "sweep", body: {} });
-  assert.equal(sweep.status, 200);
-  assert.deepEqual(sweep.value.released, ["ks-exp"]);
-  assert.equal(store.workClaims.get(ROOM, "ks-exp").state, "unclaimed");
+  assert.equal(sweep.status, 503);
+  assert.equal(sweep.value.error.code, "kill_switch_engaged");
+});
+
+// --- MCP direct paths (bypass handleWorkClaims) ------------------------------
+
+test("MCP closeWorkClaim freezes while engaged", async t => {
+  const store = makeStore(t);
+  await callWith(store, { route: "create", body: { id: "ks-mcp", files: ["server/m.mjs"] } });
+  await callWith(store, { route: "claim", id: "ks-mcp", body: { leaseHours: 6 } });
+  await killSwitch(store, "engage");
+  assert.throws(
+    () => closeWorkClaim({ store, roomId: ROOM, auth: OWNER, claimId: "ks-mcp", verb: "close", reason: "storm" }),
+    error => error.status === 503 && error.code === "kill_switch_engaged",
+    "the MCP close path must honor the freeze"
+  );
+  assert.equal(store.workClaims.get(ROOM, "ks-mcp").state, "claimed", "the frozen close must not mutate");
+  await killSwitch(store, "disengage");
+  const closed = closeWorkClaim({ store, roomId: ROOM, auth: OWNER, claimId: "ks-mcp", verb: "close", reason: "storm" });
+  assert.equal(closed.state, "closed");
+});
+
+test("MCP linkWorkClaimPullRequest freezes while engaged", async t => {
+  const store = makeStore(t);
+  await killSwitch(store, "engage");
+  assert.throws(
+    () => linkWorkClaimPullRequest({ store, roomId: ROOM, auth: OWNER, claimId: "nope",
+      data: { appendPullRequest: "https://github.com/Uuriko/project-room/pull/1", expectedClaimedAt: null, expectedHistoryLength: 0 } }),
+    error => error.status === 503 && error.code === "kill_switch_engaged",
+    "the MCP PR-link path must honor the freeze before any other validation"
+  );
 });
 
 // --- audit trail -----------------------------------------------------------

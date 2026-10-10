@@ -12,9 +12,12 @@
 // does not drive enforcement.
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, applyEvent, event, isRoomArchived } from "../src/events.js";
+import { ServiceError } from "./service-error.mjs";
 
 export const KILL_SWITCH_ENGAGED_CODE = "kill_switch_engaged";
 export const KILL_SWITCH_OWNER_CODE = "owner_required";
+export const KILL_SWITCH_MESSAGE =
+  "The room owner has engaged the work-claim kill switch; claim writes are frozen while it is engaged.";
 
 // In-memory only. A new instance (process restart, new store) is always OFF.
 export function createKillSwitchState() {
@@ -30,6 +33,19 @@ export function createKillSwitchState() {
       engagedRooms.delete(roomId);
     },
   };
+}
+
+// Throwing guard for the non-HTTP claim-mutation paths. The MCP tools call
+// the work-claim functions directly, bypassing handleWorkClaims, so each
+// agent-reachable mutation entry point enforces the freeze itself.
+// Agent-initiated claim mutations freeze while engaged; the room's own
+// time-based housekeeping (lease expiry, PR settlement) is not
+// agent-initiated and keeps running — leases keep their TTLs.
+export function assertKillSwitchOpen(store, roomId) {
+  const killSwitch = store?.killSwitch;
+  if (killSwitch && killSwitch.isEngaged(roomId)) {
+    throw new ServiceError(503, KILL_SWITCH_ENGAGED_CODE, KILL_SWITCH_MESSAGE);
+  }
 }
 
 // Audit append for engage/disengage. Mirrors emitWorkClaimEvent's append path

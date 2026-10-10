@@ -47,6 +47,11 @@ The check is a **single choke point** in `handleWorkClaims`
 kill-switch route itself is rejected with **HTTP 503** and
 `error.code = "kill_switch_engaged"` while engaged. Method-based, so a future
 mutation route freezes by default (fail-closed for new writes).
+The MCP tools that bypass `handleWorkClaims` enforce the same freeze at
+their own entry points (`closeWorkClaim`, `linkWorkClaimPullRequest`,
+`room_set_member_claim_cap` in `server/mcp-full-profile.mjs`) via the
+shared `assertKillSwitchOpen` guard — an agent with MCP access cannot walk
+around the STOP.
 
 **Reads stay live**: `GET` list / read / status / duplicates / receipts /
 provenance / config — agents can still see the board, their leases, and the
@@ -60,14 +65,15 @@ the switch is a legible, total freeze.
 
 - **Engagement force-releases nothing.** Live claims keep their owners, files,
   and lease TTLs untouched.
-- Leases keep their TTLs; they are simply **not reaped** while engaged
-  (sweep is frozen). On disengage, the next sweep reaps lapsed leases normally.
-- **Automatic housekeeping is suspended too.** Lease-expiry reaping and the
-  land/deploy live-close normally run as side effects of ordinary requests
-  (including GETs); while engaged they are skipped, so no request path can
-  change claim state. The board is fully frozen, not just the POST routes.
+- **Leases keep their TTLs — literally.** The freeze covers *agent-initiated*
+  mutations only. The room's own time-based housekeeping — lease-expiry
+  reaping (on requests and on the cron), the land/deploy live-close, and PR
+  settlement — keeps running while engaged. A lease that lapses during
+  engagement expires normally; its holder simply cannot renew, extend, or
+  re-claim until the owner disengages. The STOP halts agent churn; it does
+  not stop the room's clock.
 - No new claims can be taken while engaged; existing claims cannot be
-  updated, released, renewed, or closed.
+  updated, released, renewed, or closed by any member or agent.
 
 ### 4. Engage / disengage
 
@@ -132,8 +138,10 @@ This is a global STOP — it must not merge without:
       plus the route-docs gate `tests/route-docs-check.test.js` and the
       work-claims suites).
 - [ ] `docs/openapi.yaml` documents the new route (route-docs gate enforces).
-- [ ] Confirm no other POST work-claim route was missed (search
-      `workClaimRoute ===` in `server/work-claim-routes.mjs`).
+- [ ] Confirm no other agent-reachable work-claim mutation was missed: search
+      `workClaimRoute ===` in `server/work-claim-routes.mjs`, and the MCP
+      direct paths (`closeWorkClaim`, `linkWorkClaimPullRequest`,
+      `room_set_member_claim_cap`).
 - [ ] Confirm the archived-room path still refuses engagement (applyEvent
       throws on archived rooms — engagement is a room event and must fail
       there, same as every other room write).
