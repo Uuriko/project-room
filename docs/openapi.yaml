@@ -5029,6 +5029,14 @@ paths:
           description: |
             `summary` returns the compact per-claim projection (id, title,
             state, owner, leaseExpiresAt) instead of the full items.
+        - name: guild
+          in: query
+          schema: { type: string, pattern: '[A-Za-z0-9_-]{1,64}' }
+          description: |
+            Filter to claims tagged with this federated-guild id
+            (docs/FEDERATED-GUILDS.md). Composes with state and queue=ready.
+            Cursors bind the guild filter: a cursor from a different guild
+            (or no guild) is rejected.
       responses:
         '200':
           description: |
@@ -5055,7 +5063,7 @@ paths:
                   hasMore: { type: boolean }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
-        '422': { description: invalid_claim_input — unknown or repeated query parameter, bad limit/cursor, bad view, or state outside the claim states }
+        '422': { description: invalid_claim_input — unknown or repeated query parameter, bad limit/cursor/view/guild, or state outside the claim states }
         '429': { description: Rate limit exceeded (rate_limited). }
     post:
       summary: Register a work claim item
@@ -5123,6 +5131,13 @@ paths:
                 squadId:
                   type: string
                   description: Active squad id this work offer targets. An unknown or inactive squad is 422 squad_unknown.
+                guild:
+                  type: string
+                  pattern: '[A-Za-z0-9_-]{1,64}'
+                  description: |
+                    Federated-guild scope namespace (docs/FEDERATED-GUILDS.md).
+                    Set once at create; null means the flat model. Invalid
+                    guild ids are 422 invalid_claim_input.
                 kind:
                   type: string
                   enum: [work, land, deploy]

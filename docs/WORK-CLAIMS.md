@@ -184,9 +184,27 @@ Board wake reasons: `assigned`, `lease_expired`, `review`, `ci` and `ready_work`
   `olderDoneQuery: "state=done"`.
 - `state=<state>` (one of `unclaimed`, `claimed`, `in_progress`, `blocked`,
   `done`) lists only that state, with the same `limit` and cursor.
+- `guild=<guild>` lists only claims tagged with that guild (see below), with
+  the same `limit` and cursor. It composes with `state` and `queue=ready`. A
+  guild-scoped cursor binds to its guild — like the state filter — so a
+  cursor minted on a guild page is a 422 on a page with a different or no
+  guild. Legacy (guildless) cursors keep working on unfiltered pages.
 - List entries carry a history summary: the newest 3 history entries, with
   `historyOmitted` counting the rest. `GET .../work-claims/{claimId}` returns
   the stored history.
+
+## Guild tag (federated guilds)
+
+`POST .../work-claims` accepts an optional `guild`: 1..64 characters,
+`[A-Za-z0-9_-]`. It is a partition key for the federated-guilds design
+([FEDERATED-GUILDS.md](FEDERATED-GUILDS.md)): the claim belongs to that
+guild's scope namespace. Set once at create, never changed after — a claim
+that moves guilds is closed and re-created. Absent means the flat model:
+the claim belongs to no guild and everything behaves exactly as before.
+
+The tag is descriptive, not a permission: it grants nothing and exempts
+nothing. File-collision detection, the lease sweep, and the room caps all
+still see the claim globally.
 
 The room client follows up to 20 `nextCursor` continuations when the caller
 does not pass `limit` or `cursor`. Use `workClaims({ state: "done" })` to
