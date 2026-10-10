@@ -92,6 +92,55 @@ test("rebuild --commit-push is a no-op when the board is unchanged", () => {
   }
 });
 
+// Full-verb driver for issue #834: sources scripts/room minus its main
+// dispatch, stubs the board-reading pipeline (no network), then runs the
+// REAL cmd_rebuild with a RELATIVE in-repo --out from the repo root — the
+// exact scenario that used to abort on a same-file cp before the commit.
+function rebuildVerbDriver(wt) {
+  const d = join(wt, "rebuild-verb-driver.sh");
+  const lines = [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    `grep -vF 'main "$@"' "${roomScript}" > "${d}.src"`,
+    `. "${d}.src"`,
+    `build_state() { printf '{"tasks":{},"unleased_prose_claims":[],"prose_receipts":[],"comments":0,"generated_at":"2026-10-07T00:00:00Z","watermark":1}'; }`,
+    `registry_json() { printf '[]'; }`,
+    `lease_now() { printf '1790000000'; }`,
+    `cd "${wt}"`,
+    `cmd_rebuild --out ROOM-STATE.md --commit-push`,
+  ];
+  writeFileSync(d, lines.join("\n") + "\n");
+  return d;
+}
+
+test("rebuild --out <in-repo relative path> --commit-push commits and pushes (issue #834)", () => {
+  const { dir, origin, wt } = scratch();
+  try {
+    // Steady state: room-state exists with an older board; main is the
+    // starting branch with a tracked (clean) ROOM-STATE.md.
+    sh(`git -C "${wt}" checkout -qb room-state`);
+    writeFileSync(join(wt, "ROOM-STATE.md"), "previous tick board\n");
+    sh(`git -C "${wt}" add ROOM-STATE.md`);
+    sh(`git -C "${wt}" -c user.name=t -c user.email=t@t commit -qm "previous tick"`);
+    sh(`git -C "${wt}" push -q origin room-state`);
+    sh(`git -C "${wt}" checkout -q main`);
+    const out = runDriver(rebuildVerbDriver(wt));
+    // The write happened and the commit step ran instead of aborting.
+    assert.match(out, /wrote ROOM-STATE\.md/);
+    assert.match(out, /pushed room-state branch/);
+    // The pushed board is the freshly rebuilt one, not the stale tick.
+    const pushed = sh(`git --git-dir="${origin}" show room-state:ROOM-STATE.md`);
+    assert.match(pushed, /# ROOM-STATE — machine board/);
+    assert.match(pushed, /integrity: sha256=/);
+    assert.doesNotMatch(pushed, /^previous tick board$/m);
+    // The verb restored the starting branch.
+    const branch = sh(`git -C "${wt}" rev-parse --abbrev-ref HEAD`).trim();
+    assert.equal(branch, "main");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("rebuild --commit-push creates room-state from main when the branch is new", () => {
   const { dir, origin, wt } = scratch();
   try {
