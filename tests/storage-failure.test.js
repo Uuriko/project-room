@@ -112,7 +112,10 @@ test("an injected SQLITE_FULL rolls the command back, returns 503 storage_unavai
   assert.equal(body.category, "unavailable");
   assert.equal(refused.headers.get("retry-after"), "30");
   assert.match(body.operationId, /^op_/);
-  assert.doesNotMatch(text, /SQLITE|disk|full|readonly|ERR_/i, "driver text must not reach the client");
+  // operationId is random base64url (op_Gs8rerr_ once matched "err_"), so check
+  // everything except that one generated field.
+  const { operationId: _operationId, ...rest } = body;
+  assert.doesNotMatch(JSON.stringify(rest), /SQLITE|disk|full|readonly|ERR_/i, "driver text must not reach the client");
   assert.deepEqual(snapshot(), before, "no partial write: event log, command journal, projection and checkpoint are unchanged");
   assert.deepEqual(store.storageStatus(), { failures: 1, threshold: 2, unavailable: false });
   const record = (await diagnostics()).find(entry => entry.code === "storage_unavailable");
@@ -171,7 +174,7 @@ test("a storage error raised outside a store transaction takes the typed 503 and
     assert.equal(response.status, 503);
     const text = await response.text();
     assert.equal(JSON.parse(text).error.code, "storage_unavailable");
-    assert.doesNotMatch(text, /I\/O|SQLITE|ERR_/i);
+    { const { operationId: _op, ...rest } = JSON.parse(text); assert.doesNotMatch(JSON.stringify(rest), /I\/O|SQLITE|ERR_/i); } // operationId is random and can spell "err_"
     assert.equal(store.storageStatus().failures, expected);
   }
   assert.equal((await request("/api/ready", { token: null })).status, 503);
