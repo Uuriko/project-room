@@ -425,6 +425,7 @@
   "tests/index-html-structure.test.js": 5411,
   "tests/install-sh.test.js": 15665,
   "tests/instance-lock.test.js": 4828,
+  "tests/instance-lock-race.test.js": 20000,
   "tests/integrity-incremental.test.js": 27612,
   "tests/invariants-ci-parser.test.js": 1000,
   "tests/invariants/board-mutations-emit-events.test.mjs": 1353,
