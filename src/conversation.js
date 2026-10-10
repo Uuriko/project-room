@@ -419,8 +419,10 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
     pool = pool.filter(message => messageAddressesMember(message, viewer));
   }
   if (!term && !only && !pinnedOnly) return { messages: [], total: 0, mentionsOnly: false };
+  // A redacted live message keeps body null and no deletedAt. Searching must
+  // skip that text instead of throwing, and still return other matches.
   const matches = !term ? pool : pool.filter(message =>
-    message.body.toLocaleLowerCase().includes(term) ||
+    (typeof message.body === "string" ? message.body.toLocaleLowerCase() : "").includes(term) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));
   return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }
