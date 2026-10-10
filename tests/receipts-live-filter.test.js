@@ -175,3 +175,24 @@ test("the wrapper never reads rooms or rooms.projection on the public path", asy
   const roomReads = seen.filter(sql => /\bfrom\s+rooms\b/i.test(sql) || /rooms\.projection/i.test(sql));
   assert.deepEqual(roomReads, [], "no rooms/rooms.projection reads issued by the wrapper");
 });
+
+test("a newer hidden receipt does not consume the public page or the sitemap slot", async t => {
+  const { store, wcrOf } = serve(t);
+  const alpha = wcrOf("alpha")[0];
+  const gamma = wcrOf("gamma")[0];
+  assert.ok(alpha && gamma, "alpha and gamma have room receipts");
+  store.db.prepare("UPDATE public_receipts SET at=?, origin_room_id=?, room_id=? WHERE id NOT IN (?, ?)")
+    .run("2026-10-09T00:00:00.000Z", "beta", "beta", alpha, gamma);
+  store.db.prepare("UPDATE public_receipts SET at=? WHERE id=?").run("2026-10-08T00:00:00.000Z", alpha);
+  store.db.prepare("UPDATE public_receipts SET at=? WHERE id=?").run("2026-10-01T00:00:00.000Z", gamma);
+  store.roomDirectory.setReceiptsVisibility("beta", "owner", false);
+  const page = queryPublicReceipts(store, { limit: 1 });
+  assert.deepEqual(page.receipts.map(receipt => receipt.id), [alpha], "the visible receipt fills the page");
+  assert.equal(page.nextCursor, alpha, "the cursor is the visible receipt, not the hidden id");
+  assert.equal(publicReceiptById(store, page.nextCursor)?.id, alpha);
+  const older = queryPublicReceipts(store, { limit: 1, cursor: page.nextCursor });
+  assert.deepEqual(older.receipts.map(receipt => receipt.id), [gamma]);
+  assert.equal(older.nextCursor, null);
+  const sitemap = listPublicReceiptSitemap(store, 1);
+  assert.deepEqual(sitemap.map(entry => entry.path.split("/").pop()), [alpha]);
+});
