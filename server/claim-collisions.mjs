@@ -27,10 +27,11 @@ const normalizeFile = path => {
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
   const parts = [];
   for (const part of p.split("/")) {
-    if (part === "") continue;
+    // A "." segment is never a directory, so src/./app.js is src/app.js and
+    // src/./../app.js climbs to app.js. Empty segments come from duplicate
+    // slashes; both are dropped before ".." resolution.
+    if (part === "" || part === ".") continue;
     if (part === "..") {
-      // A "." segment is not a directory, so src/./../app.js still climbs to app.js.
-      while (parts.length > 0 && parts[parts.length - 1] === ".") parts.pop();
       if (parts.length === 0 || parts[parts.length - 1] === "..") parts.push("..");
       else parts.pop();
       continue;
