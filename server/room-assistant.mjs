@@ -32,9 +32,7 @@ const keys = {
 };
 // Deleted prompts retain only a stop handle for their existing controllers.
 // The history floor still applies: deletion cannot reveal older work to newcomers.
-// Display-only status for the ask card, returned as run.displayStatus next to
-// the raw run.status (hosts key their claim loop on status === 'queued', so
-// status must never be rewritten to a label). queued past the pickup window reads
+// Display status for the ask card. queued past the pickup window reads
 // not_picked_up; a working run whose host went silent reads stalled; a
 // working run that never reported reads unknown (legacy rows only — claim
 // always stamps hostReportedAt).
@@ -98,8 +96,7 @@ export class RoomAssistant {
           const opening = state.messages.find(m => m.id === run.sourceMessageId);
           return controlsDeletedSource(run, opening, auth.member, state, floor) ? [deletedControl(run)] : [];
         })
-        .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
-          displayStatus: derivedRunStatus(run, this.store.now()) }));
+        .map(run => ({ ...run, status: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
