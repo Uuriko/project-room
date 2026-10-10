@@ -213,3 +213,17 @@ test("a replaced stream resumes from the last full read, so an edit a window rea
   await new Promise(resolve => setTimeout(resolve, 1500));
   assert.match(urls.at(-1), /\/stream\?after=9(&|$)/, "resumes after the full read at 9, not the window read at 12");
 });
+
+test("a window that already holds the whole room counts as a full read: no fill, resume from its sequence", async t => {
+  const urls = [];
+  // no stream handle needed
+  class Events extends EventTarget { constructor(url) { super(); urls.push(url); this.readyState = 1; } close() {} }
+  const reads = [];
+  const client = new RoomClient({ events: Events, onSnapshot: () => {}, fetcher: async url => { reads.push(url); return response(recent(11, history, 0)); } });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  await client.refresh(); await new Promise(resolve => setTimeout(resolve, 400));
+  assert.deepEqual(reads, [RECENT], "no background fill for a room the window already covers");
+  client.connect();
+  assert.match(urls.at(-1), /\/stream\?after=11(&|$)/, "the stream resumes after the window read, not from 0");
+});
