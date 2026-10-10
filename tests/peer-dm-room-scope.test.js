@@ -24,6 +24,9 @@ function storeFixture(t) {
     .prepare("INSERT INTO identity_links(room_id, identity_id, member_id, linked_at) VALUES(?,?,?,?)")
     .run(roomId, identityId, memberId, now);
   const threadId = "thread-scope-1";
+  const [agentA, agentB] = [a.identityId, b.identityId].sort();
+  store.db.prepare(`INSERT INTO agent_bonds(id, agent_a, agent_b, state, proposed_by, proposed_scopes, accepted_scopes, proposed_at, accepted_at)
+    VALUES(?,?,?,?,?,?,?,?,?)`).run("bond-scope-1", agentA, agentB, "active", agentA, "[]", "[]", now, now);
   store.db.prepare("INSERT INTO peer_dm_threads(thread_id, bond_id, agent_a, agent_b, created_at) VALUES(?,?,?,?,?)")
     .run(threadId, "bond-scope-1", a.identityId, b.identityId, now);
   const message = (roomId, body) => store.db
@@ -56,13 +59,32 @@ test("recentMessagesFor is room-scoped: the inbox never shows another room's DMs
 
 test("listThreads still returns global thread metadata (no bodies)", t => {
   const f = storeFixture(t);
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: "member.added", data: { memberId: "agent-b", displayName: "Peer B", kind: "agent", permissions: ["steer"] } });
   f.link("commons", f.a.identityId, "agent-a");
+  f.link("commons", f.b.identityId, "agent-b");
   f.message("other-room", "hidden body");
   const threads = f.store.bonds.listThreads("commons", "agent-a");
   assert.equal(threads.length, 1);
   assert.equal(threads[0].threadId, f.threadId);
   assert.equal(threads[0].peerIdentityId, f.b.identityId);
   assert(!JSON.stringify(threads).includes("hidden body"), "metadata carries no message bodies");
+});
+
+test("listThreads hides stale threads: revoked bond or departed peer (qa7-14)", t => {
+  const f = storeFixture(t);
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: "member.added", data: { memberId: "agent-b", displayName: "Peer B", kind: "agent", permissions: ["steer"] } });
+  f.link("commons", f.a.identityId, "agent-a");
+  f.link("commons", f.b.identityId, "agent-b");
+  const listed = () => f.store.bonds.listThreads("commons", "agent-a");
+  assert.equal(listed().length, 1, "active bond + linked active peer lists");
+  f.store.db.prepare("UPDATE agent_bonds SET state='revoked', revoked_at=?, revoked_by=? WHERE id=?").run(f.now(), f.a.identityId, "bond-scope-1");
+  assert.equal(listed().length, 0, "revoked bond drops the thread");
+  f.store.db.prepare("UPDATE agent_bonds SET state='active', revoked_at=NULL, revoked_by=NULL WHERE id=?").run("bond-scope-1");
+  assert.equal(listed().length, 1, "active again");
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: "member.access_changed", data: { memberId: "agent-b", expectedMemberRevision: f.store.room("commons").state.members["agent-b"].revision, permissions: ["steer"], active: false } });
+  assert.equal(listed().length, 0, "departed peer drops the thread");
+  const theirs = f.store.bonds.listThreads("commons", "agent-b");
+  assert.equal(theirs.length, 0, "symmetric for the departed side too");
 });
 
 test("agentInbox peerMessages are scoped to the requesting room", t => {
