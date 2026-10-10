@@ -608,6 +608,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_request_id` | 422 | requestId must be a non-empty string when present | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_request_run` | 409 | Choose one request, attempt and supported action | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invalid_research_input` | 422 | Request body must be a JSON object | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_restore` | 422 | The restore body is not a valid whole-store export | no | Operator only. Re-take the export (GET /api/operator/export) and restore that file; do not edit it. Nothing was written. |
 | `invalid_result_selection` | 422 | Invalid result selection | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_retention` | 500 | fail("invalid_retention", message); }; // Create a retention manager. policies is { [category]: retentionDays }. export function createRetention({ pol | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_retention_input` | 500 | fail("invalid_retention_input", message); }; const eventOf = (value, index) => { check(value !== null && typeof value === "object", `event ${index} mu | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
@@ -854,6 +855,9 @@ response's own `hint`/`next` when it names something more specific.
 | `request_run_owned` | 409 | Another host owns this request; reconcile that host | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `request_run_terminal` | 409 | An uncertain attempt cannot silently resume execution | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `reset_account_mismatch` | 409 | This reset is for another account. Sign out before continuing. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `restore_failed` | 500 | Restore failed during replay | no | Operator only. The replay ran in one transaction and was rolled back, so the store is still empty. Check the Durable Object logs, then retry once with the same file. |
+| `restore_refused_nonempty` | 409 | Restore refuses a store that already holds rooms | no | Operator only. Restore never overwrites live data. Restore into a fresh, empty Durable Object. |
+| `restore_verification_failed` | 422 | The restored data did not match the export's watermark or trailer, or a torn export was refused | no | Operator only. Nothing was written (rolled back). Re-take the export and retry. |
 | `result_not_found` | 404 | Completion not found on this work; no other result was substituted | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `result_unavailable` | 422 | Exact text evidence is unavailable; no other result was substituted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `review_final` | 409 | Review decision is final | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -974,6 +978,7 @@ response's own `hint`/`next` when it names something more specific.
 | `unknown_supervision_route` | 404 | Unknown supervision route: ${route} | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `unknown_target` | 404 | No such room | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `unknown_version` | internal | receiptType must be exactly ${JSON.stringify(RECEIPT_TYPE_VETTING)} | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
+| `unreadable_body` | 400 | Could not read the restore body | no | Operator only. Resend the request body in full. |
 | `unsupported_agent_scope` | 409 | This agent scope needs a separate reviewed connection | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `unsupported_content` | 415 | Only HTML pages can be fetched | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `unsupported_inbox_view` | 422 | Choose the supported reply review. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
