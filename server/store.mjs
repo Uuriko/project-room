@@ -1019,6 +1019,20 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
     targets.set(dmId, "dm");
   }
+  // An in-thread reply to an agent's post wakes that agent the same way an
+  // @mention would: before this, a reply without an @name reached nobody
+  // and the agent never learned its post was answered. Targeted DMs already
+  // wake their recipient through the dm path above, and replies to a
+  // human's post stay on the human attention paths.
+  const replyToId = typeof data?.replyToId === "string" ? data.replyToId : "";
+  if (replyToId && !dmId) {
+    const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
+    const authorId = repliedTo?.authorId ?? "";
+    const author = authorId ? members[authorId] : null;
+    if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId && !targets.has(authorId)) {
+      targets.set(authorId, "mention");
+    }
+  }
   return targets;
 }
 
@@ -5122,6 +5136,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         `UPDATE mention_states SET state='responded', decided_at=?
          WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
+      // An in-thread reply notifies the agent who wrote the replied-to
+      // message: without a row here the reply surfaced nowhere for that
+      // agent - no mention inbox entry and no wake. Targeted DMs already
+      // reach their recipient through the dm wake and needs-me dm kind, so
+      // only open-thread replies create a row. INSERT OR IGNORE dedupes
+      // against a direct @mention of the same author in the reply body;
+      // humans keep their existing attention paths.
+      const replyDmTarget = typeof data.toMemberId === "string" ? data.toMemberId : "";
+      if (!replyDmTarget) {
+        const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
+        const authorId = repliedTo?.authorId ?? "";
+        const author = authorId ? (state?.members ?? {})[authorId] : null;
+        if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId) {
+          const replyTimeoutMs = this.mentionTimeoutMsFor(roomId);
+          this.db.prepare(
+            `INSERT OR IGNORE INTO mention_states
+             (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
+             VALUES(?,?,?,?,?,?,NULL)`
+          ).run(roomId, eventId, authorId, "delivered", nowMs, nowMs + replyTimeoutMs);
+        }
+      }
     }
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return [];
