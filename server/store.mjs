@@ -2360,12 +2360,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Account deletion removes the invitee's member_accounts binding
         // (account-deletion.mjs, "memberships"), so a deleted invitee has no
         // live membership to compare. The journal and projection matched above;
-        // check only that the joined event is still the recorded one.
-        const retired = !binding && this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0;
-        if (retired) {
-          if (!linked || linked.id !== stored.joined_event_id || linked.room_id !== stored.room_id
-            || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > sequence) throw new Error("Joined event differs from journal");
-        } else assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
+        // the joined event itself is still compared to the recorded invitation.
+        const retiredInvitee = !binding && this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0;
+        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } }, { retiredInvitee });
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
