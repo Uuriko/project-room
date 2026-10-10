@@ -391,7 +391,12 @@ export class HumanPush {
           const message = current.messages?.find(row => row.id === messageId);
           const prefs = this._prefsFor(roomId, recipient.memberId);
           const kindOn = recipient.kind === "mention" ? prefs.mention : prefs.dm;
-          return kindOn && member?.kind === "human" && member.active !== false
+          // Quiet hours are re-checked at send time: the window may have
+          // started (or the member may have enabled it) after the post-time
+          // check authorized this delivery. A push must never fire inside
+          // the member's quiet window.
+          const quietNow = prefs.quietHours ? isQuietAt(prefs.quietHours, this.store.now()) : false;
+          return kindOn && !quietNow && member?.kind === "human" && member.active !== false
             && message && !message.deletedAt
             && (!message.toMemberId || message.toMemberId === recipient.memberId)
             && !this._suppressed(roomId, current, recipient.memberId, senderMemberId, messageId)

@@ -49,9 +49,17 @@ self.addEventListener("fetch", event => {
   event.respondWith(fetch(event.request));
 });
 
+// Per-worker stale-push guard (src/human-push-display.js, inlined above).
+// A push overtaken by a newer one for the same room is dropped, so a
+// delayed delivery never re-badges a room the member has already read.
+const stalePushGuard = createStalePushGuard();
+
 self.addEventListener("push", event => {
   let payload = {};
   try { payload = event.data && event.data.json ? event.data.json() : {}; } catch { payload = {}; }
+  // Drop a push the member has already overtaken: same-room tag replacement
+  // would otherwise show older counts and re-badge a room already read.
+  if (stalePushGuard.isStale(payload)) return;
   const note = notificationFromPush(payload);
   const options = { body: note.body, tag: note.tag, renotify: false, data: note.data };
   const actionsSupported = typeof Notification === "function" && "actions" in Notification.prototype;

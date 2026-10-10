@@ -153,3 +153,20 @@ test("a click focuses an existing Room window, and opens one when none is open",
   });
   assert.deepEqual(empty.opened, ["/m/needs-you"]);
 });
+
+// Every push payload stamps the newest event sequence the counts were
+// evaluated through (server/push-subscriptions.mjs). A push that arrives
+// after a newer one for the same room is stale — showing it would re-badge
+// a room the member has already overtaken. Payloads without an integer
+// sequence are never dropped; rooms are tracked independently.
+test("a stale push (older sequence than one already shown) is dropped", async () => {
+  const worker = load();
+  const base = { roomId: "commons", counts: { mention: 1 } };
+  await fire(worker.listeners, "push", { data: { json: () => ({ ...base, sequence: 10 }) } });
+  await fire(worker.listeners, "push", { data: { json: () => ({ ...base, sequence: 5 }) } });
+  await fire(worker.listeners, "push", { data: { json: () => ({ ...base, sequence: 10 }) } });
+  await fire(worker.listeners, "push", { data: { json: () => ({ ...base, sequence: 12 }) } });
+  await fire(worker.listeners, "push", { data: { json: () => ({ ...base }) } });
+  await fire(worker.listeners, "push", { data: { json: () => ({ ...base, roomId: "other", sequence: 1 }) } });
+  assert.equal(worker.notifications.length, 4);
+});
