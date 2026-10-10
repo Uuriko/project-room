@@ -284,9 +284,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (copyLink) copyLink.disabled = !url;
     if (copyMessage) copyMessage.disabled = !message;
     const kitStatus = $("#growth-kit-status");
-    if (kitStatus && data?.inviteBlocked === "email_unverified") kitStatus.textContent = "Verify your email to invite people. Open Sign-in & security from the account menu.";
-    else if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
-    else if (kitStatus && !kitStatus.textContent) kitStatus.textContent = "";
+    // Status writes go through the shared form-status contract: textContent
+    // alone leaves .form-status display:none (the :not(.visible) rule), so the
+    // unverified-email line never rendered.
+    if (kitStatus && data?.inviteBlocked === "email_unverified") setShareLinkStatus(kitStatus, "Verify your email to invite people. Open Sign-in & security from the account menu.");
+    else if (kitStatus && invite && invite.status && invite.status !== "active") setShareLinkStatus(kitStatus, "This link has ended.");
+    else if (kitStatus && !kitStatus.textContent) setShareLinkStatus(kitStatus, "");
   }
   async function loadKit() {
     const roomId = getSession()?.roomId || getState()?.room?.id;
@@ -301,9 +304,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      if (kitStatus) kitStatus.textContent = done;
+      if (kitStatus) setShareLinkStatus(kitStatus, done);
     } catch {
-      if (kitStatus) kitStatus.textContent = "Select and copy.";
+      if (kitStatus) setShareLinkStatus(kitStatus, "Select and copy.");
     }
   }
   function ensureGrowthChrome() {
