@@ -96,13 +96,19 @@ function handleContinues(text, index) {
   return ch != null && /[A-Za-z0-9_-]/.test(ch);
 }
 
+// An address is not a mention. A word character, dot, or another @ before
+// the mark keeps ops@Builder and lee.ops@Builder from naming Builder.
+function mentionBound(text, index) {
+  return index > 0 && /[A-Za-z0-9_.@]/.test(text[index - 1]);
+}
+
 function bodyMentionsAgent(body, displayName) {
   const needle = `@${displayName}`;
   let from = 0;
   while (from <= body.length) {
     const at = body.indexOf(needle, from);
     if (at === -1) return false;
-    if (!handleContinues(body, at + needle.length)) return true;
+    if (!mentionBound(body, at) && !handleContinues(body, at + needle.length)) return true;
     from = at + 1;
   }
   return false;
