@@ -27,3 +27,11 @@
 .assistant-run > .text-button { margin-right: .6rem; margin-block: .2rem; }
 
 .human-experience:not(.human-advanced) #squads-open { display: none; }
+
+/* HS2 3a: the ask card face */
+#assistant-face { margin-top: .5rem; }
+#assistant-face p { margin: .2rem 0; }
+.assistant-face-request { font-weight: 600; }
+.assistant-face-status { font-size: var(--text-sm); color: var(--muted); }
+.assistant-face-status[data-face-status="not_picked_up"], .assistant-face-status[data-face-status="stalled"] { color: var(--warning); }
+#assistant-face > .text-button { margin-right: .6rem; margin-block: .2rem; }
