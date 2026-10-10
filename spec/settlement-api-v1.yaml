@@ -1,0 +1,427 @@
+openapi: 3.1.0
+info:
+  title: Settlement API (internal)
+  version: 1.0.0
+  description: >-
+    Internal API the gateway/compute layer calls to fund jobs, check status,
+    and release payment. Every adapter leg (Solana, Monad, future EVM) sits
+    behind the settlement envelope (200-hard-tasks #1). Mock server:
+    scripts/mock-settlement-api.mjs. Contract test: tests/settlement-api.test.js.
+servers:
+  - url: https://settlement.internal/v1
+    description: internal settlement service
+
+security:
+  - bearerAuth: []
+
+paths:
+  /settlement/envelopes:
+    post:
+      operationId: createEnvelope
+      summary: Build and validate a settlement envelope for a job
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvelopeRequest'
+      responses:
+        '201':
+          description: envelope created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+
+  /settlement/envelopes/{envelopeId}:
+    get:
+      operationId: getEnvelope
+      summary: Fetch an envelope and its escrow status
+      parameters:
+        - $ref: '#/components/parameters/EnvelopeId'
+      responses:
+        '200':
+          description: envelope with escrow status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvelopeStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /settlement/envelopes/{envelopeId}/fund:
+    post:
+      operationId: fundEscrow
+      summary: Fund the escrow for an envelope
+      parameters:
+        - $ref: '#/components/parameters/EnvelopeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountRaw]
+              properties:
+                amountRaw:
+                  type: string
+                  pattern: '^[0-9]+$'
+                  description: agreed amount in raw units; must match the envelope
+      responses:
+        '200':
+          description: funded (or replayed fund)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscrowState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/WrongAmount'
+
+  /settlement/envelopes/{envelopeId}/accept:
+    post:
+      operationId: acceptJob
+      summary: Provider accepts the funded job
+      parameters:
+        - $ref: '#/components/parameters/EnvelopeId'
+      responses:
+        '200':
+          description: accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscrowState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalTransition'
+
+  /settlement/envelopes/{envelopeId}/release:
+    post:
+      operationId: releasePayment
+      summary: Release payment to the provider (requires settlement receipt)
+      parameters:
+        - $ref: '#/components/parameters/EnvelopeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receipt]
+              properties:
+                receipt:
+                  $ref: '#/components/schemas/SettlementReceipt'
+      responses:
+        '200':
+          description: released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscrowState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalTransition'
+        '422':
+          $ref: '#/components/responses/BadReceipt'
+
+  /settlement/envelopes/{envelopeId}/refund:
+    post:
+      operationId: refundEscrow
+      summary: Refund the escrow to the payer
+      parameters:
+        - $ref: '#/components/parameters/EnvelopeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: refunded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscrowState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalTransition'
+
+  /settlement/envelopes/{envelopeId}/dispute:
+    post:
+      operationId: disputeEscrow
+      summary: Open a dispute on a funded or settled escrow
+      parameters:
+        - $ref: '#/components/parameters/EnvelopeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, evidence]
+              properties:
+                reason:
+                  type: string
+                evidence:
+                  type: object
+      responses:
+        '200':
+          description: disputed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EscrowState'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IllegalTransition'
+
+  /settlement/receipts/verify:
+    post:
+      operationId: verifyReceipt
+      summary: Verify a provider settlement receipt (signature, amount, job, freshness)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [receipt, pubkeyHex]
+              properties:
+                receipt:
+                  $ref: '#/components/schemas/SettlementReceipt'
+                pubkeyHex:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
+                jobId:
+                  type: string
+                amountRaw:
+                  type: string
+                chainId:
+                  type: string
+      responses:
+        '200':
+          description: verification verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                  code:
+                    type: string
+                  reason:
+                    type: string
+
+  /settlement/ledger/epochs/{epochId}/totals:
+    get:
+      operationId: ledgerTotals
+      summary: Per-kind totals for a ledger epoch
+      parameters:
+        - name: epochId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: totals in raw units
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deposit:
+                    type: string
+                  claim:
+                    type: string
+                  refund:
+                    type: string
+                  fee:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        Gateway identity secret. All calls are service-to-service inside the
+        trust boundary; the bearer identifies the calling gateway for audit.
+        No end-user credentials are accepted here.
+
+  parameters:
+    EnvelopeId:
+      name: envelopeId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^env_[0-9a-f]{32}$'
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        pattern: '^idem_v1_[a-z0-9-]{1,32}_[0-9a-f]{32}$'
+      description: >-
+        Client-generated idempotency key (200-hard-tasks #3). Replays return
+        the cached result; concurrent duplicates get 409 IDEM_CONFLICT.
+
+  schemas:
+    EnvelopeRequest:
+      type: object
+      required: [jobId, payer, payee, chainId, assetMint, amountRaw]
+      properties:
+        jobId:
+          type: string
+        payer:
+          type: string
+        payee:
+          type: string
+        chainId:
+          type: string
+        assetMint:
+          type: string
+        amountRaw:
+          type: string
+          pattern: '^[0-9]+$'
+    Envelope:
+      type: object
+      required: [id, version, jobId, payer, payee, chain, status]
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        jobId:
+          type: string
+        payer:
+          type: string
+        payee:
+          type: string
+        chain:
+          type: object
+        status:
+          type: string
+    EnvelopeStatus:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            escrow:
+              $ref: '#/components/schemas/EscrowState'
+    EscrowState:
+      type: object
+      required: [envelopeId, status]
+      properties:
+        envelopeId:
+          type: string
+        status:
+          type: string
+          enum: [funded, accepted, released, refunded, cancelled, disputed]
+        replayed:
+          type: boolean
+          description: true when this response replays a cached idempotent result
+    SettlementReceipt:
+      type: object
+      required: [version, jobId, envelopeId, providerId, chainId, assetMint, amountRaw, issuedAtIso, nonce, signature]
+      properties:
+        version:
+          type: string
+        jobId:
+          type: string
+        envelopeId:
+          type: string
+        providerId:
+          type: string
+        chainId:
+          type: string
+        assetMint:
+          type: string
+        amountRaw:
+          type: string
+        issuedAtIso:
+          type: string
+          format: date-time
+        nonce:
+          type: string
+        signature:
+          type: string
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [ENVELOPE_INVALID, IDEM_CONFLICT, IDEM_BAD_KEY, ADAPTER_UNKNOWN_ID, ADAPTER_ILLEGAL_TRANSITION, ADAPTER_RECEIPT_REQUIRED, ADAPTER_WRONG_AMOUNT, NOT_FOUND, BAD_RECEIPT]
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: malformed request or envelope validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: envelope or epoch not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    IdempotencyConflict:
+      description: the idempotency key is already in progress
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    IllegalTransition:
+      description: the escrow cannot make that transition from its current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    WrongAmount:
+      description: amountRaw does not match the envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadReceipt:
+      description: settlement receipt failed verification
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
