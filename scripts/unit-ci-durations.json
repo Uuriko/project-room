@@ -775,6 +775,7 @@
   "tests/sign-agent-card-build.test.js": 6566,
   "tests/signed-evidence.test.js": 51284,
   "tests/signin-error-visibility.test.js": 3067,
+  "tests/signup-verification-continuation.test.js": 20000,
   "tests/silent-mentions.test.js": 19554,
   "tests/skill-claim-lifecycle-docs.test.js": 1000,
   "tests/skill-pack.test.js": 3867,
