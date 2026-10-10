@@ -3709,7 +3709,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // The identity secret must already be verified by the caller via
   // identities.authenticateIdentitySecret. The session is scoped to
   // the room and member, with the same 8-hour expiry as human sessions.
-  createAgentSession(identityId, roomId) {
+  createAgentSession(identityId, roomId, { expiresAt = null } = {}) {
     return this.transaction(() => {
       const link = this.identities.resolveIdentityLink(identityId, roomId);
       if (!link) fail(403, "access_denied", "This agent identity is not linked to that room");
@@ -3718,7 +3718,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // If the secret is rotated or revoked, authenticate() rejects sessions
       // carrying the old hash.
       const secretRow = this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
-      const token = this.insertCredential(roomId, link.member.id, "session", null, this.now() + 8 * 3600000, secretRow?.secretHash ?? null);
+      // F13: an rak_-minted session never outlives its key. The cap only
+      // shortens the default 8-hour session, never lengthens it.
+      const fallback = this.now() + 8 * 3600000;
+      const capped = Number.isFinite(expiresAt) && expiresAt < fallback ? expiresAt : fallback;
+      const token = this.insertCredential(roomId, link.member.id, "session", null, capped, secretRow?.secretHash ?? null);
       return { token, session: this.authenticate(token) };
     });
   }
