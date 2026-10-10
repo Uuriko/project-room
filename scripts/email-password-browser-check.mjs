@@ -46,7 +46,7 @@ test("contextual email creation signs in using the actual password signup API", 
 });
 
 test("password signup opens one personal room without optional setup, with profile editing available later", { timeout: 40000 }, async t => {
-  const { page, origin } = await setup(t, { login: false });
+  const { page, origin, store } = await setup(t, { login: false });
   const shots = "test-results/onboarding";
   mkdirSync(shots, { recursive: true });
   await page.evaluate(() => {
@@ -72,10 +72,19 @@ test("password signup opens one personal room without optional setup, with profi
   const rooms = async () => (await (await page.context().request.get(origin + '/api/account-rooms', { headers: { 'X-Session-Binding': account.sessionBinding } })).json()).rooms;
   assert.equal((await rooms()).length, 1, 'automatic first-room creation stays singular');
   const initialRoom = new URL(page.url()).searchParams.get('room');
+  assert.equal(await page.locator('#message-input').evaluate(node => node === document.activeElement), true, 'first personal room is ready to type without a composer click');
+  const firstMessage = 'Hello from my first room, typed without clicking the composer.';
+  await page.keyboard.type(firstMessage);
+  const posted = page.waitForResponse(response => new URL(response.url()).pathname === `/api/rooms/${initialRoom}/commands` && response.request().method() === 'POST');
+  await page.keyboard.press('Enter');
+  assert.equal((await posted).status(), 201);
+  await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+  assert.equal(store.room(initialRoom).state.messages.filter(message => message.body === firstMessage).length, 1, 'keyboard-first message actually persisted once');
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#account-setup-dialog').isVisible(), false);
   assert.equal(new URL(page.url()).searchParams.get('room'), initialRoom);
   assert.equal((await rooms()).length, 1, 'reload cannot create another room');
+  assert.equal(store.room(initialRoom).state.messages.filter(message => message.body === firstMessage).length, 1, 'first message survives reload');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.screenshot({ path: `${shots}/first-run-1280.png` });
   await clickChrome(page, '#account-settings-button');
@@ -97,12 +106,14 @@ test("contextual email login reports a rejected password then signs into the exi
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill("wrong-synthetic-password");
   const rejected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
-  await form.locator('button[type="submit"]').click(); assert.equal((await rejected).status(), 401);
+  await form.locator('[name="password"]').press("Enter"); assert.equal((await rejected).status(), 401);
   await page.locator('#auth-signin-ui [data-signin-status].error').waitFor();
   assert.equal(await form.locator('[name="password"]').inputValue(), "", "failed password is never repainted");
-  await form.locator('[name="password"]').fill(password);
+  assert.equal(await form.locator('[name="email"]').inputValue(), email, "the email remains available for retry");
+  assert.equal(await form.locator('[name="password"]').evaluate(node => node === document.activeElement), true, "a rejected password returns focus to the cleared password field");
+  await page.keyboard.type(password);
   const accepted = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
-  await form.locator('button[type="submit"]').click(); assert.equal((await accepted).status(), 200);
+  await form.locator('[name="password"]').press("Enter"); assert.equal((await accepted).status(), 200);
   await page.locator("#auth-panel").waitFor({ state: "hidden" });
   const actual = await (await page.context().request.get(`${origin}/api/account-session`)).json();
   assert.equal(actual.authenticated, true); assert.equal(actual.account.id, "existing-password-account");
