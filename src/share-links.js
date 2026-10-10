@@ -245,8 +245,15 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function updateSwitchWarning() {
     const currentRoom = getSession()?.roomId ?? getState()?.room?.id;
-    $("#join-switch-warning").hidden = !previewRoomId || !(currentRoom ? currentRoom !== previewRoomId : accountClient.session?.authenticated);
+    const warning = $("#join-switch-warning");
+    // A27: say what actually happens - a guest join alongside an intact
+    // account - instead of the old vague identity-change warning.
+    const name = $("#join-link-name")?.value?.trim();
+    warning.textContent = name ? `You'll join as a guest named ${name}. Your account stays the same. Save a copy of unsent drafts first.`
+      : "You'll join as a guest. Your account stays the same. Save a copy of unsent drafts first.";
+    warning.hidden = !previewRoomId || !(currentRoom ? currentRoom !== previewRoomId : accountClient.session?.authenticated);
   }
+  $("#join-link-name").addEventListener("input", updateSwitchWarning);
   const inRoom = () => {
     const current = member();
     return Boolean(current && current.active !== false && (getSession()?.roomId || getState()?.room?.id));
