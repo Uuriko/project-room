@@ -148,14 +148,21 @@ test("a failing repo still passes the turn, so a healthy repo is searched next t
   assert.equal(registry.get("muse-room", "healthy").state, "done");
 });
 
-test("a full page that shares one created second steps past it instead of looping", async () => {
-  const { store, hold } = setup();
-  hold("held", 2479);
+test("51 merged pulls sharing one created second: the 51st is reached by paging within that second", async () => {
+  const { store, registry, hold } = setup();
+  hold("tie-51", 3050);
   writeClaimPullBudget(store, NOW + 3000_000, NOW);
   const same = "2026-10-09T10:00:00Z";
-  const page = Array.from({ length: 50 }, (_, i) => hit(3000 + i, true, { created_at: same }));
+  const all = Array.from({ length: 51 }, (_, i) => hit(3000 + i, true, { created_at: same }));
   const calls = [];
-  for (let tick = 0; tick < 3; tick++) await syncClaimPullRequests(store, { fetchImpl: searchOnly(page, calls), nowMs: NOW + tick * 60_000, token: null });
-  const cursors = calls.map(url => (decodeURIComponent(url).match(/created:>=(\S+?)(&|$)/) ?? [])[1] ?? null);
-  assert.deepEqual(cursors, [null, same, "2026-10-09T10:00:01Z"]);
+  const pages = query => {
+    const page = Number((query.match(/&page=(\d+)/) ?? [])[1] ?? 1);
+    return all.slice((page - 1) * 50, page * 50);
+  };
+  for (let tick = 0; tick < 3 && registry.get("muse-room", "tie-51").state !== "done"; tick++) {
+    await syncClaimPullRequests(store, { fetchImpl: searchOnly(pages, calls), nowMs: NOW + tick * 60_000, token: null });
+  }
+  assert.equal(registry.get("muse-room", "tie-51").state, "done", calls.map(decodeURIComponent).join("\n"));
+  const shape = calls.map(url => decodeURIComponent(url)).map(q => [(q.match(/created:>=(\S+?)(&|$)/) ?? [])[1] ?? null, (q.match(/&page=(\d+)/) ?? [])[1] ?? "1"]);
+  assert.deepEqual(shape, [[null, "1"], [same, "1"], [same, "2"]]);
 });
