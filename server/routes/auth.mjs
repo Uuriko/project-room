@@ -422,6 +422,104 @@ export async function handleAuthGroup(ctx) {
   reject(404, "not_found", "Not found");
 }
 
+// Guest upgrade (auth audit 2026-10-09, path 13).
+//
+// A guest who joins from a share link gets a real account (guest-<uuid>)
+// whose sign-in lasts 8 hours, with no email. Account settings offered "Set a
+// password", which needs an email, and no way to add one, so a guest could
+// neither keep the account nor delete it.
+//
+// Two steps, both on the guest's own signed-in session:
+//   POST /api/auth/guest/upgrade          { email }
+//   POST /api/auth/guest/upgrade/confirm  { email, code, password }
+// The first always answers the same 202. A free address gets a 6-digit code;
+// an address another account holds gets the existing-account notice instead.
+// The second links the email (verified) and the password to the SAME account,
+// so its id, rooms, and messages stay. Nothing is linked until the code
+// proves the inbox, and a held address simply has no code, so neither step
+// reveals whether someone else uses an email.
+
+
+function guestSession(ctx) {
+  const { req, store, reject, cookie, checkOrigin, protectWrite, accountCookieName } = ctx;
+  checkOrigin(req, true);
+  const slotToken = cookie(req, accountCookieName);
+  if (!slotToken) reject(401, "account_session_required", "Sign in to keep this account");
+  let session;
+  try { session = store.authenticateAccountSession(slotToken); }
+  catch (error) {
+    if (error.status !== 401) throw error;
+    reject(401, "invalid_session", "That session is no longer valid; sign in again");
+  }
+  if (!session.account) reject(401, "account_session_required", "Sign in to keep this account");
+  protectWrite(req, session, false);
+  const methods = store.accountLogins.listMethods(session.account.id);
+  if (methods.some(method => method.email || method.type === "password")) {
+    reject(409, "account_has_email", "This account already has an email or password; manage it in Account settings");
+  }
+  return session;
+}
+
+const emailFrom = (ctx, data) => {
+  const normalized = typeof data.email === "string" ? normalizeEmail(data.email) : null;
+  if (!normalized) ctx.reject(422, "invalid_email", "A valid email address is required");
+  return normalized;
+};
+
+async function postGuestUpgrade(ctx) {
+  const { res, store, remoteAddress, json, reject, rate, body, exact, magicMailer, magicEmailLimit, signupEmailLimiter } = ctx;
+  rate(`guest-upgrade:${remoteAddress}`, 20);
+  const session = guestSession(ctx);
+  const data = await body(ctx.req);
+  if (!exact(data, ["email"])) reject(422, "invalid_guest_upgrade", "An email is required");
+  const email = emailFrom(ctx, data);
+  rate(`guest-upgrade-account:${session.account.id}`, 5);
+  magicEmailLimit(signupEmailLimiter, email);
+  const mailConfigured = magicMailer.isConfigured();
+  if (mailConfigured) {
+    const send = fn => attemptMailDelivery(fn, "guest-upgrade");
+    if (store.accountLogins.findAccountHoldingEmail(email)) {
+      await send(() => magicMailer.sendMagicLink({ to: email, purpose: "signup-notice" }));
+    } else {
+      const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email });
+      await send(() => magicMailer.sendMagicLink({ to: email, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify" }));
+    }
+  }
+  return json(res, 202, { status: "check_email", mailConfigured });
+}
+
+async function postGuestUpgradeConfirm(ctx) {
+  const { res, store, remoteAddress, json, reject, rate, body, exact } = ctx;
+  rate(`guest-upgrade-confirm:${remoteAddress}`, 20);
+  const session = guestSession(ctx);
+  const data = await body(ctx.req);
+  if (!exact(data, ["email", "code", "password"]) || typeof data.code !== "string" || typeof data.password !== "string") {
+    reject(422, "invalid_guest_upgrade", "An email, code, and password are required");
+  }
+  const email = emailFrom(ctx, data);
+  const policy = checkPasswordPolicy(data.password);
+  if (policy) reject(422, policy.code, policy.message);
+  const accountId = session.account.id;
+  // Someone took the address since the code went out: same answer as a bad code.
+  if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
+  store.accountLogins.consumeEmailVerifyCode({ accountId, email, code: data.code.trim() });
+  const method = store.accountLogins.linkPasswordMethod(accountId, { email, verifier: hashPassword(data.password) });
+  store.accountLogins.markEmailVerified(accountId, email);
+  store.accountLogins.touchMethod(accountId, method.id);
+  return json(res, 200, { status: "upgraded", email });
+}
+
+const row = (id, path, handler, required) => Object.freeze({ id, method: "POST", path, auth: "account",
+  capability: null, scope: "worker", handler, events: [], rate: { key: id, max: 20 },
+  parity: "exempt:human browser account setup; agents have no guest account",
+  schema: { body: { type: "object", required, additionalProperties: false,
+    properties: Object.fromEntries(required.map(key => [key, { type: "string" }])) }, response: { type: "object" } } });
+
+const GUEST_UPGRADE_ROUTES = [
+  row("auth.guest.upgrade", "/api/auth/guest/upgrade", postGuestUpgrade, ["email"]),
+  row("auth.guest.upgrade.confirm", "/api/auth/guest/upgrade/confirm", postGuestUpgradeConfirm, ["email", "code", "password"]),
+];
+
 export const AUTH_ROUTES = Object.freeze([
   authRoute({
     id: "auth.magic.request", method: "POST", path: "/api/auth/magic/request", auth: "account",
@@ -492,4 +590,5 @@ export const AUTH_ROUTES = Object.freeze([
       challengeId: { type: "string" }, response: { type: "object" }, ...slotFields,
     } } },
   }),
+  ...GUEST_UPGRADE_ROUTES,
 ]);
