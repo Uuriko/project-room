@@ -6,13 +6,19 @@ import { activeClaim } from "../src/workflow.js";
 
 const SCOPE_NEEDS = Object.freeze(["repository", "ref", "paths", "expiresAt"]);
 
+// NFC and NFD are one path. Case and order stay distinct.
+function composePath(path) {
+  if (typeof path !== "string") return path;
+  try { return path.normalize("NFC"); } catch { return path; }
+}
+
 function canonicalBeginInput(input) {
   const scope = input || {};
-  const paths = Array.isArray(scope.paths) ? scope.paths : [];
+  const paths = Array.isArray(scope.paths) ? scope.paths.map(composePath) : [];
   return JSON.stringify([scope.repository ?? "", scope.ref ?? "", paths, scope.expiresAt ?? ""]);
 }
 
-// Claim and start ids include the exact scope. Accept and a start with no
+// Claim and start ids include the composed scope. Accept and a start with no
 // claim keep the previous work/action/revision id so an unchanged retry matches.
 export function beginRequestId(workItemId, action, expectedRevision, input = null) {
   const body = input == null
@@ -26,7 +32,7 @@ export function sameExactScope(claim, scope) {
   if (!claim || !scope) return false;
   if (claim.repository !== scope.repository || claim.ref !== scope.ref || claim.expiresAt !== scope.expiresAt) return false;
   if (!Array.isArray(claim.paths) || !Array.isArray(scope.paths) || claim.paths.length !== scope.paths.length) return false;
-  return claim.paths.every((path, index) => path === scope.paths[index]);
+  return claim.paths.every((path, index) => composePath(path) === composePath(scope.paths[index]));
 }
 
 function requestedScope(scope) {
