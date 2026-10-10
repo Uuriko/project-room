@@ -563,8 +563,7 @@ const EXECUTORS = {
     // share_link_scope_immutable forbids touching scope columns; revoked_at /
     // revoked_by_member_id are outside it. Self-revocation attribution.
     revoked += db.prepare("UPDATE share_links SET revoked_at=?, revoked_by_member_id=issuer_member_id WHERE issuer_account_id=? AND revoked_at IS NULL").run(now, accountId).changes;
-    revoked += db.prepare("UPDATE membership_invitations SET status='revoked' WHERE issuer_account_id=? AND status='pending'").run(accountId).changes;
-    revoked += db.prepare("UPDATE membership_invitations SET status='revoked' WHERE intended_account_id=? AND status='pending'").run(accountId).changes;
+    revoked += store.revokePendingInvitationsForAccount(accountId);
     return revoked;
   },
   sponsored_agents: (store, accountId) => {
