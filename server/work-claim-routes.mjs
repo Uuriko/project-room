@@ -1355,9 +1355,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: [], optional: ["maxMemberOpenClaims", "maxOpenClaims"] })
-      || (data.maxMemberOpenClaims === undefined && data.maxOpenClaims === undefined)) {
-      invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?} with at least one");
+    if (!shape(data, { required: [], optional: ["maxMemberOpenClaims", "maxOpenClaims", "staleSweep"] })
+      || (data.maxMemberOpenClaims === undefined && data.maxOpenClaims === undefined && data.staleSweep === undefined)) {
+      invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?, staleSweep?} with at least one");
     }
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
@@ -1368,7 +1368,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         invalidInput(reject, `${key} as an integer 1..10000`);
       }
     }
+    if (data.staleSweep !== undefined && typeof data.staleSweep !== "boolean") invalidInput(reject, "staleSweep as true or false");
     const patch = {};
+    if (data.staleSweep !== undefined) patch.staleSweep = data.staleSweep;
     if (data.maxMemberOpenClaims !== undefined) patch.maxMemberOpenClaims = data.maxMemberOpenClaims;
     if (data.maxOpenClaims !== undefined) patch.maxOpenClaims = data.maxOpenClaims;
     const saved = registry.configure(roomId, patch);

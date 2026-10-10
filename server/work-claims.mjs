@@ -293,8 +293,9 @@ const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
 // An unclaimed item nobody has touched for STALE_UNCLAIMED_DAYS is dormant.
-// Dormant items do not count against the room's open-claim cap, and the
-// cron's stale sweep (server/claim-pr-sync.mjs) retires them, at most
+// Dormant items do not count against the room's open-claim cap. When the room
+// owner turns on workClaims.staleSweep (off by default), the cron's stale
+// sweep (server/claim-pr-sync.mjs) also retires them, at most
 // STALE_SWEEP_BATCH per room per pass, as closed with reason stale_sweep.
 // Items with no readable timestamp are never dormant: unknown age counts.
 export const STALE_UNCLAIMED_DAYS = 14;
@@ -553,8 +554,8 @@ const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
-// invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims, staleSweep }; anything
+// missing or invalid falls back to the defaults (staleSweep: off).
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
@@ -565,6 +566,7 @@ export function roomWorkClaimConfig(room) {
     reviewPolicy,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    staleSweep: raw.staleSweep === true,
   });
 }
 const leaseHoursOf = value => {

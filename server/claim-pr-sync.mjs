@@ -546,7 +546,8 @@ function sweepExpiredClaimLeases(store, nowMs) {
 
 // Board cleanup 2026-10-09: retire dormant unclaimed items (no activity for
 // STALE_UNCLAIMED_DAYS) so a room's Board cannot silt up with abandoned
-// offers. Runs on the cron tick, never on a request, at most once per
+// offers. Opt-in per room: only rooms whose owner set workClaims.staleSweep
+// (POST …/work-claims/config {"staleSweep": true}) are swept. Runs on the cron tick, never on a request, at most once per
 // STALE_SWEEP_INTERVAL_MS per store and STALE_SWEEP_BATCH items per room per
 // pass, so a large backlog drains over a few passes without an event burst.
 // Each retirement is a normal close: history stamp, "closed" room event with
@@ -570,6 +571,7 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false } = {}) 
   }
   let closed = 0;
   for (const roomId of roomIds) {
+    if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
     const pairs = closeStaleUnclaimed(store.workClaims.list(roomId), nowMs);
     if (pairs.length === 0) continue;
     store.workClaims.transaction(() => {

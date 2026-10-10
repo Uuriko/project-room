@@ -82,8 +82,25 @@ test("a create succeeds past the old count when the backlog is dormant", async t
   assert.equal(over.value.error.code, "work_board_full");
 });
 
+test("the stale sweep is off by default: dormant items stay open and the owner can turn it on", async t => {
+  const { store, call } = await roomStore(t);
+  store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  assert.equal(store.workClaims.configFor("commons").staleSweep, false);
+  assert.equal(sweepStaleUnclaimedClaims(store, NOW, { force: true }), 0);
+  assert.equal(store.workClaims.get("commons", "dormant").state, "unclaimed");
+  const bad = await call("config", null, { staleSweep: "yes" }).catch(error => ({ status: error.status }));
+  assert.equal(bad.status, 422);
+  const saved = await call("config", null, { staleSweep: true });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.value.staleSweep, true);
+  assert.equal(saved.value.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS, "turning the sweep on leaves the caps alone");
+  assert.equal(sweepStaleUnclaimedClaims(store, NOW, { force: true }), 1);
+  assert.equal(store.workClaims.get("commons", "dormant").state, "closed");
+});
+
 test("the cron tick sweeps dormant unclaimed items, emits closed events, and throttles", async t => {
   const { store } = await roomStore(t);
+  store.workClaims.configure("commons", { staleSweep: true });
   store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
   store.workClaims.set("commons", createWork({ id: "recent" }, { now: NOW - DAY, agentId: "alice" }));
   store.workClaims.set("commons", claimWork(createWork({ id: "held" }, { now: OLD, agentId: "alice" }), "alice", { now: OLD, leaseHours: null }));
