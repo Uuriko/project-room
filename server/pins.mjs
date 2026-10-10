@@ -6,6 +6,7 @@
 // a request that asks for the state the room is already in appends nothing.
 import { randomUUID } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 import { EVENT_TYPES as T, PIN_LIMIT, pinnedMessages, validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -31,8 +32,11 @@ export function pinVisibleToViewer(message, viewerId) {
 
 function listView(store, roomId, viewerId) {
   const room = store.room(roomId);
+  // PRIV-2: a since_join reactivation must not read a pin body from the
+  // removal gap. The HTTP wrapper only drops hidden DMs.
+  const floor = store.historyFloor(roomId, viewerId, room.sequence);
   const pins = pinnedMessages(room.state)
-    .filter(({ message }) => pinVisibleToViewer(message, viewerId))
+    .filter(({ message }) => pinVisibleToViewer(message, viewerId) && messageInHistory(message, floor))
     .map(pinView);
   return { roomId, sequence: room.sequence, limit: PIN_LIMIT, count: pins.length, pins };
 }
