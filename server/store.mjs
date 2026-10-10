@@ -1,3 +1,4 @@
+import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
@@ -4918,6 +4919,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // A throw here rolls the event back with the row. No read path uses
         // the table yet. Older events wait for the MSG-2 backfill.
         syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
+        if (incoming.type === T.MESSAGE_EDITED) {
+          invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
+        }
         // --- PRIV-1 message redaction ---
         // The returned sequence stays this delete. Later events in the same
         // transaction rewrite the log and advance the room sequence.
