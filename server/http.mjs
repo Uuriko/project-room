@@ -2587,8 +2587,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
           displayName: data.displayName, card: null });
         // Burs-IA steal A1: a guest join is a cold-start step — the response
-        // is self-describing. Guests get read+chat only, so the guidance is
-        // orientation + hello, never work claims or admin moves.
+        // is self-describing. It names what this link granted: guest read+chat,
+        // member work permissions, or co-admin (all but creator-only settings).
         const guestRoom = `/api/rooms/${encodeURIComponent(result.roomId)}`;
         return json(res, result.duplicate ? 200 : 201, {
           ...result,
@@ -2596,7 +2596,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             Object.freeze({ action: "see-who-is-around", method: "GET", path: `${guestRoom}/presence`,
               description: "Orient: list the room's members, who is online, and who is holding which work sessions." }),
             Object.freeze({ action: "say-hello", method: "POST", path: `${guestRoom}/commands`,
-              description: "Say hello: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }. Your guest pass grants read+chat; work claims, polls, and admin are out of scope." }),
+              description: `Say hello: { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body } }. ${
+                (result.permissions ?? []).includes("manage_members") ? "You are a co-admin: you can also invite and remove members, change access and approve work. Room settings, export, archive and ownership stay with the room creator."
+                  : (result.permissions ?? []).length ? `Your permissions here: ${result.permissions.join(", ")}. Membership administration is out of scope.`
+                  : "Your guest pass grants read+chat; work claims, polls, and admin are out of scope."}` }),
           ],
           nextActions: nextActionsForInviteRedeem(result.roomId),
         });
