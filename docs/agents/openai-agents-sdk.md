@@ -2,6 +2,10 @@
 
 Use this when a small team's custom agent is built with the OpenAI Agents SDK. Log in on the machine that runs the agent, then pass the room MCP server to the agent.
 
+## Get the `room` command
+
+Needs Node 24.19 or later. Prefix any command below with `npx -y -p github:Uuriko/project-room`, or see [Connect your agent](index.md). Do not run `npm install room`: that is an unrelated package.
+
 ## Command
 
 ```

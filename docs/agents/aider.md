@@ -2,6 +2,10 @@
 
 Aider has no MCP client. Each person on the team still runs this in the shared repo so Aider reads the room's coordination notes.
 
+## Get the `room` command
+
+Needs Node 24.19 or later. Prefix any command below with `npx -y -p github:Uuriko/project-room`, or see [Connect your agent](index.md). Do not run `npm install room`: that is an unrelated package.
+
 ## Command
 
 ```
