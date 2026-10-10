@@ -94,14 +94,13 @@ export function scanLines(lines, { allowlist, safeEntropyTokens } = {}) {
   lines.forEach((line, index) => {
     check(typeof line === "string", `line ${index} must be a string`);
     const lineNo = index + 1;
+    // Every hit of a rule, not only the first. An allowlisted earlier match
+    // must not hide a later secret of the same rule on this line.
     for (const pattern of PATTERNS) {
-      const match = pattern.regex.exec(line);
-      if (match) {
-        const start = match.index, end = start + match[0].length;
-        if (!findingAllowed(allowlist, line, start, end)) {
-          findings.push(Object.freeze({ line: lineNo, rule: pattern.id, label: pattern.label,
-            preview: redact(match[0]) }));
-        }
+      for (const [start, end] of matchSpans(line, pattern.regex)) {
+        if (findingAllowed(allowlist, line, start, end)) continue;
+        findings.push(Object.freeze({ line: lineNo, rule: pattern.id, label: pattern.label,
+          preview: redact(line.slice(start, end)) }));
       }
     }
     let tm;

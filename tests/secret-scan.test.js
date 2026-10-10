@@ -137,6 +137,23 @@ test("H-19: an allowlist match that overlaps the finding still suppresses it", (
   assert.deepEqual(findings, [], "the allowlist still works when it covers the finding itself");
 });
 
+test("a later secret of the same rule is not hidden by an earlier allowlisted match", async () => {
+  const { ALLOWLIST } = await import("../scripts/secret-scan-check.mjs");
+  const live = "sk_live_" + randomBytes(16).toString("hex");
+  const documented = "sk_test_" + "a".repeat(20);
+  const stripe = scanText(`${documented} ${live}`, { allowlist: [/sk_test_[a-z]{16,}/] });
+  assert.deepEqual(stripe.map(finding => finding.rule), ["stripe-key"]);
+  assert.equal(stripe[0].preview.includes(live), false);
+
+  const password = scanText('password = generateSecret(); password = "supersecretvalue123"', { allowlist: ALLOWLIST });
+  assert.equal(password.some(finding => finding.rule === "generic-secret"), true);
+
+  const realAws = fakeAwsKey();
+  const aws = scanText(`AKIAIOSFODNN7EXAMPLE ${realAws}`, { allowlist: ALLOWLIST });
+  assert.equal(aws.filter(finding => finding.rule === "aws-access-key").length, 1);
+  assert.equal(aws[0].preview.includes(realAws), false);
+});
+
 test("H-19: a high-entropy token beside an allowlisted word is still flagged", () => {
   const secret = highEntropySecret();
   const findings = scanLines([`example.com deployed ${secret} ok`], { allowlist: [/example\.com/] });
