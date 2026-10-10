@@ -19,7 +19,8 @@ export function normalizeClaimPath(path) {
     error.code = "invalid_text_plug";
     throw error;
   }
-  return normalized;
+  // NFC and NFD are one file. Case stays distinct. A climb-out is still rejected above.
+  return normalized.normalize("NFC");
 }
 
 function activeClaims(claims) {
