@@ -9,6 +9,7 @@
 // The pure orchestration (build/submit) is exported for tests; the DOM
 // wiring at the bottom only runs in a browser.
 import { AccountClient } from "./client.js";
+import { roomIdFromNext } from "./room-deep-link.js";
 import {
   FALLBACK_REQUEST_PERMISSIONS,
   validateAccessRequestForm,
@@ -18,7 +19,7 @@ import {
 } from "./invite-context.js";
 
 // The open community room (see join.html's enroll example). Used as the
-// door's default; the user can paste any other room ID.
+// door's default; the user can paste any other room link or id.
 export const GENERAL_REQUEST_DEFAULT_ROOM_ID = "muse-room";
 export const GENERAL_REQUEST_ROOM_ID_MAX = 128;
 
@@ -26,10 +27,13 @@ export const GENERAL_REQUEST_ROOM_ID_MAX = 128;
 // body. Throws with the user-facing message on invalid input. identityId is
 // filled by submitGeneralAccessRequest after the stash read / mint.
 export function buildGeneralAccessRequest({ roomId, displayName, note, referredBy } = {}) {
-  const room = typeof roomId === "string" ? roomId.trim() : "";
-  if (!room) throw new Error("Enter the room ID you want to join.");
+  // A pasted room link (?room=<id> or #room/<id>) resolves to its room id,
+  // so nobody has to dig a raw id out of an address bar.
+  const typed = typeof roomId === "string" ? roomId.trim() : "";
+  const room = (typed && roomIdFromNext(typed)) || typed;
+  if (!room) throw new Error("Paste the link or name of the room you want to join.");
   if (room.length > GENERAL_REQUEST_ROOM_ID_MAX) {
-    throw new Error(`Room ID must be at most ${GENERAL_REQUEST_ROOM_ID_MAX} characters.`);
+    throw new Error("That room link or name is too long. Paste the link someone sent you.");
   }
   const checked = validateAccessRequestForm({ displayName, note, referredBy });
   if (!checked.ok) throw new Error(checked.error);

@@ -381,9 +381,15 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     const idle = records.filter(r => r.live?.state === "not_configured");
     const empty = $("#inbox-empty");
     if (empty) empty.textContent = idle.length
-      ? `Nothing here yet. ${idle.map(r => channelLabel[r.connection.channel] ?? r.connection.channel).join(" and ")} can go live once configured — finish the connection below and new messages will land here.`
-      : "Your inbox is empty. Connect Gmail to bring in your email.";
+      ? `Nothing here yet. ${idle.map(r => channelLabel[r.connection.channel] ?? r.connection.channel).join(" and ")} can go live once configured. Finish the connection below and new messages will land here.`
+      : gmailUnavailable ? INBOX_EMPTY_PLAIN : INBOX_EMPTY_GMAIL;
   }
+  // antislop #11: the empty state may only name Connect Gmail while that
+  // button is on screen. When this server has no Gmail, the button is hidden,
+  // so the copy says what will fill the inbox instead.
+  const INBOX_EMPTY_GMAIL = "Your inbox is empty. Connect Gmail to bring in your email.";
+  const INBOX_EMPTY_PLAIN = "Your inbox is empty. New messages for you will show up here.";
+  let gmailUnavailable = false;
   let gmailGeneration = 0;
   async function loadGmail() {
     const turn = ++gmailGeneration;
@@ -394,6 +400,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (gmailSection) gmailSection.hidden = false;
       const connected = value.state === 'connected';
       const unavailable = value.state === 'unavailable';
+      gmailUnavailable = unavailable;
+      const emptyNote = $('#inbox-empty');
+      if (emptyNote && [INBOX_EMPTY_GMAIL, INBOX_EMPTY_PLAIN].includes(emptyNote.textContent)) emptyNote.textContent = unavailable ? INBOX_EMPTY_PLAIN : INBOX_EMPTY_GMAIL;
       const status = $('#inbox-gmail-status');
       status.hidden = unavailable;
       status.textContent = connected ? value.address : unavailable ? '' : value.state === 'reconnect_required' ? 'Reconnect Gmail to receive email again.' : 'Bring your email into your private inbox.';

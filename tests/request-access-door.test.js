@@ -61,9 +61,16 @@ test("build: valid fields produce a submittable body", () => {
 });
 
 test("build: empty room id and blank name throw user-facing errors", () => {
-  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), /room ID/i);
+  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), /link or name of the room/i);
   assert.throws(() => buildGeneralAccessRequest({ roomId: "muse-room", displayName: "   " }), /display name/i);
   assert.throws(() => buildGeneralAccessRequest({ roomId: "muse-room", displayName: "x".repeat(81) }), /80/);
+});
+
+test("build: a pasted room link resolves to its room id", () => {
+  for (const link of ["https://room.trydemigod.com/?room=team-7", "https://room.trydemigod.com/#room/team-7", "  team-7  "]) {
+    assert.equal(buildGeneralAccessRequest({ roomId: link, displayName: "Ada" }).roomId, "team-7", link);
+  }
+  assert.throws(() => buildGeneralAccessRequest({ roomId: "x".repeat(129), displayName: "Ada" }), /too long/);
 });
 
 test("submit: mints once, submits with the minted identity, stashes the record", async () => {
