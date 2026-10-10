@@ -3,7 +3,7 @@
 import unittest
 
 from room_sdk import RoomClient
-from room_sdk.errors import ConflictError, ValidationError
+from room_sdk.errors import ConflictError, RoomError, ValidationError
 from tests.fakes import FakeTransport, error_body
 
 
@@ -79,6 +79,32 @@ class GetEventsTest(unittest.TestCase):
             {"events": [], "next": 7, "hasMore": False})
         self.assertEqual(list(make_client(fake).iter_events(after=7)), [])
 
+    def test_iter_events_continues_through_empty_hasmore_page(self):
+        # M2: the server advances the cursor by what it scanned, not by
+        # what this viewer may see — an empty page with hasMore=true is
+        # not the end of the log.
+        fake = (FakeTransport()
+                .add("GET", "/api/rooms/r/events",
+                     {"events": [], "next": 7, "hasMore": True})
+                .add("GET", "/api/rooms/r/events",
+                     {"events": [{"sequence": 8,
+                                  "event": {"type": "message.posted",
+                                            "data": {"body": "x"}}}],
+                      "next": 8, "hasMore": False}))
+        seqs = [e.sequence for e in make_client(fake).iter_events(after=6)]
+        self.assertEqual(seqs, [8])
+        self.assertEqual(fake.requests[1]["query"]["after"], "7")
+
+    def test_iter_events_refuses_stuck_cursor(self):
+        # A cursor that fails to advance while hasMore is true is a
+        # server bug — fail loudly instead of looping forever.
+        fake = FakeTransport().add(
+            "GET", "/api/rooms/r/events",
+            {"events": [{"sequence": 1,
+                         "event": {"type": "message.posted", "data": {}}}],
+             "next": 1, "hasMore": True})
+        with self.assertRaises(RoomError):
+            list(make_client(fake).iter_events(after=1))
 
 if __name__ == "__main__":
     unittest.main()

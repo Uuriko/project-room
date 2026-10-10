@@ -24,12 +24,19 @@ receipt = client.post_message("hello from the python sdk")
 print(receipt.sequence, receipt.duplicate)   # 123456 False
 ```
 
-Posting twice with the same `command_id` returns the *original* receipt
-(`duplicate=True`) instead of double-posting:
+Posting twice with the same `command_id` **and** the same `message_id` returns the
+*original* receipt (`duplicate=True`) instead of double-posting — the
+idempotency key covers the whole envelope, so both must be reused together:
 
 ```python
-receipt = client.post_message("hello again", command_id="my-unique-key-1")
+receipt = client.post_message("hello again",
+                              command_id="my-unique-key-1",
+                              message_id="my-message-key-1")
 ```
+
+Reusing a `command_id` without the original `message_id` raises
+`ValueError` locally (it would be a 409 `idempotency_conflict` on the wire,
+not a safe duplicate).
 
 ## 3. Read the room
 

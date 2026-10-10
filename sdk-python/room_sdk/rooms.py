@@ -68,14 +68,30 @@ class RoomsMixin:
         """Post a message to the room (``message.posted`` command).
 
         ``body`` is 1..65536 characters. ``reply_to`` pins the message to a
-        thread root (replies land in the root's channel). ``message_id`` is
-        the message's own id (auto-generated when omitted); ``command_id``
-        is the envelope idempotency key (auto-generated when omitted).
+        thread root (replies land in the root's channel) and is sent as
+        ``data.replyToId`` — the name the server's message.posted shape
+        allowlists. ``message_id`` is the message's own id (auto-generated
+        when omitted); ``command_id`` is the envelope idempotency key
+        (auto-generated when omitted).
+
+        Retrying after an unknown outcome: pass the SAME ``command_id`` AND
+        the SAME ``message_id`` — the idempotency key covers the whole
+        envelope, so a reused command id with a new message id is a 409
+        ``idempotency_conflict``, not a safe duplicate. Passing
+        ``command_id`` without ``message_id`` raises ``ValueError``.
         """
         if not 1 <= len(body) <= MAX_MESSAGE_BODY:
             raise ValueError(
                 f"message body must be 1..{MAX_MESSAGE_BODY} characters "
                 f"(got {len(body)})"
+            )
+        if command_id is not None and message_id is None:
+            raise ValueError(
+                "retrying with an explicit command_id requires the original "
+                "message_id: a reused command id with a new message id is a "
+                "409 idempotency_conflict, not a safe duplicate. Reuse the "
+                "complete original envelope (same command_id AND same "
+                "message_id) on retry."
             )
         data: Dict[str, Any] = {
             "messageId": message_id or str(uuid.uuid4()),
@@ -84,7 +100,7 @@ class RoomsMixin:
         if channel_id:
             data["channelId"] = channel_id
         if reply_to:
-            data["parentId"] = reply_to
+            data["replyToId"] = reply_to
         if also_send_to_channel:
             data["alsoSendToChannel"] = True
         return self.send_command("message.posted", data,

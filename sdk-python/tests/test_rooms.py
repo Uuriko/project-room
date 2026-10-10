@@ -36,8 +36,28 @@ class PostMessageTest(unittest.TestCase):
         make_client(fake).post_message("reply", reply_to="root1",
                                        also_send_to_channel=True)
         data = fake.last_request()["body"]["data"]
-        self.assertEqual(data["parentId"], "root1")
+        self.assertEqual(data["replyToId"], "root1")
         self.assertTrue(data["alsoSendToChannel"])
+
+    def test_command_id_without_message_id_raises_fail_fast(self):
+        # M5: a reused command_id with a regenerated messageId is a 409
+        # idempotency_conflict, not a safe duplicate. The SDK must refuse
+        # to emit that wire sequence instead of letting the server fail it.
+        client = make_client(FakeTransport())
+        with self.assertRaises(ValueError):
+            client.post_message("retry", command_id="cmd-retry")
+
+    def test_command_id_with_message_id_passes_through(self):
+        # The documented retry recipe: same command_id AND same message_id.
+        fake = FakeTransport().add(
+            "POST", "/api/rooms/r/commands",
+            {"sequence": 5, "duplicate": True})
+        receipt = make_client(fake).post_message(
+            "retry", command_id="cmd-retry", message_id="msg-1")
+        body = fake.last_request()["body"]
+        self.assertEqual(body["id"], "cmd-retry")
+        self.assertEqual(body["data"]["messageId"], "msg-1")
+        self.assertTrue(receipt.duplicate)
 
     def test_empty_and_oversized_bodies_rejected_locally(self):
         client = make_client(FakeTransport())

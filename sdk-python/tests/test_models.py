@@ -65,6 +65,25 @@ class RoomEventTest(unittest.TestCase):
         self.assertEqual(page.next, 10)
         self.assertFalse(page.has_more)
 
+    def test_event_page_wrapper_rows(self):
+        # M1: the server wraps every log entry as {"sequence": N,
+        # "event": {...}}; the entry's own sequence lives on the wrapper.
+        page = EventPage.from_dict({
+            "events": [
+                {"sequence": 11,
+                 "event": {"id": "e2", "type": "message.posted",
+                           "actorId": "b", "at": "2026-10-09T00:00:01Z",
+                           "data": {"body": "wrapped"}}},
+            ],
+            "next": 11, "hasMore": True,
+        })
+        self.assertEqual(len(page.events), 1)
+        ev = page.events[0]
+        self.assertEqual(ev.sequence, 11)
+        self.assertEqual(ev.type, "message.posted")
+        self.assertEqual(ev.data["body"], "wrapped")
+        self.assertTrue(page.has_more)
+
 
 class CommandReceiptTest(unittest.TestCase):
     def test_receipt_with_duplicate(self):
@@ -102,6 +121,17 @@ class ConversationTest(unittest.TestCase):
         self.assertEqual(p.mode, "replace")
         self.assertEqual(p.next_cursor, "tok")
         self.assertEqual(len(p.messages), 1)
+
+    def test_message_record_server_shape(self):
+        # M3: conversation records use id/replyToId, not
+        # messageId/parentId.
+        m = MessageRecord.from_dict({
+            "id": "m2", "body": "real shape", "channelId": "general",
+            "replyToId": "root", "authorId": "agent-b",
+            "createdAt": "2026-10-09T00:00:00Z",
+        })
+        self.assertEqual(m.message_id, "m2")
+        self.assertEqual(m.parent_id, "root")
 
 
 if __name__ == "__main__":

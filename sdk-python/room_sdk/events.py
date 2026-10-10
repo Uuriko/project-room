@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterator, Optional
 
+from .errors import RoomError
 from .models import EventPage, RoomEvent
 
 
@@ -72,14 +73,29 @@ class EventsMixin:
         limit: int = 100,
         actor: Optional[str] = None,
     ) -> Iterator[RoomEvent]:
-        """Yield events from ``after`` onward, following ``next`` cursors."""
+        """Yield events from ``after`` onward, following ``next`` cursors.
+
+        Continues through empty filtered pages while ``hasMore`` is true:
+        the server advances the cursor by what it scanned, not by what this
+        viewer may see, so an empty page is not the end of the log. A cursor
+        that fails to advance while ``hasMore`` is true is a server bug —
+        fail loudly instead of looping forever.
+        """
         cursor: Optional[int] = after
+        pages = 0
         while True:
             page = self.get_events(after=cursor, limit=limit,
                                    actor=actor, room_id=room_id)
-            if not page.events:
-                return
             yield from page.events
             if not page.has_more:
                 return
-            cursor = page.next if page.next is not None else cursor
+            nxt = page.next
+            if nxt is None or nxt <= cursor:
+                raise RoomError(
+                    f"event cursor did not advance (after={cursor}, next={nxt}); "
+                    "refusing to loop forever"
+                )
+            cursor = nxt
+            pages += 1
+            if pages > 10000:
+                raise RoomError("event iteration exceeded 10000 pages; aborting")
