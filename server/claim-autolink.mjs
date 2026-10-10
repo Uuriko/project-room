@@ -223,6 +223,46 @@ export function webhookDeliveryStale(store, repo, nowMs = Date.now()) {
   return !(Number.isFinite(at) && nowMs - at < WEBHOOK_FRESH_MS);
 }
 
+// --- webhook delivery replay journal ---------------------------------------
+// GitHub redelivers webhooks (timeouts, retries, manual redelivery). The
+// payload handler is idempotent in practice, but replay protection is
+// explicit: one bounded work_claim_config row records recent delivery ids,
+// and a repeated id short-circuits in postPrWebhook before the handler runs.
+// Entries expire after 7 days so a stale id can never block a legitimate
+// future delivery reusing the identifier space.
+export const PR_WEBHOOK_DELIVERY_JOURNAL = "_claim-pr-deliveries:";
+export const PR_WEBHOOK_DELIVERY_TTL_MS = 7 * 24 * 60 * 60_000;
+export const PR_WEBHOOK_DELIVERY_CAP = 500;
+
+function readDeliveryJournal(store, nowMs) {
+  const saved = readConfig(store, PR_WEBHOOK_DELIVERY_JOURNAL);
+  const list = Array.isArray(saved?.deliveries) ? saved.deliveries : [];
+  const fresh = [];
+  const seen = new Set();
+  for (const entry of list) {
+    const id = typeof entry?.id === "string" ? entry.id : "";
+    const at = Number(entry?.at);
+    if (!id || seen.has(id) || !Number.isFinite(at) || nowMs - at > PR_WEBHOOK_DELIVERY_TTL_MS) continue;
+    seen.add(id);
+    fresh.push({ id, at });
+  }
+  return fresh;
+}
+
+export function prWebhookDeliverySeen(store, delivery, nowMs = Date.now()) {
+  if (typeof delivery !== "string" || delivery === "") return false;
+  return readDeliveryJournal(store, nowMs).some(entry => entry.id === delivery);
+}
+
+export function recordPrWebhookDelivery(store, delivery, nowMs = Date.now()) {
+  if (typeof delivery !== "string" || delivery === "") return false;
+  const journal = readDeliveryJournal(store, nowMs).filter(entry => entry.id !== delivery);
+  journal.push({ id: delivery, at: nowMs });
+  while (journal.length > PR_WEBHOOK_DELIVERY_CAP) journal.shift();
+  writeConfig(store, PR_WEBHOOK_DELIVERY_JOURNAL, { deliveries: journal }, nowMs);
+  return true;
+}
+
 function discoveryDue(store, repo, nowMs) {
   const saved = readConfig(store, DISCOVERY_ROOM + repo);
   const nextAt = Number(saved?.nextAt);
@@ -459,7 +499,17 @@ export async function postPrWebhook(ctx) {
   if (parsedEvent.ignored || parsedEvent.event !== "pull_request") {
     return ctx.json(ctx.res, 200, { ok: true, ignored: true });
   }
-  const result = handlePrWebhookPayload(ctx.store, parsedEvent.payload, { nowMs: Date.now() });
+  // Replay protection (task #175 F-1): GitHub redelivers webhooks on
+  // timeouts/retries. A repeated x-github-delivery id is acknowledged
+  // without re-running the payload handler. Signature verification above
+  // already ran, so a forged replay still 401s before reaching this check.
+  const nowMs = Date.now();
+  const delivery = parsedEvent.delivery;
+  if (delivery && prWebhookDeliverySeen(ctx.store, delivery, nowMs)) {
+    return ctx.json(ctx.res, 200, { ok: true, duplicate: true });
+  }
+  if (delivery) recordPrWebhookDelivery(ctx.store, delivery, nowMs);
+  const result = handlePrWebhookPayload(ctx.store, parsedEvent.payload, { nowMs });
   if (!result.ok) return ctx.json(ctx.res, 200, { ok: true, ignored: true, reason: result.reason });
   // Minimal by design: claim id, PR number, and state. Nothing else.
   return ctx.json(ctx.res, 200, {
