@@ -14,7 +14,7 @@ const ASSET_CACHE_MAX = 96;
 const assetCache = new Map();
 let openApiCache = null;
 
-const assetType = path => path.endsWith('.js') ? 'text/javascript'
+const assetType = path => path.endsWith('.js') || path.endsWith('.mjs') ? 'text/javascript'
   : path.endsWith('.css') ? 'text/css'
   : path.endsWith('.html') ? 'text/html'
   : path.endsWith('.png') ? 'image/png'
