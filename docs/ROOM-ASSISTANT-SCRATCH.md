@@ -10,13 +10,11 @@ For every run whose coordinator is this host's member, it does the following:
 2. It reads the opening prompt and every human input by message id (`GET /conversation?messageId=`).
 3. It hands a brief (authors, bodies, conflict flags) to an executor.
 4. It publishes one public answer as a reply to the prompt, so the answer stays in the request conversation.
-5. It reports `done` with `resultMessageId` and every `appliedInputMessageIds`.
-6. After the executor finishes, it re-reads the run before posting:
-   - When the run changed because someone added context, it writes a new brief and nothing stale is posted.
-   - When someone pressed Stop or Pause, it acknowledges that and posts nothing.
-7. When a contribution lands between the post and `done`, the server answers `assistant_inputs_pending`. The host then answers again with the late input, so it is never dropped.
-8. It acknowledges `pause_requested`, `cancel_requested` and `resume_requested`.
-9. When the executor fails, it reports `failed` with the reason, not `done`.
+5. It completes the run with the atomic `publish` action, including every `appliedInputMessageIds`.
+6. While execution is running, it checks the run once per second. Stop, Pause, changed inputs, removal of the prompt, or changed execution authority abort the executor. It waits for execution to settle before acknowledging a stop or rebuilding the brief.
+7. After execution, it re-reads the run. The server publication fence also rejects a Stop or contribution arriving between that read and the final write; no stale draft reaches chat.
+8. An uncertain publish response is retried once with the exact same request and answer, recovering the receipt without repeating execution. Further uncertainty is surfaced; the run can be inspected on reconnect.
+9. It acknowledges `pause_requested`, `cancel_requested` and `resume_requested`. An executor failure reports `failed`, never `done`.
 
 **SV-1 (safety value 1): a stopped run never publishes its answer.** This is now
 enforced in code, not just documented. The assistant route has a `publish`
@@ -29,7 +27,7 @@ chat. A cancel on a host silent for over two minutes completes immediately
 and revokes its attempt (independent stop); any late host report or publish
 is then rejected. Hosts should publish instead of posting then reporting
 `done`; the old post-then-report path still works but cannot close the race.
-The `postedBeforeStop` return below only applies to that legacy path.
+This reference host uses the fenced action.
 
 Claims, reports and posts use stable ids, so repeating a pass never double-claims or double-posts.
 
@@ -38,6 +36,10 @@ Claims, reports and posts use stable ids, so repeating a pass never double-claim
 The default executor is scripted. Every answer begins with "Scripted scratch host (no model)" and simply lists the inputs it read. A green test therefore proves the shared-run contract and the host behaviour, not a model runtime.
 
 To use a real model, pass `--exec "<command>"`. The host writes the brief as JSON on stdin and publishes the command's stdout as the answer. A non-zero exit, empty output or a timeout of 120 s reports `failed`.
+
+On macOS/Linux the CLI runs in its own process group. Cancellation and timeout send SIGTERM, then SIGKILL after a 500 ms grace period, including ordinary descendant processes. Windows currently terminates only the direct child; process-tree cancellation is not qualified there. Processes that deliberately detach and remote actions need their own cancellation mechanisms. Killing a process does not undo an already completed external action.
+
+Custom executors receive `execute(brief, { signal })`. They must honor the abort signal and settle only after their work stops. A custom executor that ignores it delays acknowledgement; the host does not claim cancellation while that execution promise remains active. Control requests time out after ten seconds; a failed control read aborts execution rather than allowing it to continue unchecked. Successful publication still requires current server authority.
 
 ## Run it
 

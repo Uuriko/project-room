@@ -16,7 +16,8 @@
 //
 // <dir>/connection.json holds { origin, roomId, token, memberId? }. The token
 // is read from disk and never printed.
-import { spawn } from "node:child_process";
+import { commandExecutor, executeWatchingRun } from "./room-assistant-executor.mjs";
+export { commandExecutor } from "./room-assistant-executor.mjs";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,8 +29,9 @@ const stable = (...parts) => createHash("sha256").update(parts.join("\u0000")).d
 
 export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
   const base = `${origin.replace(/\/$/, "")}/api/rooms/${encodeURIComponent(roomId)}`;
-  async function call(method, path, body) {
+  async function call(method, path, body, signal) {
     const response = await fetchImpl(`${base}${path}`, {
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
       method, headers: { authorization: `Bearer ${token}`, origin, ...(body ? { "content-type": "application/json" } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {})
     });
@@ -40,7 +42,7 @@ export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
   }
   return {
     roomId,
-    assistant: () => call("GET", "/assistant"),
+    assistant: ({ signal } = {}) => call("GET", "/assistant", undefined, signal),
     act: input => call("POST", "/assistant", input),
     message: async id => (await call("GET", `/conversation?messageId=${encodeURIComponent(id)}`)).messages?.find(m => m.id === id) ?? null,
     recent: async (limit = 100) => (await call("GET", `/conversation?limit=${limit}`)).messages ?? [],
@@ -53,24 +55,6 @@ export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
 export async function scriptedExecute(brief) {
   const lines = brief.inputs.map(input => `- ${input.author}: ${input.body}`);
   return [`${SCRIPTED_LABEL}. I read ${brief.inputs.length} input${brief.inputs.length === 1 ? "" : "s"} from ${new Set(brief.inputs.map(i => i.author)).size} people:`, ...lines].join("\n");
-}
-
-// Real-runtime hook: pipe the brief as JSON on stdin; stdout is the answer.
-export function commandExecutor(command, { timeoutMs = 120000 } = {}) {
-  return brief => new Promise((resolve, reject) => {
-    const child = spawn(command, { shell: true, stdio: ["pipe", "pipe", "pipe"] });
-    let out = "", err = "";
-    const timer = setTimeout(() => { child.kill("SIGKILL"); reject(new Error(`executor timed out after ${timeoutMs} ms`)); }, timeoutMs);
-    child.stdout.on("data", d => { out += d; }); child.stderr.on("data", d => { err += d; });
-    child.on("error", e => { clearTimeout(timer); reject(e); });
-    child.on("close", code => {
-      clearTimeout(timer);
-      if (code !== 0) reject(new Error(`executor exited ${code}: ${err.trim().slice(0, 200)}`));
-      else if (!out.trim()) reject(new Error("executor printed no answer"));
-      else resolve(out.trim().slice(0, 8000));
-    });
-    child.stdin.end(JSON.stringify(brief));
-  });
 }
 
 async function brief(client, run, names) {
@@ -99,7 +83,7 @@ export function memberNames(client) {
   };
 }
 
-export async function runHostOnce(client, { memberId, hostId = memberId, execute = scriptedExecute, log = () => {}, names = memberNames(client) } = {}) {
+export async function runHostOnce(client, { memberId, hostId = memberId, execute = scriptedExecute, controlPollMs = 1000, log = () => {}, names = memberNames(client) } = {}) {
   const outcomes = [];
   const { runs, assistant } = await client.assistant();
   if (assistant.coordinatorMemberId !== memberId) return { outcomes, skipped: "not_coordinator" };
@@ -122,36 +106,50 @@ export async function runHostOnce(client, { memberId, hostId = memberId, execute
     if (stopped) { outcomes.push({ runId: run.id, state: stopped }); continue; }
     if (run.status === "resume_requested") run = (await report("working", "Resumed.")).result;
     if (run.status !== "working") { outcomes.push({ runId: run.id, waiting: run.status }); continue; }
-    const reread = async () => (await client.assistant()).runs.find(r => r.id === run.id);
+    const reread = async signal => (await client.assistant({ signal })).runs.find(r => r.id === run.id);
     // Each attempt: brief, execute, re-read, then publish only if the run is
     // still working at the same revision. A Stop or Pause during execution
     // publishes nothing; a late addition re-briefs before anything is posted.
-    // The server has no run-bound publication yet, so a Stop that lands in
-    // the instant between the final read and the post can still leave one
-    // answer in chat; the host then acknowledges the stop and says so.
+    // The server's atomic publish action also fences a Stop or contribution
+    // arriving after the final read. No stale draft is posted on that race.
     let outcome = null;
     for (let attempt = 0; attempt < 4 && !outcome; attempt++) {
       const input = await brief(client, run, names);
       let answer;
-      try { answer = await execute(input); }
+      try { answer = await executeWatchingRun(execute, input, run, reread, controlPollMs); }
       catch (failure) {
+        if (failure.code === "executor_stop_failed") throw failure;
         const current = await reread();
-        const state = current?.status === "working" ? (run = current, (await report("failed", `Couldn't finish: ${failure.message}`.slice(0, 2000))).result.status) : await acknowledge(current);
-        outcome = { runId: run.id, state: state ?? current?.status }; break;
+        if (current?.sourceDeleted) {
+          run = current;
+          outcome = { runId: run.id, state: (await report("cancelled", "Stopped because the request was removed.")).result.status, published: false };
+          break;
+        }
+        if (current?.status === "working" && current.revision !== run.revision) { run = current; continue; }
+        const state = current?.status === "working" ? (run = current, (await report("failed", `Couldn't finish: ${failure.message}`.slice(0, 2000))).result.status) : current && await acknowledge(current);
+        outcome = { runId: run.id, state: state ?? current?.status, ...(state === "paused" || state === "cancelled" ? { published: false } : {}) }; break;
       }
       const current = await reread();
       if (!current || current.status !== "working") { outcome = { runId: run.id, state: (current && await acknowledge(current)) ?? current?.status ?? "missing", published: false }; break; }
       if (current.revision !== run.revision) { run = current; log(`run ${run.id} changed while composing; answering again`); continue; }
       const applied = run.inputs.map(i => i.sourceMessageId);
-      const resultMessageId = `result-${stable(run.id, ...applied)}`;
-      await client.post(resultMessageId, answer, { replyToId: run.sourceMessageId, ...(input.opening?.channelId ? { channelId: input.opening.channelId } : {}) });
+      const publication = { action: "publish", requestId: stable("publish", run.id, attemptId, run.revision),
+        runId: run.id, attemptId, expectedRevision: run.revision, body: answer,
+        summary: `Answered with ${applied.length} input${applied.length === 1 ? "" : "s"}.`, appliedInputMessageIds: applied };
       try {
-        const done = await report("done", `Answered with ${applied.length} input${applied.length === 1 ? "" : "s"}.`, { resultMessageId, appliedInputMessageIds: applied });
-        outcome = { runId: run.id, state: done.result.status, resultMessageId, applied }; log(`done ${run.id}`);
+        let done;
+        try { done = await client.act(publication); }
+        catch (failure) {
+          // A transport failure may follow a committed answer. Retry exactly
+          // the same operation, never rerun the executor to recover a receipt.
+          if (failure.status && failure.status < 500) throw failure;
+          done = await client.act(publication);
+        }
+        outcome = { runId: run.id, state: done.result.status, resultMessageId: done.result.resultMessageId, applied }; log(`done ${run.id}`);
       } catch (failure) {
-        if (!["assistant_inputs_pending", "assistant_revision_conflict"].includes(failure.code)) throw failure;
+        if (!["assistant_inputs_pending", "assistant_revision_conflict", "assistant_stop_pending", "assistant_run_closed"].includes(failure.code)) throw failure;
         const latest = await reread();
-        if (!latest || latest.status !== "working") { outcome = { runId: run.id, state: (latest && await acknowledge(latest)) ?? latest?.status ?? "missing", postedBeforeStop: resultMessageId }; break; }
+        if (!latest || latest.status !== "working") { outcome = { runId: run.id, state: (latest && await acknowledge(latest)) ?? latest?.status ?? "missing", published: false }; break; }
         run = latest; log(`late input on ${run.id}; answering again`);
       }
     }
