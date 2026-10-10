@@ -17,6 +17,27 @@ export const PENDING_INVITE_KEY = "pr-pending-invite";
 const INVITE_FRAGMENT_PATTERN = /^#invite\/[A-Za-z0-9_-]{43}$/;
 const INVITE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
+// Agent-invite codes (RM- + Crockford base32, minted by the "invite agents"
+// UI and redeemed by src/join.js). The SPA's invitation dialog only speaks
+// #invite/<43-char human share-link token>; a #invite/RM-<code> fragment —
+ // e.g. pasted by a human who guessed the SPA's fragment form, or carried in
+// a magic-link destination — currently renders "This invitation link is
+// unavailable." before any API call, even though the code is perfectly
+// redeemable. agentInviteJoinPath() maps that dead-end fragment onto the
+// real join page so the SPA redirects instead of stranding the invitee.
+export const AGENT_INVITE_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
+
+// Pure: returns the door-aware join path for a #invite/RM-<code> fragment,
+// or null for anything else. pathname selects the www-door /room prefix
+// (mirrors src/join.js serviceApiBase/parseJoinCode conventions).
+export function agentInviteJoinPath(hash, pathname) {
+  const match = /^#invite\/(RM-[A-Z0-9]+)$/.exec(String(hash ?? ""));
+  if (!match) return null;
+  const p = String(pathname ?? "");
+  const door = (p === "/room" || p.startsWith("/room/")) ? "/room" : "";
+  return `${door}/join/${match[1]}`;
+}
+
 // Mirror the invitation secret at OAuth-start so the round-trip cannot drop
 // it. Called only from the OAuth entry points — never on invitation preview.
 export function stashPendingInvite(storage, secret) {
