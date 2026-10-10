@@ -504,3 +504,29 @@ test('cancel on a live host still waits for host acknowledgment', async t => {
   const ack = await api('producer',{action:'report',runId:'live',attemptId:'host-1',expectedRevision:2,state:'cancelled',summary:'Stopping.'});
   assert.equal(ack.result.status,'cancelled');
 });
+
+test('ask card statuses: 10s-not-picked-up and 2min-stalled', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','slow-prompt','Take your time.');
+  await api('owner',{action:'invoke',runId:'slow',sourceMessageId:'slow-prompt'});
+  message('owner','work-prompt','Do the thing.');
+  await api('owner',{action:'invoke',runId:'busy',sourceMessageId:'work-prompt'});
+  await api('producer',{action:'claim',runId:'busy',attemptId:'host-1',expectedRevision:0});
+  const statuses = async () => new Map((await api('owner')).runs.map(r => [r.id, r.displayStatus]));
+  const raw = async () => new Map((await api('owner')).runs.map(r => [r.id, r.status]));
+  assert.deepEqual([...await statuses()].sort(),[['busy','working'],['slow','queued']]);
+  const now = f.store.now(); f.store.now = () => now + 11000;
+  assert.equal((await statuses()).get('slow'),'not_picked_up','queued 11s with no claim reads not picked up');
+  assert.equal((await raw()).get('slow'),'queued','the raw status stays queued so a host can still claim it');
+  assert.equal((await statuses()).get('busy'),'working','claimed 11s ago with a fresh host report still reads working');
+  f.store.now = () => now + 121000;
+  assert.equal((await statuses()).get('slow'),'not_picked_up');
+  assert.equal((await statuses()).get('busy'),'stalled','working with no host update for 2min reads stalled');
+  assert.equal((await raw()).get('busy'),'unknown');
+  await api('producer',{action:'claim',runId:'slow',attemptId:'host-2',expectedRevision:0});
+  assert.equal((await raw()).get('slow'),'working','a long-unclaimed run is still claimable');
+  // A fresh host report clears the stall.
+  await api('producer',{action:'report',runId:'busy',attemptId:'host-1',expectedRevision:1,state:'working',summary:'Still on it.'});
+  assert.equal((await statuses()).get('busy'),'working');
+});
