@@ -2357,7 +2357,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const linked = this.db.prepare("SELECT id,sequence,body,room_id FROM events WHERE id=?").get(stored.joined_event_id);
         const binding = this.db.prepare("SELECT account_id,origin FROM member_accounts WHERE room_id=? AND member_id=?").get(stored.room_id, stored.intended_member_id);
         const { sequence, members } = this.roomAuthority(stored.room_id);
-        assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
+        // Account deletion removes the invitee's member_accounts binding
+        // (account-deletion.mjs, "memberships"), so a deleted invitee has no
+        // live membership to compare. The journal and projection matched above;
+        // check only that the joined event is still the recorded one.
+        const retired = !binding && this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0;
+        if (retired) {
+          if (!linked || linked.id !== stored.joined_event_id || linked.room_id !== stored.room_id
+            || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > sequence) throw new Error("Joined event differs from journal");
+        } else assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } });
       }
       return replayed;
     } catch { fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation"); }
