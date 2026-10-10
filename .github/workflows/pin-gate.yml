@@ -1,0 +1,43 @@
+# pin-gate — pinned-ref gate for workflow files.
+#
+# Threat: a PR that rewrites a push-to-main workflow can swap an action ref to
+# a tag or branch the attacker controls (mutating tags like `v4` can be
+# re-pointed). SHA pinning removes that lever. This gate runs on pull_request
+# (pre-merge, no secrets) and fails the PR when any `uses:` ref under
+# .github/workflows/ is not pinned to a full 40-char commit SHA.
+#
+# Paired with .github/CODEOWNERS (.github/workflows/** @Uuriko) so workflow
+# changes always get owner review.
+name: pin-gate
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+      - name: Require SHA-pinned action refs
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -f "$f" ] || continue
+            while IFS= read -r ref; do
+              case "$ref" in
+                ./*|docker://*) continue ;;
+              esac
+              if ! printf '%s' "$ref" | grep -Eq '^[^@]+@[0-9a-f]{40}$'; then
+                echo "UNPINNED: $f -> $ref"
+                fail=1
+              fi
+            done < <(grep -hoE 'uses:[[:space:]]+[^[:space:]#]+' "$f" | sed -E 's/^uses:[[:space:]]+//')
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "FAIL: all action refs in .github/workflows must be pinned to a full 40-char commit SHA."
+            exit 1
+          fi
+          echo "pin-gate: all refs pinned"
