@@ -1,0 +1,76 @@
+name: provision-vapid
+
+# One-shot ops workflow: generate a fresh VAPID keypair and store it as
+# Worker secrets on the PRODUCTION environment (project-room).
+# Triggered manually via workflow_dispatch only. Never runs on push.
+#
+# Secrets written (names only; values never appear in logs):
+#   ROOM_VAPID_PUBLIC_KEY
+#   ROOM_VAPID_PRIVATE_KEY
+#   ROOM_VAPID_SUBJECT  (mailto:potter@trydemigod.com)
+#
+# Safety: every secret value is registered with ::add-mask:: before use, so
+# GitHub redacts it from all logs. The run fails if any value is empty or
+# would be echoed. The keypair file is shredded at the end.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Generate VAPID keypair (values masked, never logged)
+        run: |
+          set -euo pipefail
+          node scripts/push-doctor.mjs --keys > /tmp/vapid.json
+          node -e '
+            const fs = require("fs");
+            const j = JSON.parse(fs.readFileSync("/tmp/vapid.json", "utf8"));
+            j.ROOM_VAPID_SUBJECT = "mailto:potter@trydemigod.com";
+            for (const name of ["ROOM_VAPID_PUBLIC_KEY", "ROOM_VAPID_PRIVATE_KEY", "ROOM_VAPID_SUBJECT"]) {
+              const v = j[name];
+              if (!v || typeof v !== "string" || v.length < 8) {
+                console.error(`::error::${name} missing or too short`);
+                process.exit(1);
+              }
+              console.log(`::add-mask::${v}`);
+            }
+            fs.writeFileSync("/tmp/vapid.json", JSON.stringify(j));
+            console.log(`public_key_len=${j.ROOM_VAPID_PUBLIC_KEY.length}`);
+            console.log(`private_key_len=${j.ROOM_VAPID_PRIVATE_KEY.length}`);
+            console.log(`subject=${j.ROOM_VAPID_SUBJECT}`);
+          '
+
+      - name: Store secrets on production Worker
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN secret is not available to this run. Nothing was changed."
+            exit 1
+          fi
+          cd cloudflare
+          for name in ROOM_VAPID_PUBLIC_KEY ROOM_VAPID_PRIVATE_KEY ROOM_VAPID_SUBJECT; do
+            node -e 'const j = JSON.parse(require("fs").readFileSync("/tmp/vapid.json", "utf8")); process.stdout.write(j[process.argv[1]]);' "$name" \
+              | npx -y wrangler secret put "$name" --env production
+            echo "$name: stored"
+          done
+          echo "--- secrets now present on production (names only) ---"
+          npx -y wrangler secret list --env production
+
+      - name: Shred keypair file
+        if: always()
+        run: |
+          shred -u /tmp/vapid.json 2>/dev/null || rm -f /tmp/vapid.json
+          echo "keypair file shredded"
