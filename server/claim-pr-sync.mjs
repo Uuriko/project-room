@@ -16,7 +16,7 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
@@ -439,6 +439,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   // lapsed is auto-released (lease_expired event, flake signal) so the tick
   // can never settle a dead round as done — the cron and HTTP paths agree.
   sweepExpiredClaimLeases(store, nowMs);
+  sweepStaleUnclaimedClaims(store, nowMs);
   const access = token === undefined ? githubToken(env ?? process.env) : token;
   if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
   if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
@@ -541,6 +542,45 @@ function sweepExpiredClaimLeases(store, nowMs) {
     });
   }
   return released;
+}
+
+// Board cleanup 2026-10-09: retire dormant unclaimed items (no activity for
+// STALE_UNCLAIMED_DAYS) so a room's Board cannot silt up with abandoned
+// offers. Runs on the cron tick, never on a request, at most once per
+// STALE_SWEEP_INTERVAL_MS per store and STALE_SWEEP_BATCH items per room per
+// pass, so a large backlog drains over a few passes without an event burst.
+// Each retirement is a normal close: history stamp, "closed" room event with
+// reason "closed" (the event enum), the stale_sweep note on the item's
+// history stamp, and no wake (nobody holds the item).
+export const STALE_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+const lastStaleSweep = new WeakMap();
+export function sweepStaleUnclaimedClaims(store, nowMs, { force = false } = {}) {
+  if (!store?.db || !store.workClaims) return 0;
+  const last = lastStaleSweep.get(store);
+  if (!force && typeof last === "number" && nowMs - last >= 0 && nowMs - last < STALE_SWEEP_INTERVAL_MS) return 0;
+  lastStaleSweep.set(store, nowMs);
+  let roomIds = [];
+  try {
+    roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'`)
+      .all().map(row => row.roomId);
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return 0;
+    throw error;
+  }
+  let closed = 0;
+  for (const roomId of roomIds) {
+    const pairs = closeStaleUnclaimed(store.workClaims.list(roomId), nowMs);
+    if (pairs.length === 0) continue;
+    store.workClaims.transaction(() => {
+      for (const [, item] of pairs) {
+        store.workClaims.set(roomId, item);
+        emitWorkClaimEvent(store, roomId, { actorId: "system", item, action: "closed", atMs: nowMs, reason: "closed" });
+        closed += 1;
+      }
+    });
+  }
+  return closed;
 }
 
 // Settle every live claim linked to a closing pull_request webhook payload.
