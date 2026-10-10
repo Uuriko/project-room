@@ -121,3 +121,23 @@ for (const status of ["full", "cancelled", "expired", "authority_changed"]) {
     assert.equal(f.copies.length, copiedOnCreation, "a retired invitation must not be copyable");
   });
 }
+
+test("invite button follows real invite rights: no dead-end dialog for plain members", t => {
+  const f = setup(t);
+  // manage_members (and the owner) see the Invite button.
+  f.ui.sync();
+  assert.equal(f.node("#invite-people-button").hidden, false);
+  // A plain member gets no button: the server's personalInvite returns null
+  // for them, so the dialog could only dead-end.
+  f.member.permissions = [];
+  f.ui.sync();
+  assert.equal(f.node("#invite-people-button").hidden, true);
+  // invite_member is enough.
+  f.member.permissions = ["invite_member"];
+  f.ui.sync();
+  assert.equal(f.node("#invite-people-button").hidden, false);
+  // An inactive member with invite rights still gets no button.
+  f.member.active = false;
+  f.ui.sync();
+  assert.equal(f.node("#invite-people-button").hidden, true);
+});

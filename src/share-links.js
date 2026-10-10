@@ -340,7 +340,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     refreshAgentCode();
   }
   function sync() {
-    $("#invite-people-button").hidden = !(canManage() || inRoom());
+    // Gate on real invite rights, not mere membership: the server's
+    // personalInvite returns null for members without invite_member /
+    // manage_members, so showing the dialog to them was a dead end.
+    $("#invite-people-button").hidden = !canInviteMembers(getState(), getSession()?.member?.id);
     refreshAgentCode();
     applyKitChrome();
     if (manager.open && kitOnly) {
