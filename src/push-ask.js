@@ -26,6 +26,7 @@ function readNumber(storage, key) {
 
 export function mountPushAsk({
   dock,
+  before = null,
   storage = globalThis.localStorage,
   now = () => Date.now(),
   ios = false,
@@ -41,12 +42,15 @@ export function mountPushAsk({
   copy.textContent = PUSH_ASK_COPY;
   const turnOn = document.createElement("button");
   turnOn.type = "button";
+  turnOn.className = "button ghost";
   turnOn.textContent = "Turn on";
   const notNow = document.createElement("button");
   notNow.type = "button";
+  notNow.className = "text-button";
   notNow.textContent = "Not now";
   root.append(copy, turnOn, notNow);
-  dock?.append(root);
+  if (before) dock?.insertBefore(root, before);
+  else dock?.append(root);
 
   const apply = item => {
     const decision = pushAskDecision({
@@ -71,4 +75,13 @@ export function mountPushAsk({
   });
 
   return { showFor: apply, root };
+}
+
+// The soft ask supersedes the standalone opt-in button while it is visible:
+// one opt-in control per surface, not two. Pure (no DOM beyond the two
+// handles) so the wiring is unit-testable.
+export function applyPushAskVisibility({ ask, button, needsMe }) {
+  const decision = ask?.showFor({ needsMe: Boolean(needsMe) }) ?? { show: false };
+  if (decision.show && button) button.hidden = true;
+  return decision;
 }
