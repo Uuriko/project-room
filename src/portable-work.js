@@ -1,7 +1,7 @@
 import { workPacket, packetMarkdown, parseWorkReturn, nativeWorkDraft, resultDraft, resultDraftText } from "./work-packet.js";
 import { draftCommand, retryUnconfirmed } from "./client.js";
 import { EVENT_TYPES as T } from "./events.js";
-import { sendsOnEnter } from "./conversation.js";
+import { sendsOnEnter, bodyText } from "./conversation.js";
 import { workStatus, confirmsWorkReturn } from "./workflow.js";
 
 export function installPortableWork({ client, getState, onSaved }) {
@@ -79,7 +79,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     const state = getState(), workId = button.dataset.portableWork;
     if (!state || state.room.id !== client.session.roomId || !Object.hasOwn(state.workItems, workId)) return;
     const source = button.dataset.portableOriginal ? state.messages.find(message => message.id === button.dataset.portableOriginal
-      && message.workItemId === workId && message.proposal && message.body.length <= 4000) : null;
+      && message.workItemId === workId && message.proposal && bodyText(message).length <= 4000) : null;
     if (button.dataset.portableOriginal && (!source || button.dataset.portableMode !== "draft")) return;
     entry = { version, generation: client.generation, session: client.session, state, workId, opener: button, focusKey: button.dataset.focusKey,
       source,
