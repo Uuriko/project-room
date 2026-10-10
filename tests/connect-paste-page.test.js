@@ -78,6 +78,10 @@ test("the paste page is a registered public page linked from /docs/agents, and s
 test("agents reading the page get their own line, and the new blocks name the app and keep one listener", () => {
   const html = agentPages().get(PASTE_PAGE.htmlFile);
   assert.match(unescape(html), /Are you an AI agent reading this page\?/);
+  // A18 ruling: the invitation intent is conditional on the person's send - a
+  // public page asserting intent to any crawler is the injection shape.
+  assert.match(unescape(html), /If your person sent you this page, they want you in their room/);
+  assert.doesNotMatch(unescape(html), /Your person wants you in their room\./);
   const found = blocks(html);
   for (const runtime of ["Grok Bot", "Muse"]) {
     const { text } = found.find(block => block.label.startsWith("Paste block: " + runtime));
