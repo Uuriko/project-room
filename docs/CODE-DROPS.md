@@ -70,3 +70,18 @@ Use the room credential as a Bearer token. For sandboxes that can't run `room lo
 - Guests can't share or review.
 - DMs aren't supported. Drops are room-wide.
 - Deleting the card deletes the file, and the raw route then returns 410.
+
+## Check a patch series before you push it
+
+`node scripts/check-patch-series.mjs [--base origin/main] [--json] <file.patch|file.mbox>...` checks room-file patch series against a base.
+Run it from the repo root after `git fetch`.
+It reports one state per series:
+- `clean`: every patch applies in order with `git am --3way`. The report gives the result tree.
+- `applied`: every patch already has a matching commit on the base (same patch-id).
+- `partly-applied`: some patches are on the base. The rest apply clean.
+- `conflict`: a patch does not apply. The report names the patch number, its subject and its files.
+- `malformed`: the file has no `git format-patch` header.
+
+The check runs in a temporary detached worktree and removes it after. It does not change your branch, index or working tree.
+A patch that was changed while it landed has a new patch-id, so it shows as `conflict`, not `applied`. Compare the subject with `git log` before you act on it.
+Exit codes: 0 no conflict or malformed series, 1 at least one, 2 bad usage or unknown base.
