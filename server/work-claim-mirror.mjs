@@ -122,6 +122,11 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
   if (incoming.type === "claim.released") {
     let item = registry.get(roomId, id);
     if (!item || item.state === "unclaimed" || item.state === "done" || item.state === "closed") return item;
+    // C10: boardClaimId folds distinct projection ids (lane.a -> lane_a), so a
+    // release naming one projection must not free another member's board card.
+    // Only touch the card when it is the released projection item or the
+    // releaser holds it.
+    if (item.workItemId !== data.workItemId && item.owner !== actorId) return item;
     if (item.state === "in_progress" || item.state === "blocked") {
       item = updateWork(item, actorId, { state: "claimed", note: "paused for release", now: nowMs, authority: item.owner !== actorId });
       registry.set(roomId, item);
