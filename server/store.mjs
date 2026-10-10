@@ -3386,6 +3386,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { invitation: invitationView(revoked, now, { includeScope: true }), duplicate: false };
     });
   }
+  // Account deletion revokes the account's pending invitations (as issuer or as
+  // the intended invitee) through the same state change revokeInvitation makes:
+  // revision, revoked_* columns and reason satisfy the status CHECK, the audit
+  // event is appended, and the journal entry keeps verifyInvitationRecord
+  // consistent. A bare `SET status='revoked'` violates that CHECK. The
+  // deleting account is the actor; the member is the invitee (self-decline) or
+  // the issuer (self-revoke). Runs inside the caller's transaction.
+  revokePendingInvitationsForAccount(accountId, { reason = "account_deleted" } = {}) {
+    const rows = this.db.prepare(`SELECT * FROM membership_invitations
+      WHERE status='pending' AND (issuer_account_id=? OR intended_account_id=?) ORDER BY id`).all(accountId, accountId);
+    const now = this.now();
+    const epoch = this.db.prepare("SELECT auth_epoch FROM accounts WHERE id=?").get(accountId)?.auth_epoch ?? 0;
+    for (const row of rows) {
+      const memberId = row.issuer_account_id === accountId ? row.issuer_member_id : row.intended_member_id;
+      const revision = row.revision + 1;
+      const changed = this.db.prepare(`UPDATE membership_invitations SET revision=?,status='revoked',revoked_at=?,revoked_by_account_id=?,revoked_by_member_id=?,revoke_reason=?
+        WHERE id=? AND revision=? AND status='pending'`).run(revision, now, accountId, memberId, reason, row.id, row.revision).changes;
+      if (changed !== 1) continue;
+      this.db.prepare(`INSERT INTO membership_invitation_events(
+        invitation_id,sequence,type,actor_account_id,actor_member_id,actor_auth_epoch,actor_session_revision,invitation_revision,at,room_event_id,reason
+      ) VALUES(?,2,'revoked',?,?,?,0,?,?,NULL,?)`).run(row.id, accountId, memberId, epoch, revision, now, reason);
+      this.appendInvitationJournal(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), "revoked");
+    }
+    return rows.length;
+  }
   acceptInvitation(accountSessionToken, token, { redemptionId, expectedRevision, expectedSessionBinding } = {}) {
     if (typeof token !== "string" || !tokenPattern.test(token) || typeof redemptionId !== "string" || !redemptionPattern.test(redemptionId) || expectedRevision !== 0) {
       fail(422, "invalid_invitation_acceptance", "Invitation acceptance requires its token, redemption ID, and expected revision zero");
