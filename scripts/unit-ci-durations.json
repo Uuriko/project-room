@@ -372,6 +372,7 @@
   "tests/human-404.test.js": 30433,
   "tests/human-door-contrast.test.js": 1000,
   "tests/human-onboarding-doors.test.js": 15231,
+  "tests/human-project-label.test.js": 12000,
   "tests/human-push-display.test.js": 3454,
   "tests/human-push.test.js": 51308,
   "tests/i18n-harness.test.js": 48594,

@@ -1,5 +1,15 @@
 import { uiText } from './strings.js';
 import { currentResult } from './work-selectors.js';
+// Project dialog status chips: one label per real work state. The previous
+// catch-all mapped proposed and accepted items to "Planned" (8333).
+export function humanProjectLabel(item) {
+  if (item?.state === 'completed') return currentResult(item) ? 'Done' : 'Needs review';
+  if (item?.state === 'working') return uiText("human.copy.005");
+  if (item?.state === 'blocked') return 'Needs input';
+  if (item?.state === 'accepted') return 'Ready to start';
+  if (item?.state === 'proposed') return 'Proposed';
+  return 'Planned';
+}
 // Human presentation and explicitly PUBLIC assistant invocation. No private request reuse.
 export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, selectResult, refreshTranscript }) {
   const $ = selector => document.querySelector(selector);
@@ -33,7 +43,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   $('#human-project-open').onclick = () => {
     const state = getState();
     $('#human-project-content').innerHTML = [`<p>${esc(state.room.purpose || uiText("human.copy.004"))}</p>`, Object.values(state.workItems ?? {}).filter(w => !w.supersededBy).map(w => {
-      const label = w.state === 'completed' ? (currentResult(w) ? 'Done' : 'Needs review') : w.state === 'working' ? uiText("human.copy.005") : w.state === 'blocked' ? 'Needs input' : 'Planned';
+      const label = humanProjectLabel(w);
       return ["<button type=\"button\" class=\"human-project-item\" data-project-work=\"", esc(w.id), "\"><strong>", esc(w.title), "</strong><span>", esc(label), "</span></button>"].join('');
     }).join('')].join('');
     if (!Object.keys(state.workItems ?? {}).length) $('#human-project-content').insertAdjacentHTML('beforeend', uiText("human.copy.006"));
