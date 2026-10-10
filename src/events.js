@@ -24,6 +24,12 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_SPEND_PRICING_SET: "room.spend_pricing_set",
   // One owner kill-switch for cross-owner assign and wake. Default open.
   ROOM_TRUST_SET: "room.trust_set",
+  // FIX-66 STORM kill-switch: the room owner's global STOP for the
+  // work-claim plane. Audit only — enforcement is in-memory (fail-safe OFF
+  // on restart). Rooms that never record the event keep no
+  // `room.workClaimKillSwitch` field, so replay of older logs stays
+  // byte-identical.
+  WORK_CLAIM_KILL_SWITCH_SET: "work_claim.kill_switch_set",
   // Owner opt-in for the public receipts page. Default off when absent.
   ROOM_PUBLIC_RECEIPTS_SET: "room.public_receipts_set",
   // --- GR2 public acquisition opt-ins. Absent means off. ---
@@ -516,6 +522,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
     [EVENT_TYPES.ROOM_SPEND_PRICING_SET]: setSpendPricing,
     [EVENT_TYPES.ROOM_TRUST_SET]: setRoomTrust,
+    [EVENT_TYPES.WORK_CLAIM_KILL_SWITCH_SET]: setWorkClaimKillSwitch,
     [EVENT_TYPES.ROOM_PUBLIC_RECEIPTS_SET]: setPublicReceipts,
     // --- GR2 ---
     [EVENT_TYPES.ROOM_PUBLIC_PAGE_SET]: setPublicPage,
@@ -732,6 +739,28 @@ function setRoomTrust(state, incoming) {
     revision: (previous?.revision ?? 0) + 1,
     setById: incoming.actorId,
     setAt: incoming.at
+  };
+}
+
+// FIX-66 STORM kill-switch audit record. This projection is the durable
+// audit trail only — it never drives enforcement (enforcement is the
+// in-memory kill-switch state, fail-safe OFF on restart), so a replayed
+// ON here does not re-freeze the room after a crash.
+function setWorkClaimKillSwitch(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may flip the work-claim kill switch");
+  if (typeof incoming.data.engaged !== "boolean") throw new Error("Work-claim kill switch requires engaged as true or false");
+  const reason = incoming.data.reason;
+  if (reason !== undefined && (typeof reason !== "string" || reason.length > 500)) {
+    throw new Error("Work-claim kill switch reason must be a string of at most 500 characters");
+  }
+  const previous = state.room.workClaimKillSwitch ?? null;
+  state.room.workClaimKillSwitch = {
+    engaged: incoming.data.engaged,
+    revision: (previous?.revision ?? 0) + 1,
+    setById: incoming.actorId,
+    setAt: incoming.at,
+    reason: typeof reason === "string" && reason ? reason : null
   };
 }
 

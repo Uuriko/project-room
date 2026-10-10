@@ -5185,6 +5185,54 @@ paths:
         '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '422': { description: invalid_claim_input }
         '429': { description: Rate limit exceeded (rate_limited). }
+  /api/rooms/{roomId}/work-claims/kill-switch:
+    get:
+      summary: Read the work-claim kill-switch state
+      description: |
+        Returns whether the room owner's STORM kill-switch is engaged
+        (docs/KILL-SWITCH.md). Any authenticated member may read it; reads
+        stay live while the switch is engaged. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: Kill-switch state for this room }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) }
+        '429': { description: Rate limit exceeded (rate_limited). }
+    post:
+      summary: Engage or disengage the work-claim kill switch
+      description: |
+        The room owner's global STOP for the claim plane (docs/KILL-SWITCH.md).
+        Only the room owner — a human member — may flip it; agents are refused
+        with 403 owner_required. While engaged, every work-claim mutation
+        (create/claim/update/review/release/reassign/renew/sweep/config) is
+        refused with 503 kill_switch_engaged; reads stay live. Engagement
+        force-releases nothing: live claims keep their owners and lease TTLs.
+        The switch defaults OFF and is never persisted — a restarted server
+        comes back OFF. Engage and disengage are recorded as
+        work_claim.kill_switch_set room events (who, when, why). API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [engage, disengage] }
+                reason: { type: string, maxLength: 500, description: Why the switch is being flipped; recorded in the room event }
+      responses:
+        '200': { description: The new kill-switch state }
+        '401': { description: unauthenticated }
+        '403': { description: owner_required (not the room owner), insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '409': { description: room_archived }
+        '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
+        '503': { description: kill_switch_unavailable — the store does not support the kill switch }
   /api/rooms/{roomId}/work-claims/status:
     get:
       summary: Live revision compared with GitHub main

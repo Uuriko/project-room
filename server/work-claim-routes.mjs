@@ -61,6 +61,8 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
+// FIX-66 STORM kill-switch: the room owner's global STOP for the claim plane.
+import { KILL_SWITCH_ENGAGED_CODE, KILL_SWITCH_OWNER_CODE, appendKillSwitchEvent } from "./kill-switch.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -588,6 +590,21 @@ export async function handleWorkClaims(options) {
   const { req, res, helpers, reauthorize } = options;
   const registry = options.registry ?? options.store.workClaims ?? defaultRegistry;
   const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  // FIX-66 STORM kill-switch (docs/KILL-SWITCH.md): the room owner's global
+  // STOP. While engaged, every work-claim mutation freezes — agents and the
+  // owner alike. Reads stay live, and the kill-switch route itself stays
+  // reachable so the owner can disengage. Method-based, so a future POST
+  // mutation route freezes by default (fail-closed for new writes).
+  const killSwitch = options.killSwitch ?? options.store?.killSwitch ?? null;
+  if (killSwitch && options.workClaimRoute !== "kill-switch"
+    && req.method === "POST" && killSwitch.isEngaged(options.roomId)) {
+    const message = "The room owner has engaged the work-claim kill switch; claim writes are frozen while it is engaged.";
+    return helpers.json(res, 503, {
+      error: { code: KILL_SWITCH_ENGAGED_CODE, message },
+      hint: "Reads still work. The room owner disengages the switch when the flood has passed.",
+      next: [{ command: "Ask the room owner to disengage the work-claim kill switch." }],
+    });
+  }
   // The append alternative has one shared transaction across both transports.
   if (options.workClaimRoute === "update" && req.method === "POST"
     && requestData && typeof requestData === "object" && Object.hasOwn(requestData, "appendPullRequest")) {
@@ -642,7 +659,7 @@ export async function handleWorkClaims(options) {
       });
     }
   }
-  const run = () => handleWorkClaimsCore({ ...options, registry, pullBatch, deployStatus,
+  const run = () => handleWorkClaimsCore({ ...options, killSwitch, registry, pullBatch, deployStatus,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },
   });
@@ -684,7 +701,7 @@ function memoizeList(registry) {
   });
 }
 
-function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
+function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRoute, workClaimId, helpers, registry: sourceRegistry, killSwitch = null, pullBatch = { results: [], rateLimitedUntil: null, skipped: false }, deployStatus = null }) {
   const { json, reject, body } = helpers;
   const registry = memoizeList(sourceRegistry);
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
@@ -796,6 +813,34 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     throw error;
   };
 
+  // FIX-66 STORM kill-switch (docs/KILL-SWITCH.md): the room owner's global
+  // STOP for the claim plane. GET is a read (any authenticated member);
+  // POST engage/disengage is owner-only — the caller must be the room owner
+  // and human-kind. Never agents.
+  if (workClaimRoute === "kill-switch" && (req.method === "GET" || req.method === "HEAD")) {
+    return json(res, 200, { roomId, engaged: killSwitch?.isEngaged(roomId) ?? false });
+  }
+  if (workClaimRoute === "kill-switch" && req.method === "POST") {
+    if (!killSwitch) reject(503, "kill_switch_unavailable", "This store does not support the work-claim kill switch");
+    const callerId = auth?.member?.id;
+    if (!access.ownerId || callerId !== access.ownerId || access.member?.kind !== "human") {
+      reject(403, KILL_SWITCH_OWNER_CODE, "Only the room owner can flip the work-claim kill switch");
+    }
+    if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; the kill switch cannot be flipped");
+    const data = body(req);
+    if (!shape(data, { required: ["action"], optional: ["reason"] })) {
+      invalidInput(reject, `{action: "engage"|"disengage", reason?}`);
+    }
+    const engaged = data.action === "engage" ? true : data.action === "disengage" ? false : null;
+    if (engaged === null) invalidInput(reject, `action must be "engage" or "disengage"`);
+    const reason = data.reason === undefined ? null : data.reason;
+    if (reason !== null && (typeof reason !== "string" || reason.length > 500)) {
+      invalidInput(reject, "a reason of at most 500 characters");
+    }
+    if (engaged) killSwitch.engage(roomId); else killSwitch.disengage(roomId);
+    appendKillSwitchEvent(store, roomId, { actorId: callerId, engaged, reason, atMs: nowMs });
+    return json(res, 200, { roomId, engaged, ...(reason ? { reason } : {}) });
+  }
   if (workClaimRoute === "status" && req.method === "GET") {
     closeLiveClaims();
     const status = deployStatus ?? { live: SOURCE_REVISION, main: null, behind: null, checkedAt: null };

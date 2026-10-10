@@ -3495,6 +3495,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimsDuplicatesMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/duplicates$/.exec(url.pathname);
       // Owner cap for open claims per member. Literal segment before {id}.
       const workClaimsConfigMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/config$/.exec(url.pathname);
+      // FIX-66 STORM kill-switch: owner-only global STOP for the claim plane.
+      // Literal segment before {id}, like config.
+      const workClaimKillSwitchMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/kill-switch$/.exec(url.pathname);
       const workClaimItemMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})$/.exec(url.pathname);
       const workClaimClaimMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/claim$/.exec(url.pathname);
       const workClaimUpdateMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/update$/.exec(url.pathname);
@@ -3506,7 +3509,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
       // never mistaken for a claim id.
-      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimClaimMatch
+      const workClaimMatch = workClaimsMatch ?? workClaimsStatusMatch ?? workClaimsSweepMatch ?? workClaimsDuplicatesMatch ?? workClaimsConfigMatch ?? workClaimKillSwitchMatch ?? workClaimClaimMatch
         ?? workClaimUpdateMatch ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
         ?? workClaimItemMatch
         ?? workClaimReceiptsMatch;
@@ -3797,6 +3800,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : workClaimsStatusMatch ? "status"
           : workClaimsDuplicatesMatch ? "duplicates"
           : workClaimsConfigMatch ? "config"
+          : workClaimKillSwitchMatch ? "kill-switch"
           : workClaimsMatch ? (req.method === "GET" ? "list" : "create")
           : workClaimReceiptsMatch ? "receipts"
           : workClaimItemMatch ? "read"

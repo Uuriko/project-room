@@ -33,6 +33,7 @@ import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
+import { createKillSwitchState } from "./kill-switch.mjs"; // FIX-66 STORM kill-switch: in-memory, fail-safe OFF on restart.
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
@@ -1211,6 +1212,10 @@ export class RoomStore {
       transaction: fn => this.transaction(fn),
       onChange: roomId => noteWorkClaimChange(this, roomId),
     });
+    // FIX-66 STORM kill-switch: room owner holds the global STOP for the
+    // claim plane. In-memory per room, never persisted — a crashed or
+    // restarted server always comes back OFF, never stuck ON.
+    this.killSwitch = createKillSwitchState();
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
