@@ -44,9 +44,9 @@ When a member asks the room to fetch a URL, the service requests that URL. Those
 
 ## Retention and deletion
 
-Account deletion purges sign-in credentials, browser sessions, login methods, passkeys, room memberships, connected Gmail data, account setup answers, and the profile. Personal rooms the account solely owns are archived and their messages and files are purged. Security audit rows (`account_access_events`) and the deactivated account id are kept. Room history already shared with other members is not rewritten. If the account is the sole owner of a shared room that still has other members, deletion stops until ownership is transferred.
+Account deletion purges sign-in credentials, browser sessions, login methods, passkeys, room memberships, connected Gmail and email data (including the channel import journal), private inbox content (imported messages, drafts, read state), derived cross-channel data, connected-channel operational rows (direct sends, handoffs, quarantine and spam rows, channel status), account setup answers, terms acceptance, and the profile. Guest invites, share links, and membership invitations the account issued are revoked, and agent connections it sponsored are disconnected. Personal rooms the account solely owns are archived and their messages and files are purged. Security audit rows (`account_access_events`), inbox and email command receipts, abuse reports, and the deactivated account id are kept. Room history already shared with other members is not rewritten. If the account is the sole owner of a shared room that still has other members, deletion stops until ownership is transferred.
 
-Deleting a message hides it in the room. The event history can still contain the earlier text.
+Deleting a message removes its text from the room's event history, the stored room state, and any attached file bytes. A tombstone records who deleted it and when; earlier versions in the edit history are removed too.
 
 The scheduled retention job does not delete room events, commands, audit rows, invitations, activity, or webhook deliveries. An audit planner classifies events by age (critical about 7 years, high 2 years, normal 180 days, low 30 days) and records a plan. That planner does not delete those rows.
 
