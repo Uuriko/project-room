@@ -586,11 +586,13 @@ export class AccountLoginMethods {
     });
   }
 
-  consumeEmailVerifyCode({ accountId, code } = {}) {
+  // `email` is for an account that has no email method yet (guest upgrade):
+  // the code proves the inbox before anything is linked.
+  consumeEmailVerifyCode({ accountId, code, email = null } = {}) {
     this.#getAccount(accountId);
     if (typeof code !== "string" || !/^\d{6}$/.test(code)) fail(401, "invalid_email_code", "That code is not valid");
-    const emailRow = this.db.prepare(`SELECT email FROM account_login_methods
-      WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`).get(accountId);
+    const emailRow = email === null ? this.db.prepare(`SELECT email FROM account_login_methods
+      WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`).get(accountId) : { email };
     const normalized = emailRow ? normalizeEmail(emailRow.email) : null;
     if (!normalized) fail(401, "invalid_email_code", "That code is not valid");
     const now = this.#now();

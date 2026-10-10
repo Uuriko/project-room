@@ -9089,6 +9089,66 @@ paths:
         '409': { description: password_already_set }
         '422': { description: "invalid_password_set, password_too_short/password_too_long, or no_verified_email" }
         '429': { description: rate_limited }
+  /api/auth/guest/upgrade:
+    post:
+      summary: A guest asks to keep its account by adding an email (step 1 of 2)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`, CSRF) for an
+        account with no email and no password, such as a guest who joined
+        from a share link. Always answers the same 202: a free address is
+        mailed a 6-digit code; an address another account holds is mailed
+        the existing-account notice instead and gets no code, so the reply
+        never reveals who uses an email. Nothing is linked yet.
+      x-room-permission: account
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string }
+      responses:
+        '202': { description: "{ status: check_email, mailConfigured }" }
+        '401': { description: "account_session_required or invalid_session" }
+        '403': { description: "origin_denied or csrf_denied" }
+        '409': { description: "login_method_exists: the account already has an email or password" }
+        '422': { description: "invalid_email" }
+        '429': { description: rate_limited }
+  /api/auth/guest/upgrade/confirm:
+    post:
+      summary: A guest confirms the emailed code and sets a password (step 2 of 2)
+      description: >-
+        Links the email (verified) and a password to the SAME account, so its
+        id, rooms, and messages stay. A held address has no code and answers
+        401 invalid_email_code, the same as a wrong code. The password is
+        policy-checked (10–256 characters) and stored as a scrypt verifier.
+      x-room-permission: account
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, password]
+              additionalProperties: false
+              properties:
+                email: { type: string }
+                code: { type: string }
+                password: { type: string }
+      responses:
+        '200': { description: "{ status: upgraded, email }" }
+        '401': { description: "invalid_email_code, account_session_required, or invalid_session" }
+        '403': { description: "origin_denied or csrf_denied" }
+        '409': { description: login_method_exists }
+        '422': { description: "invalid_password_set, invalid_email, or password_too_short/password_too_long" }
+        '429': { description: rate_limited }
   /api/auth/agent/rooms:
     post:
       summary: Verify an agent identity secret and list its linked rooms (PR #829)
