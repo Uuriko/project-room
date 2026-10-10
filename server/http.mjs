@@ -2643,6 +2643,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // own account via the browser UI. POST /api/auth/agent/rooms verifies
       // the identity secret and lists linked rooms; POST /api/auth/agent/session
       // creates a room-scoped browser session for the chosen room.
+      // F13: an rak_ scoped API key works too. The session stays room-scoped
+      // to the key's mcp:room:* rooms and its TTL is min(key expiry, the
+      // default session length). A revoked rak_ key does not kill sessions
+      // it already minted - the TTL cap is the bound (flagged for review).
+      const agentSignInKey = (secret, identityId) => {
+        if (typeof secret !== "string" || !secret.startsWith("rak_")) return null;
+        const record = store.agentPlugin.verifyPresentedApiKey(secret);
+        if (!record || record.identityId !== identityId) reject(401, "unauthenticated", "Unknown or revoked agent credential");
+        return record;
+      };
+      const apiKeyRoomIds = record => record.scopes.filter(scope => scope.startsWith("mcp:room:")).map(scope => scope.slice("mcp:room:".length));
       if (url.pathname === "/api/auth/agent/rooms" && req.method === "POST") {
         checkOrigin(req, true);
         rate(`login:${remoteAddress}`, 10);
@@ -2651,9 +2662,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_login", "An agent identity ID is required");
         }
         const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
-        const identity = store.identities.authenticateIdentitySecret(data.identityId, secret);
-        const rooms = store.identities.roomsForIdentity(data.identityId);
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret or scoped API key required. Agents can self-mint an identity at POST /api/agent-identities.");
+        const keyRecord = agentSignInKey(secret, data.identityId);
+        const identity = keyRecord
+          ? { identityId: keyRecord.identityId, displayName: store.identities.get(keyRecord.identityId)?.displayName ?? null }
+          : store.identities.authenticateIdentitySecret(data.identityId, secret);
+        let rooms = store.identities.roomsForIdentity(data.identityId);
+        if (keyRecord) {
+          const allowed = new Set(apiKeyRoomIds(keyRecord));
+          rooms = rooms.filter(row => allowed.has(row.roomId));
+        }
         return json(res, 200, { identityId: identity.identityId, displayName: identity.displayName, rooms });
       }
       if (url.pathname === "/api/auth/agent/session" && req.method === "POST") {
@@ -2664,10 +2682,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_login", "An agent identity ID and room are required");
         }
         const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
-        // Verify the secret before creating the session
-        store.identities.authenticateIdentitySecret(data.identityId, secret);
-        const { token, session } = store.createAgentSession(data.identityId, data.roomId);
+        if (!secret) reject(401, "unauthenticated", "Agent identity secret or scoped API key required. Agents can self-mint an identity at POST /api/agent-identities.");
+        const keyRecord = agentSignInKey(secret, data.identityId);
+        if (keyRecord) {
+          if (!apiKeyRoomIds(keyRecord).includes(data.roomId)) reject(403, "access_denied", "This API key is not scoped to that room");
+          // A browser session carries the member's full permissions, so the key must
+          // grant rooms:write (exact or wildcard), like every other room write route.
+          if (!keyRecord.scopes.some(scope => scope === "rooms:write" || scope === "rooms:*" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+        } else {
+          // Verify the secret before creating the session
+          store.identities.authenticateIdentitySecret(data.identityId, secret);
+        }
+        // F13 review (option b): an rak_-minted session is capped at 1 hour,
+        // not the 8-hour default - revoking the key does not kill sessions it
+        // already minted, so the cap bounds that window. Rotating the identity
+        // secret kills them immediately (session binding). Backlog follow-up
+        // (option c): bind the session to key_id and check revocation in
+        // authenticate().
+        const rakCap = keyRecord ? Math.min(keyRecord.expiresAt ?? Infinity, store.now() + 3600000) : null;
+        const { token, session } = store.createAgentSession(data.identityId, data.roomId, { expiresAt: rakCap });
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
       }
