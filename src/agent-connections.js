@@ -6,13 +6,19 @@ const newToken = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Ui
 const digest = async value => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))].map(byte => byte.toString(16).padStart(2, "0")).join("");
 const statuses = { key_issued: "Access ready · setup not verified", access_changed: "Access changed", revoked: "Key revoked", expired: "Expired", disconnected: "Disconnected" };
 
+// One predicate for every "Add an agent" affordance (8377): the Connect Room
+// dialog's enroll button and the People panel's connect button must agree.
+export function agentConnectionAllowed({ client, getState }) {
+  const member = getState()?.members[client.session?.member?.id];
+  return Boolean(client.ownsAccountSession() && client.session?.account && member?.active !== false
+    && getState()?.room.id === client.session.roomId
+    && member?.kind === "human" && member?.permissions.includes("manage_members") && member?.id === getState()?.room.ownerId);
+}
 export function installAgentConnections({ client, getState }) {
   const dialog = $("#agent-connect-dialog"), form = $("#agent-connect-form"), list = $("#agent-connect-list");
   let owner = null, generation = null, ownerRevision = null, pending = null, setup = null, setupMeta = null, mcpCredential = null, expiryTimer = null, busy = false, copying = false, listVersion = 0, flow = 0, rosterId = null;
   const member = () => getState()?.members[client.session?.member?.id];
-  const allowed = () => client.ownsAccountSession() && client.session?.account && member()?.active !== false
-    && getState()?.room.id === client.session.roomId
-    && member()?.kind === "human" && member()?.permissions.includes("manage_members") && member()?.id === getState()?.room.ownerId;
+  const allowed = () => agentConnectionAllowed({ client, getState });
   const owns = () => allowed() && owner === client.session && generation === client.generation && ownerRevision === member()?.revision;
   const status = text => { $("#agent-connect-status").textContent = text; };
   function conceal() { $("#agent-private-details").open = false; $("#agent-private-config").value = ""; }
