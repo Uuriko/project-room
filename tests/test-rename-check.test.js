@@ -120,6 +120,21 @@ test("copyTreeForCheck skips .git, .tmp and node_modules", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("copyTreeForCheck supports a scratch dir nested under root/.tmp", () => {
+  // Regression: fs.cpSync refuses to copy a tree into a subdirectory of
+  // itself even when the destination is filter-excluded; the scratch dir
+  // lives under <root>/.tmp by design, so the copy must tolerate that.
+  const root = makeTempDir("rename-check-nested-");
+  mkdirSync(join(root, ".tmp"));
+  write(join(root, "real.mjs"), "export const x = 1;\n");
+  write(join(root, ".tmp", "junk.txt"), "scratch junk must not be copied\n");
+  const dest = join(root, ".tmp", "rename-check", "scratch-1");
+  copyTreeForCheck(root, dest);
+  assert.equal(existsSync(join(dest, "real.mjs")), true);
+  assert.equal(existsSync(join(dest, ".tmp")), false);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("e2e: test coupled to the field name is RENAME-PROOF (exit 0)", () => {
   const root = makeSynthProject(SYNTH_PROOF_TEST);
   const result = runRenameCheck(checkOpts(root));

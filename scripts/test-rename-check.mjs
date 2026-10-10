@@ -29,7 +29,7 @@
 //   2  the check itself errored: bad usage, missing file, the field was not
 //      found in the source, or the test was already red before the mutation
 //      (the unmutated baseline runs first and a red baseline refuses verdict).
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync, copyFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,13 +81,20 @@ exit codes: 0 = RENAME-PROOF (test failed under rename), 1 = RENAME-BLIND (test 
 
 // Full-tree copy so the scratch keeps a working import closure (relative
 // imports keep resolving). Skips .git, .tmp (which holds the scratch dir
-// itself) and node_modules.
+// itself) and node_modules. Implemented manually rather than fs.cpSync:
+// cpSync refuses to copy a directory into a subdirectory of itself even when
+// the destination is filter-excluded, and the scratch dir lives under
+// <root>/.tmp by design (the shared /tmp is reaped and size-constrained).
+// Symlinks are skipped (the repo tree has none outside .git).
 export function copyTreeForCheck(root, dest) {
-  mkdirSync(dirname(dest), { recursive: true });
-  cpSync(root, dest, {
-    recursive: true,
-    filter: src => !SKIP_DIRS.has(basename(src)),
-  });
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const s = join(root, entry.name);
+    const d = join(dest, entry.name);
+    if (entry.isDirectory()) copyTreeForCheck(s, d);
+    else if (entry.isFile()) copyFileSync(s, d);
+  }
 }
 
 // Word-boundary textual rename across the given absolute source paths.
@@ -199,7 +206,11 @@ export function runRenameCheck(opts) {
   const scratchName = opts.scratchName || `${base}-${oldName}-to-${newName}-${stamp}`;
   const scratchDir = join(scratchParent, scratchName);
   mkdirSync(scratchParent, { recursive: true });
-  copyTreeForCheck(root, scratchDir);
+  try {
+    copyTreeForCheck(root, scratchDir);
+  } catch (e) {
+    return fail(`scratch copy failed: ${e.message}`);
+  }
 
   try {
     const baseline = runNodeTest({
