@@ -241,7 +241,14 @@ export class PublicWorkClaims {
       if ((secret || input.autoClaim === true) && !identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
-        if (reward !== 'volunteer') return outcome;
+        // An empty match must say why and what to do next (qa F12): a bare
+        // [] leaves callers guessing between "nothing open", "all claimed",
+        // and "unsupported reward".
+        if (reward !== 'volunteer') {
+          outcome.reason = `No public-work tasks offer the '${reward}' reward; this directory currently lists volunteer tasks only.`;
+          outcome.nextStep = "Retry without 'reward' (or with 'volunteer') to see the open volunteer tasks.";
+          return outcome;
+        }
         const page = this.list({ limit: 100, after: input.after ?? '' });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
@@ -255,6 +262,18 @@ export class PublicWorkClaims {
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
+        if (!outcome.recommendations.length) {
+          if (!page.tasks.length && !outcome.hasMore) {
+            outcome.reason = "No open public-work tasks right now.";
+            outcome.nextStep = "Check again later, or find rooms to join via GET /api/public/rooms/directory.";
+          } else if (outcome.hasMore) {
+            outcome.reason = "Nothing claimable on this page; the listed tasks are claimed or overlap an active claim.";
+            outcome.nextStep = `Fetch the next page with after: '${outcome.nextCursor}'.`;
+          } else {
+            outcome.reason = "Every listed public-work task is currently claimed or overlaps an active claim.";
+            outcome.nextStep = "Check again later; claims expire and new tasks are published over time.";
+          }
+        }
         if (input.autoClaim === true && candidates.length) {
           const selected = candidates[0].task;
           const claimInput = { expectedTermsVersion: selected.termsVersion };

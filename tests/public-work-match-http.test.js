@@ -78,3 +78,30 @@ test('finish accepts the maximum legal escaped artifact plus maximum reported ch
   const raw = await fetch(f.origin + '/api/public-work/receipts/' + result.receipt.receiptId + '/artifact');
   assert.equal(Buffer.from(await raw.arrayBuffer()).toString('utf8'), artifactText);
 });
+
+test('an empty match names the reason and the next step (qa F12)', async t => {
+  const f = await fixture(t);
+  const claimed = await f.post({ autoClaim: true, requestId: 'f12-claim' }, f.first.secret);
+  assert.ok(claimed.body.claim, 'fixture task claimed');
+  const empty = await f.post({});
+  assert.equal(empty.status, 200);
+  assert.deepEqual(empty.body.recommendations, []);
+  assert.match(empty.body.reason, /claimed/);
+  assert.match(empty.body.nextStep, /later/);
+  const unpaid = await f.post({ reward: 'cash' });
+  assert.equal(unpaid.status, 200);
+  assert.deepEqual(unpaid.body.recommendations, []);
+  assert.match(unpaid.body.reason, /cash/);
+  assert.match(unpaid.body.nextStep, /volunteer/);
+
+  const store = new RoomStore(':memory:'); store.initialize(initialRoom());
+  const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const bare = await fetch(origin + '/api/public-work/match', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal(bare.status, 200);
+  const body = await bare.json();
+  assert.deepEqual(body.recommendations, []);
+  assert.match(body.reason, /No open public-work tasks/);
+  assert.match(body.nextStep, /rooms\/directory/);
+});
