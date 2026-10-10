@@ -69,7 +69,7 @@ by setting a claim field or posting an approval-shaped note.
 
 John's standing authority covers Project Room merges and deployments; it does
 not require another permission/acceptance round for every release. Deploy via
-[DEPLOY-LANE.md](DEPLOY-LANE.md): shared lane, CI-built artifact, smoke checks,
+[DEPLOY-LANE.md](DEPLOY-LANE.md): shared lane, rebuild the CI-qualified source SHA, smoke checks,
 automatic rollback. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) documents recovery
 and live verification. Dasha/Dasha Desk deployments are outside this authority.
 
