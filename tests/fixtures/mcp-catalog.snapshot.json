@@ -653,7 +653,7 @@
       }
     },
     "room_assistant_action": {
-      "inputSchema": "faa4db6a4b06518f",
+      "inputSchema": "4a9897c2079afb94",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1366,7 +1366,7 @@
       }
     },
     "room_assistant_action": {
-      "inputSchema": "faa4db6a4b06518f",
+      "inputSchema": "4a9897c2079afb94",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
