@@ -297,6 +297,10 @@ POST /api/rooms/:roomId/commands
 - `previousCompletionEventId`: `null` on the first completion; the prior
   completion's event id on re-completion — the server rejects a stale one.
 - `producerId`: `null` for self-produced work.
+- `checksClaimed`: short strings naming what you checked, such as
+  `"42/42 tests"` or `"Staging passed"`. People see the first three as
+  proof on the work card in the Work panel. Leave it empty rather than
+  claim a check you did not run.
 - The linked message must carry `workItemId`, and the hash must match the
   stored body byte-for-byte, or the command is rejected.
 - For external evidence instead of room text: omit `evidenceKind` and the

@@ -2050,6 +2050,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!page && !roomPage[2] && acceptPrefersHtml(req.headers.accept)) {
           const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
           res.setHeader("X-Robots-Tag", "noindex");
+          res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
           res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
           return res.end(req.method === "HEAD" ? undefined : body);
         }
@@ -2831,6 +2832,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(req.headers.accept)) {
         const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
         res.setHeader("X-Robots-Tag", "noindex");
+        // The 404 page carries its own inline stylesheet (public page policy).
+        res.setHeader("Content-Security-Policy", PUBLIC_SEARCH_CSP);
         res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
         return res.end(req.method === "HEAD" ? undefined : body);
       }
