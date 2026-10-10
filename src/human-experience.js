@@ -1,4 +1,5 @@
 import { uiText } from './strings.js';
+import { agentConnectionAllowed } from './agent-connections.js';
 import { currentResult } from './work-selectors.js';
 // Human presentation and explicitly PUBLIC assistant invocation. No private request reuse.
 export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, selectResult, refreshTranscript }) {
@@ -47,6 +48,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   $('#assistant-setup').onclick = () => {
     const state = getState();
     setup.querySelector('select').innerHTML = uiText("human.copy.008") + Object.values(state.members).filter(m => m.kind === 'agent' && m.active !== false && m.permissions.includes('accept_work')).map(m => ["<option value=\"", esc(m.id), "\">", esc(m.displayName), "</option>"].join('')).join('');
+    // 8377: without the right, #connect-agent-button is hidden and its guard
+    // swallows the click, so the enroll button would be a dead affordance.
+    setup.querySelector('#assistant-enroll').hidden = !agentConnectionAllowed({ client, getState });
     if (configureOperation) setup.querySelector('select').value = configureOperation.coordinatorMemberId;
     setup.querySelector('select').disabled = Boolean(configureOperation);
     $('#assistant-setup-error').textContent = ''; setup.showModal();
