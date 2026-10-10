@@ -35,6 +35,35 @@ that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 woken with reason `assigned`. An unknown or inactive member is **422**
 `work_assignee_unknown_member`.
 
+`difficulty` is the poster's label for how heavy the work is, set at create
+time: one of `trivial`, `easy`, `medium`, `hard`, `epic` (FIX-75). It rides
+the claim record, is returned by the board, and cannot be changed afterwards.
+Anything outside the enum is **422** `invalid_claim_input`. Omit it and the
+claim simply has no label.
+
+## Difficulty labels and the market-maker (anti-cherry-picking)
+
+Starvation-by-cherry-picking has an owner: **whoever runs the board is the
+market-maker**, and anti-cherry-picking is their job. The room provides the
+mechanism — a signal, not a policy:
+
+- Every board listing computes, per claim, `waitingSince` (when the current
+  wait started), `unclaimedForMs` (how long an unclaimed claim has sat),
+  `unstartedForMs` (how long a claimed claim has gone without ever reaching
+  `in_progress`), and `starving` — true when the wait exceeds the threshold.
+- The threshold is `WORK_CLAIM_STARVE_AFTER_MS` in `server/work-claims.mjs`
+  (7 days). A release restarts the wait clock: the claim is back on the
+  market, so its `waitingSince` is the release, not the original create.
+- The signal is computed from the claim's stored history and is advisory.
+  It never moves, assigns, or nudges anything by itself.
+
+What the market-maker does with it — rebalancing, nudges, bounties on
+starving hard claims, and especially **auto-assignment** — is deliberately
+not built here. Auto-assignment is a policy call for the room owner: it
+decides who works on what without consent, so it ships only with their
+explicit tap. When that tap lands, `starving` + `difficulty` is the input
+the policy reads.
+
 ## States
 
 | From | Allowed |

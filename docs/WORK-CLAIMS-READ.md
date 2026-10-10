@@ -89,6 +89,10 @@ message:
   compacted to the newest three entries; the dropped remainder is counted in
   `historyOmitted`. Member-authored text is content-trust stamped for the
   viewer, exactly like the ordinary list.
+- Each claim also carries the market-maker signal (FIX-75): the poster-set
+  `difficulty` label (nullable) and the computed starvation fields
+  `waitingSince`, `unclaimedForMs`, `unstartedForMs`, `starving` — see
+  `docs/WORK-CLAIMS.md` ("Difficulty labels and the market-maker").
 - `hasMore` / `nextCursor`: follow `nextCursor` with the same filters for the
   next page. Cursors are opaque — pass them back unchanged.
 

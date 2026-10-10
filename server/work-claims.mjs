@@ -314,6 +314,16 @@ const kindOf = value => {
   check(CLAIM_KINDS.includes(value), `kind must be one of ${CLAIM_KINDS.join(", ")}`);
   return value;
 };
+// FIX-75 (WAVE-300): poster-set difficulty labels for the named
+// market-maker. Additive and create-time only: the poster names how heavy
+// the work is, the board carries it, and the market-maker (whoever runs the
+// board) reads it next to the starvation signal to fight cherry-picking.
+export const CLAIM_DIFFICULTIES = ["trivial", "easy", "medium", "hard", "epic"];
+const difficultyOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(CLAIM_DIFFICULTIES.includes(value), `difficulty must be one of ${CLAIM_DIFFICULTIES.join(", ")}`);
+  return value;
+};
 const revisionOf = value => {
   if (value === undefined || value === null) return null;
   check(typeof value === "string" && value.length > 0 && value.length <= 200, "revision must be 1..200 characters");
@@ -466,7 +476,7 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
+    kind, revision, difficulty: difficultyOf(value.difficulty), ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
 const stamp = (atMs, agentId, action, note) =>
@@ -512,6 +522,47 @@ export function claimUpdatedAt(item) {
   const stored = typeof item?.updatedAt === "string" ? item.updatedAt : "";
   return historyAt > stored ? historyAt : (stored || historyAt);
 }
+// FIX-75 (WAVE-300): anti-cherry-picking is a signal, not a policy. A claim
+// that sits unclaimed — or is claimed but never started — for longer than
+// WORK_CLAIM_STARVE_AFTER_MS is flagged on the board listing, so the
+// market-maker (whoever runs the board) can see what the room is
+// cherry-picking around. Auto-assignment, nudges, and any other response
+// are the market-maker's call: this module names the signal and its owner,
+// it does not act on it. The threshold is a module constant, documented in
+// docs/WORK-CLAIMS.md.
+export const WORK_CLAIM_STARVE_AFTER_MS = 7 * 24 * 3600 * 1000;
+// History actions that return a claim to the unclaimed waiting pool:
+// freshly created, or released (releaseWork stamps state:unclaimed). A
+// release restarts the wait clock — the claim is back on the market.
+const UNCLAIMED_WAIT_ACTIONS = new Set(["created", "state:unclaimed"]);
+const lastWaitStampAt = (history, actions) => {
+  for (let index = history.length - 1; index >= 0; index--) {
+    const entry = history[index];
+    if (actions.has(entry?.action) && typeof entry?.at === "string" && Number.isFinite(Date.parse(entry.at))) return entry.at;
+  }
+  return null;
+};
+export function starvationOf(item, nowMs = Date.now()) {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  let waitingSince = null, unclaimedForMs = null, unstartedForMs = null;
+  if (item?.state === "unclaimed") {
+    waitingSince = lastWaitStampAt(history, UNCLAIMED_WAIT_ACTIONS);
+    if (waitingSince !== null) unclaimedForMs = nowMs - Date.parse(waitingSince);
+  } else if (item?.state === "claimed" && !history.some(entry => entry?.action === "state:in_progress")) {
+    // Held but never started: cherry-picking's second shape — a claimer
+    // sitting on work without doing it.
+    if (typeof item?.claimedAt === "string" && Number.isFinite(Date.parse(item.claimedAt))) waitingSince = item.claimedAt;
+    if (waitingSince !== null) unstartedForMs = nowMs - Date.parse(waitingSince);
+  }
+  const waitedMs = unclaimedForMs ?? unstartedForMs;
+  const starving = waitedMs !== null && waitedMs > WORK_CLAIM_STARVE_AFTER_MS;
+  return { waitingSince, unclaimedForMs, unstartedForMs, starving };
+}
+// The board-listing projection: the stored item plus the starvation signal.
+// Additive — no existing claim field is touched.
+export function withStarvationSignal(item, nowMs = Date.now()) {
+  return { ...item, ...starvationOf(item, nowMs) };
+}
 const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
@@ -548,7 +599,7 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, difficulty } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -578,7 +629,8 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
-    kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
+    kind: claimKind, revision: claimRevision, difficulty: difficultyOf(difficulty),
+    ci: null, reviews: Object.freeze([]) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
 }

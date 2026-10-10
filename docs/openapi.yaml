@@ -5028,7 +5028,8 @@ paths:
           schema: { type: string, enum: [summary] }
           description: |
             `summary` returns the compact per-claim projection (id, title,
-            state, owner, leaseExpiresAt) instead of the full items.
+            state, owner, leaseExpiresAt, difficulty, starving, waitingSince,
+            unclaimedForMs, unstartedForMs) instead of the full items.
       responses:
         '200':
           description: |
@@ -5037,6 +5038,10 @@ paths:
             `{ roomId, queue: "ready", swept, claims, nextCursor, hasMore }`.
             With `state`, only claims in that state. With `view=summary`,
             each claim is the compact projection.
+            Every listed claim carries the market-maker signal (FIX-75):
+            `difficulty` (poster-set, nullable), plus the computed starvation
+            fields `waitingSince`, `unclaimedForMs`, `unstartedForMs`, and
+            `starving` — true when the claim has waited longer than 7 days.
           content:
             application/json:
               schema:
@@ -5123,6 +5128,13 @@ paths:
                 squadId:
                   type: string
                   description: Active squad id this work offer targets. An unknown or inactive squad is 422 squad_unknown.
+                difficulty:
+                  type: string
+                  enum: [trivial, easy, medium, hard, epic]
+                  description: |
+                    Poster-set difficulty label for this work (FIX-75). Stored
+                    on the claim, returned by the board, immutable after
+                    create. A value outside the enum is 422 invalid_claim_input.
                 kind:
                   type: string
                   enum: [work, land, deploy]
@@ -17406,6 +17418,39 @@ components:
           items: { type: string, pattern: '^sha256:[0-9a-f]{64}$' }
           maxItems: 10
           description: sha256 evidence pointers recorded on the done transition
+        difficulty:
+          type: [string, 'null']
+          enum: [trivial, easy, medium, hard, epic]
+          description: |
+            Poster-set difficulty label, chosen at create time (FIX-75). Rides
+            the claim record and is returned by the board. A value outside the
+            enum is 422 invalid_claim_input. Null when the poster set none.
+        waitingSince:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            Board-listing computed field (FIX-75): when the current wait
+            started — creation or release for unclaimed claims, the claim time
+            for claimed-but-never-started ones. Null when the claim is not
+            waiting. The market-maker's anti-cherry-picking signal.
+        unclaimedForMs:
+          type: [number, 'null']
+          description: |
+            Board-listing computed field (FIX-75): milliseconds the claim has
+            sat unclaimed. Null unless the claim is unclaimed.
+        unstartedForMs:
+          type: [number, 'null']
+          description: |
+            Board-listing computed field (FIX-75): milliseconds a claimed claim
+            has gone without ever starting (no in_progress transition). Null
+            unless the claim is claimed-but-never-started.
+        starving:
+          type: boolean
+          description: |
+            Board-listing computed field (FIX-75): true when the claim has
+            waited longer than the starvation threshold (7 days). The mechanism
+            is the signal; any response policy belongs to whoever runs the
+            board (the market-maker).
     BoardV2Claim:
       description: |
         A board-v2 claim: a lane's typed write declaring intent to work on

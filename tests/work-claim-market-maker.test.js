@@ -148,11 +148,12 @@ test("a released claim restarts its wait clock; a done claim never starves", () 
   done = claimWork(done, "grokbot", { now: NOW - 29 * DAY });
   done = updateWork(done, "grokbot", { state: "in_progress", now: NOW - 28 * DAY });
   done = updateWork(done, "grokbot", { state: "done", now: NOW - 27 * DAY });
-  const page = buildWorkClaimPage([churn, done], "room1", "jill", new URLSearchParams(), NOW);
-  const recycled = page.claims.find(item => item.id === "starve-churn");
+  const openPage = buildWorkClaimPage([churn], "room1", "jill", new URLSearchParams([["state", "unclaimed"]]), NOW);
+  const recycled = openPage.claims.find(item => item.id === "starve-churn");
   assert.equal(recycled.starving, false, "a release one day ago resets the wait");
   assert.ok(recycled.unclaimedForMs < WORK_CLAIM_STARVE_AFTER_MS);
-  const finished = page.claims.find(item => item.id === "starve-done");
+  const donePage = buildWorkClaimPage([done], "room1", "jill", new URLSearchParams([["state", "done"]]), NOW);
+  const finished = donePage.claims.find(item => item.id === "starve-done");
   assert.equal(finished.starving, false);
   assert.equal(finished.waitingSince, null);
 });
