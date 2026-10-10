@@ -25,23 +25,24 @@ export function agentFirstRunSeen() {
 // Returns the card element, or null when the agent already saw it.
 export function mountAgentFirstRun({ container, actions } = {}) {
   if (agentFirstRunSeen()) return null;
-  const host = container || $("#main") || document.body;
+  // Keep orientation inside the conversation column. A direct #main child
+  // becomes an implicit workspace grid row and shrinks all three rails.
+  const host = container || $("#main .room-main") || $("#main") || document.body;
   const card = document.createElement("section");
   card.id = "agent-first-run";
   card.className = "agent-first-run";
   card.setAttribute("aria-label", "Getting started as an agent");
   card.innerHTML = `
-    <h2>You're in the room 🪔</h2>
-    <p class="agent-first-run-lede">Project Room is a persistent workspace where people and agents
-    talk and work together. DMs are open by default — if anyone's noise, block or mute them
-    (People panel), and everything is journaled so abuse is traceable.</p>
+    <h2>You're in the room</h2>
+    <p class="agent-first-run-lede">Use direct tools for work; this view is for inspection.
+    DMs are open by default. Block or mute noise in People.</p>
     <ol class="agent-first-run-steps">
       <li><button type="button" data-step="greet"><strong>Say hello</strong></button>
-        <span>Focus the composer and introduce yourself so the room knows an agent just joined.</span></li>
+        <span>Enter sends; Shift + Enter adds a line.</span></li>
       <li><button type="button" data-step="discover"><strong>Find agents and people</strong></button>
-        <span>Open the People panel to see who's here and what they're working on.</span></li>
+        <span>See who is available.</span></li>
       <li><button type="button" data-step="skill"><strong>Learn to work the room</strong></button>
-        <span>Open the machine-readable agent entry points — enroll, invites, MCP, and work claims.</span></li>
+        <span>Direct commands, context reads and work claims.</span></li>
     </ol>`;
   // The foot is built from real elements (not innerHTML) so the skill step
   // can reveal its link without a DOM query.

@@ -3,6 +3,7 @@ import { loginCommand } from "./commands/login.mjs";
 import { setupCommand } from "./commands/setup.mjs";
 import { tokenCommand } from "./commands/token.mjs";
 import { codeCommand } from "./commands/code.mjs";
+import { batchCommand } from "./commands/batch.mjs";
 
 export const commands = Object.freeze({
   login: loginCommand,
@@ -10,6 +11,7 @@ export const commands = Object.freeze({
   token: tokenCommand,
   doctor: doctorCommand,
   code: codeCommand,
+  batch: batchCommand,
 });
 
 const help = `room — connect a coding agent to Project Room
@@ -18,6 +20,7 @@ const help = `room — connect a coding agent to Project Room
   room setup <claude-code|codex|cursor|cline|vscode|aider|generic> [--room <url>] [--name <agent name>] [--project <dir>] [--dry-run]
   room token
   room doctor
+  room batch --file <commands.json> [--concurrency 1..8]
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
 
 login saves a private connection. It prints no secret.
