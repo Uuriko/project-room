@@ -141,6 +141,9 @@ export function mirrorProjectionClaim(store, roomId, actorId, incoming) {
     return successor(store, roomId, actorId, id, nextId, data.nextAction, nowMs);
   }
   if (incoming.type === "work.superseded") {
+    // No successor id means nothing to link to; refuse rather than invent a
+    // phantom "workitem" claim (fuzz-17 A9, 8121).
+    if (typeof data.supersededByWorkItemId !== "string" || !data.supersededByWorkItemId.trim()) return null;
     const nextId = boardClaimId(data.supersededByWorkItemId);
     if (occupiedSuccessor(registry, roomId, id, nextId)) refuseOccupiedSuccessor(nextId, id);
     let source = registry.get(roomId, id);
