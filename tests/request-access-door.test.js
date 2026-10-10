@@ -11,6 +11,7 @@
 // DOM-wired without unit coverage at this boundary.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   GENERAL_REQUEST_DEFAULT_ROOM_ID,
   buildGeneralAccessRequest,
@@ -61,9 +62,23 @@ test("build: valid fields produce a submittable body", () => {
 });
 
 test("build: empty room id and blank name throw user-facing errors", () => {
-  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), /room ID/i);
+  assert.throws(() => buildGeneralAccessRequest({ roomId: "  ", displayName: "Ada" }), /link of the room/i);
   assert.throws(() => buildGeneralAccessRequest({ roomId: "muse-room", displayName: "   " }), /display name/i);
   assert.throws(() => buildGeneralAccessRequest({ roomId: "muse-room", displayName: "x".repeat(81) }), /80/);
+});
+
+test("build: a pasted room link resolves to its room id", () => {
+  for (const link of ["https://room.trydemigod.com/?room=team-7", "https://room.trydemigod.com/#room/team-7", "  team-7  "]) {
+    assert.equal(buildGeneralAccessRequest({ roomId: link, displayName: "Ada" }).roomId, "team-7", link);
+  }
+  assert.throws(() => buildGeneralAccessRequest({ roomId: "x".repeat(129), displayName: "Ada" }), /doesn't look like a room link/);
+  // A long shared link (tracking params, invite fragments) is not cut off: the
+  // field has no maxlength and only the resolved room id is length-checked.
+  const longLink = `https://room.trydemigod.com/?room=team-7&utm_source=${"x".repeat(300)}`;
+  assert.equal(buildGeneralAccessRequest({ roomId: longLink, displayName: "Ada" }).roomId, "team-7");
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /<label for="account-request-room">Room link<\/label>/);
+  assert.doesNotMatch(html.match(/<input id="account-request-room"[^>]*>/)[0], /maxlength/);
 });
 
 test("submit: mints once, submits with the minted identity, stashes the record", async () => {
