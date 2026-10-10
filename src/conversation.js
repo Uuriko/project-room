@@ -363,6 +363,15 @@ export function replyAuthorToAddress(viewerId, author) {
   return author;
 }
 
+// A redacted-but-live message keeps its slot with a null body (account-
+// deletion log scrub + projection rebuild; server/pins.mjs notes such
+// messages stay pinnable) and no deletedAt. Readers must never assume body
+// is a string: treat a missing body as empty text.
+export function bodyText(message) {
+  const body = message?.body;
+  return typeof body === "string" ? body : "";
+}
+
 export function messageMentionsMember(body, member) {
   if (!member?.displayName) return false;
   const label = `@${member.displayName}`;
@@ -420,7 +429,7 @@ export function searchMessages(state, query, limit = 50, { viewer = null, mentio
   }
   if (!term && !only && !pinnedOnly) return { messages: [], total: 0, mentionsOnly: false };
   const matches = !term ? pool : pool.filter(message =>
-    message.body.toLocaleLowerCase().includes(term) ||
+    bodyText(message).toLocaleLowerCase().includes(term) ||
     (state.members[message.authorId]?.displayName || "").toLocaleLowerCase().includes(term));
   return { messages: matches.slice(-limit).reverse(), total: matches.length, mentionsOnly: only };
 }
