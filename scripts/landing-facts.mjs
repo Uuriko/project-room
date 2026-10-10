@@ -160,6 +160,13 @@ function claimFiles(row) {
   return row.files.map(file => typeof file === "string" ? file : file?.path).filter(path => typeof path === "string" && path.length > 0);
 }
 
+// NFC and NFD are one repository path. Case stays distinct. A lone surrogate
+// cannot be composed, so it keeps the raw spelling.
+function leasePathKey(path) {
+  try { return path.normalize("NFC"); }
+  catch { return path; }
+}
+
 export function pathLeases(claims, paths, nowMs = Date.now()) {
   if (!claims || claims.truncated === true || !Array.isArray(claims.claims)) {
     return { unavailable: "claims_truncated", paths: [] };
@@ -169,7 +176,7 @@ export function pathLeases(claims, paths, nowMs = Date.now()) {
     unavailable: false,
     paths: wanted.map(path => ({
       path,
-      holders: claims.claims.filter(row => LIVE_LEASE.has(row?.state) && claimFiles(row).includes(path)).map(row => ({
+      holders: claims.claims.filter(row => LIVE_LEASE.has(row?.state) && claimFiles(row).some(file => leasePathKey(file) === leasePathKey(path))).map(row => ({
         claimId: typeof row.id === "string" ? row.id : null,
         owner: typeof row.owner === "string" ? row.owner : null,
         leaseExpiresAt: typeof row.leaseExpiresAt === "string" ? row.leaseExpiresAt : null,
