@@ -18,6 +18,45 @@ import { CoordError, guardConflicts, normalizePath } from "../client/room-coord.
 
 export const USAGE = "Usage: room-guard [--files a,b | --base REF] [--strict] [--warn] [--json]";
 
+// Git C-quotes a name-status path when it is not plain ASCII. Octal escapes
+// are UTF-8 bytes. A still-quoted token does not match the leased path.
+function unquoteGitPath(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    if (next === "n") { bytes.push(0x0a); i += 2; continue; }
+    if (next === "t") { bytes.push(0x09); i += 2; continue; }
+    if (next === "r") { bytes.push(0x0d); i += 2; continue; }
+    if (next === "\\" || next === '"') { bytes.push(next.charCodeAt(0)); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
 export function gitChangedFiles({ base, git = defaultGit } = {}) {
   // --name-status so a rename contributes both paths. The new name alone
   // would let a move out of a claimed directory pass the guard.
@@ -29,7 +68,7 @@ export function gitChangedFiles({ base, git = defaultGit } = {}) {
   for (const line of git(args).split("\n")) {
     if (!line) continue;
     for (const part of line.split("\t").slice(1)) {
-      const path = part.trim();
+      const path = unquoteGitPath(part.trim());
       if (!path || seen.has(path)) continue;
       seen.add(path);
       paths.push(path);

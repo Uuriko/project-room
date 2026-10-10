@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { RoomAgentClient } from '../client/room-agent.mjs';
@@ -88,6 +88,36 @@ test('changed files come from the staged index, or from the branch range against
   assert.deepEqual(gitChangedFiles({ git, base: 'main' }), ['committed.txt']);
   git(['mv', 'committed.txt', 'moved.txt']);
   assert.deepEqual(gitChangedFiles({ git }).sort(), ['committed.txt', 'moved.txt', 'staged.txt']);
+});
+
+test('a git-quoted name-status path still names the leased file', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'room-guard-quote-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = args => execFileSync('git', ['-C', dir, '-c', 'core.quotePath=true', '-c', 'user.email=guard@example.com', '-c', 'user.name=Guard', ...args], { encoding: 'utf8' });
+  git(['init', '-q', '-b', 'main']);
+  mkdirSync(join(dir, 'server'));
+  writeFileSync(join(dir, 'server', 'café.mjs'), 'a\n');
+  git(['add', 'server/café.mjs']);
+  git(['commit', '-q', '-m', 'base']);
+  writeFileSync(join(dir, 'server', 'café.mjs'), 'b\n');
+  git(['add', 'server/café.mjs']);
+  const files = gitChangedFiles({ git });
+  assert.deepEqual(files, ['server/café.mjs']);
+  const guard = await runGuard({
+    files,
+    memberId: 'reviewer',
+    now: Date.parse('2026-10-10T03:50:00Z'),
+    client: strictDouble({ workClaims: async () => ({ claims: [{
+      id: 'held', state: 'claimed', owner: 'other',
+      leaseExpiresAt: '2026-10-10T12:00:00.000Z',
+      files: ['server/café.mjs']
+    }] }) })
+  });
+  assert.equal(guard.code, 1);
+  assert.equal(guard.conflicts[0].file, 'server/café.mjs');
+  assert.equal(guard.conflicts[0].claimId, 'held');
+  const quoted = () => 'M\t"server/tab\\tname.mjs"\n';
+  assert.deepEqual(gitChangedFiles({ git: quoted }), ['server/tab\tname.mjs']);
 });
 
 test('guard arguments reject unknown options and options missing their value', () => {
