@@ -19,6 +19,7 @@
 /scripts/deploy-checks.mjs @Uuriko
 /scripts/deploy-live.py @Uuriko
 /scripts/deploy-recovery.mjs @Uuriko
+/scripts/onboarding-probe/ @Uuriko
 /scripts/prod-deploy-smoke.mjs @Uuriko
 /scripts/live-smoke.mjs @Uuriko
 /scripts/cold-start-probe.mjs @Uuriko
