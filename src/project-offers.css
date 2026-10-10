@@ -509,3 +509,26 @@ footer a {
   .find-work ul { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media(max-width:760px) { .find-work { padding:16px; } .find-work form,.find-work ul { grid-template-columns:minmax(0,1fr); } }
+
+/* PRODUCT-200 M-07 (mobile touch): offers.html loads only this stylesheet, so
+   #2034's coarse-pointer 44px floor (src/styles.css) never reached this page.
+   Static audit at a 375px mobile viewport found three taps under the floor:
+   - .prompt-disclosure summary ("Read the agent prompt", offer detail) was
+     ~39px (13px text + 10px vertical padding);
+   - #find-work-results summary ("Read claim instructions", match rows) had
+     no rule at all -> browser-default line height (~19px);
+   - .brand (header home nav link) was ~31.5px (21px text, inherited 1.5
+     line-height); the sibling .room-link already floors at 44px.
+   Scoped to coarse pointers (same convention as #2034 / PRODUCT-200 BU-04)
+   so fine-pointer desktop layout is untouched. min-height only, like BU-04's
+   summary treatment: the list-item disclosure markers are preserved.
+   Deliberately not floored: inline-in-sentence links (footer, .scope-links —
+   WCAG-exempt inline links) and the textarea (large text area, not a tap
+   target). */
+@media (pointer: coarse) {
+  .prompt-disclosure summary,
+  #find-work-results summary,
+  .brand {
+    min-height: 44px;
+  }
+}
