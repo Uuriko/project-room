@@ -17,7 +17,9 @@
 //
 // Everything is dry-run by default. Mutating commands need --execute;
 // destructive actions (force-release, reap-orphans kill) additionally need
-// --confirm, and force-release needs --reason (journaled).
+// --confirm, and force-release needs --reason (journaled). Confirmation is
+// not authority: force-release pre-checks that the operator token is the
+// claim holder, the room owner, or a manage_claims holder (#2009).
 //
 // Exit codes: 0 = all units ok; 1 = partial (journal shows which);
 // 2 = systemic halt (bad flags, bridge down/version mismatch, batch failure).
@@ -243,6 +245,20 @@ function slotsConflict(left, right) {
   if (left.path !== right.path) return false;
   if (!left.block || !right.block) return true;
   return left.block === right.block;
+}
+
+// #2009 (V168 follow-up): force-release pre-validates operator authority
+// against the same rule the route enforces (server/work-claim-routes.mjs
+// authorityOver): the claim holder takes the ordinary path; releasing
+// someone else's claim needs the room owner or a manage_claims holder.
+// --execute/--confirm/--reason are confirmation gates, not authority.
+export function hasForceReleaseAuthority({ viewerId, members, ownerId, claim }) {
+  if (!viewerId || !claim) return false;
+  if (claim.owner === viewerId) return true;
+  const member = members && Object.hasOwn(members, viewerId) ? members[viewerId] : null;
+  if (!member || member.active === false) return false;
+  if (ownerId && viewerId === ownerId) return true;
+  return (member.permissions ?? []).includes("manage_claims");
 }
 
 export function fileLeaseConflicts(items, claimed) {
@@ -653,6 +669,9 @@ Commands:
   reverse         Per-lane reverse migration herdr -> legacy for one claim.
   drain-status    Open herdr sessions vs flag state (the §2 matrix, live).
   force-release   Operator-gated forced release of herdr sessions (claims -> unclaimed).
+                  Authority: the caller must be the claim holder, the room owner, or a
+                  manage_claims holder (pre-checked before the release POST; the
+                  --execute/--confirm/--reason gates confirm intent, not authority).
   reap-orphans    Mark orphans per §4.4 (mark by default; kill needs --confirm).
   status          Overall migration state: per-room counts, cursor, last errors.
 
@@ -742,6 +761,12 @@ function roomApiClient({ base, token }) {
         cursor = page.nextCursor;
       }
       return claims;
+    },
+    async getRoomView(roomId) {
+      // The work view carries the caller's viewerId, the roster (with
+      // permissions) and the room record: everything an authority
+      // pre-check needs, without the full event log.
+      return request(`/api/rooms/${encodeURIComponent(roomId)}?view=work`);
     },
     async getClaim(roomId, claimId) {
       const item = await request(`/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(claimId)}`);
@@ -1235,6 +1260,13 @@ async function cmdForceRelease(flags, deps) {
   const claim = await api.getClaim(roomId, flags.claim).catch((err) => failExit(`cannot read claim: ${err.message}`));
   if (!LIVE_CLAIM_STATES.has(claim.state)) {
     failExit(`claim ${claim.id} is ${claim.state}: nothing live to force-release`, EXIT_SYSTEMIC);
+  }
+  // #2009: pre-validate operator authority before the release POST. The
+  // route 403s unless the caller is the claim holder, the room owner, or a
+  // manage_claims holder; the confirmation gates above do not authorize.
+  const view = await api.getRoomView(roomId).catch((err) => failExit(`cannot read room view for the authority check: ${err.message}`));
+  if (!hasForceReleaseAuthority({ viewerId: view?.viewerId, members: view?.state?.members, ownerId: view?.state?.room?.ownerId, claim })) {
+    failExit(`operator ${view?.viewerId ?? "unknown"} has no authority over claim ${claim.id} (owner: ${claim.owner ?? "nobody"}): force-release needs the claim holder, the room owner, or a manage_claims holder. --confirm confirms intent; it does not grant authority.`, EXIT_SYSTEMIC);
   }
   const marker = resolveOptinMarker(claim, markers[roomId] ?? {}).backend;
   if (marker === "legacy") {
