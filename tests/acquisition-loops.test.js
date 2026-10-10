@@ -215,3 +215,17 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   assert.equal(page.text.includes(visible.identityId), false);
   assert.equal(page.text.includes(SECRET_MESSAGE), false);
 });
+
+test("the /room/agents alias serves the HTML directory, not the agents packet", async t => {
+  const { origin } = await serve(t);
+  const page = await raw(origin, "/room/agents");
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-type"), /^text\/html/);
+  assert.ok(page.text.includes("<!doctype html>"));
+  const packet = await raw(origin, "/room/agents.json");
+  assert.equal(packet.status, 200);
+  assert.match(packet.headers.get("content-type"), /^application\/json/);
+  const bare = await raw(origin, "/agents");
+  assert.equal(bare.status, 200);
+  assert.match(bare.headers.get("content-type"), /^text\/html/);
+});
