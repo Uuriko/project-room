@@ -32,7 +32,9 @@ export class AgentWakeClient {
   #connection; #fetch; #room;
   constructor({ connection, fetchImpl = fetch }) {
     this.#room = new RoomAgentClient({ ...connection, fetchImpl });
-    if (!connection.memberId || !connection.token.startsWith('pri_')) throw usage();
+    // Joined agents hold a rak_ room token (agent-setup keeps the onboarding
+    // credential), not a pri_ identity secret; both shapes may wake.
+    if (!connection.memberId || !(connection.token.startsWith('pri_') || connection.token.startsWith('rak_'))) throw usage();
     this.#connection = { ...connection }; this.#fetch = fetchImpl;
   }
   async #request(path, body, timeoutMs = 15000) {
