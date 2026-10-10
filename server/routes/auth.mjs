@@ -235,8 +235,10 @@ export async function handleAuthGroup(ctx) {
     checkOrigin(req, true);
     rate(`password-signup:${remoteAddress}`, 10);
     const data = await body(req);
-    const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
+    const signupToken = signInSlotToken(req, data,
+      Object.hasOwn(data, "returnTo") ? ["email", "password", "sessionRevision", "returnTo"] : ["email", "password", "sessionRevision"],
       { code: "invalid_signup", message: "An email, password, and current session are required" });
+    if (Object.hasOwn(data, "returnTo") && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
     if (typeof data.email !== "string" || typeof data.password !== "string") {
       reject(422, "invalid_signup", "An email, password, and current session are required");
     }
@@ -264,7 +266,10 @@ export async function handleAuthGroup(ctx) {
     if (mailConfigured) {
       const issued = store.accountLogins.issueEmailVerifyCode({ accountId, email: normalized });
       await deliverSignupMail(() => magicMailer.sendMagicLink({
-        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify",
+        // A pending room invitation rides along so the fresh-tab verify link
+        // lands back on the invitation, mirroring /api/auth/magic/request.
+        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {})
       }));
     }
     finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
