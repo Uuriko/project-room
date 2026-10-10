@@ -228,7 +228,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     return currentLink;
   }
   function managementError(error) {
-    if ([401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
+    // email_unverified is a 403 about the account, not a changed session: keep the
+    // dialog and show the server's "Verify your email" message instead of
+    // claiming the invitation access changed.
+    if (error?.code !== "email_unverified" && [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code)) {
       resetManagement(); setConnectionStatus("Invitation access changed. Reopen the room before inviting.");
     }
   }
