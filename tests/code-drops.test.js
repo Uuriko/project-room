@@ -1,7 +1,8 @@
 // Real createRoomServer HTTP requests below own share/raw/check behavior and room authorization for server/routes/code-drops.mjs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -63,6 +64,47 @@ test("summarizePatch reads commits, files, line counts and base from the bytes",
   ]));
   assert.deepEqual(bundle.refs, [{ commit: "b".repeat(40), ref: "refs/heads/claude/x" }]);
   assert.equal(bundle.base, "a".repeat(40));
+});
+
+function formatPatch(files) {
+  const directory = mkdtempSync(join(tmpdir(), "code-drop-quote-"));
+  const git = (...args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" });
+  try {
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(directory, "base.txt"), "old\n");
+    git("add", "base.txt");
+    git("-c", "user.email=a@example.invalid", "-c", "user.name=a", "commit", "-qm", "base");
+    mkdirSync(join(directory, "server"));
+    for (const [name, body] of files) writeFileSync(join(directory, name), body);
+    git("add", "-A");
+    git("-c", "user.email=a@example.invalid", "-c", "user.name=a", "commit", "-qm", "quoted");
+    return git("format-patch", "-1", "--stdout", "HEAD");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test("summarizePatch names a git-quoted format-patch path instead of folding its lines onto the previous file", () => {
+  const summary = summarizePatch("mbox", Buffer.from(formatPatch([
+    ["server/pay.mjs", "pay\n"],
+    ["server/tab\tfile.mjs", "tab\n"],
+    ["server/café.mjs", "cafe\n"],
+  ])));
+  const byPath = Object.fromEntries(summary.files.map(file => [file.path, file]));
+  assert.equal(byPath["server/pay.mjs"]?.adds, 1);
+  assert.equal(byPath["server/tab\tfile.mjs"]?.adds, 1);
+  assert.equal(byPath["server/café.mjs"]?.adds, 1);
+  assert.equal(summary.files.length, 3);
+});
+
+test("summarizePatch accepts a format-patch whose only path git quotes", () => {
+  const summary = summarizePatch("mbox", Buffer.from(formatPatch([["server/tab\tfile.mjs", "tab\n"]])));
+  assert.deepEqual(summary.files, [{ path: "server/tab\tfile.mjs", adds: 1, dels: 0 }]);
+});
+
+test("summarizePatch still reads an unquoted path that contains a space", () => {
+  const summary = summarizePatch("mbox", Buffer.from(formatPatch([["server/my file.mjs", "space\n"]])));
+  assert.deepEqual(summary.files, [{ path: "server/my file.mjs", adds: 1, dels: 0 }]);
 });
 
 test("the card stays short however large the patch is", () => {
