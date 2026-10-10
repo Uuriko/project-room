@@ -64,8 +64,13 @@ test("Delete account requires the email, posts with CSRF, and confirms on the la
   await dialog.waitFor({ state: "visible" });
   const email = dialog.locator('input[name="confirmEmail"]');
   await email.waitFor();
+  // Plain summary first; the engineering inventory sits behind "Full deletion plan".
+  await dialog.getByText(/permanently deletes your account/).waitFor();
+  await dialog.getByText(/Rooms you own that will be archived: .*Solo notes/).waitFor();
+  assert.equal(await dialog.getByText(/Retention categories purged/).isVisible(), false);
+  assert.equal(await dialog.getByText(/categories purged \(/).isVisible(), false);
+  await dialog.locator("summary", { hasText: "Full deletion plan" }).click();
   await dialog.getByText(/Retention categories purged/).waitFor();
-  await dialog.getByText(/Solo notes/).waitFor();
   await email.focus();
   await page.keyboard.press("Shift+Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.closest("[data-deletion-dialog]") != null), true);
