@@ -38,6 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
+  guildOf, // FIX-10: guild tag (federated-guilds read projection)
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -139,7 +140,7 @@ const WORK_CLAIM_PROFILES = Object.freeze({
 });
 const BOARD_LIMIT_DEFAULT = 50;
 const BOARD_LIMIT_MAX = 200;
-const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view"]);
+const BOARD_QUERY = new Set(["queue", "auth", "limit", "cursor", "state", "view", "guild"]);
 
 // QA7-13: compact per-claim projection for ?view=summary — the fields a
 // board overview needs (id, title, state, owner, lease expiry) without the
@@ -299,7 +300,7 @@ function compareBoard(a, b) {
   return 0;
 }
 
-function pageBoard(items, limit, cursor, state = null) {
+function pageBoard(items, limit, cursor, state = null, guild = null) {
   const sorted = [...items].sort(compareBoard);
   let start = 0;
   if (cursor) {
@@ -315,11 +316,14 @@ function pageBoard(items, limit, cursor, state = null) {
   return {
     claims,
     hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ u: claimUpdatedAt(last), i: last.id, s: state }) : null,
+    // FIX-10: a guild-scoped page binds its cursor to the guild, the same way
+    // state pages bind to state. Legacy (guildless) cursors carry no `g`.
+    nextCursor: hasMore && last ? boardCursorEncode({ u: claimUpdatedAt(last), i: last.id, s: state,
+      ...(guild === null ? {} : { g: guild }) }) : null,
   };
 }
 
-function pageReady(items, limit, cursor) {
+function pageReady(items, limit, cursor, guild = null) {
   let start = 0;
   if (cursor) {
     start = items.findIndex(item => item.id > cursor.i);
@@ -331,7 +335,8 @@ function pageReady(items, limit, cursor) {
   return {
     claims,
     hasMore,
-    nextCursor: hasMore && last ? boardCursorEncode({ q: "ready", i: last.id }) : null,
+    nextCursor: hasMore && last ? boardCursorEncode({ q: "ready", i: last.id,
+      ...(guild === null ? {} : { g: guild }) }) : null,
   };
 }
 
@@ -343,13 +348,20 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   const params = query ?? new URLSearchParams();
   for (const key of params.keys()) {
     if (!BOARD_QUERY.has(key) || params.getAll(key).length !== 1) {
-      invalidInput(reject, "a single queue, state, limit, cursor, or view query parameter");
+      invalidInput(reject, "a single queue, state, limit, cursor, view, or guild query parameter");
     }
   }
   const limit = boardLimitOf(reject, params.get("limit"));
   const cursor = params.has("cursor") ? boardCursorOf(reject, params.get("cursor")) : null;
   const view = params.get("view");
   if (view !== null && view !== "summary") invalidInput(reject, "view=summary");
+  // FIX-10: guild-scoped board read projection. An empty guild behaves like
+  // no filter (the tag's absent/null default). A cursor minted on a
+  // guild-scoped page binds to that guild; mixing it with a different (or no)
+  // guild filter is a 422, the same convention the state filter uses.
+  const guild = params.has("guild") ? runPure(reject, () => guildOf(params.get("guild"))) : null;
+  if (cursor && (cursor.g ?? null) !== guild) invalidInput(reject, "a cursor from a page with the same guild filter");
+  const scoped = guild === null ? items : (items ?? []).filter(item => item && item.guild === guild);
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
   const present = page => {
@@ -361,7 +373,7 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     if (params.get("queue") !== "ready") invalidInput(reject, "queue=ready");
     if (params.has("state")) invalidInput(reject, "either queue=ready or state, not both");
     if (cursor && (cursor.q !== "ready" || cursor.s !== undefined)) invalidInput(reject, "a cursor from a queue=ready page");
-    return present({ ...pageReady(readyClaims(items), limit, cursor), queue: "ready", historyScope: "ready" });
+    return present({ ...pageReady(readyClaims(scoped), limit, cursor, guild), queue: "ready", historyScope: "ready" });
   }
   if (cursor?.q === "ready") invalidInput(reject, "a cursor from a work-claims page");
   const state = params.has("state") ? params.get("state") : null;
@@ -370,15 +382,15 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   // preserve their existing unbound continuation semantics during upgrades.
   if (cursor && Object.hasOwn(cursor, "s") && cursor.s !== state) invalidInput(reject, "a cursor from a page with the same state filter");
   if (state !== null) {
-    return present({ ...pageBoard(items.filter(item => item.state === state), limit, cursor, state),
+    return present({ ...pageBoard(scoped.filter(item => item.state === state), limit, cursor, state, guild),
       state, historyScope: "state" });
   }
   // Keep the canonical seven-day done window and open dependency exception.
   const since = nowMs - DONE_WINDOW_MS;
-  const needed = new Set(items.filter(item => !isTerminalClaimState(item.state)).flatMap(item => item.dependsOn ?? []));
-  const visible = items.filter(item => !isTerminalClaimState(item.state) || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
-  const olderDone = items.length - visible.length;
-  return present({ ...pageBoard(visible, limit, cursor), historyScope: "recent_done_and_dependencies",
+  const needed = new Set(scoped.filter(item => !isTerminalClaimState(item.state)).flatMap(item => item.dependsOn ?? []));
+  const visible = scoped.filter(item => !isTerminalClaimState(item.state) || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
+  const olderDone = scoped.length - visible.length;
+  return present({ ...pageBoard(visible, limit, cursor, null, guild), historyScope: "recent_done_and_dependencies",
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
@@ -901,7 +913,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "guild"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, guild?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
@@ -932,7 +944,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Pair rule: hard work defaults to a distinct reviewer, so it cannot close
     // without a non-owner APPROVE. An explicit reviewPolicy still wins.
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
-    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId }, { now: nowMs, agentId: caller }));
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, guild: data.guild }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {

@@ -271,6 +271,18 @@ const optionalId = (value, what) => {
   if (value === undefined || value === null || value === "") return null;
   return idOf(value, what, 256);
 };
+// FIX-10 (WAVE-300): guild tag — the federated-guilds scope namespace an item
+// belongs to. Optional and additive: an absent/null guild means the flat
+// model (the claim belongs to no guild). See docs/FEDERATED-GUILDS.md. The
+// tag is set once at create and is a stable partition key — a claim that
+// moves guilds is closed and re-created, keeping the write path unchanged.
+const GUILD_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const guildOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && GUILD_PATTERN.test(value),
+    "guild must be 1..64 characters matching [A-Za-z0-9_-]");
+  return value;
+};
 const blobsOf = value => {
   check(Array.isArray(value), "blobs must be an array");
   check(value.length <= MAX_RECEIPT_BLOBS, `blobs must hold at most ${MAX_RECEIPT_BLOBS} pointers`);
@@ -466,6 +478,7 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
+    guild: guildOf(value.guild), // FIX-10: federated-guilds scope namespace; null = the flat model
     kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
@@ -548,7 +561,7 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, guild } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -578,6 +591,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
+    guild: guildOf(guild), // FIX-10: guild tag set once at create; null = flat model
     kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);
