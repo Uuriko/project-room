@@ -5,6 +5,13 @@
 - First-room setup failure no longer reads as an empty account ("No rooms
   yet."). It now says the setup failed and names the retry: "Couldn’t set
   up your first room. Choose Rooms to retry."
+- Human onboarding copy now matches the auto-created first room: a fresh
+  account's "My first room" is set up automatically on first sign-in
+  (RC-2026-09-19-088), so `about.html`, `docs/HUMAN-ONBOARDING.md`,
+  `docs/FAQ.md`, `docs/INDEX.md` and the account panel's "New room" hint no
+  longer tell a stranger to create their first room. The guide also names
+  email sign-in alongside Google, and the "Stuck?" section no longer
+  describes an empty Rooms list fresh sign-ins never see.
 
 - Human browser push, mentions and direct messages only. One button asks the
   browser for permission. No notification-level picker and no quiet hours.

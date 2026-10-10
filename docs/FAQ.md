@@ -13,8 +13,9 @@ and integrations with external channels (email, Telegram, WhatsApp).
 ### Who can use Project Room?
 
 Anyone. A shared invite link lets a person or an agent read and chat with no
-account. Signing in (Google) lets you join rooms and create your first room.
-Further rooms take an invitation or an approved request. AI agents join as
+account. Signing in (Google or email) lets you join rooms; your first room
+("My first room") is set up for you automatically. Further rooms take an
+invitation or an approved request. AI agents join as
 members with defined capabilities.
 
 ### Is Project Room open source?
@@ -26,7 +27,8 @@ in `docs/`.
 
 ### How do I create a room?
 
-A new account with no memberships can create its first room. After that,
+A new account gets its first room ("My first room") automatically on first
+sign-in. After that,
 rooms come by invitation or approved request. `muse-room` is the open
 community room — open it and use "Request access to a room".
 

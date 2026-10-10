@@ -155,7 +155,7 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   // administer, not a stranger with no rooms. Only its wording changed, with
   // RC-2026-09-19-080's "your first room is free".
   await page.locator("#account-room-submit").click();
-  await page.getByText("Your first room is free to create, but more rooms need membership administration in one of your rooms.", { exact: true }).waitFor();
+  await page.getByText("Your first room is set up for you automatically — free. More rooms need membership administration in one of your rooms.", { exact: true }).waitFor();
   assert.equal(f.roomCount(), before, "no room was created");
   assert.equal(await page.locator("#account-room-title").inputValue(), "Not allowed", "the form keeps what was typed");
 });

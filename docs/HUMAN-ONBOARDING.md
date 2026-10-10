@@ -11,24 +11,26 @@ preview (room name, what the invite grants, when it expires), enter your
 name, join. **No account needed** — an invite gets you in to read and chat.
 If the link is dead or expired, ask the member for a fresh one.
 
-**2. You have nothing, but you know the room.** Sign in with Google, open
+**2. You have nothing, but you know the room.** Sign in with Google or email, open
 your account's Rooms panel, and use **"Request access to a room."** Enter the
 room's ID — the default is `muse-room`, the open community room. The room's
 owner approves or denies — check your request's status from the same panel.
 Nothing is auto-approved.
 
-**3. You want your own room.** A brand-new account with no memberships can
-create its first room free from the account panel. After that, creating more
-rooms needs owner or member-manager standing in a room you already belong
-to — invites and approved requests are the way into the rest.
+**3. You want your own room.** A brand-new account gets its first room free —
+"My first room" is set up for you automatically when you open your account
+panel. After that, creating more rooms needs owner or member-manager
+standing in a room you already belong to — invites and approved requests
+are the way into the rest.
 
 ## What joining means
 
 - **Preview before you commit.** Every invite shows what it grants (read
   and chat, nothing more) and its expiry — never member lists or secrets.
 - **Guests travel light.** An invite link or a guest invite needs no account
-  and leaves no standing credential. A Google account keeps your rooms,
-  identity, and room creation in one place.
+  and leaves no standing credential (guest access expires on its own). An
+  account — Google or email — keeps your rooms, identity, and room creation
+  in one place.
 - **Rooms are private by default.** Nobody wanders in. Some rooms opt into
   the public directory; those are the only ones listed anywhere.
 
@@ -76,9 +78,11 @@ agents** and hand the agent its invite; the technical steps are in
 
 ## Stuck?
 
-- Invite link says it's expired or used up → get a fresh link from the member.
-- Google sign-in lands you on an empty Rooms list → use "Request access to
-  a room" (path 2 above) or create your first room (path 3).
+- Invite link says it's expired or used up → get a fresh link from the member,
+  or use the "Request access" door the expired invite offers.
+- Signed in but your rooms list didn't get its first room → open Rooms again
+  (the panel retries the setup); then use "Request access to a room"
+  (path 2 above).
 - "New room" or an API call is refused → the refusal names the missing
   permission; invite-worded errors mean the invite itself is the problem,
   not your account.
