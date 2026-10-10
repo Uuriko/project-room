@@ -2,7 +2,7 @@ import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
-import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID, memberHistoryVisibility } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
@@ -2293,6 +2293,7 @@ function renderMessages() {
   const focusedMessage = focused?.matches(".message");
   const newMessages = sameView && !revealing ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
   const newCount = newMessages.length;
+  if (!sameView) readerActive = false; // opening a view is not reading it
   if (!sameView || nearBottom) unreadAnchorId = null;
   else if (!unreadAnchorId && newMessages[0]) unreadAnchorId = newMessages[0].id;
   // New arrivals while the user watches the bottom count as read (debounced).
@@ -2425,11 +2426,17 @@ function renderMessages() {
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  // PRIV-2: a member who sees only messages from after they joined gets the
+  // honest reason for an empty chat, not "No messages yet" in a busy room.
+  const sinceJoin = Boolean(session?.member?.id) && memberHistoryVisibility(state, session.member.id) === "since_join";
+  const sinceJoinNote = `<li class="empty-note" data-empty-since-join>${esc(uiText("chat.since_join.note"))} <button type="button" class="text-button" data-empty-write>${esc(uiText("chat.since_join.hello"))}</button></li>`;
+  if (!messages.length && !workEntries.length && sinceJoin) list.innerHTML = sinceJoinNote;
+  else if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
     while (list.children.length > merged.length) list.lastChild.remove();
+    if (!messages.length && sinceJoin) list.insertAdjacentHTML("afterbegin", sinceJoinNote);
   }
   restoreTimelineSelection(list, savedSelection);
   list.dataset.view = view;
@@ -6595,6 +6602,17 @@ let horizonAnchorId = null; // first message after the read horizon; the "New me
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
 const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in", reaction: "reacted to your message" };
 let horizonAdvanceTimer = null;
+// The read horizon only moves after the reader does something in this view
+// (scroll by hand, touch, key, click). Opening a room scrolls to the bottom by
+// itself; counting that as reading cleared the "New messages" divider about
+// 1.5 s after open, before anyone saw it.
+let readerActive = false;
+function noteReaderInput() {
+  if (readerActive) return;
+  readerActive = true;
+  if (nearBottomOfList()) scheduleHorizonAdvance();
+}
+for (const type of ["wheel", "touchmove", "keydown", "pointerdown"]) addEventListener(type, noteReaderInput, { capture: true, passive: true });
 function nearBottomOfList() {
   const list = $("#message-list");
   if (!list || !state) return false;
@@ -6609,7 +6627,7 @@ function scheduleHorizonAdvance() {
   horizonAdvanceTimer = setTimeout(() => { horizonAdvanceTimer = null; void advanceHorizon(); }, 1500);
 }
 async function advanceHorizon() {
-  if (!state || !session || !client.session || !nearBottomOfList()) return;
+  if (!readerActive || !state || !session || !client.session || !nearBottomOfList()) return;
   const threadKey = currentThreadId ?? "";
   const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const latest = messages.length ? messages[messages.length - 1].id : null;
@@ -6634,7 +6652,7 @@ function resetAttention() {
   $("#later-list").replaceChildren(); delete $("#later-list")._content;
   setText("#later-status", "");
   savedMessageIds = new Set(); savedIdsBusy = false;
-  horizonAnchorId = null; horizonCache = new Map(); lastHorizonView = null;
+  horizonAnchorId = null; horizonCache = new Map(); lastHorizonView = null; readerActive = false;
   clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
   previewItems = []; previewBusy = false;
   const preview = $("#activity-preview"); if (preview) { $("#activity-preview-list")?.replaceChildren(); preview.hidden = true; }
