@@ -137,6 +137,33 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.match(alreadyLinked.hint, /earlier link is live/);
   assert.match(alreadyLinked.hint, /do not mint another identity/);
   assert.ok(alreadyLinked.next.some(step => step.tool === "room_check_access"));
+  // ch-2056 challenge (QA-200, 2026-10-08): two holes in the #2056 shape.
+  // (1) A room-scoped bare not_found (membership-delegation grant,
+  // server/membership-delegation.mjs:46 "No such linked agent identity in
+  // this room") reached this branch with roomId set, but the next step named
+  // GET /api/public-work/tasks — a global board that can never hold the
+  // room's ids. The example must be room-scoped when roomId is known.
+  const roomScopedId = agentErrorAx({ httpStatus: 404, code: "not_found",
+    message: "No such linked agent identity in this room", roomId: "commons" });
+  assertAx(roomScopedId, { reason: "not_found" });
+  assert.doesNotMatch(JSON.stringify(roomScopedId.next), /\/api\/public-work\/tasks/);
+  assert.ok(roomScopedId.next.some(step => step.command?.includes("/api/rooms/commons/presence")));
+  // (2) A 404 not_found that names an authority problem, not a missing id
+  // (membership-delegation revoke, server/membership-delegation.mjs:203 "No
+  // membership-administration authority for this identity"). The id is fine;
+  // "use a current id; do not guess ids" can never succeed — name the
+  // authority state instead.
+  const noAuthority = agentErrorAx({ httpStatus: 404, code: "not_found",
+    message: "No membership-administration authority for this identity", roomId: "commons" });
+  assertAx(noAuthority, { reason: "not_found" });
+  assert.doesNotMatch(noAuthority.hint, /does not exist|do not guess ids/i);
+  assert.match(noAuthority.hint, /authority/i);
+  assert.match(noAuthority.hint, /Nothing was changed/);
+  assert.doesNotMatch(noAuthority.hint, /Unknown error/);
+  // The stranger case from #2056 (no roomId) is unchanged.
+  const strangerAgain = agentErrorAx({ httpStatus: 404, code: "not_found", message: "Not found" });
+  assertAx(strangerAgain, { reason: "not_found" });
+  assert.ok(strangerAgain.next.some(step => step.command?.includes("/api/public-work/tasks")));
 });
 
 test("challenge ch-2031: 405 hint does not promise an Allow header that usually isn't there", () => {
