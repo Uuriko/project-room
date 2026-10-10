@@ -97,6 +97,18 @@ async function scanBackward(fetchPage, after, end, limit) {
   return { collected, reachedStart: bound - 1 <= after, capped: pages >= MESSAGE_SCAN_PAGES && bound - 1 > after };
 }
 
+// latest:true next from paginateRoomMessages is the oldest sequence in the
+// window, the exclusive end for an older page. The read tools have no end
+// argument, so returning that value as next makes a follow with after repeat
+// the same messages. The returned next is the newest sequence. hasMore still
+// means older messages exist; it is not an after-cursor.
+export function latestSnapshotPage(messages, after = 0, hasMore = false) {
+  return {
+    next: messages.length ? messages[messages.length - 1].sequence : after,
+    hasMore,
+  };
+}
+
 export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, latest = false, end = null, mapMessage } = {}) {
   const map = mapMessage ?? (item => item);
   if (latest && Number.isSafeInteger(end) && end > after) {
@@ -556,7 +568,8 @@ export class RoomAgentClient {
   // types are skipped; private messages appear only to their two parties
   // (the service filters them). limit counts messages, not scanned events.
   // latest:true returns the latest messages in chronological order
-  // (GET /conversation parity). Follow next while hasMore is true.
+  // (GET /conversation parity). next is the newest sequence, so following it
+  // as after does not repeat the page. hasMore means older messages exist.
   async roomMessages({ after = 0, limit = 50, latest = false, signal } = {}) {
     const fetchPage = (cursor, pageLimit) => this.#request(`/events?after=${cursor}&limit=${pageLimit}`, undefined, signal);
     const mapMessage = ({ sequence, event }) => ({
@@ -568,10 +581,13 @@ export class RoomAgentClient {
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     });
     const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, mapMessage });
+    const mapped = messages.map(message => markIfOther(message, this.#memberId, message.from));
+    const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
     return withContentTrust({
       roomId: this.#roomId,
-      messages: messages.map(message => markIfOther(message, this.#memberId, message.from)),
-      next, hasMore
+      messages: mapped,
+      next: cursor.next,
+      hasMore: cursor.hasMore,
     });
   }
   async replyRead(name, args = {}, { signal } = {}) {
