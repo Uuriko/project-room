@@ -48,10 +48,14 @@ test("compact login and signup remain usable in both themes and small windows", 
     assert.equal(await form.locator('[name="email"]').getAttribute("autocomplete"), "username");
     assert.equal(await form.locator('[name="password"]').getAttribute("autocomplete"), "current-password");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    for (const selector of ['[data-signin-form="password"] button[type="submit"]', '[data-password-visibility]', '[data-password-mode]', '[data-forgot-password]', '[data-passkey-signin]', '#agent-signin-button']) {
+    for (const selector of ['[data-signin-form="password"] button[type="submit"]', '[data-password-visibility]', '[data-password-mode]', '[data-forgot-password]', '#agent-signin-button']) {
       const box = await page.locator('#auth-panel').locator(selector).boundingBox();
       assert.ok(box.height >= 44, selector + " touch target");
     }
+    assert.equal(await form.locator('[data-passkey-signin]').count(), 0, "only the primary sign-in paths on the entrance");
+    await page.locator('[data-forgot-password]').click();
+    await page.locator('[data-passkey-signin]').waitFor({ state: 'visible' });
+    await page.locator('[data-signin-back]').click();
     await form.locator('[name="email"]').fill('layout@example.invalid');
     await form.locator('[name="password"]').fill('synthetic-password');
     await form.locator('[data-password-visibility]').click();
@@ -101,6 +105,7 @@ test("a real virtual-authenticator passkey can be enrolled, used after logout, a
   await page.goto(origin + '/?room=commons');
   await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
   const assertion = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/passkey/authenticate/finish');
+  await page.locator('[data-forgot-password]').click();
   await page.locator('[data-passkey-signin]').click();
   const accepted = await assertion;
   assert.equal(accepted.status(), 200, 'real browser assertion verified');

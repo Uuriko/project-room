@@ -118,16 +118,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingTerms) return uiText("signin.copy.005", { fragmentA: busy ? "disabled" : "" });
     if (welcome) return uiText("signin.copy.004");
     if (pendingLink) return uiText("signin.copy.006", { fragmentA: busy ? "disabled" : "" });
-    if (emailMethod === "forgot") return uiText("signin.copy.007");
+    if (emailMethod === "forgot") {
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      return uiText("signin.copy.007") + (passkeySupported ? uiText("signin.passkey.action") : "");
+    }
     if (emailMethod === "reset") {
       if (resetPhase === "sent") return uiText("signin.copy.008", { fragmentA: escapeHtml(resetEmail) });
       if (resetPhase === "form") return uiText("signin.copy.009", { fragmentA: busy ? "disabled" : "" });
-      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" });
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
     if (emailMethod === "password") {
       const signup = passwordMode === "signup";
-      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10" aria-describedby="signup-password-hint"' : "", fragmentD: signup ? '<p class="form-hint" id="signup-password-hint">10–256 characters</p>' : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options", { passkey: passkeySupported ? uiText("signin.passkey.action") : "" }) });
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10" placeholder="10+ characters"' : "", fragmentD: "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
     }
     if (magicPhase === "sent") return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
     return uiText("signin.copy.015", { fragmentA: escapeHtml(magicEmail), fragmentB: busy ? "disabled" : "" });

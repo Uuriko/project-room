@@ -39,6 +39,8 @@ test('assertion helpers preserve binary signature bytes and a nullable user hand
 });
 test('passkey login uses the current slot and the common signed-in completion', async () => {
   const f = fixture(async ({ publicKey }) => { assert.equal(publicKey.rpId, 'localhost'); return credential; });
+  assert.doesNotMatch(f.node.innerHTML, /data-passkey-signin/);
+  f.ui.showView("reset-request");
   assert.match(f.node.innerHTML, /data-passkey-signin/);
   await f.click();
   assert.equal(f.calls.length, 2);
@@ -48,15 +50,18 @@ test('passkey login uses the current slot and the common signed-in completion', 
 });
 test('cancelling passkey authentication leaves password login usable and sends no assertion', async () => {
   const f = fixture(async () => { throw Object.assign(new Error('user declined'), { name: 'NotAllowedError' }); });
+  f.ui.showView('reset-request');
   await f.click();
   assert.equal(f.calls.length, 1);
   assert.equal(f.signed.length, 0);
   assert.match(f.status.textContent, /cancelled/);
   assert.equal(f.ui.canLeave(), true);
+  f.ui.back();
   assert.match(f.node.innerHTML, /data-signin-form="password"/);
 });
 test('an assertion obtained after the account view changes cannot upgrade the old slot', async () => {
   const f = fixture(async () => credential, { stale: true });
+  f.ui.showView('reset-request');
   await f.click();
   assert.equal(f.calls.length, 1);
   assert.equal(f.signed.length, 0);
