@@ -13,6 +13,11 @@ const cyrillic = /\p{Script=Cyrillic}/u;
 const invisible = /\p{Default_Ignorable_Code_Point}/u;
 const controls = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const spaces = /\p{White_Space}+/gu;
+// A sentence mark is not part of the label. "everyone." is everyone.
+const sentenceEnd = /[.!?,;:。．！？，：…]+$/u;
+function peelSentenceEnd(value) {
+  return value.replace(sentenceEnd, '').trim();
+}
 
 // Most frequent Latin-lookalike alphabetic characters. Deliberately explicit:
 // unmapped characters retain their code point and do not masquerade as a
@@ -58,7 +63,7 @@ export function displayNameSkeleton(value) {
   // "admin" but never matches the reserved-word list (QA2-SECREG followup:
   // 527 admitted diacritic variants, plus combining-mark sequences).
   const canonical = value.normalize('NFKD').replace(/\p{M}/gu, '').trim().replace(spaces, ' ').toLowerCase();
-  return [...canonical].map(char => lookalikes.get(char) ?? char).join('');
+  return peelSentenceEnd([...canonical].map(char => lookalikes.get(char) ?? char).join(''));
 }
 
 function recordName(record) {
@@ -137,18 +142,18 @@ function activeNameList(activeNames) {
 // core skeleton plus each decoration skeleton, so "(owner)" is reserved
 // even when the words in front of it are not.
 function labelParts(skeleton) {
-  let value = skeleton.replace(/^@+\s*/, '').trim();
+  let value = peelSentenceEnd(skeleton.replace(/^@+\s*/, '').trim());
   const decorations = [];
   while (value) {
     const match = /^(.*?)\s*[(\[]([^)\]]+)[)\]]$/.exec(value);
     if (!match) break;
-    const core = match[1].trim();
-    const decoration = match[2].trim();
+    const core = peelSentenceEnd(match[1].trim());
+    const decoration = peelSentenceEnd(match[2].trim());
     if (!core) return { core: decoration, decorations };
     decorations.push(decoration);
     value = core;
   }
-  return { core: value, decorations };
+  return { core: peelSentenceEnd(value), decorations };
 }
 
 function isReservedLabel(skeleton) {
@@ -183,7 +188,7 @@ function classifyMemberDisplayName(name, activeNames) {
 }
 
 function visibleBase(name) {
-  const stripped = stripControls(name).normalize('NFKC').replace(spaces, ' ').trim().replace(/^@+\s*/, '').trim();
+  const stripped = peelSentenceEnd(stripControls(name).normalize('NFKC').replace(spaces, ' ').trim().replace(/^@+\s*/, '').trim());
   let current = stripped;
   while (current) {
     const match = /^(.*?)\s*[(\[]([^)\]]+)[)\]]$/.exec(current);
@@ -194,7 +199,7 @@ function visibleBase(name) {
     if (!core) return 'Member';
     current = core;
   }
-  const base = current.trim();
+  const base = peelSentenceEnd(current.trim());
   if (!base) return 'Member';
   return base.length > 70 ? base.slice(0, 70).trim() || 'Member' : base;
 }
