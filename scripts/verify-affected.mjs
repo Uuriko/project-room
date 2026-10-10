@@ -70,15 +70,29 @@ export function parseImports(source) {
   return [...out];
 }
 
+// Compose so an NFD spelling of café is the same file as NFC. Case stays distinct.
+function composedPath(value) {
+  if (typeof value !== "string") return "";
+  try { return value.normalize("NFC"); }
+  catch { return value; }
+}
+
 // Resolve a relative specifier from a repo-relative file to a repo-relative
 // path in `known` (a Set). Bare and node: specifiers return null.
 export function resolveSpecifier(fromFile, spec, known) {
   if (!spec.startsWith("./") && !spec.startsWith("../")) return null;
   const base = posix.normalize(posix.join(posix.dirname(fromFile), spec.split(/[?#]/)[0]));
   if (base.startsWith("../")) return null;
+  const byComposed = new Map();
+  for (const file of known) {
+    const key = composedPath(file);
+    if (!byComposed.has(key)) byComposed.set(key, file);
+  }
   for (const ext of RESOLVE_EXT) {
     const candidate = base + ext;
     if (known.has(candidate)) return candidate;
+    const folded = byComposed.get(composedPath(candidate));
+    if (folded) return folded;
   }
   return null;
 }
@@ -103,24 +117,43 @@ export function buildReverseGraph(files, read, known = new Set(files)) {
 }
 
 // BFS from changed files over reverse edges; returns Map<test, {distance, via}>.
+function importersOf(reverse, node) {
+  const found = new Set(reverse.get(node) ?? []);
+  const want = composedPath(node);
+  if (found.size && want === node) return found;
+  for (const [key, importers] of reverse ?? []) {
+    if (key === node || composedPath(key) !== want) continue;
+    for (const importer of importers) found.add(importer);
+  }
+  return found;
+}
+
 export function relatedTests({ changed, tests, reverse, read }) {
   const testSet = new Set(tests);
+  const testByComposed = new Map();
+  for (const test of tests) {
+    const key = composedPath(test);
+    if (!testByComposed.has(key)) testByComposed.set(key, test);
+  }
+  const listedTest = file => testSet.has(file) ? file : testByComposed.get(composedPath(file));
   const hit = new Map();
   const note = (test, distance, via) => {
     const prev = hit.get(test);
     if (!prev || distance < prev.distance) hit.set(test, { distance, via });
   };
   for (const file of changed) {
-    if (testSet.has(file)) note(file, 0, "changed");
+    const named = listedTest(file);
+    if (named) note(named, 0, "changed");
     const seen = new Set([file]);
     let frontier = [file];
     for (let depth = 1; frontier.length; depth++) {
       const next = [];
       for (const node of frontier) {
-        for (const importer of reverse.get(node) ?? []) {
+        for (const importer of importersOf(reverse, node)) {
           if (seen.has(importer)) continue;
           seen.add(importer);
-          if (testSet.has(importer)) note(importer, depth, `imports ${file}`);
+          const listed = listedTest(importer);
+          if (listed) note(listed, depth, `imports ${file}`);
           next.push(importer);
         }
       }
@@ -129,10 +162,13 @@ export function relatedTests({ changed, tests, reverse, read }) {
   }
   // Path mentions (non-test changed files). Nested paths match anywhere; a
   // root file (AGENTS.md, index.html) only as a quoted literal, so short
-  // names do not match unrelated text.
-  const mentionable = changed.filter((f) => !testSet.has(f));
-  const mentions = (source, file) =>
-    file.includes("/") ? source.includes(file) : ['"', "'", "`"].some((q) => source.includes(q + file + q));
+  // names do not match unrelated text. NFC and NFD spellings are one path.
+  const mentionable = changed.filter((f) => !listedTest(f));
+  const mentions = (source, file) => {
+    const text = composedPath(source);
+    const path = composedPath(file);
+    return path.includes("/") ? text.includes(path) : ['"', "'", "`"].some((q) => text.includes(q + path + q));
+  };
   if (mentionable.length) {
     for (const test of tests) {
       let source;
