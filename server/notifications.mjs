@@ -8,6 +8,7 @@ import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./store.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
+import { indexMessages, rowInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -239,7 +240,15 @@ export class Notifications {
       const rows = fetched.slice(0, tail).reverse().map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const member = room.state.members[auth.member.id] ?? auth.member;
       const mutedThreadIds = this.store.threadMutes.mutedThreadIds(roomId, auth.member.id);
-      const notifications = deriveNotifications({ events: rows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, rows) });
+      // PRIV-2: a since_join reader's feed follows the same floor as every
+      // other message read. A mention recorded before removal stays in the
+      // event tail after reactivation; it must not come back as unread.
+      // nextBefore still names the oldest scanned row so a hidden row cannot
+      // stall the older-page walk.
+      const floor = this.store.historyFloor(roomId, auth.member.id, room.sequence);
+      const floorMessages = floor ? indexMessages(room.state.messages) : null;
+      const visibleRows = rows.filter(row => rowInHistory(row, floor, floorMessages));
+      const notifications = deriveNotifications({ events: visibleRows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, visibleRows) });
       const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
         : truncated ? rows[0].sequence : null;
       // Tag acknowledgment (2026-09-23): per-member mention ack rate over the
