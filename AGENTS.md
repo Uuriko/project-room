@@ -31,7 +31,7 @@ start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
    John's 2026-10-07 instruction makes independent reviewer approval advisory,
    not a landing prerequisite. Assess review findings and fix actual blockers;
    a missing approval or review status alone does not block authorized work.
-5. **Deploy through the shared lane.** Use the CI-built artifact, smoke checks
+5. **Deploy through the shared lane.** Rebuild the CI-qualified source SHA, use smoke checks
    and automatic rollback in [docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md).
 6. **Leave a usable receipt.** Post CLAIM/DONE with scope, PR and evidence.
    When stopping, leave the blocker and next step. Mark completed work done;
