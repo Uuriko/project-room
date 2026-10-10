@@ -147,6 +147,21 @@ export const ANONYMOUS_PROOF_FREE_PER_ADDRESS = 8;
 // bucket = floor(now / IDENTITY_POW_WINDOW_MS). The previous and next
 // bucket are accepted so a clock a few minutes off still matches.
 export const IDENTITY_POW_BITS = 12;
+// Adaptive proof difficulty. The 12-bit proof stays the price for everyone
+// until the global daily budget is half spent; after that, a network that has
+// already minted HEAVY_NETWORK_MINTS identities in the window pays more per
+// mint (16 bits from 50% of the global budget, 20 bits from 80%). Networks
+// below that count keep the base difficulty, so first-time agents and clients
+// that hard-code 12 bits are unaffected. The 428 detail names the bits.
+export const POW_STEPS = Object.freeze([Object.freeze({ usage: 0.8, bits: 20 }), Object.freeze({ usage: 0.5, bits: 16 })]);
+export const HEAVY_NETWORK_MINTS = 10;
+export const CAPACITY_ALERT_USAGE = 0.8;
+const CAPACITY_ALERT_EVERY_MS = 60 * 60 * 1000;
+export function requiredPowBits(baseBits, { globalDay, globalLimit, networkDay }) {
+  if (networkDay < HEAVY_NETWORK_MINTS) return baseBits;
+  for (const step of POW_STEPS) if (globalDay >= step.usage * globalLimit) return Math.max(baseBits, step.bits);
+  return baseBits;
+}
 export const IDENTITY_POW_WINDOW_MS = 10 * 60 * 1000;
 const MINT_MINUTE_MS = 60 * 1000;
 const PROOF_NONCE = /^[A-Za-z0-9_-]{1,43}$/;
@@ -216,12 +231,20 @@ export function enforceAnonymousMintLimits(identities, { name, buckets, proof, r
   const addressDay = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
   ).get(buckets.address, dayStart).n;
+  const networkDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
+  ).get(buckets.network, dayStart).n;
+  const globalDay = db.prepare(
+    "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
+  ).get(dayStart).n;
+  identities.noteCapacity?.(globalDay, now);
+  const bits = requiredPowBits(identities.powBits, { globalDay, globalLimit: identities.anonymousDailyLimit, networkDay });
   const presented = typeof proof === "string" && proof.length > 0;
-  if (presented && !verifyIdentityMintProof(name, proof, now, identities.powBits)) {
-    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now));
+  if (presented && !verifyIdentityMintProof(name, proof, now, bits)) {
+    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now, bits));
   }
   if (!presented && requireProof && addressDay >= identities.proofFreePerAddress) {
-    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now));
+    fail(428, "proof_required", "Identity mint proof required", null, identities.proofDetail(name, now, bits));
   }
   const addressMinute = db.prepare(
     "SELECT count(*) AS n FROM agent_identities WHERE mint_address=? AND created_at>=?"
@@ -237,14 +260,8 @@ export function enforceAnonymousMintLimits(identities, { name, buckets, proof, r
   if (addressMinute >= identities.addressMinuteLimit) limited("Too many identity mints from this address", 60);
   if (addressDay >= identities.addressDailyLimit)
     limited("Identity mint address budget reached", dayRetry("mint_address=?", [buckets.address], addressDay, identities.addressDailyLimit));
-  const networkDay = db.prepare(
-    "SELECT count(*) AS n FROM agent_identities WHERE mint_network=? AND created_at>=?"
-  ).get(buckets.network, dayStart).n;
   if (networkDay >= identities.networkDailyLimit)
     limited("Identity mint network budget reached", dayRetry("mint_network=?", [buckets.network], networkDay, identities.networkDailyLimit));
-  const globalDay = db.prepare(
-    "SELECT count(*) AS n FROM agent_identities WHERE mint_address IS NOT NULL AND created_at>=?"
-  ).get(dayStart).n;
   if (globalDay >= identities.anonymousDailyLimit)
     limited("Identity mint daily budget reached", dayRetry("mint_address IS NOT NULL", [], globalDay, identities.anonymousDailyLimit));
 }
@@ -293,6 +310,7 @@ export class AgentIdentities {
     proofFreePerAddress = ANONYMOUS_PROOF_FREE_PER_ADDRESS,
     activationWindowMs = IDENTITY_ACTIVATION_WINDOW_MS,
     powBits = IDENTITY_POW_BITS,
+    capacityAlert = message => console.warn(message),
     hashKey = undefined,
   } = {}) {
     const positive = (label, value) => {
@@ -316,6 +334,8 @@ export class AgentIdentities {
     this.proofFreePerAddress = proofFreePerAddress;
     this.activationWindowMs = activationWindowMs;
     this.powBits = powBits;
+    this.capacityAlert = capacityAlert;
+    this.lastCapacityAlertAt = 0;
     this.pendingActivation = new Set();
     this.pendingHashUpgrades = new Map();
     this.capacitySchemaReady = false;
@@ -424,15 +444,15 @@ export class AgentIdentities {
   // Enough for a raw HTTP or MCP client to mint a nonce without the Node
   // client: SHA-256 hex of {bucket}:{trimmedDisplayName}:{nonce} must start
   // with prefix, nonce matches nonce, and bucket is one of acceptBuckets.
-  proofDetail(name, now) {
+  proofDetail(name, now, bits = this.powBits) {
     const bucket = Math.floor(now / IDENTITY_POW_WINDOW_MS);
-    const prefix = "0".repeat(this.powBits / 4);
+    const prefix = "0".repeat(bits / 4);
     return {
       proof: {
         algorithm: "sha256-prefix",
         hash: "sha256",
         encoding: "hex",
-        bits: this.powBits,
+        bits,
         prefix,
         input: "{bucket}:{trimmedDisplayName}:{nonce}",
         challenge: `${bucket}:${name}`,
@@ -443,6 +463,15 @@ export class AgentIdentities {
         resend: { method: "POST", fields: ["displayName", "proof"] },
       },
     };
+  }
+
+  // Operator signal: one line per hour while the global anonymous mint budget
+  // is at or above CAPACITY_ALERT_USAGE, so a lockout is seen before agents hit it.
+  noteCapacity(globalDay, now) {
+    if (typeof this.capacityAlert !== "function" || globalDay < CAPACITY_ALERT_USAGE * this.anonymousDailyLimit) return;
+    if (this.lastCapacityAlertAt && now - this.lastCapacityAlertAt < CAPACITY_ALERT_EVERY_MS) return;
+    this.lastCapacityAlertAt = now;
+    this.capacityAlert(`[capacity] anonymous identity mints ${globalDay}/${this.anonymousDailyLimit} in the rolling 24h (${Math.round(100 * globalDay / this.anonymousDailyLimit)}%); new anonymous mints get 429 at the limit. Invite-code redeems are not counted.`);
   }
 
   admitAnonymous(name, buckets, proof, requireProof, now, limitCode = "rate_limited") {
