@@ -379,7 +379,10 @@ export class AgentPluginStore {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
+      // heartbeats:* let a joined agent report and poll its own wakes over
+      // REST (scripts/agent-wake.mjs); without them every rak_ join token is
+      // 403 insufficient_scope on /api/agent-heartbeats and /api/agent-wakes/poll.
+      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
