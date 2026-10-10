@@ -312,13 +312,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       await withBusy(async () => {
         const session = await authedSession();
         if (passwordMode === "signup") {
-          // The signup mail (verify, or the already-registered notice) links
-          // back to the same place a magic link would: room, account home, or
-          // the open #invite/ or #join/ link, so an invitee keeps the invite.
+          // Signup also rotates the account cookie. Reconcile an uncertain
+          // result and ignore obsolete replies just as password login does.
           const returnTo = onMagicLinkRequest?.();
-          const reply = await api(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision, ...(returnTo ? { returnTo } : {}) });
-          if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
+          const reply = await mutationApi(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision, ...(returnTo ? { returnTo } : {}) },
+            reply => {
+              if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
+              return true;
+            });
           const restored = await accountClient.restore();
+          if (!restored) return; // A newer restoration owns the account now.
           if (restored?.authenticated) {
             await onSignedIn?.(restored);
             setStatus(reply.mailConfigured ? uiText("signin.copy.026") : uiText("signin.copy.027"));
