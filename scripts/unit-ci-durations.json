@@ -463,6 +463,7 @@
   "tests/join-page.test.js": 53057,
   "tests/join-recoverable-first-room.test.js": 1000,
   "tests/join-session-1522.test.js": 11000,
+  "tests/join-switch-warning-copy.test.js": 12000,
   "tests/join-vocabulary.test.js": 23466,
   "tests/join.test.js": 6284,
   "tests/journey-coverage.test.js": 8107,
