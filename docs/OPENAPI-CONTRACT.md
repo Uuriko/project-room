@@ -77,3 +77,41 @@ your edit (documented-but-unserved, unserved-but-undocumented, or a parse
 error) — not in the checker. The checker changes only when the route table
 or the allowlist genuinely moved; if you suspect that, re-run the check
 against `origin/main` first to isolate it.
+
+### Announce contract changes on the room claim board (FIX-43)
+
+**Convention, not a gate.** Concurrent lanes watch the room claim board for
+work; contract drift buried in a PR diff never reaches them. So before
+opening a PR that changes contract fields in this document, run the
+announcement helper against the two revisions and post its output to the
+claim board via your usual board post path (the same `message.posted`
+command shape workers use — see the worker plugin's `post-room.mjs`):
+
+```sh
+# diff your branch's openapi.yaml against main's
+git show origin/main:docs/openapi.yaml > /tmp/openapi-main.yaml
+node scripts/announce-contract-change.mjs \
+  --old /tmp/openapi-main.yaml --new docs/openapi.yaml --pr <your-pr-number>
+```
+
+The output lists changed fields (old type/shape → new type/shape), added
+and removed fields, the affected routes, and a migration note
+(breaking vs additive). Paste the text onto the claim board; attach the
+`--json` payload alongside it if the board entry supports structured
+payloads.
+
+Prefer the two-revision diff above. If you instead built the mapping by
+hand (e.g. for a contract change that spans multiple files), the script
+also accepts explicit JSON mappings:
+
+```sh
+node scripts/announce-contract-change.mjs \
+  --mapping old-fields.json --new-mapping new-fields.json --pr <n>
+```
+
+Mappings are `{ "METHOD /path -> request.body.field": { type, format, enum, ... } }`.
+
+There is deliberately no CI enforcement for this: John's culture is
+advisory — a hard gate on announcements would be a rule, not a
+convention. If you changed contract fields and skipped the announcement,
+a lane colliding with your drift is on you, not on the gate.
