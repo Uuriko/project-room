@@ -2161,8 +2161,13 @@ function retireApproval(item, incoming, reason) {
 }
 
 // Same path grammar as server/claim-scopes.mjs: a file, folder/** or **.
+// NFC and NFD spellings of the same file compare equal. Case stays distinct.
+const composed = value => {
+  try { return value.normalize("NFC"); }
+  catch { return value; }
+};
 const claimPath = value => {
-  const text = String(value).trim().replace(/^\.\//, "");
+  const text = composed(String(value).trim().replace(/^\.\//, ""));
   if (text === "**") return { path: "", subtree: true };
   const subtree = text.endsWith("/**");
   return { path: (subtree ? text.slice(0, -3) : text).replace(/\/+$/, ""), subtree };

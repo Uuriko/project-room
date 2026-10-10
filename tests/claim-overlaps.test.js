@@ -55,3 +55,15 @@ test("overlaps are deterministic on replay", () => {
   assert.deepEqual(first.overlaps, [{ workItemId: "w-login", holderId: "codex", paths: ["docs/**"] }]);
   assert.deepEqual(second, first);
 });
+
+test("an NFD path overlaps an NFC claim on the same file", () => {
+  const nfc = "server/café.mjs";
+  const nfd = "server/cafe\u0301.mjs";
+  assert.notEqual(nfc, nfd);
+  let state = claim(twoAgents(), "w-login", "codex", [nfc]);
+  state = claim(state, "w-start", "claude", [nfd]);
+  assert.deepEqual(state.workItems["w-start"].claim.overlaps, [{ workItemId: "w-login", holderId: "codex", paths: [nfc] }]);
+  assert.deepEqual(claimOverlaps(state, "other", "Acme/Demo", ["Server/Café.mjs"], at), []);
+  const directory = claim(twoAgents(), "w-login", "codex", ["server/café/**"]);
+  assert.deepEqual(claimOverlaps(directory, "other", "Acme/Demo", ["server/cafe\u0301/http.mjs"], at), [{ workItemId: "w-login", holderId: "codex", paths: ["server/café/**"] }]);
+});
