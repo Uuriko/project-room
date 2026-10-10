@@ -61,7 +61,9 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   store.command(agent, "commons", command(T.WORK_STARTED, { workItemId: "work-build", expectedRevision: 1 }));
 
   const identity = store.identities.create("Signal agent");
-  store.identities.link(owner, "commons", { identityId: identity.identityId, memberId: "signal-agent", displayName: "Signal agent", permissions: ["accept_work", "complete_work"] });
+  store.identities.link(owner, "commons", { identityId: identity.identityId,
+    identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
+    memberId: "signal-agent", displayName: "Signal agent", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, "commons", "signal-agent", "t2_standard", { updatedBy: "owner", nowMs: observedAt });
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "signal-work", title: "Check the observation path", definitionOfDone: "Live signals observed", accountableMemberId: "signal-agent", mode: "read" }));
   const server = createRoomServer({ store, streamInterval: 60 });

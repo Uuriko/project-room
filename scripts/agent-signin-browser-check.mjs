@@ -75,7 +75,9 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   const f = createAcceptanceFixture();
   const identity = f.store.identities.create("Browser test agent");
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  f.store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  f.store.identities.link(ownerKey, "commons", { identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
+    permissions: ["accept_work"] });
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
