@@ -17,9 +17,17 @@
 import { randomUUID } from "node:crypto";
 
 class BondError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
+  constructor(status, code, message, hint = null, next = null) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    if (hint) this.hint = hint;
+    if (next) this.next = next;
+  }
 }
-const fail = (status, code, message) => { throw new BondError(status, code, message); };
+const fail = (status, code, message, opts = {}) => {
+  throw new BondError(status, code, message, opts.hint ?? null, opts.next ?? null);
+};
 
 export const BOND_SCOPES = Object.freeze(["peer.wake", "peer.card", "peer.context", "peer.dm"]);
 export const BOND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -187,8 +195,12 @@ export class Bonds {
     if (linked && this._identityExists(linked)) return linked;
     if (this._identityExists(raw) && this._identityInRoom(roomId, raw)) return raw;
     // One answer for every refusal (M3), worded so it is true in each case:
-    // it never says the identity does not exist (#1554).
-    fail(404, "peer_not_found", "That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.");
+    // it never says the identity does not exist (#1554). The hint/next
+    // teach recovery without distinguishing the refusal cases.
+    fail(404, "peer_not_found", "That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.", {
+      hint: "The target must be a room-linked peer; ask them to join the room first.",
+      next: [{ tool: "get_room_context" }]
+    });
   }
 
   _pairRow(a, b) {
