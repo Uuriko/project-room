@@ -58,3 +58,31 @@ test("room_read_messages carries the anti-loop counts for the reader, ignoring D
   post("owner", "p2");
   assert.equal((await read("a1")).agentMessagesSincePerson, 0, "a person post resets it");
 });
+
+test("room_read_messages anti-loop respects a since_join reader's history floor, same-millisecond ties included", async t => {
+  const { RoomStore } = await import("../server/store.mjs");
+  const { initialRoom } = await import("../server/bootstrap.mjs");
+  const { callHostedStdioTool } = await import("../server/mcp-full-profile.mjs");
+  const { PERMISSIONS } = await import("../src/events.js");
+  let clock = Date.parse("2026-10-09T12:00:00.000Z");
+  const store = new RoomStore(":memory:", { now: () => clock });
+  t.after(() => store.close());
+  store.initialize(initialRoom());
+  const keys = { owner: store.issueAccessKey("commons", "owner") };
+  const add = (id, kind, permissions) => { store.command(keys.owner, "commons", { id: `join-${id}`, type: "member.added", data: { memberId: id, displayName: id, kind, permissions } }); keys[id] = store.issueAccessKey("commons", id); };
+  add("a1", "agent", [...PERMISSIONS]);
+  store.command(keys.owner, "commons", { id: "hv", type: "room.history_visibility_set", data: { historyVisibility: "since_join" } });
+  const post = (who, messageId, extra = {}) => store.command(keys[who], "commons", { id: `post-${messageId}`, type: "message.posted", data: { messageId, body: messageId, ...extra } });
+  clock += 1000;
+  post("owner", "before-person"); post("a1", "before-agent");
+  add("late", "human", []); // joins in the same millisecond as the two posts above
+  clock += 1000;
+  post("a1", "after-1"); post("a1", "after-2");
+  const read = async who => (await callHostedStdioTool(store, keys[who], "room_read_messages", { roomId: "commons", latest: true, limit: 10 })).value.antiLoop;
+  const late = await read("late");
+  assert.equal(late.agentMessagesSincePerson, 2, "only agent posts after the join count");
+  assert.equal(late.lastPersonMessageId, null, "an earlier person message id never leaks");
+  assert.equal(late.lastPersonMessageAt, null);
+  assert.equal((await read("owner")).agentMessagesSincePerson, 3, "the owner reads everything");
+  assert.equal((await read("owner")).lastPersonMessageId, "before-person");
+});
