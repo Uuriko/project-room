@@ -61,6 +61,8 @@ if (wiki.status !== 0) process.exit(wiki.status || 1);
 // Wiki read API (W009): the build-time embedded wiki data stays current with the planes.
 const wikiBuild = spawnSync(process.execPath, ["scripts/wiki-build.mjs", "--check"], { stdio: "inherit" });
 if (wikiBuild.status !== 0) process.exit(wikiBuild.status || 1);
+const workflowPins = spawnSync(process.execPath, ["scripts/check-workflow-pins.mjs"], { stdio: "inherit" });
+if (workflowPins.status !== 0) process.exit(workflowPins.status ?? 1);
 const docLinks = spawnSync(process.execPath, ["scripts/docs-link-check.mjs"], { stdio: "inherit" });
 if (docLinks.status !== 0) process.exit(docLinks.status || 1);
 // VL-2a: the GitHub App manifest stays aligned with the shared core.
