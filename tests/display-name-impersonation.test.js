@@ -36,6 +36,17 @@ test("reserved labels, control characters, duplicates, and lookalikes are classi
   assert.equal(assessMemberDisplayName("Room owner (verified)", members).reason, "reserved");
   assert.equal(assessMemberDisplayName("Potter (owner)", members).reason, "reserved");
   assert.equal(assessMemberDisplayName("@everyone", members).reason, "reserved");
+  // A trailing sentence mark is not a different label. The role rule does not
+  // cover everyone/here/channel/all, and the roster check is what member add uses.
+  for (const name of ["everyone.", "here!", "all?", "channel,", "owner:", "Admin."]) {
+    const marked = assessMemberDisplayName(name, members);
+    assert.equal(marked.available, false, name);
+    assert.equal(marked.reason, "reserved", name);
+    assert.equal(assessMemberDisplayName(marked.suggestion, members).available, true, marked.suggestion);
+  }
+  assert.equal(assessMemberDisplayName("Potter.", members).reason, "confusable");
+  assert.equal(assessMemberDisplayName("Calliope.", members).available, true);
+  assert.equal(assessMemberDisplayName("Allen!", members).available, true);
   assert.equal(assessMemberDisplayName("Calliope", members).available, true);
   assert.equal(assessMemberDisplayName("Allen", members).available, true);
   assert.equal(assessMemberDisplayName("Channeling", members).available, true);
