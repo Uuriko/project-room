@@ -53,6 +53,11 @@ global identity states below.
   credential for a self-minted identity, so a revoked identity can never
   rotate back to life.
 
+Scoped API key (rak_) revocation is narrower: revoking a key stops new
+uses of that key, but browser sessions it already minted stay valid for
+up to 1 hour (their TTL cap). Rotate the identity secret to kill those
+sessions immediately — sessions are bound to the identity's secret hash.
+
 ## Per-room links (orthogonal)
 
 Link and unlink happen per room, as owner actions with the room's account
