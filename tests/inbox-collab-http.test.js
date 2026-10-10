@@ -34,10 +34,10 @@ function setup(t) {
     purpose: "An agent-owned room.", kind: "personal", displayName: "Den Keeper" });
   const humanKey = state.store.issueAccessKey("commons", "owner");
   const agent = state.store.identities.create("Collab Agent");
-  state.store.identities.link(humanKey, "commons", { identityId: agent.identityId,
+  state.store.identities.link(humanKey, "commons", { identityId: agent.identityId, identityLinkCode: state.store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode,
     displayName: "Collab Agent", permissions: ["accept_work"] });
   const agent2 = state.store.identities.create("Second Agent");
-  state.store.identities.link(humanKey, "commons", { identityId: agent2.identityId,
+  state.store.identities.link(humanKey, "commons", { identityId: agent2.identityId, identityLinkCode: state.store.identities.mintLinkCode(agent2.identityId, agent2.secret).linkCode,
     displayName: "Second Agent", permissions: ["accept_work"] });
   Object.assign(state, { humanKey, agent, agent2, denIdentity });
   state.serve = async () => {

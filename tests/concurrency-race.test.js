@@ -78,7 +78,7 @@ async function fixture(t) {
     const identity = store.identities.create(name);
     const memberId = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 32);
     store.identities.link(ownerKey, ROOM, {
-      identityId: identity.identityId, memberId, displayName: name,
+      identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId, displayName: name,
       permissions: ["accept_work", "complete_work"],
     });
     return { memberId, key: store.issueAccessKey(ROOM, memberId) };

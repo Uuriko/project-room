@@ -20,8 +20,8 @@ test('needs-me continuation preserves overflow DMs, mentions, rooms and tied lan
     const roomId = `pagination-${String(r).padStart(2, '0')}`;
     const owner = store.identities.create(`Owen ${r}`);
     rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Pagination', kind: 'personal' });
-    store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
-    store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+    store.identities.link(owner.secret, roomId, { identityId: ada.identityId, identityLinkCode: store.identities.mintLinkCode(ada.identityId, ada.secret).linkCode, displayName: 'Ada', permissions: [] });
+    store.identities.link(owner.secret, roomId, { identityId: bob.identityId, identityLinkCode: store.identities.mintLinkCode(bob.identityId, bob.secret).linkCode, displayName: 'Bob', permissions: [] });
     setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
     for (let i = 0; i < (r === 0 ? 9 : 3); i++) {
       const id = `dm-${r}-${i}`;
@@ -88,8 +88,8 @@ test('needs-me room_reply suggestions carry a stable requestId', t => {
   const roomId = 'rid-reqid';
   const owner = store.identities.create('OwnerRid');
   rooms.create(owner.secret, { roomId, title: 'rid', purpose: 'x', kind: 'personal' });
-  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
-  store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, identityLinkCode: store.identities.mintLinkCode(ada.identityId, ada.secret).linkCode, displayName: 'Ada', permissions: [] });
+  store.identities.link(owner.secret, roomId, { identityId: bob.identityId, identityLinkCode: store.identities.mintLinkCode(bob.identityId, bob.secret).linkCode, displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   store.command(bob.secret, roomId, { id: 'm1', type: 'message.posted', data: { messageId: 'm1', body: '@Ada look here' } });
   const first = collectNeedsMe(store, ada.secret, {}).items.find(i => i.kind === 'mention');

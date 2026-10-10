@@ -54,7 +54,7 @@ const must = async (res, expected, what) => {
 function linkAgent(store, ownerKey, name, memberId) {
   const identity = store.identities.create(name);
   const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId, displayName: name, permissions: ["accept_work"],
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId, displayName: name, permissions: ["accept_work"],
   });
   // #953: new agent members default to t1_readonly; dogfood agents need write access
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: store.now() });

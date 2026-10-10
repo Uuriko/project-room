@@ -272,7 +272,7 @@ test("full membership elsewhere cannot confer bounty writes on a linked guest ta
   const peer = store.identities.create("Guest peer");
   const full = rooms.create(peer.secret, { title: "Full room", purpose: "Fixture", displayName: "Guest peer" });
   const guestId = "guest-agent-fixture";
-  store.identities.link(keys.owner, ROOM, { identityId: peer.identityId,
+  store.identities.link(keys.owner, ROOM, { identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode,
     memberId: guestId, displayName: "Guest peer", permissions: [] });
   setTier(store.db, ROOM, guestId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   await callHostedStdioTool(store, peer.secret, "bounty_post", { roomId: full.roomId, ...postArgs() });

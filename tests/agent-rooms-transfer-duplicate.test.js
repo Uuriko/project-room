@@ -25,7 +25,7 @@ function setup(t) {
   const ownerToken = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Owning Agent");
   store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Owning Agent", permissions: ["accept_work"]
   });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, rooms, ownerToken, identity };
@@ -59,7 +59,7 @@ test("a non-owner asking for the current owner still gets 403", t => {
   const { store, rooms, ownerToken, identity } = setup(t);
   const intruder = store.identities.create("Intruder");
   store.identities.link(ownerToken, "commons", {
-    identityId: intruder.identityId, displayName: "Intruder", permissions: ["accept_work"]
+    identityId: intruder.identityId, identityLinkCode: store.identities.mintLinkCode(intruder.identityId, intruder.secret).linkCode, displayName: "Intruder", permissions: ["accept_work"]
   });
   rooms.transfer(ownerToken, "commons", { toMemberId: identity.identityId });
 

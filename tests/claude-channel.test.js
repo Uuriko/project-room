@@ -18,7 +18,7 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 async function fixture(t) {
   const store = new RoomStore(':memory:'), owner = store.identities.create('Channel owner'), agent = store.identities.create('Channel receiver');
   new AgentRooms(store).create(owner.secret, { roomId: 'channel-room', title: 'Channel', purpose: 'Synthetic transport qualification' });
-  store.identities.link(owner.secret, 'channel-room', { identityId: agent.identityId, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
+  store.identities.link(owner.secret, 'channel-room', { identityId: agent.identityId, identityLinkCode: store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const directory = mkdtempSync(join(tmpdir(), 'claude-channel-')), config = join(directory, 'private');
@@ -69,7 +69,7 @@ const signalFrame = signal => frame => frame.method === 'notifications/claude/ch
 test('real channel starts after initialization, delivers once, and requires explicit scoped ACK; generic MCP stays tools-only', async t => {
   const f = await fixture(t), signal = f.enqueue('private-message');
   new AgentRooms(f.store).create(f.owner.secret, { roomId: 'other-room', title: 'Other', purpose: 'Other private scope' });
-  f.store.identities.link(f.owner.secret, 'other-room', { identityId: f.agent.identityId, memberId: 'other-receiver', displayName: 'Other', permissions: [] });
+  f.store.identities.link(f.owner.secret, 'other-room', { identityId: f.agent.identityId, identityLinkCode: f.store.identities.mintLinkCode(f.agent.identityId, f.agent.secret).linkCode, memberId: 'other-receiver', displayName: 'Other', permissions: [] });
   const foreign = f.store.agentHeartbeats.enqueueWake({ agentId: f.agent.identityId, kind: 'mention', roomId: 'other-room', messageId: 'foreign-private-message' }).signal;
   const p = peer(t, f);
   const initialized = await p.initialize();

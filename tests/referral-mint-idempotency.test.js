@@ -34,7 +34,7 @@ async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
   const created = await post(origin, "/api/agent-identities", { displayName });
   assert.equal(created.status, 201);
   store.identities.link(ownerKey, "commons", {
-    identityId: created.json.identityId, displayName,
+    identityId: created.json.identityId, identityLinkCode: store.identities.mintLinkCode(created.json.identityId, created.json.secret).linkCode, displayName,
     permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"],
   });
   return { identityId: created.json.identityId, secret: created.json.secret };

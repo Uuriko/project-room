@@ -37,7 +37,7 @@ function setup() {
   const identity = f.store.identities.create("skills-agent");
   const ownerKey = f.store.issueAccessKey("commons", "owner");
   f.store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Skills Agent", permissions: ["accept_work"], memberId: "skills-agent",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Skills Agent", permissions: ["accept_work"], memberId: "skills-agent",
   });
   const roomKey = f.store.issueAccessKey("commons", "skills-agent");
   return { f, identity, roomKey };

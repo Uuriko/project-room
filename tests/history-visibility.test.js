@@ -70,7 +70,7 @@ async function setup(t, { preJoinEvents = 0 } = {}) {
   cmd(T.MEMBER_ADDED, { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const lateKey = store.issueAccessKey("commons", "late-agent");
   const identity = store.identities.create("Late reader");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Late reader", permissions: [] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Late reader", permissions: [] });
   // An edit after the join still belongs to a message from before it.
   cmd(T.MESSAGE_EDITED, { messageId: "before-question", body: `${BEFORE_EDIT}?`, expectedMessageRevision: 0 });
   cmd(T.MESSAGE_POSTED, { messageId: "after-root", body: AFTER });

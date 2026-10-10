@@ -115,7 +115,7 @@ test("done retires the item from updates and needs-me, and a clarification bring
   const { store, ownerKey, request } = serve(t);
   const identity = store.identities.create("Needs Reader");
   store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId: "reader", displayName: "Needs Reader", permissions: []
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "reader", displayName: "Needs Reader", permissions: []
   });
   const { messageId } = ask(store, "commons", ownerKey, "reader", "please take this");
   const readerKey = store.issueAccessKey("commons", "reader");
@@ -467,7 +467,7 @@ test("cross-room updates include only rooms the identity or account can access",
   const betaOwner = store.issueAccessKey("beta", "owner");
   const identity = store.identities.create("Alpha Reader");
   store.identities.link(alphaOwner, "alpha", {
-    identityId: identity.identityId, memberId: "reader", displayName: "Alpha Reader", permissions: []
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "reader", displayName: "Alpha Reader", permissions: []
   });
   const readerKey = store.issueAccessKey("alpha", "reader");
   store.command(alphaOwner, "alpha", { id: randomUUID(), type: T.MESSAGE_POSTED, data: {

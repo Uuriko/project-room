@@ -92,7 +92,7 @@ test("a non-owner agent member cannot administer invitations", t => {
   // Join the room as an ordinary member first: the denial must be the
   // admin gate (403 account_session_required), not missing membership.
   f.store.identities.link(f.identity.secret, "agent-den", {
-    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work"]
+    identityId: other.identityId, identityLinkCode: f.store.identities.mintLinkCode(other.identityId, other.secret).linkCode, displayName: "Other Agent", permissions: ["accept_work"]
   });
   assert.throws(() => f.store.issueInvitation(other.secret, "agent-den", issueDetails()),
     /account browser session/);

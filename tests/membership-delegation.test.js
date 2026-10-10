@@ -34,7 +34,7 @@ function setup(t) {
   // The would-be delegate: a linked agent identity with work permissions only.
   const agent = store.identities.create("Delegate Agent");
   const agentLinked = store.identities.link(ownerToken, "commons", {
-    identityId: agent.identityId, displayName: "Delegate Agent",
+    identityId: agent.identityId, identityLinkCode: store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode, displayName: "Delegate Agent",
     permissions: ["accept_work", "complete_work", "steer", "verify"]
   });
   // #953: new agent members default to t1_readonly; the delegate needs write access for decide/link
@@ -42,7 +42,7 @@ function setup(t) {
   // A second agent, never granted: the control group.
   const other = store.identities.create("Other Agent");
   store.identities.link(ownerToken, "commons", {
-    identityId: other.identityId, displayName: "Other Agent",
+    identityId: other.identityId, identityLinkCode: store.identities.mintLinkCode(other.identityId, other.secret).linkCode, displayName: "Other Agent",
     permissions: ["accept_work", "complete_work"]
   });
   // A requester whose request the delegate will decide.
@@ -200,7 +200,7 @@ test("grant keeps a pre-existing invite_member untouched on revoke", t => {
   // Owner links a second identity that already carries invite_member.
   const second = delegation.store.identities.create("Invite Agent");
   delegation.store.identities.link(ownerToken, "commons", {
-    identityId: second.identityId, displayName: "Invite Agent",
+    identityId: second.identityId, identityLinkCode: delegation.store.identities.mintLinkCode(second.identityId, second.secret).linkCode, displayName: "Invite Agent",
     permissions: ["accept_work", "invite_member"]
   });
   delegation.grant(ownerToken, "commons", { identityId: second.identityId });
@@ -230,12 +230,12 @@ test("a delegate cannot link an identity with manage_members — no transitive g
   delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
   const fresh = store.identities.create("Sneaky Agent");
   assert.throws(() => store.identities.link(agent.secret, "commons", {
-    identityId: fresh.identityId, displayName: "Sneaky Agent",
+    identityId: fresh.identityId, identityLinkCode: store.identities.mintLinkCode(fresh.identityId, fresh.secret).linkCode, displayName: "Sneaky Agent",
     permissions: ["accept_work", "manage_members"]
   }), err => err.status === 403 && /cannot grant manage_members/.test(err.message));
   // Linking without manage_members still works for the delegate.
   const linked = store.identities.link(agent.secret, "commons", {
-    identityId: fresh.identityId, displayName: "Sneaky Agent",
+    identityId: fresh.identityId, identityLinkCode: store.identities.mintLinkCode(fresh.identityId, fresh.secret).linkCode, displayName: "Sneaky Agent",
     permissions: ["accept_work"]
   });
   assert.equal(linked.roomId, "commons");
@@ -249,7 +249,7 @@ test("the owner remains sovereign: may approve and link with manage_members", t 
   assert.deepEqual([...decided.grantedPermissions].sort(), ["accept_work", "manage_members"]);
   const fresh = store.identities.create("Delegate Linked Agent");
   const linked = store.identities.link(ownerToken, "commons", {
-    identityId: fresh.identityId, displayName: "Delegate Linked Agent",
+    identityId: fresh.identityId, identityLinkCode: store.identities.mintLinkCode(fresh.identityId, fresh.secret).linkCode, displayName: "Delegate Linked Agent",
     permissions: ["manage_members"]
   });
   assert.equal(linked.roomId, "commons");
@@ -391,7 +391,7 @@ test("HTTP delegation-revoke strips direct admin bits as well as the grant", asy
 
   const identity = store.identities.create("Demote Me");
   const linked = store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Demote Me", permissions: ["accept_work"],
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Demote Me", permissions: ["accept_work"],
   });
   // Direct member-bit admin authority (the #742 path), alongside a table grant.
   const before = store.room("commons").state.members[linked.memberId];
@@ -435,7 +435,7 @@ test("a delegate cannot approve a join with permissions it does not hold (#1520)
 test("a delegate with no work permissions can still admit with read/chat access only (#1520)", t => {
   const { delegation, ownerToken, requests, store } = setup(t);
   const bare = store.identities.create("Bare Delegate");
-  const linked = store.identities.link(ownerToken, "commons", { identityId: bare.identityId, displayName: "Bare Delegate", permissions: [] });
+  const linked = store.identities.link(ownerToken, "commons", { identityId: bare.identityId, identityLinkCode: store.identities.mintLinkCode(bare.identityId, bare.secret).linkCode, displayName: "Bare Delegate", permissions: [] });
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   delegation.grant(ownerToken, "commons", { identityId: bare.identityId });
   const requester = store.identities.create("Requesting Agent 2");
@@ -452,6 +452,6 @@ test("a delegate cannot link an identity with permissions it does not hold (#152
   delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
   const fresh = store.identities.create("Escalating Agent");
   assert.throws(() => store.identities.link(agent.secret, "commons", {
-    identityId: fresh.identityId, displayName: "Escalating Agent", permissions: ["decide"]
+    identityId: fresh.identityId, identityLinkCode: store.identities.mintLinkCode(fresh.identityId, fresh.secret).linkCode, displayName: "Escalating Agent", permissions: ["decide"]
   }), err => err.status === 403 && /Cannot grant permissions not held: decide/.test(err.message));
 });

@@ -217,23 +217,25 @@ test("room verification-policy gates identity linking", async t => {
   // An unverified identity is denied linking while the gate is on.
   const agent = f.store.identities.create("Gated agent");
   assert.throws(
-    () => f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, permissions: ["accept_work"] }),
+    () => f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, identityLinkCode: f.store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode, permissions: ["accept_work"] }),
     err => err.code === "unverified_identity");
   assert.equal(
     await errorCode(await post(origin, "/api/rooms/commons/identity-links",
-      { identityId: agent.identityId, permissions: ["accept_work"] }, ownerKey)),
+      { identityId: agent.identityId,
+        identityLinkCode: f.store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode,
+        permissions: ["accept_work"] }, ownerKey)),
     "unverified_identity");
 
   // After a room-owner attestation the same identity links cleanly.
   const attester = makeAttester(f);
   await post(origin, `/api/agent-identities/${agent.identityId}/verify`, {}, attester.secret);
-  const linked = f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, permissions: ["accept_work"] });
+  const linked = f.store.identities.link(ownerKey, "commons", { identityId: agent.identityId, identityLinkCode: f.store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode, permissions: ["accept_work"] });
   assert.equal(linked.memberId, agent.identityId);
 
   // Relaxing the policy re-opens linking for unverified identities.
   await post(origin, policyPath, { requireVerified: false }, ownerKey);
   const other = f.store.identities.create("Ungated agent");
-  const linked2 = f.store.identities.link(ownerKey, "commons", { identityId: other.identityId, permissions: ["accept_work"] });
+  const linked2 = f.store.identities.link(ownerKey, "commons", { identityId: other.identityId, identityLinkCode: f.store.identities.mintLinkCode(other.identityId, other.secret).linkCode, permissions: ["accept_work"] });
   assert.equal(linked2.memberId, other.identityId);
 });
 

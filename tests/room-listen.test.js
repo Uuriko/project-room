@@ -29,7 +29,7 @@ async function saved(t, { listen = false } = {}) {
   const origin = server ? 'http://127.0.0.1:' + server.address().port : 'http://127.0.0.1:9';
   if (listen) {
     new AgentRooms(store).create(owner.secret, { roomId: 'listen-room', title: 'Listen', purpose: 'Synthetic poll' });
-    store.identities.link(owner.secret, 'listen-room', { identityId: agent.identityId, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
+    store.identities.link(owner.secret, 'listen-room', { identityId: agent.identityId, identityLinkCode: store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   }
   saveAgentConnection(config, { version: 1, origin, roomId: 'listen-room', memberId: 'receiver', token: agent.secret });
   const requests = [];

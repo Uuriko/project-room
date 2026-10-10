@@ -17,7 +17,7 @@ async function fixture(t) {
   const store = new RoomStore(':memory:'); const identity = store.identities.create('Wake owner');
   new AgentRooms(store).create(identity.secret, { roomId: 'wake-room', title: 'Wake', purpose: 'Synthetic wake testing' });
   const alias = store.identities.create('Linked alias');
-  store.identities.link(identity.secret, 'wake-room', { identityId: alias.identityId, memberId: 'linked-alias', displayName: 'Alias', permissions: [] });
+  store.identities.link(identity.secret, 'wake-room', { identityId: alias.identityId, identityLinkCode: store.identities.mintLinkCode(alias.identityId, alias.secret).linkCode, memberId: 'linked-alias', displayName: 'Alias', permissions: [] });
   const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => server.close(resolve)); store.close(); });
   const connection = { origin: 'http://127.0.0.1:' + server.address().port, roomId: 'wake-room', memberId: 'linked-alias', token: alias.secret };

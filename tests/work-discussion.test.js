@@ -229,7 +229,7 @@ test('prepared MCP reads resume after a completed checkpoint without skipping a 
   for (const transport of ['stdio', 'hosted']) await t.test(transport, async t => {
   const f = await fixture(t);
   const identity = f.store.identities.create('Hosted observer');
-  f.store.identities.link(f.keys.owner, 'commons', { identityId: identity.identityId, permissions: [] });
+  f.store.identities.link(f.keys.owner, 'commons', { identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: [] });
   const mcp = transport === 'stdio' ? await f.open() : { async call(name, args) {
     const response = await fetch(`${f.origin}/room/mcp`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${identity.secret}` },

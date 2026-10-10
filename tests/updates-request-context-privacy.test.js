@@ -27,7 +27,7 @@ function serve(t, roomId = "commons") {
 function addAgent(store, roomId, token, memberId, displayName) {
   const secret = `pri_${memberId}${"s".repeat(43 - memberId.length)}`;
   const identity = store.identities.create(displayName, { secret });
-  store.identities.link(token, roomId, { identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work"] });
+  store.identities.link(token, roomId, { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, secret).linkCode, memberId, displayName, permissions: ["accept_work", "complete_work"] });
   return { secret, memberKey: store.issueAccessKey(roomId, memberId) };
 }
 

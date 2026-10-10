@@ -92,7 +92,7 @@ function spyWake(t, store) {
 function linkOffline(store, ownerKey) {
   const identity = store.identities.create("Lander");
   const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Lander", permissions: []
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Lander", permissions: []
   });
   const seen = store.now() - 10 * 60 * 1000;
   store.db.prepare(`INSERT INTO agent_hosts

@@ -212,7 +212,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     store.command(ownerA, roomA, { id: randomUUID(), type: T.WORK_PROPOSED, data: { workItemId: workId, title: "Fixture work", definitionOfDone: "Done", accountableMemberId: "owner" } });
     store.workClaims.set(roomA, { id: "claim-a", title: "Fixture claim", state: "open", owner: "owner", updatedAt: new Date().toISOString() });
     const identity = store.identities.create("qa2-room-agent");
-    store.identities.link(ownerA, roomA, { identityId: identity.identityId, memberId: "reporter", displayName: "Reporter", permissions: [] });
+    store.identities.link(ownerA, roomA, { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "reporter", displayName: "Reporter", permissions: [] });
     store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"] });
     store.command(ownerA, roomA, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "wake the subscription" } });
     assert.ok(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE room_id=?").get(roomA).n > 0);
@@ -311,7 +311,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     store.initialize(createdRoom("commons", "Commons"));
     const owner = store.issueAccessKey("commons", "owner");
     const identity = store.identities.create("qa2-fixture-agent");
-    store.identities.link(owner, "commons", { identityId: identity.identityId, memberId: "linked", displayName: "Linked", permissions: [] });
+    store.identities.link(owner, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "linked", displayName: "Linked", permissions: [] });
     const subscribed = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"] });
     store.command(owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "for the delivery" } });
     assert.ok(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE agent_id=?").get(identity.identityId).n > 0);

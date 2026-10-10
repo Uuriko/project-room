@@ -675,7 +675,7 @@ test("hosted discovery keeps room identity and distinguishes formal requests fro
   const f = await fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder"), outsider = f.store.identities.create("Observer");
   const rooms = new AgentRooms(f.store);
   const created = rooms.create(owner.secret, { roomId: "guided-hosted", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
-  for (const person of [peer, outsider]) f.store.identities.link(owner.secret, created.roomId, { identityId: person.identityId, displayName: person === peer ? "Responder" : "Observer", permissions: [] });
+  for (const person of [peer, outsider]) f.store.identities.link(owner.secret, created.roomId, { identityId: person.identityId, identityLinkCode: f.store.identities.mintLinkCode(person.identityId, person.secret).linkCode, displayName: person === peer ? "Responder" : "Observer", permissions: [] });
   for (const [from, to] of [[created.ownerMemberId, peer.identityId], [peer.identityId, created.ownerMemberId]]) {
     f.store.dmConsents.request(created.roomId, from, to, "Fixture");
     f.store.dmConsents.decide(created.roomId, to, from, "approve");

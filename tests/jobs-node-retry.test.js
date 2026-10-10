@@ -27,7 +27,7 @@ test("node scheduler retries a failing webhook receiver then dead-letters it", a
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Hook Agent");
   store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId: "hookagent", displayName: "Hook Agent", permissions: []
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "hookagent", displayName: "Hook Agent", permissions: []
   });
   const posts = [];
   const server = createRoomServer({ store });

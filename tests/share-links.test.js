@@ -256,7 +256,7 @@ function agentOwnerFixture(t) {
   const f = fixture(t);
   const identity = f.store.identities.create("Owning Agent");
   f.store.identities.link(f.ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Owning Agent", permissions: ["accept_work"]
   });
   new AgentRooms(f.store).transfer(f.ownerKey, "commons", { toMemberId: identity.identityId });
   assert.equal(f.store.roomAuthority("commons").ownerId, identity.identityId);
@@ -335,7 +335,7 @@ test("HTTP: owner and appointed agent admin can manage shared invites; ordinary 
   // A work grant alone never permits membership administration.
   const other = f.store.identities.create("Other Agent");
   f.store.identities.link(f.ownerKey, "commons", {
-    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work", "steer", "verify"]
+    identityId: other.identityId, identityLinkCode: f.store.identities.mintLinkCode(other.identityId, other.secret).linkCode, displayName: "Other Agent", permissions: ["accept_work", "steer", "verify"]
   });
   const otherBearer = { Authorization: `Bearer ${other.secret}` };
   for (const args of [
@@ -440,7 +440,7 @@ test("v34 databases migrate share-link and invitation history to v36 with issuer
   assert.doesNotThrow(() => store.shareLinks.verify());
   // The nullable columns now accept an agent issuer end to end.
   const identity = store.identities.create("Migrated Owner");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Migrated Owner", permissions: ["accept_work"] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Migrated Owner", permissions: ["accept_work"] });
   new AgentRooms(store).transfer(ownerKey, "commons", { toMemberId: identity.identityId });
   const agentToken = randomBytes(32).toString("base64url");
   const agentCreated = store.shareLinks.create(identity.secret, "commons",

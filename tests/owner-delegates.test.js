@@ -50,7 +50,7 @@ async function serve(t) {
 function makeLinkedAgent(store, ownerKey, name = "Delegate Agent") {
   const agent = store.identities.create(name);
   const linked = store.identities.link(ownerKey, "commons", {
-    identityId: agent.identityId, displayName: name,
+    identityId: agent.identityId, identityLinkCode: store.identities.mintLinkCode(agent.identityId, agent.secret).linkCode, displayName: name,
     permissions: ["accept_work", "complete_work", "steer", "verify"]
   });
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });

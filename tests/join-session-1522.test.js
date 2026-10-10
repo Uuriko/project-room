@@ -17,7 +17,7 @@ function setup(t) {
   // record plus the identity_links row that authenticate() consults.
   const ownerKey = store.issueAccessKey("commons", "owner");
   const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Join agent", permissions: ["accept_work"],
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Join agent", permissions: ["accept_work"],
   });
   return { store, identity, memberId: linked.memberId };
 }

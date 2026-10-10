@@ -42,7 +42,7 @@ test("agents are never counted as human seats; identities are counted separately
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "bot-a", displayName: "Bot A", kind: "agent", permissions: ["accept_work"] });
   cmd(ownerKey, T.MEMBER_ADDED, { memberId: "bot-b", displayName: "Bot B", kind: "agent", permissions: ["accept_work"] });
   const identity = store.identities.create("Roaming agent");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: ["accept_work"] });
 
   const before = await usage();
   assert.equal(before.status, 200);
@@ -216,7 +216,7 @@ test("non-members are refused and the response carries no secrets or hashes", as
   assert.equal((await get("/api/rooms/commons/usage", labOwner)).status, 403);
 
   const identity = store.identities.create("Linked identity");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: ["accept_work"] });
   const { status, body } = await usage();
   assert.equal(status, 200);
   const text = JSON.stringify(body);

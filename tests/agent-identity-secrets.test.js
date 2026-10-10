@@ -32,16 +32,18 @@ const errorCode = async res => (await res.json()).error?.code;
 
 // Link an identity into the fixture room so the room-scoped auth path
 // (RoomStore#authenticate -> resolveIdentityAuth) is exercised too.
-function linkToCommons(f, identityId) {
+function linkToCommons(f, identity) {
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  return f.store.identities.link(ownerKey, "commons", { identityId, permissions: ["accept_work"] });
+  return f.store.identities.link(ownerKey, "commons", { identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
+    permissions: ["accept_work"] });
 }
 
 test("rotate issues a new secret once; the old secret 401s on every pri_ auth path", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Rotating agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
   const path = id => `/api/agent-identities/${id}/rotate`;
 
   const res = await post(origin, path(agent.identityId), { confirm: true }, agent.secret);
@@ -81,7 +83,7 @@ test("revoke kills every auth path and keeps the identity row for audit", async 
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Revoked agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
   const path = id => `/api/agent-identities/${id}/revoke`;
 
   const res = await post(origin, path(agent.identityId), { confirm: true }, agent.secret);

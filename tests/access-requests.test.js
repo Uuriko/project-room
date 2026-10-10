@@ -149,7 +149,7 @@ test("unknown identity or room is a bare 404", async t => {
 test("already-linked identity cannot request", async t => {
   const { store, requests, ownerToken, identity } = setup(t);
   store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Requesting Agent", permissions: ["accept_work"]
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: "Requesting Agent", permissions: ["accept_work"]
   });
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",

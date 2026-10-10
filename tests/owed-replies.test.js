@@ -34,7 +34,7 @@ function addIdentityAgent(store, roomId, token, memberId, displayName, permissio
   assert.match(secret, /^pri_[A-Za-z0-9_-]{43}$/);
   const identity = store.identities.create(displayName, { secret });
   store.identities.link(token, roomId, {
-    identityId: identity.identityId, memberId, displayName, permissions
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, secret).linkCode, memberId, displayName, permissions
   });
   return { secret, identityId: identity.identityId, memberKey: store.issueAccessKey(roomId, memberId) };
 }
@@ -195,7 +195,7 @@ test("an open handoff addressed to the viewer is owed; closing it removes it", a
   ]);
   const bossKey = store.issueAccessKey("commons", "boss");
   store.identities.link(bossKey, "commons", {
-    identityId: identity.identityId, memberId: "boss", displayName: "Boss Agent", permissions: [...PERMISSIONS]
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, secret).linkCode, memberId: "boss", displayName: "Boss Agent", permissions: [...PERMISSIONS]
   });
   store.command(bossKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
     workItemId: "wi-1", title: "Handoff fixture", definitionOfDone: "done",

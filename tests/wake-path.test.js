@@ -424,7 +424,7 @@ async function triggerFixture(t, memberId = "pushagent") {
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("push-trigger-agent");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId, displayName: "Push Agent",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId, displayName: "Push Agent",
     permissions: ["accept_work"],
   });
   const transport = mockTransport();
@@ -487,7 +487,7 @@ test("trigger: bond proposal POSTs bond.proposed to the offline party", async t 
   const { f, transport, identity } = await triggerFixture(t, "bondagent");
   const proposer = f.store.identities.create("bond-proposer");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: proposer.identityId, memberId: "proposer",
+    identityId: proposer.identityId, identityLinkCode: f.store.identities.mintLinkCode(proposer.identityId, proposer.secret).linkCode, memberId: "proposer",
     displayName: "Proposer", permissions: ["accept_work"],
   });
   // #953: new agent members default to t1_readonly; proposer needs write access for bond.propose
@@ -524,7 +524,7 @@ test("trigger: assignment to an offline agent without push config POSTs nothing"
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("no-push-agent");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "nopush",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "nopush",
     displayName: "No Push", permissions: ["accept_work"],
   });
   const transport = mockTransport();

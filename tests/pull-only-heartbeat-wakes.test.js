@@ -45,7 +45,7 @@ function seat(t) {
   f.store.now = () => at;
   const identity = f.store.identities.create("Pull Host");
   f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "pullhost",
+    identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "pullhost",
     displayName: "Pull Host", permissions: [],
   });
   return { f, identity, clock: { advance: ms => { at += ms; } } };
