@@ -102,19 +102,25 @@ test("reassign of an unclaimed file-declared item refuses on overlap (409)", asy
   assert.equal(registry.get("room1", "b").owner, null);
 });
 
-test("reassign of an active claim to a holder of overlapping files refuses (409)", async () => {
+// FIX-71: reassign is advisory by default too. An active advisory claim
+// moved onto a holder of overlapping files lands with fileConflicts[]
+// instead of refusing — the hard 409 is reserved for exclusive leases,
+// and an exclusive lease can never be overlapped in the first place (the
+// overlap is refused at claim time).
+test("reassign of an active claim with an overlapping holder lands advisory (200)", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "jill", "create", null, { id: "a", files: ["server/a.mjs"] });
-  // the moved lease is exclusive, so landing it on ada's overlapping hold 409s
-  await call(registry, "jill", "claim", "a", { exclusive: true });
-  // ada deliberately holds the overlap via advisory warn-and-proceed
+  await call(registry, "jill", "claim", "a", {});
   await call(registry, "claude", "create", null, { id: "b" });
-  await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"], advisory: true });
-  const out = await call(registry, "jill", "reassign", "a", { newOwner: "ada", ...roundOfItem(registry.get("room1", "a")) });
+  await call(registry, "ada", "claim", "b", { files: ["server/a.mjs"] });
+  const out = await call(registry, "jill", "reassign", "a", { newOwner: "grokbot", ...roundOfItem(registry.get("room1", "a")) });
 
-  assert.equal(out.status, 409);
-  assert.equal(out.value.error.code, "file_lease_conflict");
-  assert.equal(registry.get("room1", "a").owner, "jill");
+  assert.equal(out.status, 200);
+  assert.equal(out.value.owner, "grokbot");
+  assert.equal(out.value.state, "claimed");
+  assert.equal(out.value.fileConflicts.length, 1);
+  assert.equal(out.value.fileConflicts[0].holder.claimId, "b");
+  assert.equal(registry.get("room1", "a").owner, "grokbot");
 });
 
 test("reassign with no file overlap still transfers (200)", async () => {

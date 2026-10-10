@@ -559,12 +559,14 @@ below. Use [WORK-CLAIMS.md](WORK-CLAIMS.md) for current API/review semantics and
 
 - `workClaimCreate({ id, title?, reviewPolicy?, note?, files?, tags? })` creates an
   unclaimed item. Files are repository-relative paths; tags are receipt labels.
-- `claimWorkItem(id, { note?, leaseHours?, files?, advisory? })` claims an existing item.
-  Omitted files preserve its declaration; `files: []` clears it. Conflicting
-  declared files are exclusive by default: overlap returns `409 file_lease_conflict`.
-  Explicit `advisory: true` returns `fileWarnings`; it is not permission to
-  bypass a conflicting contributor's lease.
-- `workClaim(id, { title?, reviewPolicy?, note?, tags?, files?, leaseHours?, advisory? })`
+- `claimWorkItem(id, { note?, leaseHours?, files?, advisory?, exclusive? })` claims an existing item.
+  Omitted files preserve its declaration; `files: []` clears it. Declared
+  files are advisory by default: overlap lands with `fileConflicts[]` naming
+  the conflicting holders. `exclusive: true` requests a hard lease — overlap
+  then returns `409 file_lease_conflict`. Explicit `advisory: true` returns
+  `fileWarnings`; it is not permission to bypass a conflicting contributor's
+  exclusive lease.
+- `workClaim(id, { title?, reviewPolicy?, note?, tags?, files?, leaseHours?, advisory?, exclusive? })`
   creates a missing item before claiming it. Title, review policy, and tags
   apply only when creating; files also apply when claiming an existing item.
 - `updateWorkItem(id, { state?, note?, deliveryMode?, reviewedBy?, tags?, blobs? })`

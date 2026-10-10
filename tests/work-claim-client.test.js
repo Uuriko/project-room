@@ -42,7 +42,9 @@ test('SDK retains declared files, overlap warnings, and completion receipt metad
   assert.deepEqual(created.tags, ['migration']);
   await client.claimWorkItem('holder');
   await client.workClaimCreate({ id: 'candidate' });
-  await assert.rejects(client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'] }), error => {
+  // FIX-71: file leases are advisory by default — the hard 409 needs an
+  // explicit exclusive upgrade.
+  await assert.rejects(client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'], exclusive: true }), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'file_lease_conflict');
     assert.deepEqual(error.holder, { claimId: 'holder', owner: 'owner' });
@@ -50,6 +52,11 @@ test('SDK retains declared files, overlap warnings, and completion receipt metad
     assert.equal(typeof error.leaseExpiresAt, 'string');
     return true;
   });
+  const defaultClaim = await client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'] });
+  assert.equal(defaultClaim.state, 'claimed');
+  assert.equal(defaultClaim.fileConflicts.length, 1);
+  assert.deepEqual(defaultClaim.fileConflicts[0].holder, { claimId: 'holder', owner: 'owner' });
+  await client.workRelease('candidate', roundOf(await client.workClaimGet('candidate')));
   const claim = await client.claimWorkItem('candidate', { files: ['src/shared.js', 'docs/claims.md'], advisory: true });
   assert.equal(claim.state, 'claimed');
   assert.deepEqual(claim.fileWarnings, [{ file: 'src/shared.js', heldBy: [{ id: 'holder', owner: 'owner' }] }]);

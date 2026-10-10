@@ -57,18 +57,35 @@ see the manual review contract below.
 
 ## Claim, release, reassign
 
-`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
+`POST .../claim` with `{ "note"?, "leaseHours"?, "files"?, "advisory"?, "exclusive"?, "dependsOn"?, "pullRequest"?, "pullRequests"?, "repo"?, "branch"? }`.
 Only an `unclaimed` item can be claimed. A second holder is **409**
 `work_claim_conflict`. `repo` and `branch` are optional labels (1..200
 characters of letters, numbers, or `.` `_` `/` `-`).
 
-Files are an exclusive lease. A path string, or `{ "path", "block"? }` /
+File leases are **advisory by default** (FIX-71; behavioral change — a file
+overlap no longer 409s by default). A path string, or `{ "path", "block"? }` /
 `{ "path", "region"? }`, names what the claim holds. No label means the whole
-file and conflicts with every other live claim on that path. Two different
-labels on the same path do not conflict. The same label does. Overlap is
-**409** `file_lease_conflict`. The body names `holder` (`claimId`, `owner`),
-`files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
-`fileWarnings`.
+file and overlaps every other live claim on that path. Two different labels
+on the same path do not overlap. The same label does. An overlap lands the
+claim with **200** and a `fileConflicts[]` array in the body — one entry per
+conflicting holder, each naming `holder` (`claimId`, `owner`), the overlapping
+`files`, `leaseExpiresAt`, and whether that holder's lease is `exclusive` —
+the same info the 409 body carries. `advisory: true` keeps the older
+warn-and-proceed behavior and additionally returns `fileWarnings`.
+
+A hard **409** `file_lease_conflict` is reserved for two cases, and its body
+keeps the FIX-9 shape (`holder`, `files`, `leaseExpiresAt`, `conflicts`):
+
+- the claim explicitly requests an exclusive lease upgrade with
+  `exclusive: true` and the files overlap a live lease;
+- the overlap is with an existing exclusive lease — exclusive means
+  exclusive, so any overlapping claim is refused.
+
+`exclusive: true` marks the landed lease exclusive (`leaseExclusive`, served
+on reads and durable across restarts); anything else lands an advisory lease.
+The same policy runs on the other acquire paths: create-with-assignee
+(`exclusive` in the create body, `fileConflicts[]` on the 201) and reassign
+(the lease's exclusivity travels with the item, `fileConflicts[]` on the 200).
 
 `POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
 to `unclaimed` and clears owner, lease, files, and attestations. The holder
@@ -93,11 +110,14 @@ against the *current holder* — the contention the holder otherwise never sees
   because the item is already held;
 - any 409 `file_lease_conflict` from an overlapping exclusive file lease
   (claim, create-with-assignee, reassign) — each named holder's counter
-  increments.
+  increments;
+- any *advisory* file-lease overlap (FIX-71: the claim lands with
+  `fileConflicts[]` instead of refusing) — each named holder's counter
+  increments, so holders keep contention visibility on overlaps they never
+  refused.
 
 Self re-claim 409s, terminal-state 409s, and stale-round precondition 409s are
-not contention and do not count. `advisory: true` file warnings are not
-refusals and do not count either.
+not contention and do not count.
 
 Reset rule: the counter belongs to the holder's round. It resets to `0` when
 the hold ends — release, lease-expiry auto-release, close/cancel — and when

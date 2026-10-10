@@ -5146,7 +5146,7 @@ paths:
                 $ref: '#/components/schemas/WorkClaim'
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
-        '409': { description: work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee overlapping a live lease), or room_event_budget_low }
+        '409': { description: work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee with exclusive: true overlapping a live lease, or overlapping an exclusive lease), or room_event_budget_low }
         '422': { description: invalid_claim_input, work_assignee_unknown_member, or squad_unknown }
         '429': { description: Rate limit exceeded (rate_limited). }
   /api/rooms/{roomId}/work-claims/config:
@@ -5443,10 +5443,16 @@ paths:
         configured default, else 24h; max 168h). `null` opts out of leases
         and is only accepted from the room owner or a member with
         manage_claims. The item records `claimedAt` and `leaseExpiresAt`.
-        Declared files are an exclusive lease: overlap with another live
-        claim is 409 `file_lease_conflict`, naming the holder, the files,
-        and `leaseExpiresAt`. `advisory: true` records the claim anyway and
-        returns `fileWarnings`. API keys need `rooms:write`.
+        Declared files are an advisory lease by default (FIX-71): overlap
+        with another live claim lands with 200 and a `fileConflicts[]`
+        array naming each conflicting holder (`holder` with `claimId` and
+        `owner`, the overlapping `files`, `leaseExpiresAt`, and whether
+        that holder's lease is `exclusive`). A hard 409
+        `file_lease_conflict` is reserved for an explicit exclusive upgrade
+        (`exclusive: true`) that conflicts, or an overlap with an existing
+        exclusive lease — the 409 body names the holder, the files, and
+        `leaseExpiresAt`. `advisory: true` keeps the older warn-and-proceed
+        behavior and returns `fileWarnings`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -5469,7 +5475,10 @@ paths:
                   description: Repo-relative paths this claim will touch. Replaces the item's files when given.
                 advisory:
                   type: boolean
-                  description: True keeps overlap as fileWarnings and still claims. Omitted or false refuses overlap with 409.
+                  description: Legacy. True keeps overlap as fileWarnings and still claims; the default is now advisory anyway (see fileConflicts). Omitted or false no longer refuses overlap — use exclusive for a hard lease.
+                exclusive:
+                  type: boolean
+                  description: True requests an exclusive lease upgrade. When the declared files overlap a live lease the claim is refused with 409 file_lease_conflict; otherwise the landed lease is recorded exclusive (leaseExclusive) and later overlaps hard-refuse.
                 dependsOn:
                   type: array
                   items: { type: string }
@@ -5500,8 +5509,11 @@ paths:
       responses:
         '200':
           description: |
-            The claimed item. `fileWarnings` names other live claims on the
-            same files when `advisory` is true; otherwise it is empty.
+            The claimed item. `fileConflicts` names other live claims on the
+            same files (one entry per conflicting holder: holder { claimId,
+            owner }, files, leaseExpiresAt, exclusive); empty when there is
+            no overlap. `fileWarnings` names other live claims on the same
+            files when `advisory` is true; otherwise it is empty.
             `requiredReading` lists the repo-relative docs the claim's kind
             asks the holder to read (advisory; acks go to /update).
           content:
@@ -5511,6 +5523,21 @@ paths:
                   - $ref: '#/components/schemas/WorkClaim'
                   - type: object
                     properties:
+                      fileConflicts:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            holder:
+                              type: object
+                              properties:
+                                claimId: { type: string }
+                                owner: { type: [string, 'null'] }
+                            files:
+                              type: array
+                              items: { type: string }
+                            leaseExpiresAt: { type: [string, 'null'] }
+                            exclusive: { type: boolean }
                       fileWarnings:
                         type: array
                         items:
@@ -5537,9 +5564,11 @@ paths:
             names the holder: a self re-claim (same holder) says "You already
             hold work ..." — never release it to re-claim; a foreign claimant
             gets "held by <owner>". file_lease_conflict when declared files
-            overlap a live lease. The body names holder { claimId, owner },
-            files, and leaseExpiresAt. too_many_open_claims when the caller
-            already holds the room's per-member cap. room_event_budget_low
+            overlap a live lease and the claim requests exclusive: true, or
+            when the overlap is with an existing exclusive lease. The body
+            names holder { claimId, owner }, files, and leaseExpiresAt.
+            too_many_open_claims when the caller already holds the room's
+            per-member cap. room_event_budget_low
             when the room is nearly out of room events (owner and claim
             managers may still write).
         '422': { description: invalid_claim_input }
@@ -6030,7 +6059,7 @@ paths:
                 expectedHistoryLength: { type: integer, minimum: 0 }
       responses:
         '200':
-          description: The reassigned item
+          description: The reassigned item, with `fileConflicts[]` naming any overlapping live leases (advisory by default).
           content:
             application/json:
               schema:
@@ -6041,8 +6070,10 @@ paths:
         '409':
           description: |
             too_many_open_claims when the new owner already holds the room's
-            per-member cap. file_lease_conflict when the claim's declared
-            files overlap another live lease. room_event_budget_low when the
+            per-member cap. file_lease_conflict when the moved lease is
+            exclusive and its declared files overlap another live lease, or
+            when the files overlap an existing exclusive lease.
+            room_event_budget_low when the
             room is nearly out of room events (owner and claim managers may
             still write).
         '422': { description: invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member }
@@ -17398,7 +17429,10 @@ components:
         blockedAttempts:
           type: integer
           minimum: 0
-          description: Blocked claim/lease attempts against the current holder (409 work_claim_conflict from a foreign claimant, 409 file_lease_conflict naming this claim's holder). The holding side's view of contention; resets to 0 when the hold ends (release, lease-expiry auto-release, close/cancel) or ownership moves (reassign, fresh claim).
+          description: Blocked claim/lease attempts against the current holder (409 work_claim_conflict from a foreign claimant, 409 file_lease_conflict naming this claim's holder, or an advisory file-lease overlap landing with fileConflicts[]). The holding side's view of contention; resets to 0 when the hold ends (release, lease-expiry auto-release, close/cancel) or ownership moves (reassign, fresh claim).
+        leaseExclusive:
+          type: boolean
+          description: "Whether this claim's file lease is exclusive (landed via exclusive: true). An exclusive lease hard-refuses any overlapping claim with 409 file_lease_conflict; advisory leases overlap with fileConflicts[] instead. Cleared when the hold ends."
     BoardV2Claim:
       description: |
         A board-v2 claim: a lane's typed write declaring intent to work on

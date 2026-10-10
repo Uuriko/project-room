@@ -817,10 +817,11 @@ export class RoomAgentClient {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/${verb === "cancel" ? "cancel" : "close"}`,
       reason === undefined ? {} : { reason }, signal);
   }
-  claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+  claimWorkItem(id, { note, leaseHours, files, advisory, exclusive, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
       { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
         ...(files === undefined ? {} : { files }), ...(advisory === undefined ? {} : { advisory }),
+        ...(exclusive === undefined ? {} : { exclusive }),
         ...(dependsOn === undefined ? {} : { dependsOn }),
         ...(parentClaimId === undefined ? {} : { parentClaimId }),
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
@@ -868,12 +869,12 @@ export class RoomAgentClient {
   // Convenience: claim, creating the item first when it does not exist yet.
   // title, reviewPolicy and tags apply only to creation; files apply to every
   // claim. Omitted files retain the declaration, while [] explicitly clears it.
-  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
+  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, exclusive, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, exclusive, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
       await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, files, advisory, pullRequest, signal });
+      return this.claimWorkItem(id, { note, leaseHours, files, advisory, exclusive, pullRequest, signal });
     }
   }
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
