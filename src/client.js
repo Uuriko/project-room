@@ -504,20 +504,20 @@ export class RoomClient {
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           // A server without the recent view ignores the parameter and answers in full.
           const whole = full || !Object.hasOwn(read, "messagesWindow");
-          let snapshot, partial = false;
+          let snapshot, partial = false, complete = whole;
           if (whole) snapshot = read;
           else if (!holding || holding.partial) {
             // First window (or a newer window while only a window is held): used as is.
             const first = firstWindow(read);
-            snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial);
+            snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial); complete = Boolean(first) && !partial;
           } else snapshot = mergeRecentMessages(holding.messages, read);
           if (!snapshot) { flight.fullNow = true; continue; }
-          if (whole) covered = Math.max(covered, read.sequence);
+          if (complete) covered = Math.max(covered, read.sequence);
           if (snapshot.sequence >= this.sequence) {
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
-              fullSequence: whole ? snapshot.sequence : (holding?.fullSequence ?? 0),
-              partial, owesFull: !whole && (partial || Boolean(holding?.owesFull)) };
+              fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
+              partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
