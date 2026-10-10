@@ -114,7 +114,12 @@ export function acquireInstanceLock(lockPath) {
       // stale one since the first read.
       const current = readLock(lockPath);
       if (current && (heldPaths.has(lockPath) || (current.pid !== process.pid && pidAlive(current.pid)))) throw heldError(current);
-      try { unlinkSync(lockPath); }
+      // Only remove a file that was actually there when re-read: if the path was
+      // absent, a fresh contender may publish at it without taking this mutex, and
+      // an unconditional unlink would delete their live lock (two holders).
+      let present = true;
+      try { statSync(lockPath); } catch (statError) { if (statError?.code === "ENOENT") present = false; }
+      if (present) try { unlinkSync(lockPath); }
       catch (unlinkError) {
         if (unlinkError?.code !== "ENOENT") throw lockError("instance_lock_io", `instance lock: cannot reclaim stale lock ${lockPath}: ${unlinkError?.message ?? unlinkError}`);
       }
