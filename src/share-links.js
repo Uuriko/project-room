@@ -136,6 +136,7 @@ export async function reuseVisibleRoom(client, roomId, visibleSession) {
 
 export function installShareLinks({ client, accountClient, getState, getSession, openRoom,
   listPurposes = () => [], onJoinedRoom = null, onAccountSignin = () => {}, onOAuthStart = () => {}, canLeaveAccountSignin = () => true,
+  beforeOpen = () => true,
   setConnectionStatus = text => { $("#connection-status").textContent = text; } }) {
   let managementVersion = 0, listVersion = 0, joinVersion = 0, joinSecret = null, redemptionId = null, joining = false, pendingCreate = null;
   let joinFocus = null;
@@ -148,6 +149,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
   const joinStatus = text => setShareLinkStatus($("#join-link-status"), text);
+  const joinBusyText = "Finish the current join before opening another invitation.";
   function syncAccountSigninBusy() {
     const pending = joining || !canLeaveAccountSignin();
     joinDialog.setAttribute("aria-busy", String(pending));
@@ -530,7 +532,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#share-note-copy").addEventListener("click", () => copy(true));
   async function open(fragment, { afterSignIn = false } = {}) {
     if (!afterSignIn && !canLeaveAccountSignin()) { joinStatus("Finish signing in before opening another invitation."); return; }
-    if (joining) { joinStatus("Finish the current join before opening another invitation."); return; }
+    if (joining) { joinStatus(joinBusyText); return; }
+    // One invitation dialog at a time: a join link opened while a reviewed
+    // #invite/ is showing replaces it instead of stacking a second modal.
+    if (beforeOpen() === false) return;
     const retryHadFocus = document.activeElement === $("#join-link-retry");
     const version = ++joinVersion; joinSecret = fragment.token; redemptionId = crypto.randomUUID(); joined = null; joinFocus = fragment.focus ?? null; previewRoomId = null; previewRoomTitle = null;
     joinAttempted = false; joinLanded = false;
@@ -800,7 +805,15 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const fragment = consumeJoinFragment(); if (fragment) open(fragment);
   });
   ensureGrowthChrome();
-  return { sync, resetManagement, open, syncAccountSigninBusy,
+  // An #invite/ opened over an open join dialog replaces it, unless a join or
+  // its sign-in is in flight. Returns whether the join dialog is out of the way.
+  function yieldJoinDialog() {
+    if (!joinDialog.open) return true;
+    if (joining || !canLeaveAccountSignin()) { joinStatus(joinBusyText); return false; }
+    joinDialog.close();
+    return true;
+  }
+  return { sync, resetManagement, open, syncAccountSigninBusy, yieldJoinDialog,
     pendingFragment: () => joinSecret ? `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}` : null,
     async resumeSignedIn() {
       if (!joinDialog.open || !joinSecret) return false;

@@ -521,3 +521,20 @@ test("a shared invitation retains its pending account signup across Escape and n
   await page.locator("#join-link-submit").click();
   await page.waitForURL(`${f.origin}/?room=studio`); await page.locator("#main").waitFor({ state: "visible" });
 });
+
+test("a second invitation link in the same tab replaces the open dialog instead of stacking", { timeout: 45000 }, async t => {
+  const { browser, origin } = await fixture(t);
+  const page = await (await browser.newContext()).newPage();
+  const openDialogs = () => page.evaluate(() => [...document.querySelectorAll("dialog[open]")].map(dialog => dialog.id));
+  await page.goto(`${origin}/#join/BOGUSCODE123`);
+  await page.locator("#join-link-dialog").waitFor({ state: "visible" });
+  await page.evaluate(() => { location.hash = "#invite/BOGUSCODE123"; });
+  await page.locator("#invitation-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => !document.querySelector("#join-link-dialog").open);
+  assert.deepEqual(await openDialogs(), ["invitation-dialog"], "the invitation replaces the join dialog");
+  await page.evaluate(() => { location.hash = "#join/BOGUSCODE123"; });
+  await page.locator("#join-link-dialog").waitFor({ state: "visible" });
+  await page.waitForFunction(() => !document.querySelector("#invitation-dialog").open);
+  assert.deepEqual(await openDialogs(), ["join-link-dialog"], "the join link replaces the invitation dialog");
+  assert.match(await page.locator("#join-link-scope").textContent(), /Ask for a new link/);
+});
