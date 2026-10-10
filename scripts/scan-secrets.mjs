@@ -50,6 +50,49 @@ const PATTERNS = [
   },
 ];
 
+// Git quotes a diff --git path when it contains a space. The old scan took
+// only an unquoted ` b/` token, left `file` null, and then skipped every
+// added line in that file. A quoted header must still name the file.
+export function fileFromDiffGitLine(line) {
+  if (!line.startsWith("diff --git ")) return null;
+  const rest = line.slice("diff --git ".length);
+  const tokens = [];
+  let i = 0;
+  while (i < rest.length && tokens.length < 2) {
+    while (rest[i] === " ") i += 1;
+    if (i >= rest.length) break;
+    if (rest[i] === '"') {
+      let j = i + 1;
+      while (j < rest.length) {
+        if (rest[j] === "\\" && j + 1 < rest.length) {
+          j += 2;
+          continue;
+        }
+        if (rest[j] === '"') break;
+        j += 1;
+      }
+      tokens.push(rest.slice(i, Math.min(rest.length, j + 1)));
+      i = j + 1;
+    } else {
+      const j = rest.indexOf(" ", i);
+      const end = j === -1 ? rest.length : j;
+      tokens.push(rest.slice(i, end));
+      i = end;
+    }
+  }
+  let b = tokens[1];
+  if (!b) return null;
+  if (b.startsWith('"') && b.endsWith('"') && b.length >= 2) {
+    b = b.slice(1, -1).replace(/\\([0-7]{3}|.)/g, (_, esc) => {
+      if (/^[0-7]{3}$/.test(esc)) return String.fromCharCode(Number.parseInt(esc, 8));
+      if (esc === "n") return "\n";
+      if (esc === "t") return "\t";
+      return esc;
+    });
+  }
+  return b.startsWith("b/") ? b.slice(2) : b;
+}
+
 function getDiff(base, diffFile) {
   if (diffFile) {
     return readFileSync(diffFile, "utf8");
