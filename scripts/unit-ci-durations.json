@@ -572,6 +572,7 @@
   "tests/orient-endpoint.test.js": 23378,
   "tests/otel-wiring.test.js": 38622,
   "tests/outbound-webhooks.test.js": 3671,
+  "tests/outside-agent-verify-relink.test.js": 12000,
   "tests/outside-agents.test.js": 25390,
   "tests/owner-attention.test.js": 62204,
   "tests/owner-delegated-admin.test.js": 32356,

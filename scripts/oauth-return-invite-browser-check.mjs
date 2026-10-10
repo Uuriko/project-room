@@ -2,11 +2,12 @@
 // land on that invitation, not in their own first room. The Google callback
 // sends anyone who already has a room to /?room=<first room>, and the OAuth
 // stash restore used to refuse any ?room= landing, so the friend's link was
-// dropped for every returning member. Provider endpoints are synthetic; every
+// dropped for every returning member. Legacy codes must survive the same trip,
+// even with a stale join stash from an abandoned sign-in. Provider endpoints are synthetic; every
 // Room route, cookie and the share link are real.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { rmSync } from "node:fs";
 import { chromium } from "playwright";
@@ -15,7 +16,7 @@ import { googleAuth, sub } from "./helpers/google-oauth-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
-for (const kind of ["join", "invite"]) test(`returning Google member keeps a friend's #${kind}/ link through sign-in`, { timeout: 40000 }, async t => {
+for (const kind of ["join", "invite", "code", "code-stale"]) test(`returning Google member keeps a friend's ${kind} link through sign-in`, { timeout: 40000 }, async t => {
   const f = createAcceptanceFixture();
   const accountId = `google:${sub}`;
   f.store.createAccount(accountId, "google"); f.store.completeOnboarding(accountId);
@@ -26,10 +27,15 @@ for (const kind of ["join", "invite"]) test(`returning Google member keeps a fri
   f.store.bindHumanAccount("a-home", "home-owner", accountId);
   const token = randomBytes(32).toString("base64url");
   let fragment;
-  if (kind === "join") {
-    f.store.shareLinks.create(f.keys.owner, "commons", { requestId: "friend-link", linkToken: token,
+  if (kind !== "invite") {
+    const made = f.store.shareLinks.create(f.keys.owner, "commons", { requestId: "friend-link", linkToken: token,
       expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
     fragment = `#join/${token}`;
+    if (kind.startsWith("code")) {
+      f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
+        .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), made.link.id, Date.now());
+      fragment = "#code/abc-def-ghj";
+    }
   } else {
     const ownerKey = f.store.issueAccountAccessKey(f.store.accountForMember("commons", "owner").id);
     const slot = f.store.createAccountSessionSlot();
@@ -63,9 +69,13 @@ for (const kind of ["join", "invite"]) test(`returning Google member keeps a fri
     const authorize = new URL(response.headers().location);
     await route.fulfill({ response, headers: { ...response.headers(), location: providerOrigin + authorize.pathname + authorize.search } });
   });
+  if (kind === "code-stale") {
+    await page.goto(origin + "/");
+    await page.evaluate(() => sessionStorage.setItem("pr-pending-join", "#join/" + "s".repeat(43)));
+  }
   await page.goto(origin + "/" + fragment);
   const callback = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/google/callback");
-  if (kind === "join") {
+  if (kind !== "invite") {
     await page.locator("#join-link-form").waitFor();
     if (await page.locator("#join-account-signin").isVisible()) await page.locator("#join-account-signin").click();
     await page.locator("#join-account-google").click();
@@ -75,13 +85,13 @@ for (const kind of ["join", "invite"]) test(`returning Google member keeps a fri
   }
   assert.equal((await callback).status(), 200);
   await page.waitForURL(url => new URL(url).pathname === "/" && new URL(url).searchParams.get("room") === "a-home");
-  const dialog = kind === "join" ? "#join-link-dialog" : "#invitation-dialog";
+  const dialog = kind !== "invite" ? "#join-link-dialog" : "#invitation-dialog";
   try { await page.locator(dialog).waitFor({ state: "visible", timeout: 8000 }); }
   catch (error) {
     error.message += "\nLanding: " + JSON.stringify(await page.evaluate(() => ({ search: location.search, hash: location.hash,
       title: document.querySelector("#room-title")?.textContent || null }))); throw error;
   }
-  if (kind === "join") {
+  if (kind !== "invite") {
     await page.locator("#join-link-submit").filter({ hasText: /^Join room$/ }).waitFor();
     await page.locator("#join-link-name").fill("Returning friend"); await page.locator("#join-link-submit").click();
     await page.locator(dialog).waitFor({ state: "hidden" });

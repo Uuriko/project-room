@@ -132,6 +132,16 @@ test("join clear removes the stash", () => {
   assert.equal(storage._has(PENDING_JOIN_KEY), false);
 });
 
+test("legacy join codes and their focus survive OAuth once", () => {
+  for (const fragment of ["#join/ABC-DEF-GHJ", "#join/abcdefghj", "#join/ABC-DEF-GHJ/work/w-123", "#join/ABC-DEF-GHJ/message/m-123"]) {
+    const storage = fakeStorage();
+    stashPendingJoin(storage, fragment);
+    assert.equal(storage.getItem(PENDING_JOIN_KEY), fragment);
+    assert.deepEqual(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), { valid: true, fragment });
+    assert.equal(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), null);
+  }
+});
+
 test("join restore returns the fragment on an account landing and consumes the stash", () => {
   const storage = fakeStorage({ [PENDING_JOIN_KEY]: JOIN_FOCUS_FRAGMENT });
   const first = takeRestoredJoin({ storage, hash: "", search: "?account=1" });
@@ -147,9 +157,10 @@ test("join restore returns the fragment on the OAuth landing of a returning memb
   assert.equal(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), null);
 });
 
-test("join restore is skipped over a fresh join/invite hash or a #room/ deep link", () => {
+test("join restore is skipped over a fresh join/code/invite hash or a #room/ deep link", () => {
   for (const landing of [
     { hash: JOIN_FRAGMENT, search: "" },
+    { hash: "#code/abc-def-ghj", search: "" },
     { hash: FRAGMENT, search: "" },
     { hash: "#room/commons", search: "" },
     { hash: "#room/commons", search: "?room=lobby" },
@@ -162,7 +173,7 @@ test("join restore is skipped over a fresh join/invite hash or a #room/ deep lin
 });
 
 test("join restore ignores malformed or missing stashes", () => {
-  for (const pending of [null, "", "#join/short", "#join/" + "e".repeat(44), "https://evil.example/" + JOIN_FRAGMENT]) {
+  for (const pending of [null, "", "#join/short", "#join/ABC-DEF-GHU", "#join/ABC-DEF-GHJ/other/w-123", "#join/ABC-DEF-GHJ/work/", "#join/" + "e".repeat(44), "https://evil.example/" + JOIN_FRAGMENT]) {
     const storage = fakeStorage(pending == null ? {} : { [PENDING_JOIN_KEY]: pending });
     assert.equal(
       takeRestoredJoin({ storage, hash: "", search: "?account=1" }),
