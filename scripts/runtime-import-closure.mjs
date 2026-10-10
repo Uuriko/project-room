@@ -4,13 +4,23 @@
 // without humans hand-maintaining a file list.
 //
 // Only static `import`/`export ... from` with relative specifiers (./ or ../)
-// are followed. `node:` builtins, bare package specifiers, and dynamic
-// `import()` are ignored: the server tree uses static relative imports with
-// explicit extensions throughout.
+// are followed, plus relative string-literal specifiers in dynamic
+// `import("./x.mjs")` calls and JSON module imports
+// (`import data from "./x.json" with { type: "json" }`). `node:` builtins,
+// bare package specifiers, non-literal dynamic specifiers (variables,
+// template literals), and member-call `.import(...)` are ignored: the server
+// tree uses static relative imports with explicit extensions throughout, and
+// its only dynamic imports are node: builtins (web-fetch, webhook-dispatch).
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
 
 const IMPORT_RE = /(?:import\s+(?:[^"']*?\s+from\s+)?|export\s+(?:[^"']*?\s+from\s+)?)(["'])(\.[^"']*)\1/g;
+
+// Dynamic import() with a string-literal relative specifier. The lookbehind
+// keeps member calls (`loader.import("./x")`) and longer identifiers
+// (`reimport("./x")`) out; the required quote keeps variables and template
+// literals out (they cannot be resolved statically).
+const DYNAMIC_IMPORT_RE = /(?<![\w$.])import\s*\(\s*(["'])(\.[^"']*)\1\s*\)/g;
 
 function relativeImports(source) {
   const specs = [];
@@ -20,13 +30,19 @@ function relativeImports(source) {
     const spec = match[2];
     if (spec.startsWith("./") || spec.startsWith("../")) specs.push(spec);
   }
+  DYNAMIC_IMPORT_RE.lastIndex = 0;
+  while ((match = DYNAMIC_IMPORT_RE.exec(source)) !== null) {
+    const spec = match[2];
+    if (spec.startsWith("./") || spec.startsWith("../")) specs.push(spec);
+  }
   return specs;
 }
 
 /**
  * Returns the set of repo-relative (posix) paths transitively imported from
- * `entry` (repo-relative posix path, e.g. "server.mjs"), following only
- * relative static imports between .mjs/.js/.cjs files that exist on disk.
+ * `entry` (repo-relative posix path, e.g. "server.mjs"), following relative
+ * static imports, relative string-literal dynamic import() specifiers, and
+ * JSON module imports between .mjs/.js/.cjs/.json files that exist on disk.
  */
 export function importClosure(entry, repositoryRoot) {
   const seen = new Set();
@@ -43,7 +59,7 @@ export function importClosure(entry, repositoryRoot) {
     const dir = dirname(rel);
     for (const spec of relativeImports(source)) {
       const resolved = normalize(join(dir, spec)).split(sep).join("/");
-      if (!/\.(mjs|js|cjs)$/.test(resolved)) continue;
+      if (!/\.(mjs|js|cjs|json)$/.test(resolved)) continue;
       if (resolved === ".." || resolved.startsWith("../")) continue; // escapes the repo
       if (!seen.has(resolved)) queue.push(resolved);
     }
