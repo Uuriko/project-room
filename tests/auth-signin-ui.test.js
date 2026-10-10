@@ -65,6 +65,24 @@ function mount(routes = {}) {
   return { client, signins, container, ui };
 }
 
+for (const outcome of ["success", "network failure"]) test(`obsolete signup ${outcome} cannot restore over a newer identity`, async () => {
+  let resolveReply, rejectReply;
+  const response = new Promise((resolve, reject) => { resolveReply = resolve; rejectReply = reject; });
+  const { client, container, ui, signins } = mount({ "/api/auth/password/signup": () => response });
+  ui.showPassword("signup");
+  const submission = container.listeners.submit[0](submitForm("password", { email: "old-signup@example.invalid", password: "synthetic-password" }));
+  while (!client.calls.length) await Promise.resolve();
+  const replacement = { authenticated: true, account: { id: "replacement" } };
+  client.generation++; client.session = replacement;
+  if (outcome === "success") resolveReply({ status: "check_email", mailConfigured: false });
+  else rejectReply(new Error("Connection lost"));
+  await submission;
+  assert.equal(client.session, replacement);
+  assert.equal(client.calls.filter(call => call.path === "/api/account-session").length, 0, "obsolete signup cannot initiate another account restore");
+  assert.deepEqual(signins, [], "obsolete signup cannot report success for another identity");
+  assert.equal(ui.canLeave(), true);
+});
+
 
 test("primary entry exposes password sign-in and contextual recovery", async () => {
   const { container } = mount();

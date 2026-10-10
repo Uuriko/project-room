@@ -9,7 +9,7 @@ import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { axeSerious, assertAxeClean, chromiumLaunchOptions } from "./a11y-axe-helper.mjs";
 
-async function setup(t, { passkey = false } = {}) {
+async function setup(t, { passkey = false, mail } = {}) {
   const f = createAcceptanceFixture();
   let port = 0, configuredOrigin;
   if (passkey) {
@@ -17,7 +17,8 @@ async function setup(t, { passkey = false } = {}) {
     port = probe.address().port; await new Promise(resolve => probe.close(resolve));
     configuredOrigin = `http://localhost:${port}`;
   }
-  const server = createRoomServer({ store: f.store, origin: configuredOrigin });
+  const server = createRoomServer({ store: f.store, origin: configuredOrigin,
+    ...(mail ? { magicLinkMailer: { isConfigured: () => true, sendMagicLink: async payload => { mail.push(payload); } } } : {}) });
   await new Promise(resolve => server.listen(port, "127.0.0.1", resolve));
   const origin = configuredOrigin ?? `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch(chromiumLaunchOptions());
@@ -113,4 +114,63 @@ test("a real virtual-authenticator passkey can be enrolled, used after logout, a
   await page.locator('#main').waitFor({ state: 'visible' });
   const replay = await page.context().request.post(origin + '/api/auth/passkey/authenticate/finish', { data: accepted.request().postDataJSON(), headers: { Origin: origin } });
   assert.ok(replay.status() >= 400, 'a consumed assertion cannot be replayed');
+});
+
+test("signup reconciles a committed account when its response body is interrupted", { timeout: 25000 }, async t => {
+  const mail = [];
+  const { page, origin, store } = await setup(t, { mail });
+  const email = 'interrupted-signup@example.invalid';
+  let committed = false;
+  await page.route('**/api/auth/password/signup', async route => {
+    const response = await route.fetch();
+    assert.equal(response.status(), 202);
+    committed = Boolean(store.accountLogins.findPasswordAccount(email));
+    // Keep the real server's status and Set-Cookie. Only the JSON body is
+    // truncated: the server has committed, but the client cannot read its reply.
+    await route.fulfill({ response, body: '{' });
+  });
+  const form = page.locator('[data-signin-form="password"]');
+  await form.locator('[data-password-mode="signup"]').click();
+  await form.locator('[name="email"]').fill(email);
+  await form.locator('[name="password"]').fill('synthetic-recovery-password');
+  await form.locator('button[type="submit"]').click();
+  await page.waitForFunction(() => document.querySelector('#auth-signin-ui').getAttribute('aria-busy') === 'false');
+  assert.equal(committed, true, 'fault happened after the real account mutation');
+  const actual = await (await page.context().request.get(origin + '/api/account-session')).json();
+  assert.equal(actual.authenticated, true, 'the real session cookie survived the interrupted reply');
+  assert.equal(actual.account.id, store.accountLogins.findPasswordAccount(email));
+  assert.equal(await page.locator('#auth-panel').isVisible(), false, 'reconciled account must not remain on signup');
+  assert.equal(await page.locator('#signout-button').isEnabled(), true, 'recovered session has usable account controls');
+  const verification = mail.find(message => message.purpose === 'email-verify' && message.to === email);
+  assert.ok(verification?.code, 'real signup issued the verification challenge');
+  // Verification transport is outside this recovery regression. Consume the
+  // delivered challenge through the real endpoint before testing room access.
+  const verified = await page.context().request.post(origin + '/api/auth/email/verify', {
+    headers: { Origin: origin, 'X-CSRF-Token': actual.csrf, 'X-Session-Binding': actual.sessionBinding },
+    data: { code: verification.code }
+  });
+  assert.equal(verified.status(), 200);
+  await clickChrome(page, '#nav-rooms');
+  await page.locator('#setup-name').fill('Recovery tester');
+  await page.locator('#account-setup-dialog').getByRole('button', { name: 'Done', exact: true }).click();
+  await page.locator('#account-room-create summary').click();
+  await page.locator('#account-room-title').fill('Recovered workspace');
+  await page.locator('#account-room-purpose').fill('Continue after interrupted signup.');
+  await page.locator('#account-room-name').fill('Recovery tester');
+  await page.locator('#account-room-kind').selectOption('organization');
+  const creation = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account-rooms' && response.request().method() === 'POST');
+  await page.locator('#account-room-submit').click();
+  const created = await creation;
+  assert.equal(created.status(), 201, JSON.stringify(await created.json()));
+  await page.locator('#main').waitFor({ state: 'visible' }).catch(async error => {
+    throw new Error(`${error.message}; room status: ${await page.locator('#account-rooms-status').textContent()}; form: ${await page.locator('#account-room-create').innerText()}`);
+  });
+  await page.locator('#message-input').fill('First message after recovery');
+  await page.locator('#message-form button[type="submit"]').click();
+  await page.locator('#message-list').getByText('First message after recovery', { exact: true }).waitFor();
+  const roomId = new URL(page.url()).searchParams.get('room');
+  const room = store.room(roomId).state;
+  const message = Object.values(room.messages).find(message => message.body === 'First message after recovery');
+  assert.ok(message, 'the first useful action is durable, not an optimistic UI echo');
+  assert.equal(store.accountForMember(roomId, message.authorId).id, actual.account.id);
 });
