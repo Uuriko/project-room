@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { validId } from "../src/events.js";
+import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
@@ -169,19 +170,26 @@ function projectRoom(store, roomId, memberId, identityId) {
   const requests = state.replyRequests ?? {};
   const messages = state.messages ?? [];
   const byId = new Map(messages.map(message => [message.id, message]));
+  // PRIV-2: a since_join reader's updates follow the same floor as every
+  // other message read. A mention recorded before removal stays in
+  // mention_states after reactivation; the body must not come back with it.
+  const floor = store.historyFloor(roomId, memberId, room.sequence);
+  const hiddenMessage = message => !messageInHistory(message, floor);
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;
     const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
     // Same rule as reply-context (server/reply-requests.mjs): a private message is
     // visible only to its author and recipient, so never echo it as the title.
+    // A message from before this reader's floor is the same kind of hidden context.
     const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
-    const updatedAt = iso(context?.createdAt ?? request.closedAt ?? request.createdAt);
+    const visibleContext = context && !hiddenMessage(context) ? context : null;
+    const updatedAt = iso(visibleContext?.createdAt ?? request.closedAt ?? request.createdAt);
     const terminal = request.status === "answered" || request.status === "declined" ? "answered"
       : request.status === "cancelled" ? "cleared" : null;
     items.push(draft({
       kind: "request", roomId, key: `request|${request.id}`,
-      title: clip(context?.body || `Reply requested by ${request.requesterId}`),
+      title: clip(visibleContext?.body || `Reply requested by ${request.requesterId}`),
       actor: request.requesterId, createdAt: iso(request.createdAt), updatedAt,
       basis: `${request.status}|${request.revision}|${request.contextEventId ?? ""}`,
       sourceRef: { requestId: request.id, ...(request.workItemId ? { workItemId: request.workItemId } : {}) },
@@ -202,6 +210,7 @@ function projectRoom(store, roomId, memberId, identityId) {
     for (const row of rows) {
       const messageId = row.messageId || row.messageEventId;
       if (requestIds.has(messageId)) continue;
+      if (hiddenMessage(byId.get(messageId))) continue;
       const terminal = row.state === "responded" ? "answered" : row.state === "acknowledged" ? "read" : null;
       const at = iso(row.createdAt);
       items.push(draft({
@@ -220,7 +229,7 @@ function projectRoom(store, roomId, memberId, identityId) {
   const replied = new Set(messages.filter(message => message.authorId === memberId && message.replyToId).map(message => message.replyToId));
   for (const message of messages) {
     if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
-    if (requestIds.has(message.id)) continue;
+    if (requestIds.has(message.id) || hiddenMessage(message)) continue;
     const at = iso(message.createdAt);
     items.push(draft({
       kind: "dm", roomId, key: `dm|${message.id}`,
