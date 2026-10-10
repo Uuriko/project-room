@@ -114,6 +114,21 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     if (url.pathname.endsWith("/work-result")) reads.push({ path: url.pathname, workItemId: url.searchParams.get("workItemId"), completionEventId: url.searchParams.get("completionEventId") });
   });
   await page.evaluate(mode => { document.documentElement.dataset.theme = mode; }, theme);
+  // CI keeps no screenshots for a failed shard, so keep a short focus/DOM trace
+  // that a failing assertion prints. It observes only; it never changes focus.
+  await page.evaluate(() => {
+    const trace = window.__focusTrace = [], t0 = performance.now();
+    const label = node => node && node.nodeType === 1 ? `${node.tagName.toLowerCase()}${node.id ? "#" + node.id : ""}${node.dataset?.readResult ? "[read-result]" : ""}` : String(node);
+    const note = text => { trace.push(`${Math.round(performance.now() - t0)}ms ${text}`); if (trace.length > 40) trace.shift(); };
+    for (const type of ["focusin", "focusout"]) document.addEventListener(type, event => note(`${type} ${label(event.target)} -> ${label(event.relatedTarget)}`), true);
+    for (const type of ["close", "cancel"]) document.addEventListener(type, event => note(`${type} ${label(event.target)}`), true);
+    new MutationObserver(records => {
+      if (records.some(record => [...record.removedNodes].some(node => node.nodeType === 1 && (node.matches?.("[data-read-result]") || node.querySelector?.("[data-read-result]")))))
+        note("a [data-read-result] node was removed from #message-list");
+    }).observe(document.querySelector("#message-list"), { childList: true, subtree: true });
+  });
+  const trace = async () => page.evaluate(() => ({ trace: window.__focusTrace, active: document.activeElement?.outerHTML.slice(0, 140),
+    dialogOpen: document.querySelector("#result-dialog").open, hasFocus: document.hasFocus(), scrollY }));
   await page.locator("#message-input").fill("Keep this reviewer's conversation draft.");
   const measure = async (stage, panelSelector = null, textSelector = null) => {
     const value = await page.evaluate(({ panelSelector, textSelector }) => {
@@ -154,7 +169,8 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     }
     const focus = value.focus;
     assert.ok(focus.width > 0 && focus.height > 0 && focus.x >= 0 && focus.x + focus.width <= 321, `${stage}: focus is horizontally available`);
-    assert.ok(focus.y < value.height && focus.y + focus.height > 0 && focus.unobscured, `${stage}: focus is visible and unobscured`);
+    assert.ok(focus.y < value.height && focus.y + focus.height > 0 && focus.unobscured,
+      `${stage}: focus is visible and unobscured; ${JSON.stringify({ focus, ...(await trace()) })}`);
     if (panelSelector) assert.ok(focus.y >= 0 && focus.y + focus.height <= value.height + 1, `${stage}: focused core control fits the viewport`);
   };
   const readExact = async stage => {
@@ -165,7 +181,8 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     assert.equal(await page.locator("#close-result").evaluate(node => node === document.activeElement), true);
     await measure(stage, "#result-dialog", "#result-body");
     await page.keyboard.press("Escape"); await page.locator("#result-dialog").waitFor({ state: "hidden" });
-    assert.equal(await read.evaluate(node => node === document.activeElement), true, "reader returns to this work's result control");
+    assert.equal(await read.evaluate(node => node === document.activeElement), true,
+      `reader returns to this work's result control; ${JSON.stringify(await trace())}`);
     assert.equal(page.url(), initialUrl);
   };
   await readExact("reader-before");
