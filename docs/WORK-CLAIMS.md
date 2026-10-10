@@ -112,6 +112,57 @@ fields. The board's owner form sets both. `GET` on that path reads
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.
 
+## Correlated-death HOLD (FIX-19)
+
+**What it is:** an automatic, detector-driven 30-minute park on **new claim
+intake**. Trigger path observed: 3+ daemon restarts killed ~46
+lane-instances at once. When a squad (or the room) goes mass-silent at once,
+creating new work claims is refused with **503** `correlated_death_hold`
+until the park lapses. Existing claims keep working — claim, update, release,
+renew, review, close all proceed. Reads are unaffected. This is a HOLD on
+intake, not a freeze.
+
+**The detector.** A member is *silent* when they have no server-journaled
+authenticated command and no executing-session heartbeat within the presence
+TTL — the same activity signal FIX-67 derives presence-online from
+(`HEARTBEAT_STALE_AFTER_MS` = 180s). Enrollment (`member.added`) is not
+activity, so a member who joined but never acted counts as silent. The park
+engages when either:
+
+- any **active squad** has **≥30%** of its active members silent, or
+- **≥15** active members room-wide are silent.
+
+**The thresholds are theoretical tunables, not measured constants.**
+`CORRELATED_DEATH_SQUAD_SILENCE_FRACTION = 0.30`,
+`CORRELATED_DEATH_ROOM_SILENCE_COUNT = 15`,
+`CORRELATED_DEATH_PARK_MS = 30 min`, all exported from
+`server/correlated-death.mjs`. The playbook's trigger observation (3+
+restarts, ~46 dead lane-instances) motivated the shape, not the numbers —
+tune them against real room behavior. Known rough edge: a room whose members
+are simply quiet (no authenticated activity for 3+ minutes) can trip the
+room-wide trigger even with nothing wrong; the park is 30 minutes, intake
+only, and any resumed activity re-arms the detector.
+
+**Behavior.** The detector evaluates on every new-claim attempt
+(`POST /api/rooms/{roomId}/work-claims`). While parked, creates get 503
+`correlated_death_hold` with a `hold.remainingMs` and the trigger reason
+(`squad` with the squad id/name, or `room`). The park auto-releases after 30
+minutes; the next create re-evaluates, so a still-dead room re-parks and a
+recovered room proceeds. A broken detector fails **open** — intake is never
+blocked by signal errors.
+
+**Fail-safe.** Park state is in-memory only, per room, never persisted (same
+as the kill-switch). A crashed or restarted server always comes back
+un-parked.
+
+**How it composes with the FIX-66 kill-switch** (`docs/KILL-SWITCH.md`): the
+HOLD is the automatic cousin of the owner's manual STOP. The kill-switch is
+owner-driven, freezes *every* claim mutation, and never auto-releases. The
+HOLD is detector-driven, parks only *new* claims, and auto-releases after 30
+minutes. The kill-switch is checked first and wins while engaged; the HOLD
+never freezes in-flight work. If both are somehow active, the owner
+disengages the switch and the detector's park lapses on its own.
+
 ## Leases
 
 Default **24h**. `leaseHours` must be a number from **0.25** to **168**.

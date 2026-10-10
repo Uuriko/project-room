@@ -5149,6 +5149,7 @@ paths:
         '409': { description: work_claim_exists, work_board_full, too_many_open_claims, file_lease_conflict (create-with-assignee overlapping a live lease), or room_event_budget_low }
         '422': { description: invalid_claim_input, work_assignee_unknown_member, or squad_unknown }
         '429': { description: Rate limit exceeded (rate_limited). }
+        '503': { description: correlated_death_hold — the FIX-19 mass-silence detector parked new-claim intake for 30 minutes; existing claims keep working }
   /api/rooms/{roomId}/work-claims/config:
     get:
       summary: Read the room's work-claim caps
