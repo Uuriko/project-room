@@ -516,3 +516,16 @@ export function verifyBountyReceipt(receipt, { expectedPubkey = null, seen = nul
 }
 
 export { ReceiptError };
+
+// Settlement evidence credential (settlement-evidence/1): binds a movement
+// chain, the evaluator's signed verdict, and the recorded settlement into one
+// third-party-verifiable bundle. Re-exported here so the receipt codec is the
+// single import point for the receipt verification layer. (Deferred use only
+// inside settlement-evidence.mjs, so this module cycle is benign.)
+export {
+  SETTLEMENT_EVIDENCE_VERSION,
+  EvidenceError,
+  signVerdict,
+  issueSettlementEvidence,
+  verifySettlementEvidence,
+} from "./settlement-evidence.mjs";
