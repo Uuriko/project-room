@@ -428,7 +428,7 @@ export class GuestInvites {
     return { sequence, state };
   }
 
-  mint(token, roomId, details, binding) {
+  mint(token, roomId, details, binding, { emailVerificationUnachievable = false } = {}) {
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
     const allowed = ["requestId", "roomId", "guestLabel", "tier", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
     if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
@@ -457,7 +457,12 @@ export class GuestInvites {
       // Invitation issuance carries the f520ca69 email-verification gate,
       // same as agent-invites.create and share-link creation. Owner
       // delegates are accountless by design (no account to verify).
-      if (auth.account) this.store.accountLogins.assertEmailVerified(auth.account.id);
+      // The gate bites only when verification is achievable: a deployment
+      // whose mailer is unconfigured can never verify an account, so
+      // blocking mint on it would deadlock onboarding permanently
+      // (same bypass as agent-invites.create). The HTTP route passes
+      // emailVerificationUnachievable from the mailer's isConfigured().
+      if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
       // The freshness check pins the OWNER's member revision: the minter
       // asserts they saw the current owner state. A delegate's own member
       // revision is irrelevant to their delegated authority, so the check
