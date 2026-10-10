@@ -416,7 +416,7 @@ test("docs 403 descriptions match the served error codes for owner-gated room ro
   });
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Docs parity prober");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: ["accept_work"] });
   const probe = async (method, path, reqBody) => {
     const res = await fetch(`${origin}${path}`, {
       method,

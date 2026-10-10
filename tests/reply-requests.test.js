@@ -548,7 +548,7 @@ test("hosted needs-me discovers private incoming requests without exposing their
   const f = fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder");
   const rooms = new AgentRooms(f.store);
   const created = rooms.create(owner.secret, { roomId: "hosted-replies", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
-  f.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, displayName: "Responder", permissions: [] });
+  f.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, identityLinkCode: f.store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "Responder", permissions: [] });
   f.store.dmConsents.request(created.roomId, created.ownerMemberId, peer.identityId, "Fixture");
   f.store.dmConsents.decide(created.roomId, peer.identityId, created.ownerMemberId, "approve");
   const send = command => f.store.command(owner.secret, created.roomId, command);

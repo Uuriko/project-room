@@ -70,24 +70,24 @@ test('integration: identity mint and room link enforce names at the write bounda
   assert.throws(() => store.identities.create('ＣＯＰ'), { status: 422, code: 'invalid_identity' },
     'fullwidth visual clone cannot bypass mint collision detection');
   const relay = store.identities.create('Relay');
-  store.identities.link(ownerKey, 'commons', { identityId: relay.identityId, permissions: [] });
+  store.identities.link(ownerKey, 'commons', { identityId: relay.identityId, identityLinkCode: store.identities.mintLinkCode(relay.identityId, relay.secret).linkCode, permissions: [] });
   const second = store.identities.create('Other');
   const count = () => store.db.prepare('SELECT count(*) AS n FROM identity_links WHERE room_id=?').get('commons').n;
   const linkedBefore = count();
   for (const name of ['Ｒｅｌａｙ', 'Rеlay', 'B\u200dot']) {
     assert.throws(() => store.identities.link(ownerKey, 'commons', {
-      identityId: second.identityId, displayName: name, permissions: []
+      identityId: second.identityId, identityLinkCode: store.identities.mintLinkCode(second.identityId, second.secret).linkCode, displayName: name, permissions: []
     }), { status: 422, code: 'invalid_identity' });
   }
   assert.equal(count(), linkedBefore, 'failed links do not leave a membership');
   const duplicate = store.identities.create('Another');
   assert.throws(() => store.identities.link(ownerKey, 'commons', {
-    identityId: duplicate.identityId, displayName: 'Relay', permissions: []
+    identityId: duplicate.identityId, identityLinkCode: store.identities.mintLinkCode(duplicate.identityId, duplicate.secret).linkCode, displayName: 'Relay', permissions: []
   }), error => error.status === 422 && error.code === 'display_name_unavailable',
   'a live room link refuses an exact display-name duplicate');
   assert.equal(count(), linkedBefore, 'a refused duplicate link writes no membership');
   const linked = store.identities.link(ownerKey, 'commons', {
-    identityId: second.identityId, displayName: 'Helpful Agent', permissions: []
+    identityId: second.identityId, identityLinkCode: store.identities.mintLinkCode(second.identityId, second.secret).linkCode, displayName: 'Helpful Agent', permissions: []
   });
   assert.equal(linked.identityId, second.identityId);
   assert.equal(store.room('commons').state.members[linked.memberId].displayName, 'Helpful Agent');

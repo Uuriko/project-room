@@ -25,7 +25,7 @@ function setup(t, permissions = ["steer"]) {
   const ownerToken = store.issueAccessKey("commons", "owner", 30 * 86400000);
   const identity = store.identities.create("Existing Agent");
   const { memberId } = store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, memberId: "existing-agent",
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, memberId: "existing-agent",
     displayName: "Existing Agent", permissions,
   });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -119,7 +119,7 @@ test("unprivileged and admission-only reviewers cannot approve an upgrade", t =>
   assert.throws(() => f.requests.decide(f.identity.secret, "commons", "ar_admin", { decision: "approve" }),
     error => error.status === 403 && error.code === "access_denied");
   const reviewer = f.store.identities.create("Admission Reviewer");
-  f.store.identities.link(f.ownerToken, "commons", { identityId: reviewer.identityId, permissions: [] });
+  f.store.identities.link(f.ownerToken, "commons", { identityId: reviewer.identityId, identityLinkCode: f.store.identities.mintLinkCode(reviewer.identityId, reviewer.secret).linkCode, permissions: [] });
   f.store.delegation.grant(f.ownerToken, "commons", { identityId: reviewer.identityId });
   assert.throws(() => f.requests.decide(reviewer.secret, "commons", "ar_admin", { decision: "approve" }),
     error => error.status === 403 && error.code === "access_denied");
@@ -139,7 +139,7 @@ test("changed or withdrawn membership invalidates a pending upgrade", async t =>
     relinked: f => {
       f.store.identities.unlink(f.ownerToken, "commons", f.identity.identityId);
       f.store.identities.link(f.ownerToken, "commons", {
-        identityId: f.identity.identityId, memberId: f.memberId,
+        identityId: f.identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(f.identity.identityId, f.identity.secret).linkCode, memberId: f.memberId,
         permissions: [], settleAccessRequests: false,
       });
     },

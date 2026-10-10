@@ -61,7 +61,7 @@ async function fixture(t) {
     displayName: "Helper", access: "contribute", keyHash, expiresAt: now + 86400000, expectedOwnerRevision: 0 }, ownerSession.session.sessionBinding);
   // Multi-room agent identity linked into the room.
   const identity = store.identities.create("Roaming agent");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: ["accept_work"] });
   // Guest agent (2 h credential). GA-1 (issue #941): the token is always
   // server-issued; callers never supply linkToken.
   const guestAgent = store.guestAgentLinks.mint(ownerKey, "commons", { requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Scout" }, null);

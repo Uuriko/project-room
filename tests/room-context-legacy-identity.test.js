@@ -10,7 +10,7 @@ test("compact context accepts legacy identities without making a read write auth
     store.initialize(initialRoom("commons"));
     const owner = store.issueAccessKey("commons", "owner");
     const identity = store.identities.create("Context reader");
-    store.identities.link(owner, "commons", { identityId: identity.identityId, permissions: [] });
+    store.identities.link(owner, "commons", { identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, permissions: [] });
     const legacy = createHash("sha256").update(identity.secret).digest("hex");
     store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identity.identityId);
     const changes = store.db.prepare("SELECT total_changes() AS n").get().n;

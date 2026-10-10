@@ -39,6 +39,7 @@ test("room access key registers pull-only presence and a stale mention queues a 
   const identity = f.store.identities.create("Pull Seat");
   f.store.identities.link(f.keys.owner, "commons", {
     identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
     memberId: identity.identityId,
     displayName: "Pull Seat",
     permissions: ["accept_work"],
@@ -89,6 +90,7 @@ test("room access key cannot install a wake URL or replace a wakeable host", asy
   const identity = f.store.identities.create("Wake Seat");
   f.store.identities.link(f.keys.owner, "commons", {
     identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
     memberId: identity.identityId,
     displayName: "Wake Seat",
     permissions: ["accept_work"],
@@ -127,7 +129,7 @@ test("room access key cannot install a wake URL or replace a wakeable host", asy
 async function seat(t) {
   const f = createAcceptanceFixture();
   const identity = f.store.identities.create("Scoped seat");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId,
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
     memberId: "scoped-seat", permissions: [] });
   const roomKey = f.store.issueAccessKey("commons", "scoped-seat");
   return { f, identity, roomKey, origin: await startServer(t, f) };
@@ -213,7 +215,7 @@ test("room key refuses multi-room identity and an unlinked member", async t => {
   const { initialRoom } = await import("../server/bootstrap.mjs");
   f.store.initialize(initialRoom("other-room"));
   const ownerKey=f.store.issueAccessKey("other-room","owner");
-  f.store.identities.link(ownerKey,"other-room",{identityId:identity.identityId,permissions:[]});
+  f.store.identities.link(ownerKey,"other-room",{identityId:identity.identityId, identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,permissions:[]});
   assert.equal((await post(origin,"/api/agent-heartbeats",{hostId:"local",mode:"pull-only"},roomKey)).status,403);
   f.store.db.prepare("DELETE FROM identity_links WHERE identity_id=?").run(identity.identityId);
   assert.equal((await post(origin,"/api/agent-heartbeats",{hostId:"local",mode:"pull-only"},roomKey)).status,403);

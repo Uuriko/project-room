@@ -53,6 +53,7 @@ test("room-key pull registers presence, returns a mention wake, and acks only th
   const identity = f.store.identities.create("Pull Seat");
   f.store.identities.link(f.keys.owner, "commons", {
     identityId: identity.identityId,
+    identityLinkCode: f.store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode,
     memberId: identity.identityId,
     displayName: "Pull Seat",
     permissions: ["accept_work"],

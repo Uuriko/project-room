@@ -60,7 +60,7 @@ function landEvents(store, roomId = "commons") {
 function secondMember(store, ownerKey, name) {
   const identity = store.identities.create(name);
   const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: name, permissions: []
+    identityId: identity.identityId, identityLinkCode: store.identities.mintLinkCode(identity.identityId, identity.secret).linkCode, displayName: name, permissions: []
   });
   return linked.memberId;
 }

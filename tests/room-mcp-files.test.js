@@ -86,7 +86,7 @@ test("enrolled members upload and download room_attachments through hosted MCP",
     roomId: "file-den", title: "File den", purpose: "Room file bytes", kind: "personal", displayName: "File owner"
   });
   store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "File peer", permissions: []
+    identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "File peer", permissions: []
   });
   const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
   for (const name of FILE_TOOLS) assert.equal(names.includes(name), true);
@@ -173,7 +173,7 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
     roomId: "commit-den", title: "Commit den", purpose: "Commit a staged file", kind: "personal", displayName: "Commit owner"
   });
   store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Commit peer", permissions: []
+    identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "Commit peer", permissions: []
   });
   // #953: new agent members default to t1_readonly; peer needs write access for message.posted
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
@@ -412,7 +412,7 @@ test("staged files stay with the uploader; DM-committed files stay with the DM p
   });
   for (const ident of [peer, third]) {
     store.identities.link(owner.secret, created.roomId, {
-      identityId: ident.identityId, displayName: ident.displayName, permissions: []
+      identityId: ident.identityId, identityLinkCode: store.identities.mintLinkCode(ident.identityId, ident.secret).linkCode, displayName: ident.displayName, permissions: []
     });
     // #953: new agent members default to t1_readonly; members need write access for message.posted
     setTier(store.db, created.roomId, ident.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });

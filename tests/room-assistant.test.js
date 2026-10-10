@@ -265,7 +265,7 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const { setTier }=await import('../server/autonomy-tiers.mjs');
   const identity=f.store.identities.create('Connected lead');
   const memberId=identity.identityId;
-  f.store.identities.link(f.keys.owner,'commons',{identityId:memberId,permissions:['accept_work','complete_work']});
+  f.store.identities.link(f.keys.owner,'commons',{identityId:memberId,identityLinkCode:f.store.identities.mintLinkCode(identity.identityId,identity.secret).linkCode,permissions:['accept_work','complete_work']});
   setTier(f.store.db,'commons',memberId,'t2_standard',{updatedBy:'owner',nowMs:f.store.now()});
   await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:memberId});
   await api('owner',{action:'invoke',runId:'mcp-shared',sourceMessageId:'test-welcome'});

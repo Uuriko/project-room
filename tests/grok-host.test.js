@@ -619,7 +619,7 @@ async function liveAccessFixture(t) {
   const worker = store.identities.create("Access fixture worker");
   rooms.create(owner.secret, { roomId: "source", title: "Source", purpose: "Alias fixture", kind: "personal" });
   rooms.create(owner.secret, { roomId: "target", title: "Target", purpose: "Access fixture", kind: "personal" });
-  store.identities.link(owner.secret, "source", { identityId: worker.identityId, memberId: "worker-alias", permissions: [] });
+  store.identities.link(owner.secret, "source", { identityId: worker.identityId, identityLinkCode: store.identities.mintLinkCode(worker.identityId, worker.secret).linkCode, memberId: "worker-alias", permissions: [] });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;

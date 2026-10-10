@@ -195,7 +195,7 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   };
   publish(visible.identityId, "visible-agent", "Visible Agent", "public");
   publish(hidden.identityId, "hidden-agent", "Hidden Agent Card", "private");
-  store.identities.link(ownerKey, "alpha", { identityId: visible.identityId, displayName: "hidden-link-name", permissions: ["accept_work"] });
+  store.identities.link(ownerKey, "alpha", { identityId: visible.identityId, identityLinkCode: store.identities.mintLinkCode(visible.identityId, visible.secret).linkCode, displayName: "hidden-link-name", permissions: ["accept_work"] });
   const receiptId = `pwr_${"ab".repeat(16)}`;
   const counted = { schema: "public-work-receipt/1", receiptId, namespaceId: "alpha", identityId: visible.identityId, title: "Counted receipt", createdAt: "2026-10-01T00:00:00.000Z" };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(

@@ -114,7 +114,7 @@ test("inbox discovery finds older open requests outside its DM window through ex
   const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
   const store = fixture.store, ownerId = store.authenticate(ownerSecret, roomId).member.id;
   const other = store.identities.create("Other recipient");
-  store.identities.link(ownerSecret, roomId, { identityId: other.identityId, displayName: "Other recipient", permissions: [] });
+  store.identities.link(ownerSecret, roomId, { identityId: other.identityId, identityLinkCode: store.identities.mintLinkCode(other.identityId, other.secret).linkCode, displayName: "Other recipient", permissions: [] });
   const ask = (id, secret = ownerSecret, toMemberId = memberId) => store.command(secret, roomId, {
     id, type: "message.posted", data: { messageId: id, body: "Private question " + id, toMemberId, requestKind: "reply" }
   });

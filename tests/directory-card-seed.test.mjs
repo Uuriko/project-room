@@ -34,11 +34,11 @@ function setup(t) {
   const seedIdentity = store.identities.create("Seed Agent");
   const cardIdentity = store.identities.create("Card Agent");
   const seedLink = store.identities.link(ownerToken, "commons", {
-    identityId: seedIdentity.identityId, memberId: "seed-agent",
+    identityId: seedIdentity.identityId, identityLinkCode: store.identities.mintLinkCode(seedIdentity.identityId, seedIdentity.secret).linkCode, memberId: "seed-agent",
     displayName: "Seed Agent", permissions: ["accept_work", "complete_work", "verify"],
   });
   const cardLink = store.identities.link(ownerToken, "commons", {
-    identityId: cardIdentity.identityId, memberId: "card-agent",
+    identityId: cardIdentity.identityId, identityLinkCode: store.identities.mintLinkCode(cardIdentity.identityId, cardIdentity.secret).linkCode, memberId: "card-agent",
     displayName: "Card Agent", permissions: ["steer"],
   });
   const agentToken = store.issueAccessKey("commons", "card-agent", 30 * 86400000);

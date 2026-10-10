@@ -250,7 +250,7 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   const peer = store.identities.create("Pause peer");
   const created = roomFor(store, rooms, owner);
   store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Pause peer", permissions: []
+    identityId: peer.identityId, identityLinkCode: store.identities.mintLinkCode(peer.identityId, peer.secret).linkCode, displayName: "Pause peer", permissions: []
   });
   const outsider = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-1", reason: "away"
