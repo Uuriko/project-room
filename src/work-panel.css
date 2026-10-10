@@ -17,10 +17,10 @@
 .wp-card p { margin: 0; }
 .wp-title { font-weight: 600; font-size: var(--text-sm); line-height: 1.35; overflow-wrap: anywhere; }
 .wp-meta { display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: var(--text-xs); }
-.wp-avatar { width: 1.25rem; height: 1.25rem; flex: none; display: inline-grid; place-items: center; color: #fff; font-size: .62rem; font-weight: 600; background: var(--room-green); border-radius: 50%; }
+.wp-avatar { width: 1.25rem; height: 1.25rem; flex: none; display: inline-grid; place-items: center; color: var(--on-accent); font-size: var(--text-xs); font-weight: 600; background: var(--room-green); border-radius: 50%; }
 .wp-avatar.wp-agent { border-radius: .35rem; background: var(--violet); }
 .wp-avatar.wp-unknown { background: var(--muted); }
-.wp-kind { color: var(--muted); font-size: .68rem; }
+.wp-kind { color: var(--muted); font-size: var(--text-xs); }
 .wp-status { color: var(--muted); font-size: var(--text-xs); }
 .wp-tone-working .wp-status::before { content: ""; display: inline-block; width: .45rem; height: .45rem; margin-right: .4rem; border-radius: 50%; background: var(--amber); vertical-align: .05rem; }
 .wp-tone-blocked .wp-status { color: var(--red); }
@@ -70,7 +70,7 @@
 .ps-chip { display: inline-flex; align-items: center; gap: .4rem; max-width: 18rem; padding: .2rem .65rem .2rem .2rem; border: 1px solid var(--line-soft); border-radius: 999px; background: var(--panel); color: var(--text); font-size: var(--text-xs); white-space: nowrap; cursor: pointer; }
 .ps-chip:hover { border-color: var(--line); }
 .ps-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.ps-avatar { position: relative; width: 1.35rem; height: 1.35rem; flex: none; display: inline-grid; place-items: center; color: #fff; font-size: .62rem; font-weight: 600; background: var(--room-green); border-radius: 50%; }
+.ps-avatar { position: relative; width: 1.35rem; height: 1.35rem; flex: none; display: inline-grid; place-items: center; color: var(--on-accent); font-size: var(--text-xs); font-weight: 600; background: var(--room-green); border-radius: 50%; }
 .ps-avatar.ps-agent { border-radius: .35rem; background: var(--violet); }
 .ps-name { font-weight: 600; }
 .ps-line { overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
