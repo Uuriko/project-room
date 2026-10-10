@@ -1,9 +1,30 @@
 // Relocate existing controls, preserving their listeners, authority and state.
 // Account destinations keep their original home outside a room; no duplicate
 // controls or parallel navigation state are introduced by this layout.
+// The mobile bottom bar is position:fixed and reserves its own space via
+// var(--workspace-nav-height, 3.5rem) on the app shell. The 3.5rem fallback
+// under-covers phones whose home-indicator safe area pushes the bar taller
+// (1px border + .25rem padding + 44px min-height + ~34px safe area ≈ 83px),
+// so the bar occludes the last ~30px of the inbox list or room composer.
+// This keeps the reserved space glued to the bar's measured height; a hidden
+// bar reserves nothing. Returns the reserved pixel height.
+export function syncWorkspaceNavHeight(shell, nav) {
+  if (!shell?.style?.setProperty || !nav) return 0;
+  const px = nav.hidden ? 0 : Math.max(0, Math.round(nav.offsetHeight || 0));
+  shell.style.setProperty("--workspace-nav-height", `${px}px`);
+  return px;
+}
+
 export function installRoomLayout() {
   const get = selector => document.querySelector(selector);
   const main = get('#main');
+  const shell = get('.app-shell'), nav = get('#workspace-nav');
+  if (shell && nav) {
+    syncWorkspaceNavHeight(shell, nav);
+    // The bar's height changes with safe-area insets, text size and
+    // show/hide state; re-sync whenever its box changes.
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => syncWorkspaceNavHeight(shell, nav)).observe(nav);
+  }
   const entries = [
     ['#workspace-nav', '#sidebar-workspace'],
     ['#session-menu', '.room-topbar .topbar-actions'],
