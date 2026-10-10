@@ -88,6 +88,19 @@ test("a dot segment is the same file as the path without it", () => {
   assert.equal(collisions[0].file, "src/app.js");
 });
 
+test("NFC and NFD spellings of the same path collide", () => {
+  const nfc = "server/caf\u00e9.mjs";
+  const nfd = "server/cafe\u0301.mjs";
+  assert.notEqual(nfc, nfd);
+  const collisions = findClaimCollisions([
+    claim("lane-a", [nfc]),
+    claim("lane-b", [nfd]),
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].file, nfc);
+  assert.deepEqual([...collisions[0].claims], ["lane-a", "lane-b"]);
+});
+
 test("empty input and disjoint claims are collision-free", () => {
   assert.deepEqual(findClaimCollisions([]), []);
   assert.ok(claimsAreCollisionFree([
