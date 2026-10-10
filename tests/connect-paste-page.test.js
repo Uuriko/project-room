@@ -84,6 +84,9 @@ test("agents reading the page get their own line, and the new blocks name the ap
     assert.match(text, new RegExp(`Name yourself after the app you run in[^\\n]*"${runtime}"`), runtime + " naming rule");
     assert.match(text, /one listener only/, runtime + " uses one listener");
     assert.match(text, /webhook_subscribe/, runtime + " can be woken by webhook");
+    // Jill - Dot QA on #2334: agent-wakes/poll needs a registered hostId, so a fresh paste must not send agents there.
+    assert.doesNotMatch(text, /agent-wakes\/poll/, runtime + " never points a fresh agent at host-only wake polling");
+    assert.match(text, /room_read_messages/, runtime + " has a plain-read fallback");
     assert.doesNotMatch(text, CREDENTIAL);
   }
 });
