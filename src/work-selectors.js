@@ -77,8 +77,9 @@ const REQUEST_ROLES = ["accountableMemberId", "verifierMemberId", "humanDecision
 
 // Search only the supplied current Room projection. A hit is not an assignment,
 // verified result or permission to act. No external evidence/history is fetched.
-export function searchWork(state, query, limit = 25) {
+export function searchWork(state, query, limit = 25, { offset: pageOffset = 0 } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 25) throw new RangeError("Work search limit must be 1–25");
+  if (!Number.isSafeInteger(pageOffset) || pageOffset < 0) throw new RangeError("invalid_search_offset");
   const term = String(query).trim().slice(0, 200).toLocaleLowerCase();
   if (!term) return { work: [], total: 0 };
   const matches = [];
@@ -106,7 +107,7 @@ export function searchWork(state, query, limit = 25) {
   }
   matches.sort((a, b) => Number(terminalWork(a.item)) - Number(terminalWork(b.item))
     || b.item.updatedAt.localeCompare(a.item.updatedAt) || a.item.id.localeCompare(b.item.id));
-  return { work: matches.slice(0, limit), total: matches.length };
+  return { work: matches.slice(pageOffset, pageOffset + limit), total: matches.length };
 }
 
 // Two independent return facts (matrix refinement 4): unread-since-cursor and
