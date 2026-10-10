@@ -11,6 +11,9 @@ import { normalizeShareInviteCode, parseShareInviteCode } from "../src/share-inv
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { PERSONAL_INVITE_PREFIX, PERSONAL_INVITE_TTL_MS, personalInviteToken, rememberReferee } from "./growth-loop.mjs";
 
+// The name ensure-default-room gives an account with no profile name (server/http.mjs).
+export const DEFAULT_OWNER_NAME = "Owner";
+
 // Agent admissions reuse the durable membership event as their receipt. The
 // link ID is public metadata; neither the invitation token nor its hash is exposed.
 const agentJoinPrefix = row => `sj_${row.id.replaceAll("-", "")}_`;
@@ -204,6 +207,12 @@ export class ShareLinks {
     if (!row) unavailable();
     return row;
   }
+  issuerHasProfileName(roomId, memberId) {
+    const account = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    if (!account) return true; // not an account member: keep its room name as is
+    const row = this.db.prepare("SELECT display_name FROM accounts WHERE id=?").get(account.account_id);
+    return typeof row?.display_name === "string" && row.display_name.trim() !== "";
+  }
   preview(token, accountToken = null, binding = null) {
     return this.store.readTransaction(() => {
       const row = this.find(token), link = this.view(row);
@@ -214,7 +223,12 @@ export class ShareLinks {
       }
       const members = this.store.room(row.room_id).state.members;
       const issuer = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : null;
-      const inviterDisplayName = typeof issuer?.displayName === "string" && issuer.displayName.trim() ? issuer.displayName.trim() : "A member";
+      const named = typeof issuer?.displayName === "string" && issuer.displayName.trim() ? issuer.displayName.trim() : null;
+      // An account that never chose a name joins its first room as the
+      // placeholder "Owner". Don't tell friends "Owner invited you."; the
+      // dialog drops the line instead. A person who typed a name keeps it.
+      const placeholder = named === DEFAULT_OWNER_NAME && !this.issuerHasProfileName(row.room_id, row.issuer_member_id);
+      const inviterDisplayName = placeholder ? null : named ?? "A member";
       const roomState = this.store.room(row.room_id).state;
       return { link, room: { id: row.room_id, title: roomState.room.title },
         access: previewAccessText(link.access, roomState),
