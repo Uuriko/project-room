@@ -152,10 +152,9 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   await page.locator("#account-room-name").fill("Guest");
   // The refusal still holds - leaving sets the membership inactive and keeps
   // its member_accounts row, so this account is a member who does not
-  // administer, not a stranger with no rooms. Only its wording changed, with
-  // RC-2026-09-19-080's "your first room is free".
+  // administer, not a stranger with no rooms. Only its wording changed.
   await page.locator("#account-room-submit").click();
-  await page.getByText("Your first room is free to create, but more rooms need membership administration in one of your rooms.", { exact: true }).waitFor();
+  await page.getByText("You can't create a room from this account yet. Ask a room owner for membership administration in one of their rooms.", { exact: true }).waitFor();
   assert.equal(f.roomCount(), before, "no room was created");
   assert.equal(await page.locator("#account-room-title").inputValue(), "Not allowed", "the form keeps what was typed");
 });
