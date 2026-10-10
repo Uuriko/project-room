@@ -1680,15 +1680,19 @@ paths:
             `total`, even when the returned lists are capped.
         - name: before
           in: query
-          schema: { type: string, maxLength: 512 }
+          schema: { type: string, maxLength: 320 }
           description: >
             Opaque cursor from a previous page's `nextCursor`, for
             `kind=messages` or `kind=pinned` only. It returns the next older
             page (up to `limit` matches, still chronological). The cursor is
-            bound to the same `q` and `kind`; any other pairing, a malformed
-            value, or an anchor message that is gone is rejected with 422
-            `invalid_search_cursor`. Every visibility filter runs again on
-            each page, and `total` stays the full match count.
+            bound to the same `q` and `kind`. Its last result (the anchor)
+            must still be a match the caller can read: if that message was
+            deleted, redacted, edited so it no longer matches, unpinned, or
+            its author muted, the cursor is stale. A stale, malformed or
+            mismatched cursor, or one naming a message the caller may not
+            read, gets the same 422 `invalid_search_cursor`; start again
+            without `before`. Every visibility filter runs again on each page,
+            and `total` stays the full match count.
       responses:
         '401': { description: unauthenticated }
         '422': { description: invalid_search (bad q, kind, or limit) or invalid_search_cursor }
