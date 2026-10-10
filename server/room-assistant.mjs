@@ -38,6 +38,25 @@ const deletedControl = run => Object.fromEntries([
   ...['id', 'sourceMessageId', 'initiatorId', 'coordinatorMemberId', 'status', 'revision', 'attemptId', 'createdAt', 'updatedAt', 'hostReportedAt'].map(key => [key, run[key]]),
   ['sourceDeleted', true], ['inputs', []], ['activity', []]
 ]);
+// Called only after a validated message edit, inside the command transaction.
+// The run revision fences both publication and acknowledgements: an ID still
+// refers to the same message after editing, but no longer to the same input.
+export function invalidateEditedAssistantInput(db, roomId, messageId, at) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'").get()) return;
+  const rows = db.prepare(`SELECT runs.run_id,runs.value FROM room_assistant_runs AS runs
+    WHERE runs.room_id=? AND json_extract(runs.value,'$.status') NOT IN ('done','cancelled','failed')
+    AND EXISTS (SELECT 1 FROM json_each(json_extract(runs.value,'$.inputs')) AS entry
+      WHERE json_extract(entry.value,'$.sourceMessageId')=?)`).all(roomId, messageId);
+  for (const row of rows) {
+    const run = JSON.parse(row.value);
+    for (const input of run.inputs) if (input.sourceMessageId === messageId) input.status = 'pending';
+    run.revision++;
+    run.updatedAt = at;
+    db.prepare('UPDATE room_assistant_runs SET value=? WHERE room_id=? AND run_id=?')
+      .run(JSON.stringify(run), roomId, row.run_id);
+  }
+}
+
 export class RoomAssistant {
   constructor(store) { this.store = store; }
   init() { this.store.db.exec(roomAssistantSchema); }
