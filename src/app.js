@@ -283,6 +283,7 @@ let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+let searchPageKey = "", searchMessageLimit = 50, searchWorkPages = 1;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
 const workNavigationOrigins = new Map();
@@ -541,6 +542,8 @@ const client = new RoomClient({
     $("#review-brief").hidden = true; $("#review-notes").open = false;
     $("#decision-review").hidden = true; $("#decision-review").open = false;
     $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = "";
+    searchPageKey = ""; searchMessageLimit = 50; searchWorkPages = 1;
+    $("#search-more").hidden = true;
     $("#thread-title").textContent = ""; $("#thread-context").textContent = "";
     $("#thread-bar").hidden = true; $("#search-results").hidden = true; $("#new-messages-button").hidden = true;
     $("#search-mentions")?.setAttribute("aria-pressed", "false"); $("#search-pinned")?.setAttribute("aria-pressed", "false"); $("#message-search").value = ""; $("#clear-search").hidden = true;
@@ -2674,14 +2677,24 @@ function renderSearch(now = Date.now()) {
   const parsed = parseSearchQuery(query);
   const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
   const active = Boolean(query.trim()) || only || pinnedOnly;
+  const pageKey = JSON.stringify([client.generation, state?.room?.id, session?.member?.id, query, only, pinnedOnly]);
+  if (pageKey !== searchPageKey) {
+    searchPageKey = pageKey; searchMessageLimit = 50; searchWorkPages = 1;
+  }
   $("#clear-search").hidden = !query && !mentionsFilterOn() && !pinnedOnly;
   $("#search-results").hidden = !active;
-  if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
+  $("#search-more").textContent = uiText("search.more");
+  if (!active) { $("#search-more").hidden = true; $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
+  const searchable = { ...state, messages: state.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)) };
+  const result = searchMessages(searchable, query, searchMessageLimit, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
+  for (let page = 1; page < searchWorkPages && work.work.length < work.total; page++) {
+    work.work.push(...searchWork(state, parsed.term || query, 25, { offset: page * 25 }).work);
+  }
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
   const noun = only && !parsed.term ? (total === 1 ? "mention" : "mentions") : pinnedOnly && !parsed.term ? (total === 1 ? "pinned message" : "pinned messages") : (total === 1 ? "match" : "matches");
   setText("#search-count", `${total} ${noun}${total > shown ? ` · ${shown} shown` : ""} in this room`);
+  $("#search-more").hidden = total <= shown;
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
@@ -4620,6 +4633,14 @@ document.addEventListener("keydown", event => {
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
 $("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
+$("#search-more").addEventListener("click", () => {
+  if (!state) return;
+  const shown = new Set([...$("#search-list").querySelectorAll("[data-search-key]")].map(node => node.dataset.searchKey));
+  searchMessageLimit += 50; searchWorkPages += 1;
+  renderSearch();
+  const next = [...$("#search-list").querySelectorAll("[data-search-key]")].find(node => !shown.has(node.dataset.searchKey));
+  (next || $("#message-search")).focus({ preventScroll: true });
+});
 $("#search-mentions").addEventListener("click", () => {
   const on = mentionsFilterOn();
   $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");

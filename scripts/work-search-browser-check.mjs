@@ -36,6 +36,11 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
     evidenceVersion: crypto.randomUUID(), producerId: 'owner', nextAction: 'Discuss any follow-up.' });
   finish('The handoff-only finding is ready.');
   for (let index = 0; index < 27; index++) propose(`bounded-${index}`, `Bounds fixture ${index}`);
+  let searchClock = Date.now();
+  f.store.now = () => { searchClock += 2000; return searchClock; };
+  for (let index = 0; index < 71; index++) {
+    send('message.posted', { messageId: `archive-${index}`, body: `Archive needle ${index}` });
+  }
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
@@ -208,6 +213,36 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   await search.fill('Bounds');
   assert.equal(await hits.locator('[data-open-work]').count(), 25);
   assert.equal(await page.locator('#search-count').textContent(), '27 matches · 25 shown in this room');
+  await page.locator('#search-more').focus();
+  send('message.posted', { messageId: 'unrelated-search-update', body: 'A live update without the search terms.' });
+  await page.locator('#message-list [data-message-record-id="unrelated-search-update"]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#search-more').evaluate(node => node === document.activeElement), true,
+    'an unrelated live render preserves the focused continuation');
+  assert.equal(await page.locator('#search-more').isVisible(), true);
+  const beforePaging = auditRecovery(f.store).dataSha256;
+  const draftBeforePaging = await page.locator('#message-input').inputValue();
+  await page.locator('#search-more').focus(); await page.keyboard.press('Enter');
+  assert.equal(await hits.locator('[data-open-work]').count(), 27, 'older work matches are reachable');
+  assert.equal(await page.locator('#search-count').textContent(), '27 matches in this room');
+  assert.equal(await page.locator('#search-more').isVisible(), false);
+  assert.equal(await hits.locator('a').evaluateAll(nodes => nodes.includes(document.activeElement)), true,
+    'the final continuation leaves focus on a newly exposed result');
+  assert.equal(auditRecovery(f.store).dataSha256, beforePaging, 'work paging is read-only');
+  await search.fill('Archive needle');
+  assert.equal(await hits.locator('[data-open-message]').count(), 50, 'query changes reset the page size');
+  assert.equal(await hits.locator('[data-open-message="archive-0"]').count(), 0);
+  assert.equal(await page.locator('#search-count').textContent(), '71 matches · 50 shown in this room');
+  await page.locator('#search-more').click();
+  assert.equal(await hits.locator('[data-open-message]').count(), 71);
+  assert.equal(await page.locator('#search-more').isVisible(), false);
+  assert.equal(await page.locator('#search-count').textContent(), '71 matches in this room');
+  assert.equal(auditRecovery(f.store).dataSha256, beforePaging, 'message paging is read-only');
+  await hits.locator('[data-open-message="archive-0"]').press('Enter');
+  await page.locator('#message-list [data-message-record-id="archive-0"]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#message-input').inputValue(), draftBeforePaging, 'older navigation preserves the draft');
+  await openSearch(page);
+  await search.fill('Bounds');
+  assert.equal(await hits.locator('[data-open-work]').count(), 25, 'returning to a different query starts at its first page');
   await search.fill('telescope');
   assert.equal(await hits.locator('[data-open-work]').count(), 1);
   const searchFont = await hits.locator('a').evaluate(node => parseFloat(getComputedStyle(node).fontSize));
