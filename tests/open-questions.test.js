@@ -87,6 +87,45 @@ test('DM scoping: other members\u2019 DMs stay invisible to the viewer', () => {
   assert.deepEqual(ids(findOpenQuestions({ messages, viewerId: 'nobody' })), ['m1']);
 });
 
+// Derivation must depend only on the viewer's readable projection, including
+// when response candidates share a thread rather than a direct parent.
+for (const relation of ['direct', 'shared-thread']) {
+  const root = msg('root', 'a', 'Planning thread.', { createdAt: '2026-09-23T19:59:00.000Z' });
+  const question = msg('question', 'a', 'What is next?', { replyToId: root.id });
+  const response = msg('response', 'b', 'Next step recorded.', {
+    replyToId: relation === 'direct' ? question.id : root.id,
+    toMemberId: 'a', createdAt: '2026-09-23T20:01:00.000Z',
+  });
+
+  test(`${relation}: the question view is invariant to unreadable projection entries`, () => {
+    for (const viewerId of ['viewer', null]) {
+      for (const entry of [response,
+        { ...response, body: 'Updated next step.', editedAt: '2026-09-23T20:02:00.000Z' },
+        { ...response, deletedAt: '2026-09-23T20:02:00.000Z' }]) {
+        const rows = findOpenQuestions({ messages: [root, question, entry], viewerId });
+        assert.deepEqual(ids(rows), ['question']);
+        assert.equal(rows[0].threadRootId, 'root');
+      }
+    }
+  });
+
+  test(`${relation}: readable answers retain participant and public behavior`, () => {
+    for (const viewerId of ['a', 'b']) {
+      assert.deepEqual(ids(findOpenQuestions({ messages: [root, question, response], viewerId })), []);
+    }
+    assert.deepEqual(ids(findOpenQuestions({
+      messages: [root, question, { ...response, toMemberId: null }], viewerId: 'viewer',
+    })), []);
+    // A visible candidate must also be readable by the question's author.
+    assert.deepEqual(ids(findOpenQuestions({
+      messages: [root, question, { ...response, toMemberId: 'viewer' }], viewerId: 'viewer',
+    })), ['question']);
+    assert.deepEqual(ids(findOpenQuestions({
+      messages: [root, question, { ...response, deletedAt: '2026-09-23T20:02:00.000Z' }], viewerId: 'a',
+    })), ['question']);
+  });
+}
+
 test('newest questions sort first', () => {
   const rows = findOpenQuestions({ messages: [
     msg('m1', 'a', 'First?', { createdAt: '2026-09-23T20:00:00.000Z' }),

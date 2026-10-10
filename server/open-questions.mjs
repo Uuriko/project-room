@@ -53,7 +53,8 @@ export function findOpenQuestions({ messages, viewerId = null }) {
   const isQuestion = message => typeof message.body === "string" && message.body.includes("?");
   // True when someone other than the asker spoke in the question's thread at
   // or after the question, or replied to it directly. A reply the asker
-  // cannot read (someone else's DM) never closes the question.
+  // cannot read (someone else's DM) never closes the question. Response
+  // candidates must also be visible to the viewer of this projection.
   const answered = question => {
     const root = rootOf(question.id);
     const askedAt = Date.parse(question.createdAt) || 0;
@@ -61,7 +62,7 @@ export function findOpenQuestions({ messages, viewerId = null }) {
       if (!message || message.id === question.id || message.deletedAt) continue;
       if (message.authorId === question.authorId) continue; // own follow-up
       if (message.toMemberId && message.toMemberId !== question.authorId) continue; // unreadable answer
-      if (!visible(message) && !(message.toMemberId === question.authorId)) continue;
+      if (!visible(message)) continue;
       if (message.replyToId === question.id) return true;
       if (rootOf(message.id) === root && (Date.parse(message.createdAt) || 0) >= askedAt) return true;
     }
