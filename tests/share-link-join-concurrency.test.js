@@ -107,11 +107,13 @@ function setup(t, { maxJoins }) {
 
 function runRacers(dir, childFile, argSets) {
   return Promise.all(argSets.map(args => new Promise(resolve => {
-    execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout) => {
+    execFile(process.execPath, [join(dir, childFile), ...args], { timeout: 180000 }, (error, stdout, stderr) => {
       const line = String(stdout).split("\n").find(l => l.startsWith("RESULT "));
       let parsed = null;
       try { parsed = JSON.parse(line.slice("RESULT ".length)); } catch { /* leave null */ }
-      resolve({ parsed, execError: error ? String(error.message).slice(0, 120) : null });
+      resolve({ parsed, execError: error ? String(error.message).slice(0, 120) : null,
+        // A child that dies without a RESULT line is otherwise undiagnosable in CI.
+        ...(parsed ? {} : { code: error?.code ?? null, signal: error?.signal ?? null, stderr: String(stderr).slice(-300) }) });
     });
   })));
 }
