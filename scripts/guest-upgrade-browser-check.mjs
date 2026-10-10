@@ -12,7 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 
-const PASSWORD = "synthetic-guest-upgrade-pw";
+const PW = "synthetic-guest-password";
 const SIZES = [["desktop", { viewport: { width: 1280, height: 860 } }], ["390px phone", { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }]];
 
 async function setup(t) {
@@ -76,7 +76,7 @@ for (const [label, size] of SIZES) {
     const code = f.sent.filter(m => m.to === email && m.purpose === "email-verify").at(-1)?.code;
     assert.ok(code, "a code was mailed");
     await confirm.getByLabel("Code").fill(code);
-    await confirm.getByLabel("Password").fill(PASSWORD);
+    await confirm.getByLabel("Password").fill(PW);
     await confirm.getByRole("button", { name: "Keep account" }).click();
     await page.getByText("Account kept.").first().waitFor();
     assert.equal(f.store.accountLogins.emailVerification(account).status, "verified");
@@ -85,7 +85,7 @@ for (const [label, size] of SIZES) {
     const login = later.locator('#auth-signin-ui [data-signin-form="password"]');
     if (await later.locator('#auth-signin-ui [data-password-mode="login"]').first().isVisible()) await later.locator('#auth-signin-ui [data-password-mode="login"]').first().click();
     await login.locator('[name="email"]').fill(email);
-    await login.locator('[name="password"]').fill(PASSWORD);
+    await login.locator('[name="password"]').fill(PW);
     await login.locator('button[type="submit"]').click();
     await later.locator("#main").waitFor({ state: "visible" });
     assert.equal((await f.session(later)).account?.id, account, "signs in to the same account");

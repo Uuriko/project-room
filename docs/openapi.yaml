@@ -9080,8 +9080,8 @@ paths:
         '202': { description: "{ status: check_email, mailConfigured }" }
         '401': { description: "account_session_required or invalid_session" }
         '403': { description: "origin_denied or csrf_denied" }
-        '409': { description: "account_has_email: the account already has an email or password" }
-        '422': { description: "invalid_guest_upgrade or invalid_email" }
+        '409': { description: "login_method_exists: the account already has an email or password" }
+        '422': { description: "invalid_email" }
         '429': { description: rate_limited }
   /api/auth/guest/upgrade/confirm:
     post:
@@ -9110,8 +9110,8 @@ paths:
         '200': { description: "{ status: upgraded, email }" }
         '401': { description: "invalid_email_code, account_session_required, or invalid_session" }
         '403': { description: "origin_denied or csrf_denied" }
-        '409': { description: account_has_email }
-        '422': { description: "invalid_guest_upgrade, invalid_email, or password_too_short/password_too_long" }
+        '409': { description: login_method_exists }
+        '422': { description: "invalid_password_set, invalid_email, or password_too_short/password_too_long" }
         '429': { description: rate_limited }
   /api/auth/agent/rooms:
     post:

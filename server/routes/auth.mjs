@@ -455,7 +455,7 @@ function guestSession(ctx) {
   protectWrite(req, session, false);
   const methods = store.accountLogins.listMethods(session.account.id);
   if (methods.some(method => method.email || method.type === "password")) {
-    reject(409, "account_has_email", "This account already has an email or password; manage it in Account settings");
+    reject(409, "login_method_exists", "This account already has an email or password; manage it in Account settings");
   }
   return session;
 }
@@ -471,7 +471,7 @@ async function postGuestUpgrade(ctx) {
   rate(`guest-upgrade:${remoteAddress}`, 20);
   const session = guestSession(ctx);
   const data = await body(ctx.req);
-  if (!exact(data, ["email"])) reject(422, "invalid_guest_upgrade", "An email is required");
+  if (!exact(data, ["email"])) reject(422, "invalid_email", "A valid email address is required");
   const email = emailFrom(ctx, data);
   rate(`guest-upgrade-account:${session.account.id}`, 5);
   magicEmailLimit(signupEmailLimiter, email);
@@ -494,7 +494,7 @@ async function postGuestUpgradeConfirm(ctx) {
   const session = guestSession(ctx);
   const data = await body(ctx.req);
   if (!exact(data, ["email", "code", "password"]) || typeof data.code !== "string" || typeof data.password !== "string") {
-    reject(422, "invalid_guest_upgrade", "An email, code, and password are required");
+    reject(422, "invalid_password_set", "An email, code, and password are required");
   }
   const email = emailFrom(ctx, data);
   const policy = checkPasswordPolicy(data.password);
