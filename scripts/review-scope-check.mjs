@@ -35,15 +35,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function normalizePath(p) {
   let s = String(p ?? "").trim();
+  try { s = s.normalize("NFC"); } catch { /* unpaired surrogates stay as given */ }
   while (s.startsWith("./")) s = s.slice(2);
   while (s.startsWith("/")) s = s.slice(1);
   return s;
 }
 
 // A declared entry covers a changed file when it matches exactly, or when
-// the entry ends in `/` and the file lives under that directory. A bare
-// directory name without the trailing slash is exact-only on purpose: it
-// keeps `scripts` from silently covering `scripts2/x.mjs`.
+// the entry ends in `/` and the file lives under that directory. Paths are
+// compared after NFC composition, so an NFD spelling is the same file.
+// Case stays distinct. A bare directory name without the trailing slash is
+// exact-only on purpose: it keeps `scripts` from silently covering `scripts2/x.mjs`.
 export function covers(declared, changed) {
   if (declared.endsWith("/")) return changed.startsWith(declared);
   return changed === declared;
