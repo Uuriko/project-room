@@ -72,6 +72,15 @@ const TAG_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 const BLOB_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MAX_RECEIPT_TAGS = 10;
 const MAX_RECEIPT_BLOBS = 10;
+// FIX-68 claim channels: a claim's namespace tag. Optional; null/"" means the
+// default (unnamed) channel, bounded only by the room-level open-claim cap.
+export const CLAIM_CHANNEL_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+export const channelOf = value => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && CLAIM_CHANNEL_PATTERN.test(value),
+    "channel must be 1..32 characters matching [A-Za-z0-9_-]");
+  return value;
+};
 const tagsOf = value => {
   check(Array.isArray(value), "tags must be an array");
   check(value.length <= MAX_RECEIPT_TAGS, `tags must hold at most ${MAX_RECEIPT_TAGS} tags`);
@@ -466,6 +475,7 @@ const workOf = value => {
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
     squadId: optionalId(value.squadId, "squadId"), // plan-squads: work offer targeted at a squad
+    channel: channelOf(value.channel), // FIX-68: claim channel (namespace); null = default channel
     kind, revision, ci: ciOf(value.ci), reviews: reviewsOf(value.reviews) };
 };
 const agentOf = value => idOf(value, "agent id", 128);
@@ -530,6 +540,18 @@ export function roomWorkClaimConfig(room) {
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
   });
 }
+// FIX-68 phase 1: per-channel open-claim counts for the board read. Counts
+// only non-terminal claims. Channel-less claims count under the "" key (the
+// default channel). Returned object is frozen; key order is insertion order.
+export function openClaimChannelCounts(items) {
+  const counts = {};
+  for (const item of items ?? []) {
+    if (isTerminalClaimState(item?.state)) continue;
+    const channel = channelOf(item?.channel) ?? "";
+    counts[channel] = (counts[channel] ?? 0) + 1;
+  }
+  return Object.freeze(counts);
+}
 const leaseHoursOf = value => {
   if (value === null || value === undefined) return value; // null = explicit opt-out of leases
   check(typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_LEASE_HOURS,
@@ -548,7 +570,7 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, channel } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -578,6 +600,7 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     repo: repoOf(repo), branch: branchOf(branch),
     chain: Object.freeze([]), supersededBy: null, workItemId: optionalId(workItemId, "workItemId"),
     squadId: optionalId(squadId, "squadId"), // plan-squads: work offer targeted at a squad
+    channel: channelOf(channel) ?? null, // FIX-68: namespace tag; null = default channel
     kind: claimKind, revision: claimRevision, ci: null, reviews: Object.freeze([]) };
   // The creating member when the route knows it; "system" for internal creates.
   return withHistory(item, atMs, agentId === undefined ? "system" : agentOf(agentId), "created", note);

@@ -5120,6 +5120,15 @@ paths:
                 branch:
                   type: string
                   description: The branch this work targets.
+                channel:
+                  type: string
+                  pattern: '[A-Za-z0-9_-]{1,32}'
+                  description: |
+                    Claim channel (namespace) this work belongs to, e.g. a wave
+                    or guild name. Channels partition the claim board for
+                    per-namespace cap accounting (docs/CLAIM-CHANNELS.md).
+                    Omit to file the claim in the default channel. An invalid
+                    value is 422 invalid_claim_input.
                 squadId:
                   type: string
                   description: Active squad id this work offer targets. An unknown or inactive squad is 422 squad_unknown.
