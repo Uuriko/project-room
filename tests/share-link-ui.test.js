@@ -649,3 +649,49 @@ test("a dead invite link asks for a fresh one and offers sign-in", async () => {
     assert.equal(dom.node("#join-link-scope").textContent.includes("incomplete"), false);
   } finally { dom.uninstall(); }
 });
+
+test("growth kit unverified-email line renders through the visible form-status contract", async () => {
+  const nodes = new Map();
+  const node = selector => {
+    if (!nodes.has(selector)) {
+      const classes = new Set();
+      nodes.set(selector, {
+        value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+        setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
+        classList: { toggle(name, enabled) { enabled ? classes.add(name) : classes.delete(name); }, contains() { return classes.has(name); } },
+        _classes: classes,
+        addEventListener(type, handler) { this.handlers[type] = handler; },
+        contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
+        focus() {},
+      });
+    }
+    return nodes.get(selector);
+  };
+  const globals = { document: { querySelector: node }, window: { addEventListener() {} },
+    location: { hostname: "localhost", origin: "http://localhost:52331" } };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
+  const session = { roomId: "room", member };
+  const client = {
+    session, ownsAccountSession: () => true, generation: 0, path: suffix => suffix,
+    async request(path) {
+      if (path === "/referrals") return { roomId: "room", referrals: [], leaderboard: [], myReferralCount: 0, myReferrals: [], myActiveCount: 0, reward: null, invite: null, inviteBlocked: "email_unverified" };
+      return { links: [] };
+    },
+  };
+  try {
+    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    const state = { members: { owner: member }, room: { id: "room", ownerId: "owner" } };
+    const ui = installShareLinks({ client, accountClient: {}, getState: () => state, getSession: () => session, openRoom() {} });
+    await node("#invite-people-button").handlers.click();
+    const kitStatus = node("#growth-kit-status");
+    assert.equal(kitStatus.textContent, "Verify your email to invite people. Open Sign-in & security from the account menu.");
+    assert.equal(kitStatus._classes.has("visible"), true, "status must carry .visible or .form-status stays display:none");
+    ui.resetManagement();
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
