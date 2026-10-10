@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS room_assistant_runs (room_id TEXT NOT NULL, run_id TE
 CREATE TABLE IF NOT EXISTS room_assistant_ops (room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(room_id,actor_id,request_id));`;
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const terminal = new Set(['done', 'cancelled', 'failed']);
+// The same 2-minute window the read projection uses to show a working run as 'unknown'.
+export const HOST_STALL_MS = 120000;
+const hostSilent = (run, now) => !Number.isFinite(run.hostReportedAt) || now - run.hostReportedAt > HOST_STALL_MS;
 const keys = {
   configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId'],
   contribute: ['runId', 'sourceMessageId', 'expectedRevision', 'conflict'],
@@ -55,7 +58,7 @@ export class RoomAssistant {
           const opening = state.messages.find(m => m.id === run.sourceMessageId);
           return controlsDeletedSource(run, opening, auth.member, state, floor) ? [deletedControl(run)] : [];
         })
-        .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > 120000) ? 'unknown' : run.status }));
+        .map(run => ({ ...run, status: run.status === 'working' && hostSilent(run, this.store.now()) ? 'unknown' : run.status }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
       return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
@@ -167,7 +170,13 @@ export class RoomAssistant {
             run.status = run.attemptId ? 'resume_requested' : 'queued';
           } else if (['pause', 'cancel'].includes(input.action)) {
             if (!isHuman || (!isOwner && actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or owner controls this request', 403);
-            run.status = run.attemptId ? input.action === 'pause' ? 'pause_requested' : 'cancel_requested' : input.action === 'pause' ? 'paused' : 'cancelled';
+            // HS2 3c: Stop always works. A host that has gone silent for the
+            // stall window can't acknowledge, so Stop closes the run itself.
+            // The run is then terminal: any late claim or report from that
+            // attempt is refused as assistant_run_closed (the publish fence).
+            const silent = run.attemptId && input.action === 'cancel' && hostSilent(run, this.store.now());
+            run.status = run.attemptId && !silent ? input.action === 'pause' ? 'pause_requested' : 'cancel_requested' : input.action === 'pause' ? 'paused' : 'cancelled';
+            if (silent) run.activity = [...run.activity, { at: this.store.now(), memberId: actor.id, kind: 'stopped', summary: 'Stopped. The assistant had stopped responding, so the request was closed without it.', state: 'cancelled' }].slice(-100);
           } else {
             if (actor.kind !== 'agent' || actor.id !== run.coordinatorMemberId
               || !actor.permissions.includes('accept_work')
