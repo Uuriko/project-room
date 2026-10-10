@@ -139,7 +139,9 @@ export function createPasskeyAuth({ store, challenges = createChallengeStore({ n
       user: { id: createHash("sha256").update(accountId, "utf8").digest(), name: userName, displayName: userName },
       challenge: issued.challenge,
       excludeCredentials,
-      // Login discovers the account from its credential, without an id list.
+      // Login is discoverable-only (beginAuthentication sends no
+      // allowCredentials), so a registered credential is useless unless it
+      // is discoverable: force resident keys no matter what the caller asked.
       authenticatorSelection: { ...authenticatorSelection, residentKey: "required", requireResidentKey: true }
     });
     return { ...options, challengeId: issued.id };
