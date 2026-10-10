@@ -73,6 +73,7 @@ import { attentionReport } from "./owner-attention.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
+import { provisionFromPaste, SetupLineError } from "./room-in-a-paste.mjs"; // hs2-room-in-a-paste (1d).
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
 import { createNextActionsRoutes } from "./next-actions-routes.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
@@ -3144,6 +3145,36 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         const created = agentRooms.create(secret, data);
         return json(res, created.duplicate ? 200 : 201, created);
+      }
+      // hs2-room-in-a-paste (1d): provision a room from a single pasted
+      // setup line (pr-setup://v1?...). Same bearer-identity auth and
+      // per-address rate limit as POST /api/agent-rooms. A wake URL in the
+      // line subscribes the identity to the 1c counts-only agent.wake
+      // webhook there (fail-fast on non-public URLs, like /api/agent-webhooks).
+      // The device-code field is carried through as pending — its approval
+      // wiring lands with guild B1's 1b (see server/room-in-a-paste.mjs).
+      if (url.pathname === "/api/agent-rooms/from-paste" && req.method === "POST") {
+        rate(`agent-room-from-paste:${remoteAddress}`, 20);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+        const data = await body(req);
+        if (!data || typeof data.setupLine !== "string") reject(422, "invalid_setup_line", "setupLine is required");
+        let provisioned;
+        try {
+          provisioned = await provisionFromPaste({
+            createRoom: (identitySecret, request) => agentRooms.create(identitySecret, request),
+            subscribeWake: async ({ identityId, url: wakeUrl, events }) => {
+              await store.agentPlugin.assertWebhookUrl(wakeUrl);
+              return store.agentPlugin.subscribeWebhook({ identityId, url: wakeUrl, events });
+            },
+            setupLine: data.setupLine,
+            identitySecret: secret,
+          });
+        } catch (error) {
+          if (error instanceof SetupLineError) reject(422, error.code, error.message);
+          throw error;
+        }
+        return json(res, provisioned.duplicate ? 200 : 201, provisioned);
       }
       // GET is a documented identity-secret list (401 without a pri_), not a
       // POST-only route. Other methods are not part of that contract.

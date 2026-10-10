@@ -31,6 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { pendingWakeCounts } from "./agent-wake-webhooks.mjs"; // hs2-webhook-counts (1c): counts-only wake pings.
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -902,12 +903,22 @@ export class AgentPluginStore {
   // with the cron tick as the restart-safe backstop; the agent sees each
   // delivery in its journal. No subscription, no delivery — the heartbeat
   // queue alone carries the wake.
-  deliverWakePing({ identityId, signal }) {
+  //
+  // hs2-webhook-counts (1c): the journaled payload is counts-only by
+  // default — the webhook names the agent and its pending wake counts,
+  // never the signal content (privacy-contract parity with the human push
+  // channel). Counts are tallied from the durable wake queue at journal
+  // time, uncapped, so the receiver sees the true backlog even past the
+  // poll page cap. Pass full:true only for receivers that explicitly
+  // opted into the legacy full-signal payload. Failed deliveries ride the
+  // standard redelivery queue (failed with backoff, then dead_letter).
+  deliverWakePing({ identityId, signal, full = false }) {
     const result = this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
       const deliveries = [];
-      const wakePing = buildWakePing({ agentId: identityId, signal });
+      const counts = pendingWakeCounts(this.db, identityId);
+      const wakePing = buildWakePing({ agentId: identityId, signal, counts, full });
       const eventId = signal?.signalId ?? null;
       for (const row of rows) {
         let events = [];

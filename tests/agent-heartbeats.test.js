@@ -143,11 +143,16 @@ test("hosts and signals survive a restart (new instance on the same database)", 
 
 test("buildWakePing carries the canonical agent.wake payload", () => {
   const signal = { signalId: "ws_1", agentId: "ai_x", kind: "mention", roomId: "r", messageId: "m" };
-  const payload = buildWakePing({ agentId: "ai_x", signal });
+  // hs2-webhook-counts (1c): counts-only by default; the full signal rides
+  // only the explicit opt-in.
+  const payload = buildWakePing({ agentId: "ai_x", signal, counts: { pending: 1, mentions: 1, dms: 0 } });
   assert.equal(payload.event, WAKE_PING_EVENT);
   assert.equal(payload.event, "agent.wake");
   assert.equal(payload.agentId, "ai_x");
-  assert.deepEqual(payload.signal, signal);
+  assert.deepEqual({ ...payload.counts }, { pending: 1, mentions: 1, dms: 0 });
+  assert.ok(!("signal" in payload));
+  const full = buildWakePing({ agentId: "ai_x", signal, full: true });
+  assert.deepEqual(full.signal, signal);
   assert.throws(() => buildWakePing({ agentId: "ai_x", signal: { kind: "mention" } }), /signalId/);
 });
 
