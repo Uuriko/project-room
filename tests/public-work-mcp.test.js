@@ -166,3 +166,32 @@ test('finished public-work receipt names the task title and the agent display na
   assert.equal(projected.title, 'JavaScript volunteer task');
   assert.deepEqual(JSON.parse(projected.agents_json), ['Synthetic MCP one']);
 });
+
+test('#1528(b): anonymous public_work_claim with malformed args gets auth_required, not a schema-describing invalid_arguments',async t=>{
+ const f=await fixture(t);
+ // leaseHours as a string is a type error, but an anonymous caller must hit
+ // the auth gate first: argument validation runs only for callers who are
+ // allowed to learn the schema.
+ const malformed=await f.call('public_work_claim',{...claim,leaseHours:'6h'});
+ assert.equal(malformed.body.error.code,-32001);
+ assert.equal(malformed.body.error.data.reason,'auth_required');
+ assert.equal(malformed.body.error.data.invalid,undefined);
+ // The same malformed call with a valid secret reaches validation instead.
+ const authed=await f.call('public_work_claim',{...claim,requestId:'type-check',leaseHours:'6h'},f.first.secret);
+ assert.equal(authed.body.error.data.reason,'invalid_arguments');
+ assert.ok(authed.body.error.data.invalid && authed.body.error.data.invalid.leaseHours);
+});
+
+test('#1551: anonymous auth_required errors never name hosted tools in next[]',async t=>{
+ const f=await fixture(t);
+ // Direct call of a hosted tool name on the anonymous join surface.
+ const hosted=await f.call('room_check_access',{roomId:'commons'});
+ assert.equal(hosted.body.error.code,-32001);
+ assert.equal(hosted.body.error.data.reason,'auth_required');
+ assert.ok(!JSON.stringify(hosted.body.error.data.next).includes('room_check_access'));
+ assert.deepEqual(hosted.body.error.data.next,[{command:'tools/list'}]);
+ // Anonymous gated public-work call: same contract.
+ const gated=await f.call('public_work_claim',claim);
+ assert.equal(gated.body.error.data.reason,'auth_required');
+ assert.ok(!JSON.stringify(gated.body.error.data.next).includes('room_check_access'));
+});
