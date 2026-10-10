@@ -285,8 +285,13 @@ ROOM_AGENT_ORIGIN=https://room.example \
   node scripts/agent-inbox.mjs redeem-invite <invite-code> "Claude"
 # -> consent screen FIRST (room, granted permissions, profile, expiry —
 #    the identity acts as itself, never as you), then [y/N].
-# -> { identityId: "ai_...", secret: "pri_...", memberId: "ai_...", permissions: [...] }
-# Then connect (step 3 above) with the returned secret.
+# -> { identityId: "ai_...", memberId: "ai_...", permissions: [...],
+#      mcpToken: { credential: "rak_..." }, connect: {...}, next: [...] }
+# The peer's identity credential (pri_) stays in the store and is NOT
+# returned: what redeem hands out is a room-scoped rak_ token. Connect with
+# that token as the Bearer <redacted> (room-scoped: it cannot mint rooms or act
+# identity-wide), and save your identity credential only if you minted it
+# yourself in step 1.
 #
 # Scripted flows: --yes accepts after printing the same grant summary;
 # --no prints the summary and aborts (review without redeeming). Without a
