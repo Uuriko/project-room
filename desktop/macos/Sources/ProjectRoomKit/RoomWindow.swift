@@ -30,6 +30,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public let webView: WKWebView
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
+    private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
     private var localTools: LocalToolsWindow?
     private var authentication: (any RoomAuthenticationSession)?
     private let acceptanceAuthenticationFactory: RoomAuthenticationFactory?
@@ -87,6 +88,12 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             let button = NSButton(title: title, target: self, action: action)
             button.bezelStyle = .rounded; bar.addArrangedSubview(button)
         }
+        cancelSignInButton.target = self
+        cancelSignInButton.action = #selector(cancelSignIn)
+        cancelSignInButton.keyEquivalent = "\u{1b}"
+        cancelSignInButton.keyEquivalentModifierMask = []
+        cancelSignInButton.isHidden = true
+        bar.addArrangedSubview(cancelSignInButton)
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -117,6 +124,9 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         if signInPending { cancelAuthentication(message: "Sign-in cancelled. Your room is unchanged.") }
         else { webView.goBack() }
     }
+    @objc public func cancelSignIn() {
+        if signInPending { cancelAuthentication(message: "Sign-in cancelled. Your room is unchanged.") }
+    }
     @objc public func forward() { if !signInPending { webView.goForward() } }
     @objc public func reload() { if !signInPending { webView.reload() } }
     @objc public func goTo() {
@@ -132,6 +142,8 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         let attempt = UUID()
         signInAttempt = attempt
         signInPending = true
+        cancelSignInButton.isHidden = false
+        cancelSignInButton.isEnabled = true
         authenticationTimeoutTask = Task { @MainActor [weak self, timeout = authenticationTimeoutNanoseconds] in
             do { try await Task.sleep(nanoseconds: timeout) } catch { return }
             guard let self, self.currentAuthentication(attempt) else { return }
@@ -227,6 +239,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         guard currentAuthentication(attempt) else { return }
         authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
         signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
+        cancelSignInButton.isHidden = true
         cookieCommitPending = false; cookieCommitWaitExpired = false
         signInSlot = nil; pendingDestination = nil; authentication = nil; webView.isHidden = false
     }
@@ -256,6 +269,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             guard currentAuthentication(attempt) else { return }
             guard let tuple = slot as? String, tuple == signInSlot else { tell("The account changed while signing in. Your current session was kept."); return }
             cookieCommitPending = true
+            cancelSignInButton.isEnabled = false
             status.stringValue = "Finishing sign-in…"
             authenticationTimeoutTask?.cancel()
             authenticationTimeoutTask = Task { @MainActor [weak self, timeout = cookieCommitTimeoutNanoseconds] in
