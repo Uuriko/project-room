@@ -244,3 +244,30 @@ test("registration options for an email account carry a WebAuthn-legal user.id (
   const again = auth.beginRegistration({ accountId: emailAccount, rpId: "example.test", userName: "Ada" });
   assert.equal(again.user.id, options.user.id, "stable per account so a re-register replaces the same passkey slot");
 });
+
+test("beginRegistration always forces discoverable credentials (residentKey required)", () => {
+  // Login is discoverable-only (beginAuthentication sends no allowCredentials),
+  // so a registered credential is useless unless it is discoverable. The server
+  // must force resident keys even when the caller asks for less.
+  const seen = [];
+  const recordingVerifiers = { ...stubVerifiers,
+    createRegistrationOptions: args => {
+      seen.push(args.authenticatorSelection);
+      return stubVerifiers.createRegistrationOptions(args);
+    }
+  };
+  const { auth } = service({ verifiers: recordingVerifiers });
+  auth.beginRegistration({ accountId: "acct-1", rpId: "example.test", userName: "Ada" });
+  auth.beginRegistration({ accountId: "acct-1", rpId: "example.test", userName: "Ada",
+    authenticatorSelection: { residentKey: "preferred", userVerification: "discouraged" } });
+  auth.beginRegistration({ accountId: "acct-1", rpId: "example.test", userName: "Ada",
+    authenticatorSelection: { residentKey: "discouraged" } });
+  assert.equal(seen.length, 3);
+  for (const selection of seen) {
+    assert.equal(selection.residentKey, "required",
+      "registration must create discoverable credentials: login sends no allowCredentials");
+    assert.equal(selection.requireResidentKey, true);
+  }
+  // Caller extras are preserved; only the resident-key requirement is forced.
+  assert.equal(seen[1].userVerification, "discouraged");
+});
