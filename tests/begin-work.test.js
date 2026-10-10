@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { beginRequestId, beginSelectedWork, planBegin } from "../client/begin-work.mjs";
+import { beginRequestId, beginSelectedWork, planBegin, sameExactScope } from "../client/begin-work.mjs";
 import { roomTools, validRoomToolArguments } from "../client/mcp-stdio.mjs";
 import { HOSTED_ROOM_MCP_TOOLS } from "../src/room-mcp-join.js";
 
@@ -99,4 +99,35 @@ test("room_begin_work is a hosted tool and rejects a guessed extra field", async
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925" }), true);
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", repository: "Uuriko/project-room" }), true);
   assert.equal(validRoomToolArguments("room_begin_work", { workItemId: "together-begin-20260925", token: "nope" }), false);
+});
+
+test("an NFD spelling of a claimed file is the same Begin scope", () => {
+  const nfc = "server/caf\u00e9.mjs";
+  const nfd = "server/cafe\u0301.mjs";
+  const expiresAt = "2026-10-11T00:00:00.000Z";
+  const claim = {
+    status: "active",
+    holderId: "producer",
+    repository: "Uuriko/project-room",
+    ref: "grok/begin-nfd",
+    paths: [nfc],
+    expiresAt,
+  };
+  const scope = { repository: claim.repository, ref: claim.ref, paths: [nfd], expiresAt };
+  assert.equal(sameExactScope(claim, scope), true);
+  assert.equal(beginRequestId("work", "room_acquire_claim", 4, scope), beginRequestId("work", "room_acquire_claim", 4, { ...scope, paths: [nfc] }));
+  const writer = { id: "producer", active: true, permissions: ["accept_work", "write_external"] };
+  const item = {
+    id: "work",
+    state: "accepted",
+    mode: "write",
+    revision: 4,
+    accountableMemberId: "producer",
+    claim,
+  };
+  const plan = planBegin(item, writer, { scope, now: Date.parse("2026-10-10T12:00:00.000Z") });
+  assert.equal(plan.reason, null);
+  assert.equal(plan.stage.action, "room_start_work");
+  assert.equal(sameExactScope(claim, { ...scope, paths: ["server/Caf\u00e9.mjs"] }), false);
+  assert.equal(sameExactScope(claim, { ...scope, paths: [nfd, "src/other.mjs"] }), false);
 });
