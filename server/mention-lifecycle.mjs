@@ -170,6 +170,9 @@ export function identityNamesForRoom(db, roomId) {
   }
 }
 
+// A hyphen continues the handle. "@Instinct-3" is not a mention of "Instinct".
+const handleContinues = (text, end) => end < text.length && /[A-Za-z0-9_-]/.test(text[end]);
+
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous
 // longer label to a shorter recipient. Silent @_mentions, email addresses,
@@ -186,7 +189,7 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
       if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
-      if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
+      if (handleContinues(text, end)) continue;
       if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
       if (candidate.lower.length === longest) matches.push(candidate);
     }
@@ -227,7 +230,7 @@ export function mentionTargetWarnings(members, identityNames, text, senderMember
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
       if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
-      if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
+      if (handleContinues(text, end)) continue;
       if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
       if (candidate.lower.length === longest) matches.push(candidate);
     }

@@ -112,6 +112,16 @@ test("G16b: legacy duplicate display names notify all non-sender candidates", ()
   assert.deepEqual(resolveMentionTargetsInText(prefixMembers, {}, "@Alice can you check?", "alice"), []);
 });
 
+test("a hyphen suffix is not a mention of the shorter display name", () => {
+  const members = { instinct1: { displayName: "Instinct", active: true } };
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Instinct-3 please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Instinct please", "me"), ["instinct1"]);
+  const warnings = mentionTargetWarnings(members, {}, "ping @Instinct-3 please", "me");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].handle, "Instinct-3");
+  assert.equal(warnings[0].reason, "not_member");
+});
+
 // --- Store: tracking ------------------------------------------------------
 
 test("posting @alice creates a delivered mention row; unknown names do not", t => {
