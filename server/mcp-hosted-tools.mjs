@@ -30,7 +30,8 @@ export const hostedRoomTools = [
     roomId: { type: "string", minLength: 1, maxLength: 64 },
     kind: { type: "string", enum: [...ROOM_KINDS] },
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key for creates that omit roomId: retrying with the same requestId and parameters returns the original room (duplicate:true); reusing it with different parameters is 409 request_conflict." },
-    displayName: { type: "string", minLength: 1, maxLength: 80 }
+    displayName: { type: "string", minLength: 1, maxLength: 80 },
+    starter: { type: "boolean", default: true, description: "Whether to seed the room's starter work-claim task. Defaults to true." }
   }, ["title", "purpose"]), false),
   tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. displayName defaults to this identity's name. Does not mint a new identity.", schema({
     linkToken: { type: "string", minLength: 1, maxLength: 200 },
