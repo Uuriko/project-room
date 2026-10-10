@@ -7359,7 +7359,10 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     const messageId = i.draftCount > 1 ? null : i.draftMessageId ?? (i.kind === "request" ? i.id : null);
     const href = messageId ? recordHref("message", messageId) : workHref(i.id);
     const target = messageId ? `data-open-message="${esc(messageId)}"` : `data-open-work="${esc(i.id)}"${i.draftCount > 1 ? ' data-view-drafts' : ''}`;
-    const label = messageId || i.draftCount > 1 || i.recovery ? i.label : nextWorkStep(state.workItems[i.id], now).label;
+    // Needs-you rows already carry contributionSteps' attention-aware label;
+    // recomputing nextWorkStep here dropped that framing (and the ownerId) and
+    // disagreed with the board's to-chase semantics.
+    const label = i.label;
     return `<li class="rb-event"><a class="work-link" href="${esc(href)}" ${target} data-brief-key="${esc(i.kind === "work" ? `attention:${i.id}` : i.key)}">${esc(i.title)}</a> <span class="rb-detail">${esc(label)}</span></li>`;
   }).join("")
     || (current ? '<li class="rb-empty">Nothing waiting for you.</li>' : ""));
