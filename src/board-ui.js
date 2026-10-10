@@ -634,7 +634,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     return "Closed stale claims";
   }
 
-  async function load({ force = false } = {}) {
+  async function load({ force = false, focus = null } = {}) {
     const session = getSession(), owned = context();
     if (!owned) return;
     if (loadedContext !== owned) {
@@ -664,6 +664,9 @@ export function installWorkBoard({ client, getState, getSession }) {
       loadedRoom = session.roomId;
       seen = mark;
       boardLoading = false;
+      // Announce completion only with the fresh claim state. Loading and
+      // filter paints must not consume an action's success while it is pending.
+      if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
       paint();
       return true;
     } catch {
@@ -688,7 +691,6 @@ export function installWorkBoard({ client, getState, getSession }) {
     // An explicit action supersedes a background read; its stale response
     // cannot paint or block the fresh list after this mutation.
     readFlight = null;
-    if (focus) { pendingFocus = { key: focus.key ?? null, id: focus.id ?? null }; pendingStatus = focus.status ?? ""; }
     mutating = true;
     if (focus?.pending) note(focus.pending);
     let pending = null;
@@ -697,7 +699,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       await pending;
       if (mine !== operation || context() !== owned) return;
       // Keep duplicate mutations excluded until their new state is visible.
-      const refreshed = await load({ force: true });
+      const refreshed = await load({ force: true, focus });
       if (reconcile && actionFlight === pending && context() === owned) {
         note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
       }
@@ -705,7 +707,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       if (mine !== operation || context() !== owned) return;
       if (reconcile) {
         note("Checking the current claim…");
-        const refreshed = await load({ force: true });
+        const refreshed = await load({ force: true, focus });
         if (actionFlight === pending && context() === owned) {
           note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
         }
