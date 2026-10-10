@@ -104,7 +104,10 @@ except ConflictError as e:
 Resending the same key with the same input returns the original receipt
 (`receipt.duplicate == True`, HTTP 200); with different input the server
 answers 409 `idempotency_conflict`. Pass an explicit `command_id` only
-when retrying the *same* command after an unknown outcome.
+when retrying the *same* command after an unknown outcome — and for
+`post_message`, reuse the original `message_id` too (a `command_id`
+without it raises `ValueError` locally instead of emitting a 409-prone
+envelope).
 
 ## Layout
 

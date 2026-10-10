@@ -139,7 +139,13 @@ class RoomEvent:
 
 @dataclass
 class EventPage:
-    """One page from ``GET /api/rooms/{roomId}/events``."""
+    """One page from ``GET /api/rooms/{roomId}/events``.
+
+    The server wraps every log entry as ``{"sequence": N, "event": {...}}``
+    (see ``store.eventsAfter``); the entry's own sequence lives on the
+    wrapper — the event body itself carries no sequence. Parse the inner
+    event and retain the wrapper sequence.
+    """
 
     events: List[RoomEvent]
     next: Optional[int]
@@ -148,8 +154,19 @@ class EventPage:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "EventPage":
         items = d.get("events")
+        parsed: List[RoomEvent] = []
+        if isinstance(items, list):
+            for row in items:
+                if isinstance(row, dict) and isinstance(row.get("event"), dict):
+                    ev = RoomEvent.from_dict(row["event"])
+                    if ev.sequence is None:
+                        ev.sequence = _opt_int(row, "sequence")
+                    parsed.append(ev)
+                elif isinstance(row, dict):
+                    # Tolerate a bare event dict (older fakes).
+                    parsed.append(RoomEvent.from_dict(row))
         return cls(
-            events=[RoomEvent.from_dict(e) for e in items] if isinstance(items, list) else [],
+            events=parsed,
             next=_opt_int(d, "next"),
             has_more=bool(d.get("hasMore")),
         )
@@ -195,11 +212,13 @@ class MessageRecord:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "MessageRecord":
+        # Server message records use id/replyToId (see src/events.js
+        # postMessage). messageId/parentId are kept as legacy aliases.
         return cls(
-            message_id=_opt_str(d, "messageId"),
+            message_id=_opt_str(d, "id") or _opt_str(d, "messageId"),
             body=_opt_str(d, "body"),
             channel_id=_opt_str(d, "channelId"),
-            parent_id=_opt_str(d, "parentId"),
+            parent_id=_opt_str(d, "replyToId") or _opt_str(d, "parentId"),
             author_id=_opt_str(d, "authorId"),
             created_at=_opt_str(d, "createdAt") or _opt_str(d, "at"),
             raw=dict(d),
