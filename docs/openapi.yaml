@@ -8635,13 +8635,15 @@ paths:
         Open (also HEAD). The Worker answers with per-job lastSuccessAt /
         lastError for the cron jobs, read through one Durable Object RPC,
         plus `publicReports` (open public abuse reports). 200 `{ status, jobs,
-        publicReports }` when every job is fresh; 503 when a job is stale,
+        publicReports }` when every job is fresh, or with status `degraded`
+        when a job ran but was held by GitHub's rate limit (that job reads
+        `degraded: github_rate_limited`); 503 when a job is stale,
         failing, or the read is unavailable. The Node process answers 200
         `{ schema, publicReports, servedBy: "node" }` and does not invent a
         cron status. Operational metadata only, no room data and no report bodies.
       security: []
       responses:
-        '200': { description: "Worker: { status, jobs, publicReports } when fresh. Node: { schema, publicReports, servedBy: node }" }
+        '200': { description: "Worker: { status, jobs, publicReports } when fresh or degraded. Node: { schema, publicReports, servedBy: node }" }
         '503': { description: "Worker: a job is stale or failing, or the heartbeat read failed" }
     head:
       summary: Read public response headers
