@@ -53,6 +53,22 @@ moves as routes are added or removed. Do not pin a fixed number in
 runbooks: older notes said "512/512", which went stale. Trust the check
 output, not the number.
 
+## The served spec is a curated surface (qa7-03)
+
+`GET /openapi.json` is generated from `DISCOVERABILITY_ROUTES`
+(`server/discoverability.mjs`): a hand-maintained inventory of the in-scope
+**machine** surfaces, deliberately not the full route table. The exclusions
+in `scripts/openapi-served-exclusions.json` are intentional scope decisions
+(human web-UI backends, account auth, operator console, and similar), each
+with a written reason — they are not documentation debt and the curated
+surface is the design (qa7-03 ruling, 2026-10: KEEP).
+
+`tests/openapi-served-coverage.test.js` enforces both directions: no phantom
+paths in the served spec, and no silent omissions — a new served `/api`
+route fails CI until it is either inventoried in
+`server/discoverability.mjs` or added to the exclusion file with a reason,
+and a stale exclusion prefix that matches nothing fails CI too.
+
 ## Who owns it
 
 The gate was introduced by **batch RT**. It stays a check (not a
