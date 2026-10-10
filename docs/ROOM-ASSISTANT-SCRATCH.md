@@ -18,7 +18,18 @@ For every run whose coordinator is this host's member, it does the following:
 8. It acknowledges `pause_requested`, `cancel_requested` and `resume_requested`.
 9. When the executor fails, it reports `failed` with the reason, not `done`.
 
-**Known gap.** The server has no run-bound publication yet: the answer is an ordinary `/commands` post. A Stop that lands in the instant between the host's final read and its post can still leave one answer in chat. The host still reports `cancelled` and never attaches that answer as the run's result. It returns `postedBeforeStop` instead of hiding it, and a test pins this. Closing the gap needs a server publish fence on the run revision, which is server work and outside this slice.
+**SV-1 (safety value 1): a stopped run never publishes its answer.** This is now
+enforced in code, not just documented. The assistant route has a `publish`
+action: the host submits the answer `body` (plus `summary` and
+`appliedInputMessageIds`), and the server posts it as the coordinator in the
+same transaction that marks the run `done`. The fence checks the reserved
+`attemptId`, the run `expectedRevision`, and that no stop is pending — a stop
+that landed first rejects the publish with 409, so the answer never reaches
+chat. A cancel on a host silent for over two minutes completes immediately
+and revokes its attempt (independent stop); any late host report or publish
+is then rejected. Hosts should publish instead of posting then reporting
+`done`; the old post-then-report path still works but cannot close the race.
+The `postedBeforeStop` return below only applies to that legacy path.
 
 Claims, reports and posts use stable ids, so repeating a pass never double-claims or double-posts.
 

@@ -200,7 +200,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);
-    return { value: withContentTrust(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize)), isError: false };
+    return { value: withContentTrust(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize, secret)), isError: false };
   }
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
