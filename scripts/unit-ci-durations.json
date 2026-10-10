@@ -920,6 +920,7 @@
   "tests/access-request-upgrade.test.mjs": 1038.93,
   "tests/entry-docs-start-here.test.mjs": 129.053,
   "tests/guest-agent-refresh.test.mjs": 694.755,
+  "tests/guest-expiry-401-branch.test.mjs": 12000,
   "tests/guest-invite-expiry-docs.test.mjs": 64.69,
   "tests/guest-token-expiry.test.mjs": 566.757,
   "tests/landing-hero.test.mjs": 274.09,
