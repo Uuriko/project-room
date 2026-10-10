@@ -165,7 +165,7 @@ test("a delayed restore cannot replace a newer explicit login", async () => {
     fetcher: async (path, options) => {
       if (path === "/api/session" && options.method === "GET") return oldRestore.promise;
       if (path === "/api/session" && options.method === "POST") return response(identity("other"), 201);
-      if (path === "/api/rooms/commons") return response(snapshot(7, "other"));
+      if (path.split("?")[0] === "/api/rooms/commons") return response(snapshot(7, "other"));
       throw new Error(`Unexpected request: ${options.method} ${path}`);
     },
     onSnapshot: (value, current) => seen.push([value.sequence, current.member.id])
@@ -383,7 +383,7 @@ function liveRefreshFixture(t, snapshotRead = async sequence => response(snapsho
   const seen = [];
   const client = new RoomClient({ events: Events, onSnapshot: value => seen.push(value.sequence), fetcher: async (url, options) => {
     if (url === '/api/rooms/commons/commands' && options.method === 'POST') return response(event(current));
-    assert.equal(url, '/api/rooms/commons', 'unexpected transport request');
+    assert.equal(url.split('?')[0], '/api/rooms/commons', 'unexpected transport request');
     assert.equal(options.method, 'GET');
     reads++;
     return snapshotRead(current, reads);
