@@ -109,3 +109,46 @@ test("HTTP: the same second room and identity mint are still refused when a mail
   assert.equal(second.status, 403);
   assert.equal((await post("/api/agent-identities", { displayName: "Mailer mint" }, { Cookie: headers.Cookie })).status, 403);
 });
+
+// A mailer that is configured but erroring is an outage, not "unachievable":
+// isConfigured() stays true, so the gates keep refusing (fail closed).
+test("HTTP: a configured mailer whose delivery fails keeps every gate strict", async t => {
+  const failing = createMagicLinkMailer({ send: async () => { throw new Error("smtp down"); } });
+  assert.equal(failing.isConfigured(), true);
+  const { post, headers, room } = await http(t, failing);
+  assert.equal((await room("second")).status, 403);
+  assert.equal((await post("/api/agent-identities", { displayName: "Outage mint" }, { Cookie: headers.Cookie })).status, 403);
+});
+
+// The same running server: flipping the mailer from disabled to configured
+// flips the gates from relaxed to strict with no restart and no stale answer.
+test("HTTP: disabled -> configured flips the gates on the same server (no restart)", async t => {
+  const state = { configured: false };
+  const inner = createMagicLinkMailer({ send: async () => {} });
+  const switchable = Object.freeze({
+    isConfigured: () => state.configured,
+    sendMagicLink: args => inner.sendMagicLink(args),
+    sendPasswordResetNotice: args => inner.sendPasswordResetNotice(args),
+  });
+  const { post, headers, room } = await http(t, switchable);
+  assert.equal((await room("relaxed")).status, 201, "no mailer: relaxed");
+  assert.equal((await post("/api/agent-identities", { displayName: "Relaxed mint" }, { Cookie: headers.Cookie })).status, 201);
+  state.configured = true;
+  assert.equal((await room("strict")).status, 403, "mailer enabled: strict again, no restart");
+  assert.equal((await post("/api/agent-identities", { displayName: "Strict mint" }, { Cookie: headers.Cookie })).status, 403);
+  state.configured = false;
+  assert.equal((await room("relaxed-again")).status, 201, "and relaxed again when it is disabled again");
+});
+
+// Relaxing the gate never changes who the account is: it stays unverified, its
+// email is not treated as a verified identity, and nothing binds to it.
+test("relaxing the gate leaves the email unverified and the identity binding untouched", t => {
+  const { store } = unverifiedOwner(t);
+  unachievable(store, true);
+  store.accountLogins.assertEmailVerified("owner-acct");
+  assert.equal(store.accountLogins.emailStatus("owner-acct"), "unverified");
+  assert.equal(store.accountLogins.emailVerification("owner-acct").verified, false);
+  assert.equal(store.accountLogins.findAccountByVerifiedEmail("gate@example.com"), null, "an unverified email is never a verified identity");
+  const methods = store.db.prepare("SELECT account_id AS accountId, verified_at AS verifiedAt FROM account_login_methods WHERE email IS NOT NULL").all();
+  assert.deepEqual(methods.map(m => [m.accountId, m.verifiedAt]), [["owner-acct", null]]);
+});

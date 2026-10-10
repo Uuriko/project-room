@@ -227,7 +227,7 @@ export function operatorExportResponse(request, token, db) {
 
 // REL-14: the inverse of sanitizeCell's BLOB encoding. Any other object is
 // refused by name instead of failing as an unbindable parameter.
-function cellOf(value) {
+export function cellOf(value) {
   if (value === null || typeof value !== "object") return value;
   const keys = Object.keys(value);
   if (keys.length === 1 && keys[0] === "$base64" && typeof value.$base64 === "string") {
@@ -241,7 +241,7 @@ function cellOf(value) {
 
 // REL-14 (Instinct-3 4534): a file row carries its own byte_length and sha256;
 // replay proves the decoded bytes against both, so a tampered BLOB is refused.
-function checkStoredBytes(table, row) {
+export function checkStoredBytes(table, row) {
   if (!(row.bytes instanceof Uint8Array)) return;
   if (typeof row.byte_length === "number" && row.bytes.length !== row.byte_length)
     throw new Error(`Export ${table} row ${row.id ?? "?"} bytes do not match its byte_length`);

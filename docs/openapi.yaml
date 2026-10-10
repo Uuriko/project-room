@@ -8721,6 +8721,39 @@ paths:
         '200': { description: Headers only }
         '401': { description: Wrong operator token }
         '404': { description: Export is not configured }
+  /api/operator/restore:
+    post:
+      summary: Operator Durable Object restore
+      x-worker-only: true
+      x-room-permission: operator
+      description: >-
+        Operator only. Answered by the Durable Object. Requires
+        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters),
+        the same token as GET /api/operator/export. A missing or short token
+        is 404. A wrong token is 401. The body is the NDJSON an export
+        produced (watermark line, {table, row} lines, optional trailer).
+        Binary cells are decoded and proved against their byte_length and
+        sha256, and a torn export is refused. The store must hold no rooms:
+        a non-empty store is 409 and is never overwritten. Replay runs in one
+        transaction, so a failed restore leaves the store empty and retryable.
+        Other methods are 405.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-ndjson:
+            schema: { type: string }
+      responses:
+        '200': { description: "{ ok, verified, events, ... } restore summary" }
+        '400': { description: Body could not be read }
+        '401': { description: Wrong operator token }
+        '404': { description: Restore is not configured }
+        '405': { description: Method is not POST }
+        '409': { description: Store already holds rooms }
+        '413': { description: Body over the 64 MiB cap }
+        '422': { description: Export is invalid or failed verification }
+        '503': { description: Store unavailable }
   /api/version:
     get:
       summary: Deployed revision
