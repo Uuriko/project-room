@@ -21,6 +21,8 @@
     <link rel="stylesheet" href="./src/board.css">
     <link rel="stylesheet" href="./src/public-a11y.css">
     <link rel="stylesheet" href="./src/human-experience.css">
+    <link rel="stylesheet" href="./src/room-polish.css">
+    <link rel="stylesheet" href="./src/work-panel.css">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
@@ -41,7 +43,7 @@
       </section>
       <header class="topbar">
         <div class="brand" aria-label="Project Room">
-          <span class="brand-mark" aria-hidden="true">PR</span>
+          <img class="brand-mark" src="/favicon.svg" alt="" width="32" height="32">
           <div>
             <strong>Project Room</strong>
           </div>
@@ -339,6 +341,7 @@
             <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+              <button id="work-panel-toggle" class="topbar-button" type="button" aria-controls="work-panel" aria-expanded="false" hidden>Work <span id="work-panel-count" class="count-chip" hidden></span></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="count-chip"></span></button>
               <details id="room-more" class="room-more"><summary class="topbar-button">More</summary>
                 <div class="room-more-actions">
@@ -350,6 +353,7 @@
               </details>
             </div>
           </header>
+          <div id="presence-strip" class="presence-strip" aria-label="Who is here" hidden></div>
           <section id="needs-attention" class="needs-attention" aria-label="Needs your attention" hidden>
             <header class="attention-header">
               <h3><span class="attention-icon" aria-hidden="true">!</span> Needs your attention <span id="attention-count" class="count-chip"></span></h3>
@@ -439,6 +443,10 @@
           </form>
           <button id="resume-action" class="button secondary pending-save" type="button" hidden>Check pending save</button>
         </section>
+        <aside id="work-panel" class="work-panel" aria-labelledby="work-panel-title" hidden>
+          <div class="work-panel-head"><h2 id="work-panel-title" tabindex="-1">Work</h2><span id="work-panel-summary" class="work-panel-summary"></span><button class="button ghost work-panel-close" type="button" data-wp-close>Close</button></div>
+          <div id="work-panel-body" class="work-panel-body"></div>
+        </aside>
 
         <dialog id="room-overview-dialog" aria-labelledby="room-overview-title">
           <div class="dialog-head"><h2 id="room-overview-title">Room overview</h2><button id="room-overview-close" class="button ghost" type="button">Close</button></div>

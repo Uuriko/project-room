@@ -229,6 +229,7 @@ async function assetResponse(request, env, url) {
     if (publicHtmlNotFoundPath(url.pathname) && acceptPrefersHtml(request.headers.get('accept'))) {
       const page = new TextEncoder().encode(PUBLIC_NOT_FOUND_HTML);
       headers.set('X-Robots-Tag', 'noindex');
+      headers.set('Content-Security-Policy', PUBLIC_SEARCH_CSP);
       headers.set('Content-Type', 'text/html; charset=utf-8');
       headers.set('Content-Length', String(page.byteLength));
       return new Response(request.method === 'HEAD' ? null : page, { status: 404, headers });

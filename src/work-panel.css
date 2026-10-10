@@ -1,0 +1,82 @@
+/* Work panel (room-full phase 1). Its own file so it does not collide
+   with open work in styles.css. Wide screens: a third column. Narrow: a drawer. */
+.work-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); border-left: 1px solid var(--line-soft); }
+.work-panel-head { display: flex; align-items: baseline; gap: .5rem; padding: .9rem 1rem .5rem; }
+.work-panel-head h2 { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.work-panel-head h2:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
+.work-panel-summary { color: var(--muted); font-size: var(--text-sm); }
+.work-panel-close { margin-left: auto; }
+.work-panel-body { flex: 1; overflow: auto; padding: 0 .75rem 1rem; display: flex; flex-direction: column; gap: 1rem; }
+.wp-section { display: flex; flex-direction: column; gap: .5rem; }
+.wp-heading { display: flex; justify-content: space-between; margin: 0; padding: 0 .35rem; font-size: var(--text-xs); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.wp-heading:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.wp-count { font-variant-numeric: tabular-nums; }
+.wp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.wp-card { display: flex; flex-direction: column; gap: .35rem; padding: .7rem .75rem; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--panel); }
+.wp-card.wp-needsYou { border-color: var(--blue); }
+.wp-card p { margin: 0; }
+.wp-title { font-weight: 600; font-size: var(--text-sm); line-height: 1.35; overflow-wrap: anywhere; }
+.wp-meta { display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: var(--text-xs); }
+.wp-avatar { width: 1.25rem; height: 1.25rem; flex: none; display: inline-grid; place-items: center; color: var(--on-accent); font-size: var(--text-xs); font-weight: 600; background: var(--room-green); border-radius: 50%; }
+.wp-avatar.wp-agent { border-radius: .35rem; background: var(--violet); }
+.wp-avatar.wp-unknown { background: var(--muted); }
+.wp-kind { color: var(--muted); font-size: var(--text-xs); }
+.wp-status { color: var(--muted); font-size: var(--text-xs); }
+.wp-tone-working .wp-status::before { content: ""; display: inline-block; width: .45rem; height: .45rem; margin-right: .4rem; border-radius: 50%; background: var(--amber); vertical-align: .05rem; }
+.wp-tone-blocked .wp-status { color: var(--red); }
+.wp-proof { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .25rem .6rem; font-size: var(--text-xs); color: var(--muted); }
+.wp-proof li::before { content: "✓ "; color: var(--green); }
+.wp-proof .wp-proof-fail { color: var(--red); }
+.wp-proof .wp-proof-fail::before { content: "✕ "; color: var(--red); }
+.wp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; margin-top: .15rem; }
+.wp-link { font-size: var(--text-xs); color: var(--muted); }
+.wp-link:hover { color: var(--text); }
+.wp-done .wp-title { font-weight: 500; }
+.wp-done { opacity: .78; }
+.wp-catchup { padding: .65rem .8rem; border-radius: var(--radius-lg); background: var(--panel-raised); font-size: var(--text-sm); line-height: 1.45; }
+.wp-catchup ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.wp-catchup li { overflow-wrap: anywhere; }
+.wp-catchup .wp-catchup-needs { font-weight: 600; }
+.wp-empty, .wp-more { margin: 0; padding: 0 .35rem; color: var(--muted); font-size: var(--text-xs); }
+#work-panel-toggle .count-chip[hidden] { display: none; }
+
+@media (min-width: 1200px) {
+  .community-shell.has-work-panel { grid-template-columns: 16rem minmax(0, 1fr) 21rem; }
+  .work-panel { position: sticky; top: 0; height: 100dvh; }
+  /* With the panel open, work in the conversation becomes one compact row:
+     status, title and next step on the left, the action on the right. The
+     full card (evidence, details, copy) stays one click away. */
+  .community-shell.has-work-panel .timeline .work-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 1rem; row-gap: .15rem; align-items: center; padding: .6rem .85rem; }
+  .community-shell.has-work-panel .timeline .work-card > * { grid-column: 1; }
+  .community-shell.has-work-panel .timeline .work-card h3 { margin: 0; }
+  .community-shell.has-work-panel .timeline .work-card .work-next-step { margin: 0; font-size: var(--text-xs); color: var(--muted); }
+  .community-shell.has-work-panel .timeline .work-card .work-actions { grid-column: 2; grid-row: 1 / span 3; align-self: center; margin: 0; }
+  .community-shell.has-work-panel .timeline .work-card > .portable-actions { display: none; }
+  .community-shell.has-work-panel .timeline .work-card .work-details > summary { font-size: var(--text-xs); }
+  /* The owner attention card repeats decisions and reviews the panel already
+     shows. Keep its other rows (join and permission requests, spend, leases). */
+  .community-shell.has-work-panel #needs-attention .attention-item.attention-decision,
+  .community-shell.has-work-panel #needs-attention .attention-item.attention-verification { display: none; }
+  .community-shell.has-work-panel #needs-attention:not(:has(.attention-item:not(.attention-decision):not(.attention-verification))) { display: none; }
+}
+@media (max-width: 1199.98px) {
+  .work-panel { position: fixed; z-index: 40; top: 0; right: 0; bottom: 0; width: min(24rem, 100vw); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); box-shadow: var(--shadow); }
+}
+
+/* Presence strip (room-full phase 4): who is here and what they are on. */
+.presence-strip { padding: .25rem 1.25rem .5rem; overflow-x: auto; scrollbar-width: none; }
+.presence-strip::-webkit-scrollbar { display: none; }
+.ps-list { list-style: none; margin: 0; padding: 0; display: flex; gap: .4rem; }
+.ps-chip { display: inline-flex; align-items: center; gap: .4rem; max-width: 18rem; padding: .2rem .65rem .2rem .2rem; border: 1px solid var(--line-soft); border-radius: 999px; background: var(--panel); color: var(--text); font-size: var(--text-xs); white-space: nowrap; cursor: pointer; }
+.ps-chip:hover { border-color: var(--line); }
+.ps-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.ps-avatar { position: relative; width: 1.35rem; height: 1.35rem; flex: none; display: inline-grid; place-items: center; color: var(--on-accent); font-size: var(--text-xs); font-weight: 600; background: var(--room-green); border-radius: 50%; }
+.ps-avatar.ps-agent { border-radius: .35rem; background: var(--violet); }
+.ps-name { font-weight: 600; }
+.ps-line { overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.ps-working .ps-avatar::after { content: ""; position: absolute; inset: -3px; border: 2px solid var(--amber); border-radius: inherit; }
+.ps-listening .ps-avatar.ps-human::after { content: ""; position: absolute; right: -2px; bottom: -2px; width: .45rem; height: .45rem; border-radius: 50%; background: var(--green); border: 2px solid var(--panel); }
+.ps-idle, .ps-unknown, .ps-unreachable { opacity: .72; }
+.ps-more { align-self: center; color: var(--muted); font-size: var(--text-xs); padding: 0 .3rem; }
+@media (prefers-reduced-motion: no-preference) { .ps-working .ps-avatar::after { animation: ps-pulse 1.8s ease-in-out infinite; } }
+@keyframes ps-pulse { 50% { opacity: .35; } }

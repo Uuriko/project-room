@@ -9,6 +9,8 @@ import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, s
 import { TIMELINE_WINDOW, windowTimeline, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
+import { createWorkPanel, workPanelModel } from "./work-panel.js";
+import { presenceStripModel, renderPresenceStrip } from "./presence-strip.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
@@ -669,6 +671,10 @@ instructionsUI = installRoomInstructions({ client, getState: () => state, onSave
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention"), getState: () => state });
+// Work panel: Needs you / In progress / Done today, from the same selectors as catch-up.
+const workPanel = createWorkPanel({ panel: $("#work-panel"), body: $("#work-panel-body"), summary: $("#work-panel-summary"),
+  toggle: $("#work-panel-toggle"), count: $("#work-panel-count"), shell: $("#main"),
+  onAction: (id, action) => { if (!busy && state?.workItems?.[id]) openWorkAction(state.workItems[id], action); } });
 const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
 // JDOT-MEMBER-PERMS-UI end
 // UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
@@ -2003,6 +2009,9 @@ function render() {
     return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
+  const strip = renderPresenceStrip(presenceStripModel({ members: state.members, presence: presenceStates, selfId: session?.member?.id ?? null, stale: presenceStale }));
+  if ($("#presence-strip")._html !== strip) { $("#presence-strip").innerHTML = strip; $("#presence-strip")._html = strip; }
+  $("#presence-strip").hidden = !strip;
   const presenceRow = m => {
     // #660: prefer the server-derived presence entry when we have one; it
     // carries the authoritative working state plus owner/scope projection.
@@ -7330,6 +7339,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   const current = owned ? { evaluatedThrough: client.sequence,
     needsAttention: needsAttention({ workItems: state.workItems, memberId: session.member.id, now }),
     workInvolvingMe: workInvolvingMe({ workItems: state.workItems, memberId: session.member.id }) } : null;
+  workPanel.render(owned ? workPanelModel(state, session.member.id, now) : null);
   const unread = state ? Math.max(0, client.sequence - roomCursor) : 0;
   const contributions = owned ? contributionSteps(state, session.member.id, now) : [];
   renderContribution(contributions, owned);

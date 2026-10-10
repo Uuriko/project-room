@@ -77,7 +77,7 @@ test("favicon, icon, and manifest routes serve the public marks", async t => {
   const icon = await fetch(`${origin}/favicon.svg`);
   assert.equal(icon.status, 200);
   assert.match(icon.headers.get("content-type") ?? "", /image\/svg\+xml/);
-  assert.match(await icon.text(), /#5555bd/);
+  assert.match(await icon.text(), /#3dff8b/); // the green cube mark (docs/DESIGN.md)
   const logo = await fetch(`${origin}/icon.svg`);
   assert.equal(logo.status, 200);
   const manifest = await fetch(`${origin}/manifest.webmanifest`);

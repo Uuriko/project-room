@@ -164,6 +164,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/owner-attention.mjs'); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
   paths.add('server/open-questions.mjs'); // F1: open-questions radar read (imported by server/http.mjs)
   paths.add('src/room-layout.js');
+  paths.add('src/work-panel.js'); paths.add('src/work-panel.css'); paths.add('src/presence-strip.js'); // room-full phase 1 (imported by src/app.js / index.html)
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
   paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)

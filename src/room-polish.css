@@ -1,0 +1,25 @@
+/* Design pass 3 (docs/DESIGN.md). One layer on top of styles.css, kept in
+   its own file so it does not collide with open work in styles.css.
+   Goal: messages first, work cards quieter, one readable column. */
+
+/* One readable column: long lines on wide screens are hard to read. */
+.timeline > * { max-width: 54rem; }
+.composer > form, #message-form { max-width: 54rem; }
+
+/* Work cards sit in the conversation; they should not outweigh it. */
+.work-card { padding: .75rem .95rem; border-radius: var(--radius-lg); background: var(--panel); border-color: var(--line-soft); }
+.work-card h3 { margin: .45rem 0 .15rem; font-size: var(--text-md); font-weight: 600; letter-spacing: -.01em; }
+.work-card .state { padding: .15rem .45rem; font-size: var(--text-xs); font-weight: 600; letter-spacing: .01em; }
+.work-card .work-details > summary { min-height: 2.25rem; padding: .35rem 0; font-size: var(--text-sm); }
+.work-card .work-actions:empty { display: none; }
+
+/* The room assistant line is status, not a panel. */
+#room-assistant { max-width: 54rem; margin: 0 1.25rem; padding: .45rem 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; background: transparent; }
+#room-assistant .assistant-heading { gap: .6rem; font-size: var(--text-sm); }
+@media (max-width: 600px) {
+  #room-assistant { margin: 0 .75rem; }
+  .work-card { padding: .7rem .8rem; }
+}
+
+/* The brand mark is a self-contained image (black tile, green cube); drop the old text-tile fill. */
+img.brand-mark { background: none; border-radius: 0; }

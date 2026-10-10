@@ -14,6 +14,7 @@ import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
 import { HEALTH_PAGE_STYLE } from "../scripts/room-health.mjs";
+import { PUBLIC_NOT_FOUND_HTML } from "../deploy/public-search.mjs";
 
 const RETIRED = /#dfff00|#0B120F|#070608|#fafaf7|#205bb0|#dc673e/i;
 
@@ -57,7 +58,8 @@ const surfaces = {
   "public face": faceHtml(),
   receipts,
   "room export": renderRoomExportHtml([]),
-  "room health": readFileSync(new URL("../docs/room-health.html", import.meta.url), "utf8")
+  "room health": readFileSync(new URL("../docs/room-health.html", import.meta.url), "utf8"),
+  "404 page": PUBLIC_NOT_FOUND_HTML
 };
 
 test("every surface embeds the same dark and light tokens", () => {
