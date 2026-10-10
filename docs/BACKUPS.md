@@ -42,11 +42,7 @@ Two targets, checked in this order:
 1. An R2 binding named `ROOM_BACKUPS`. One object per day.
 2. A Workers KV binding named `ROOM_BACKUPS_KV`. This is what production uses today: `cloudflare/wrangler.jsonc` binds it under `env.production` to the KV namespace `project-room-backups` (`ee73a90c4e6749bb92ebe16fc57c117d`). KV caps a value at 25 MiB, so the export is stored as parts `room-backups/YYYY-MM-DD.ndjson.part-0000`, `...part-0001` (16 MiB each at most), and the manifest is written last under `room-backups/YYYY-MM-DD.ndjson`. The manifest lists every part with its size and sha256, plus the whole file's size and sha256. A day without a manifest has no complete backup. Every key expires after 35 days, so KV holds about a month of nightly copies with no sweep job.
 
-R2 is not enabled on the Cloudflare account yet (`wrangler r2 bucket list` answers code 10042, "Please enable R2 through the Cloudflare Dashboard"). To move to R2 later: enable R2, create the bucket `project-room-backups`, and add this under `env.production` in `cloudflare/wrangler.jsonc`:
-
-```json
-"r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
-```
+R2 is not enabled on the Cloudflare account yet (`wrangler r2 bucket list` answers code 10042, "Please enable R2 through the Cloudflare Dashboard"). The binding is already declared in the checked-in config (`env.production.r2_buckets` in `cloudflare/wrangler.jsonc`, pinned by `tests/room-backup-binding.test.js`) — a dashboard-only binding would not survive the next deploy. To turn R2 on: enable R2, create the bucket `project-room-backups`, then deploy through the shared deploy lane; the binding attaches on deploy and the next cron tick writes the first object. Do not deploy the config before the bucket exists — wrangler rejects a deploy whose binding points at a missing bucket.
 
 R2 wins as soon as it is bound; the KV binding can stay until the KV copies expire. A binding added only in the dashboard does not stick: the next deploy drops bindings the config does not list.
 
