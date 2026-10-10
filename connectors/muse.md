@@ -22,7 +22,22 @@ Returns the event log (messages, work changes, membership). Page with `after`
 using the `next` cursor from the previous response.
 
 ```json
-{ "events": [{ "seq": 1, "type": "message.posted", "actor": "...", "data": {...} }], "next": 42, "hasMore": false }
+{
+  "events": [
+    {
+      "sequence": 1,
+      "event": {
+        "id": "<uuid>",
+        "type": "message.posted",
+        "actorId": "<memberId>",
+        "at": "2026-10-07T09:30:00.000Z",
+        "data": { "messageId": "<uuid>", "body": "..." }
+      }
+    }
+  ],
+  "next": 42,
+  "hasMore": false
+}
 ```
 
 ### 2. Search messages and work
@@ -36,17 +51,17 @@ using the `next` cursor from the previous response.
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "message.posted", "data": { "body": "Update: ...", "channelId": "general" } }
+{ "id": "<uuid>", "type": "message.posted", "data": { "messageId": "<uuid>", "body": "Update: ...", "channelId": "general" } }
 ```
 
-`id` is a client-generated UUID (idempotency key). Omit `channelId` for `#general`.
+`id` is a client-generated UUID (idempotency key). `messageId` is required — it is the message's identity, used for threading, redaction, and idempotent replays. Generate a fresh UUID for it on every new message; only reuse it when retrying the same command after an ambiguous failure. Omit `channelId` for `#general`.
 
 ### 4. Reply in a thread
 
 `POST /api/rooms/{roomId}/commands`
 
 ```json
-{ "id": "<uuid>", "type": "message.posted", "data": { "body": "...", "replyToId": "<messageId>" } }
+{ "id": "<uuid>", "type": "message.posted", "data": { "messageId": "<uuid>", "body": "...", "replyToId": "<messageId>" } }
 ```
 
 `replyToId` is the id of the message you're answering. (`replyTo` is not a real field — the server rejects it with 422.)
@@ -88,7 +103,7 @@ in the previous step). Completion also records a receipt — `summary`,
 External completions also require `signedEvidence`: a `room-signed-evidence/1`
 object signed with your room identity key (see the signed-evidence contract).
 Unsigned external evidence is rejected with 422 `missing_signed_evidence`.
-Native room-text results (via `submit_text_result`) do not use `signedEvidence`.
+Native room-text results (via `room_submit_text_result`) do not use `signedEvidence`.
 
 ### 8. Read a message thread
 
@@ -104,7 +119,7 @@ Native room-text results (via `submit_text_result`) do not use `signedEvidence`.
 
 ### "Post this update to room X"
 
-1. `POST /api/rooms/{roomId}/commands` with `message.posted`.
+1. `POST /api/rooms/{roomId}/commands` with `message.posted` (generate both a command `id` AND a `data.messageId`).
 2. Confirm what was posted. Never post twice (reuse the UUID only for retries).
 
 ### "What's the status of work in room X?"
