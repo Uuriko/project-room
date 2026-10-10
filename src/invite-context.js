@@ -11,6 +11,7 @@
 //
 // Side-effect-free: storage and location parts are passed in, so these are
 // unit-testable without a browser.
+import { normalizeShareInviteCode } from "./share-invite-code.js";
 
 export const PENDING_INVITE_KEY = "pr-pending-invite";
 
@@ -89,15 +90,18 @@ export function takeRestoredInvite({ storage, hash, search }) {
 
 export const PENDING_JOIN_KEY = "pr-pending-join";
 
-// #join/<43-char token> with the optional purpose focus (#join/<token>/work/<id>
+// #join/<token or legacy code> with optional purpose focus (#join/<token>/work/<id>
 // or /message/<id>). The fragment never leaves the browser, so the raw token
 // may touch sessionStorage only for the OAuth round-trip.
-const JOIN_FRAGMENT_PATTERN = /^#join\/[A-Za-z0-9_-]{43}(\/(work|message)\/[^/?#]+)?$/;
+function isJoinFragment(value) {
+  const token = typeof value === "string" && /^#join\/([^/?#]+)(\/(work|message)\/[^/?#]+)?$/.exec(value)?.[1];
+  return Boolean(token && (INVITE_SECRET_PATTERN.test(token) || normalizeShareInviteCode(token)));
+}
 
 // Mirror the join fragment at OAuth-start so the round-trip cannot drop it.
 // Called only from the OAuth entry points — never on invitation preview.
 export function stashPendingJoin(storage, fragment) {
-  if (!storage || typeof fragment !== "string" || !JOIN_FRAGMENT_PATTERN.test(fragment)) return;
+  if (!storage || !isJoinFragment(fragment)) return;
   try { storage.setItem(PENDING_JOIN_KEY, fragment); } catch { /* storage unavailable */ }
 }
 
@@ -109,7 +113,7 @@ export function clearPendingJoin(storage) {
 
 // One-shot restore for boot: returns { valid: true, fragment } when a stashed
 // join link should be re-opened, else null. Always consumes the stash.
-// Never restores over a fresh #join/ or #invite/ hash or a #room/ deep link —
+// Never restores over a fresh #join/, #code/ or #invite/ hash or a #room/ deep link —
 // a freshly opened link always wins over a stale stash. A ?room= search does
 // not block it: that is the OAuth callback's landing for a returning member
 // (see takeRestoredInvite).
@@ -119,8 +123,8 @@ export function takeRestoredJoin({ storage, hash, search }) {
     pending = storage?.getItem(PENDING_JOIN_KEY) ?? null;
     storage?.removeItem(PENDING_JOIN_KEY);
   } catch { return null; }
-  if (typeof pending !== "string" || !JOIN_FRAGMENT_PATTERN.test(pending)) return null;
-  if (typeof hash === "string" && (hash.startsWith("#join/") || hash.startsWith("#invite/"))) return null;
+  if (!isJoinFragment(pending)) return null;
+  if (typeof hash === "string" && (hash.startsWith("#join/") || hash.startsWith("#code/") || hash.startsWith("#invite/"))) return null;
   if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
   return { valid: true, fragment: pending };
 }

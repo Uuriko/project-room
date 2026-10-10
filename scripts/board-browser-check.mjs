@@ -1098,3 +1098,89 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   assert.equal(await page.locator("article[data-claim-id='reader-held']").count(), 1);
   assert.equal(await page.locator("[data-claim-link-pr]").count(), 0, "a held claim does not restore revoked Board-write authority");
 });
+
+// Real-browser guards for the two #2476 repairs. Unit tests model the
+// controller; these hold the actual GET list response in Chromium. On the
+// pre-#2476 board-ui.js both parts fail: focus falls off Save cap when the
+// first read repaints, and "Done" is announced over the stale lease.
+test("held Board reads keep Save cap focus and announce Done only after fresh claims", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "held-done", title: "Finish behind a held read" }, 201);
+  await post(page, origin, "/work-claims/held-done/claim", {});
+  await post(page, origin, "/work-claims/held-done/update", { state: "in_progress" });
+
+  const isList = request => request.method() === "GET" && /\/api\/rooms\/commons\/work-claims$/.test(new URL(request.url()).pathname);
+  const holds = [];
+  const hold = () => {
+    const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+    t.after(() => release.resolve());
+    holds.push({ arrived, release, captured: null });
+    return holds.at(-1);
+  };
+  await page.route("**/api/rooms/commons/work-claims*", async route => {
+    const current = holds.find(entry => !entry.captured);
+    if (!current || !isList(route.request())) return route.continue();
+    current.captured = route.request();
+    const response = await route.fetch();
+    current.arrived.resolve();
+    await current.release.promise;
+    await route.fulfill({ response });
+  });
+  try {
+    // 1. Keyboard focus on Save cap survives the first list read replacing it.
+    const first = hold();
+    await openBoard(page);
+    await first.arrived.promise;
+    assert.equal(await page.locator("article[data-claim-id='held-done']").count(), 0, "the first list read is still held");
+    for (let step = 0; step < 25; step += 1) {
+      if (await page.evaluate(() => document.activeElement?.matches("form[data-claim-cap] button[type='submit']"))) break;
+      await page.keyboard.press("Shift+Tab");
+    }
+    const onSaveCap = () => page.evaluate(() => document.activeElement?.matches("form[data-claim-cap] button[type='submit']") === true);
+    assert.equal(await onSaveCap(), true, "Shift+Tab reaches Save cap while the first read is held");
+    first.release.resolve();
+    await page.locator("article[data-claim-id='held-done'] .claim-lease").waitFor();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    assert.equal(await onSaveCap(), true, "the first read's repaint keeps keyboard focus on Save cap");
+
+    // 2. "Done" is announced only once the refreshed claim (no lease) renders.
+    await page.evaluate(() => {
+      const dialog = document.querySelector("#board-dialog");
+      window.__boardDoneAnnounce = null;
+      new MutationObserver(() => {
+        const status = document.querySelector("#board-status")?.textContent;
+        if (window.__boardDoneAnnounce || status !== "Done 'Finish behind a held read'") return;
+        const card = document.querySelector("article[data-claim-id='held-done']");
+        window.__boardDoneAnnounce = { leases: card?.querySelectorAll(".claim-lease").length ?? -1,
+          column: card?.closest("[aria-labelledby]")?.getAttribute("aria-labelledby") ?? null };
+      }).observe(dialog, { childList: true, characterData: true, subtree: true });
+    });
+    const second = hold();
+    await page.locator("article[data-claim-id='held-done'] [data-claim-action='done']").click();
+    await second.arrived.promise;
+    await page.waitForTimeout(900);
+    assert.equal(await page.evaluate(() => window.__boardDoneAnnounce), null, "no Done announcement while the refreshed list is held");
+    second.release.resolve();
+    await page.waitForFunction(() => window.__boardDoneAnnounce !== null);
+    assert.deepEqual(await page.evaluate(() => window.__boardDoneAnnounce), { leases: 0, column: "board-col-landed" },
+      "Done is announced over the refreshed claim, not the stale lease");
+  } finally {
+    await drainBoardRoutes(page, ...holds.map(entry => entry.release));
+  }
+});
