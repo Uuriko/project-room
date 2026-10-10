@@ -241,25 +241,27 @@ test("the Board list pages done claims by age and summarizes history", async t =
   assert.equal((await f.call("owner", "list", { query: "?state=finished" })).status, 422);
 });
 
-// QUARANTINED — see tests/quarantine.json and docs/FLAKY-QUARANTINE.md.
-// The p95 timing assertion below flakes on loaded/slow VMs (it fails on
-// pristine main), so it is skipped in the blocking suite and runs only in
-// the non-blocking quarantine lane (`npm run test:quarantined`, which sets
-// QUARANTINE_RUN=1).
-const QUARANTINE_RUN = process.env.QUARANTINE_RUN === "1";
-
-test("the Board list endpoint p95 stays under the 50 ms budget", { skip: !QUARANTINE_RUN }, async t => {
+// Perf guard: the Board list cost is priced in CPU time (process.cpuUsage),
+// not wall-clock time. The old wall-clock p95 over 10 samples is the max
+// sample, so one scheduler stall on a loaded runner failed it (5/7 failures
+// on pristine main, e.g. 58.3 ms vs the 50 ms budget; quarantined
+// 2026-10-05). CPU time prices the work the endpoint actually does, so
+// contention stalls don't move it — while a real regression (much more work
+// per list) still fails the budget.
+test("the Board list endpoint CPU cost stays under the 50 ms budget", async t => {
   const f = roomFixture(t);
   seedBoardClaims(f);
-  await f.call("owner", "list", { query: "?limit=200" }); // warm-up
+  await f.call("owner", "list", { query: "?limit=200" }); // warm-up (JIT, caches)
   const samples = [];
   for (let i = 0; i < 10; i++) {
-    const started = performance.now();
+    const before = process.cpuUsage();
     await f.call("owner", "list", { query: "?limit=50" });
-    samples.push(performance.now() - started);
+    const delta = process.cpuUsage(before);
+    samples.push((delta.user + delta.system) / 1000);
   }
   samples.sort((a, b) => a - b);
-  assert.ok(samples[Math.ceil(samples.length * 0.95) - 1] < 50, `list p95 ${samples.at(-1).toFixed(1)} ms`);
+  const median = samples[samples.length >> 1];
+  assert.ok(median < 50, `list CPU median ${median.toFixed(1)} ms (samples: ${samples.map(sample => sample.toFixed(1)).join(", ")})`);
 });
 
 test("Board reads mark another member's claim text untrusted and never the reader's own", async t => {
