@@ -103,3 +103,45 @@ test("selection and delivery failures still never fail the caller", async t => {
   await hb.flushPushes();
   assert.ok(true, "unknown identities stay silent");
 });
+
+test("online agent with a push subscription gets no push target", async t => {
+  const { hb, advance } = unit(t);
+  const transport = mockTransport();
+  hb.setPushTransport(transport);
+  hb.heartbeat(sub("host-1")); // fresh heartbeat -> agent online
+  assert.equal(hb.statusOf("ai_multihost").status, "online");
+  assert.deepEqual(hb.pushTargets("ai_multihost"), [],
+    "an online agent keeps its doorbell silent even with a live subscription");
+  hb.pushNotify({ identityId: "ai_multihost", eventType: "message.posted", roomId: "r", id: "e1", ts: T0 });
+  await hb.flushPushes();
+  assert.equal(transport.calls.length, 0, "no POST is scheduled for an online agent");
+  // Once every host goes stale, the same subscription becomes eligible.
+  advance(HEARTBEAT_STALE_AFTER_MS + 1);
+  assert.equal(hb.statusOf("ai_multihost").status, "offline");
+  assert.equal(hb.pushTargets("ai_multihost").length, 1);
+});
+
+test("pull-only hosts are excluded from push targets", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat({ agentId: "ai_multihost", hostId: "host-pull", mode: "pull-only",
+    pushNotification: { url: PUSH_URL, token: "tok-host-pull" } });
+  advance(HEARTBEAT_STALE_AFTER_MS + 1);
+  assert.equal(hb.statusOf("ai_multihost").status, "offline");
+  assert.deepEqual(hb.pushTargets("ai_multihost"), [],
+    "a pull-only host's subscription never becomes a push target");
+});
+
+test("suspended subscriptions are excluded from push targets", async t => {
+  const { hb, advance } = unit(t);
+  const transport = mockTransport({ status: 500 });
+  hb.setPushTransport(transport);
+  hb.heartbeat(sub("host-1"));
+  advance(HEARTBEAT_STALE_AFTER_MS + 1);
+  assert.equal(hb.pushTargets("ai_multihost").length, 1, "sanity: eligible before failures");
+  for (let i = 0; i < 3; i++) {
+    hb.pushNotify({ identityId: "ai_multihost", eventType: "message.posted", roomId: "r", id: `e${i}`, ts: T0 });
+    await hb.flushPushes();
+  }
+  assert.deepEqual(hb.pushTargets("ai_multihost"), [],
+    "three consecutive delivery failures suspend the subscription out of selection");
+});
