@@ -18,6 +18,14 @@
 //   "taskId, title, termsVersion, and claim state" flat. Reality: those live
 //   nested at rec.task.taskId / rec.task.title / rec.task.termsVersion /
 //   rec.task.claim.state; the recommendation envelope is { task, reasons }.
+//   DOC GAP 4 (step 1 failure modes): only ANONYMOUS_PROOF_FREE_PER_ADDRESS
+//   (8) anonymous mints per address per day are proof-free; the 9th returns
+//   428 proof_required with a resend recipe in the body. The skill's Step 1
+//   enumerates failures ("bad secret, no route, no HTTP tool") but never
+//   names the 428 path — a doc gap, not a hard break: the 428 body carries a
+//   hint, but a wave-scale onboard behind one egress hits a failure the skill
+//   does not teach. The recipe sentence (IDENTITY_MINT_PROOF) lives in the
+//   same file yet is absent from the skill.
 //
 // When the skill text is corrected, these tests already describe the
 // corrected contract — no test change needed.
@@ -177,4 +185,19 @@ test("skill text names the real step 1-2 routes", () => {
   assert.match(skill, /POST .*\/api\/public-work\/match/, "step 2A names POST /api/public-work/match");
   assert.match(skill, /GET .*\/api\/project-offers\b/, "step 2B names GET /api/project-offers");
   assert.match(skill, /\/api\/project-offers\/\{offerId\}\/brief\.md/, "step 2B names the brief.md route");
+});
+
+// DOC GAP 4: step 1 must name the 428 proof_required recipe. The server
+// grants only ANONYMOUS_PROOF_FREE_PER_ADDRESS (8) proof-free anonymous
+// mints per address per day; the 9th returns 428 proof_required whose body
+// carries the resend recipe. The skill's Step 1 failure sentence names
+// "bad secret, no route, no HTTP tool" and never the 428 path. Fails on
+// the current skill text; passes when Step 1 carries the recipe sentence
+// (IDENTITY_MINT_PROOF in deploy/agent-discovery.mjs) — no test change
+// needed then.
+test("step 1: skill names the 428 proof_required recipe", () => {
+  const skill = skillMd();
+  assert.match(skill, /\b428\b/, "step 1 names the 428 status");
+  assert.match(skill, /proof_required/, "step 1 names the proof_required code");
+  assert.match(skill, /proof\.prefix/, "step 1 carries the proof recipe (sha-256 hex must start with proof.prefix)");
 });
