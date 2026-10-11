@@ -3515,6 +3515,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ?? collabRoutingMatch ?? collabRoutingResolveMatch ?? collabRoutingPolicyMatch ?? collabHandoffsMatch
         ?? collabHandoffTransitionMatch ?? collabEnvelopesMatch ?? collabEnvelopeSweepMatch
         ?? collabEnvelopeMetricsMatch ?? collabEnvelopeTransitionMatch;
+      // WAVE-500 G10 unified approval inbox (mount slice): route match
+      // entries for /api/rooms/{roomId}/approvals*. Slice 4's
+      // server/approval-inbox-routes.mjs is not merged yet — the dispatch
+      // block below resolves its handler lazily and 503s with
+      // approval_inbox_not_ready until it lands. Every route template
+      // below is documented in docs/openapi.yaml — the route-docs gate
+      // extracts these literals from this file.
+      const approvalInboxListMatch = /^\/api\/rooms\/([^/]{1,384})\/approvals$/.exec(url.pathname);
+      const approvalInboxItemMatch = /^\/api\/rooms\/([^/]{1,384})\/approvals\/([^/]{1,64})$/.exec(url.pathname);
+      const approvalInboxDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/approvals\/([^/]{1,64})\/decide$/.exec(url.pathname);
+      const approvalInboxMatch = approvalInboxListMatch ?? approvalInboxItemMatch ?? approvalInboxDecideMatch;
       // Work claims with leases, delivery modes and review policies (task
       // RC-2026-09-18-041): every route template below is documented in
       // docs/openapi.yaml — the route-docs gate extracts these literals from
@@ -3639,14 +3650,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
         && !memberCardMatch && !dirSeedMatch
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
-        && !matchmakingMatch) reject(404, "not_found", "Not found");
+        && !matchmakingMatch && !approvalInboxMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
         ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
         ?? memberCardMatch ?? dirSeedMatch
-        ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch ?? matchmakingMatch)[1]);
+        ?? agentGrantsMatch ?? agentGrantDeleteMatch ?? agentCapabilitiesMatch ?? matchmakingMatch ?? approvalInboxMatch)[1]);
       // NOTE: matchmakingMatch must stay in the roomId chain above — it was
       // added to the 404 guard but forgotten here, so every matchmaking
       // route 500'd on `undefined[1]` instead of reaching roomAuth's 401.
@@ -3783,7 +3794,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // their approved history access. Same code and copy as the store
       // gate, so clients see one stable denial either way.
       if (auth.member && isGuestAgentMemberId(auth.member.id)
-        && (collabMatch || workClaimMatch || feedbackMatch || bountyMatch || creditsMatch)
+        && (collabMatch || workClaimMatch || feedbackMatch || bountyMatch || creditsMatch || approvalInboxMatch)
         && !["GET", "HEAD"].includes(req.method)) {
         reject(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
@@ -3827,6 +3838,31 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
             return current;
           }, helpers: { json, reject, body } });
+      }
+      // WAVE-500 G10 unified approval inbox (mount slice): the route
+      // surface is stable from day one, but slice 4's
+      // server/approval-inbox-routes.mjs is not merged yet — so every
+      // request resolves here and 503s with approval_inbox_not_ready
+      // until the handler lands. The lazy dynamic import keeps a missing
+      // module (or a module without the expected export) from breaking
+      // server boot; slice 4 only needs to export handleApprovalInbox
+      // with the collab-style signature below.
+      if (approvalInboxMatch) {
+        const approvalInboxRoute = approvalInboxDecideMatch ? "decide"
+          : approvalInboxItemMatch ? "item" : "list";
+        const approvalInboxIdMatch = approvalInboxDecideMatch ?? approvalInboxItemMatch;
+        let handleApprovalInbox = null;
+        try {
+          ({ handleApprovalInbox } = await import("./approval-inbox-routes.mjs"));
+        } catch {
+          handleApprovalInbox = null;
+        }
+        if (typeof handleApprovalInbox !== "function") {
+          return reject(503, "approval_inbox_not_ready", "The unified approval inbox is not mounted yet");
+        }
+        return await handleApprovalInbox({ req, res, url, store, roomId, auth, approvalInboxRoute,
+          approvalInboxId: approvalInboxIdMatch ? pathId(approvalInboxIdMatch[2]) : null,
+          helpers: { json, reject, body } });
       }
       // Work claims (task RC-2026-09-18-041): room-scoped claim registry
       // routes share the credential, fence and rate-limit checks above; the

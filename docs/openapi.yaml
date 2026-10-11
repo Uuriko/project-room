@@ -12344,6 +12344,93 @@ paths:
         '404': { description: approval_not_found }
         '409': { description: approval_transition }
         '422': { description: approval_invalid }
+  /api/rooms/{roomId}/approvals:
+    get:
+      summary: List pending human approval decisions (unified approval inbox)
+      description: >-
+        Room-token read. The unified approval inbox: pending human
+        decisions in the room surfaced as cards (WAVE-500 G10). Slice 4
+        (server/approval-inbox-routes.mjs) owns the implementation; until
+        it lands this route answers 503 approval_inbox_not_ready.
+      security:
+        - roomToken: []
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ approvals: [{ approvalId, kind, title, status, createdAt, decidedBy?, decidedAt? }] }" }
+        '503': { description: approval_inbox_not_ready (slice 4 handler not mounted yet) }
+    post:
+      summary: Open a human approval decision (unified approval inbox)
+      description: >-
+        Room-token write (CSRF + rate limit). Opens a new pending decision
+        card. Answers 503 approval_inbox_not_ready until slice 4 lands.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, maxLength: 200 }
+                detail: { type: object, description: "Card payload for the human decider" }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ approval: { approvalId, status: pending } }" }
+        '422': { description: approval_invalid }
+        '503': { description: approval_inbox_not_ready (slice 4 handler not mounted yet) }
+  /api/rooms/{roomId}/approvals/{id}:
+    get:
+      summary: Read one approval decision card (unified approval inbox)
+      description: >-
+        Room-token read. 503 approval_inbox_not_ready until slice 4
+        (server/approval-inbox-routes.mjs) lands.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ approval: { approvalId, kind, title, status, detail, history } }" }
+        '404': { description: approval_not_found }
+        '503': { description: approval_inbox_not_ready (slice 4 handler not mounted yet) }
+  /api/rooms/{roomId}/approvals/{id}/decide:
+    post:
+      summary: Record a human decision on an approval card (unified approval inbox)
+      description: >-
+        Room-token write (CSRF + rate limit). Human decision only —
+        guests are denied outright (guest_scope_denied), mirroring the
+        collab family gate. 503 approval_inbox_not_ready until slice 4
+        (server/approval-inbox-routes.mjs) lands.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approved, rejected, changes_requested] }
+                note: { type: string, maxLength: 2000 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ approval: { approvalId, status, decidedBy, decidedAt } }" }
+        '403': { description: guest_scope_denied }
+        '404': { description: approval_not_found }
+        '409': { description: approval_transition }
+        '422': { description: approval_invalid }
+        '503': { description: approval_inbox_not_ready (slice 4 handler not mounted yet) }
   /api/rooms/{roomId}/collab/routing/mentions:
     post:
       summary: Record an agent mention routing event
