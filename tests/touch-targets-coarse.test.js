@@ -81,7 +81,7 @@ for (const selector of [".create-room-details summary", ".member-profile-body su
 ".member-directory-card > summary", ".member-profile > summary",
 "#connection-details > summary", "#session-menu-panel #connection-details > summary",
 ".inbox-add-connection summary", ".dm-consent summary",
-".claim summary", ".work-more > summary", ".message-expansion > summary"]) {
+".claim summary", ".work-more > summary", ".message-expansion > summary", "#people-panel > summary", ".message-time"]) {
   test(`coarse pointers: disclosure ${selector} reaches the 44px touch minimum`, () => {
     const rules = [...coarse.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
     const covered = rules.some(([, selectors, declarations]) => {
