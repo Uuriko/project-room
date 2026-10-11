@@ -3,7 +3,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -39,7 +38,7 @@ const row = (page, text) => page.locator("#message-list li.message", { hasText: 
 async function openMenu(page, text) { await row(page, text).locator("details.message-more > summary").click(); }
 
 test("own messages can be edited and deleted from the overflow menu", { timeout: 60000 }, async t => {
-  const { page, store, keys } = await setup(t);
+  const { page, store } = await setup(t);
   await post(page, "first draft of the plan");
 
   await openMenu(page, "first draft of the plan");
