@@ -646,26 +646,33 @@ export class AgentHeartbeats {
       422, "invalid_listener_lease", "ttlMs must be a positive number");
     this.ensureListenerSchema();
     const at = this.now();
-    const existing = this.db.prepare(`SELECT listener_id AS listenerId, fencing_token AS fencingToken,
-      lease_expires_at AS leaseExpiresAt FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?`)
-      .get(agentId, roomKey);
-    if (existing && existing.leaseExpiresAt > at) {
-      if (existing.listenerId === listenerId) {
-        this.db.prepare(`UPDATE agent_wake_listener_leases SET lease_expires_at=?, updated_at=?
-          WHERE agent_id=? AND room_key=?`).run(at + ttlMs, at, agentId, roomKey);
-        return Object.freeze({ acquired: true, fencingToken: existing.fencingToken, listenerId, renewed: true, leaseExpiresAt: at + ttlMs });
-      }
-      return Object.freeze({ acquired: false, activeListenerId: existing.listenerId, leaseExpiresAt: existing.leaseExpiresAt });
+    // Each step is a single statement, so two racing acquirers cannot both
+    // win: renewal only touches the same listener's live lease, and the
+    // insert only overwrites an expired row. The loser falls through to the
+    // read that names the holder.
+    const renewed = this.db.prepare(`UPDATE agent_wake_listener_leases SET lease_expires_at=?, updated_at=?
+      WHERE agent_id=? AND room_key=? AND listener_id=? AND lease_expires_at > ?
+      RETURNING fencing_token AS fencingToken`).get(at + ttlMs, at, agentId, roomKey, listenerId, at);
+    if (renewed) {
+      return Object.freeze({ acquired: true, fencingToken: renewed.fencingToken, listenerId, renewed: true, leaseExpiresAt: at + ttlMs });
     }
     const fencingToken = randomBytes(16).toString("base64url");
-    this.db.prepare(`INSERT INTO agent_wake_listener_leases
+    const inserted = this.db.prepare(`INSERT INTO agent_wake_listener_leases
       (agent_id, room_key, listener_id, fencing_token, lease_expires_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(agent_id, room_key) DO UPDATE SET listener_id=excluded.listener_id,
         fencing_token=excluded.fencing_token, lease_expires_at=excluded.lease_expires_at,
-        updated_at=excluded.updated_at`)
-      .run(agentId, roomKey, listenerId, fencingToken, at + ttlMs, at);
-    return Object.freeze({ acquired: true, fencingToken, listenerId, renewed: false, leaseExpiresAt: at + ttlMs });
+        updated_at=excluded.updated_at
+      WHERE agent_wake_listener_leases.lease_expires_at <= ?`)
+      .run(agentId, roomKey, listenerId, fencingToken, at + ttlMs, at, at);
+    if (inserted.changes > 0) {
+      return Object.freeze({ acquired: true, fencingToken, listenerId, renewed: false, leaseExpiresAt: at + ttlMs });
+    }
+    const live = this.db.prepare(`SELECT listener_id AS listenerId, lease_expires_at AS leaseExpiresAt
+      FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=? AND lease_expires_at > ?`).get(agentId, roomKey, at);
+    return Object.freeze(live
+      ? { acquired: false, activeListenerId: live.listenerId, leaseExpiresAt: live.leaseExpiresAt }
+      : { acquired: false, activeListenerId: null, leaseExpiresAt: null });
   }
 
   // Claim the oldest unacked wake signals as one atomic batch for the
