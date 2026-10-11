@@ -173,6 +173,7 @@
   "file.download.unavailable": "File unavailable",
   "file.download.retry": "Couldn’t download. Try again.",
   "human.decisionRationaleNotice": "<p class=\"form-hint\">Your reason will be posted to the room.</p>",
+  "human.admissionReceiptUnknown": "Request receipt could not be confirmed. Retry your draft.",
   "human.decisionReceiptUnknown": "Save receipt could not be confirmed",
   "human.decisionRationaleChanged": "Your reason was posted. Review the changed result before deciding.",
   "human.stopRequest": "<button type=\"button\" class=\"text-button\" data-pause-run=\"{runId}\" data-cancel=\"true\" data-revision=\"{revision}\">Stop</button>",
@@ -375,5 +376,6 @@
   "human.face.sharedRequest": "Shared request",
   "human.face.openResult": "Open result",
   "human.assistantChange": "Change",
-  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
+  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
+  "chat.typingStatus": "{name} is typing"
 }
