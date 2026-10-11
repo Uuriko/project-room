@@ -269,17 +269,43 @@ export function roomMcpUrlForHost(urlLike) {
   }
 }
 
-export function roomMcpSnippets(mcpUrl = ROOM_MCP_PUBLIC_URL) {
+// AUX-07: hosted Room tools need the saved identity secret on every POST.
+// Each snippet reads it from one environment variable (the same name the
+// in-repo plugin .mcp.json uses), so no secret value is ever pasted into a
+// host config or a prompt. Syntax per host docs (checked 2026-10-11):
+// Claude Code `claude mcp add --header`, Cursor mcp.json `${env:NAME}` in
+// headers, Codex `codex mcp add --url --bearer-token-env-var`.
+export const ROOM_MCP_SECRET_ENV = "PROJECT_ROOM_SECRET";
+export const GROK_BUILD_SNIPPET_COMMAND = "node scripts/room-roster.mjs grok-build --snippet";
+
+// withAuth: false keeps the URL-only forms for the public door page, which
+// deliberately shows no auth header (tests/room-entry.test.js FORBIDDEN).
+export function roomMcpSnippets(mcpUrl = ROOM_MCP_PUBLIC_URL, { withAuth = true } = {}) {
   const url = String(mcpUrl ?? ROOM_MCP_PUBLIC_URL);
+  if (!withAuth) {
+    return Object.freeze({
+      url,
+      secretEnv: ROOM_MCP_SECRET_ENV,
+      claude: `claude mcp add --transport http --scope user ${ROOM_MCP_SERVER_NAME} ${url}`,
+      cursor: Object.freeze({ mcpServers: Object.freeze({ [ROOM_MCP_SERVER_NAME]: Object.freeze({ url }) }) }),
+      codex: `codex mcp add ${ROOM_MCP_SERVER_NAME} --url ${url}`,
+      grokBuild: GROK_BUILD_SNIPPET_COMMAND
+    });
+  }
   return Object.freeze({
     url,
-    claude: `claude mcp add --transport http --scope user ${ROOM_MCP_SERVER_NAME} ${url}`,
+    secretEnv: ROOM_MCP_SECRET_ENV,
+    claude: `claude mcp add --transport http --scope user ${ROOM_MCP_SERVER_NAME} ${url} --header "Authorization: Bearer $${ROOM_MCP_SECRET_ENV}"`,
     cursor: Object.freeze({
       mcpServers: Object.freeze({
-        [ROOM_MCP_SERVER_NAME]: Object.freeze({ url })
+        [ROOM_MCP_SERVER_NAME]: Object.freeze({
+          url,
+          headers: Object.freeze({ Authorization: `Bearer \${env:${ROOM_MCP_SECRET_ENV}}` })
+        })
       })
     }),
-    codex: `codex mcp add ${ROOM_MCP_SERVER_NAME} --url ${url}`
+    codex: `codex mcp add ${ROOM_MCP_SERVER_NAME} --url ${url} --bearer-token-env-var ${ROOM_MCP_SECRET_ENV}`,
+    grokBuild: GROK_BUILD_SNIPPET_COMMAND
   });
 }
 
@@ -298,6 +324,9 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "",
     "Codex:",
     snippets.codex,
+    "",
+    `Set ${snippets.secretEnv} to your saved identity secret in the host's environment first. Never paste the secret into a prompt or a committed file.`,
+    `Grok Build: run ${snippets.grokBuild} in a Room checkout and merge the printed [mcp_servers.project-room] TOML into ~/.grok/config.toml.`,
     "",
     "This endpoint speaks MCP (initialize, tools/list, tools/call).",
     "Without Authorization, tools/list includes the four join documents plus public_work_recommend and public_work_read_task.",
@@ -353,7 +382,9 @@ export function roomMcpJoinJson(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     snippets: {
       claude: snippets.claude,
       cursor: snippets.cursor,
-      codex: snippets.codex
+      codex: snippets.codex,
+      grokBuild: snippets.grokBuild,
+      secretEnv: snippets.secretEnv
     }
   };
 }
