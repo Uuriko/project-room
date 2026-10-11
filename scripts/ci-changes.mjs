@@ -31,26 +31,15 @@ const EVAL_PATTERNS = [
   "package*.json",
 ];
 
-// There is no src/client/ or public/ tree. The browser suite loads root HTML
-// plus src/, and several checks import the repo-root client/ agent modules.
-const BROWSER_EXACT = new Set([
-  "index.html",
-  "join.html",
-  "about.html",
-  "offers.html",
-  "favicon.svg",
-  "icon.svg",
-  "manifest.webmanifest",
-  "push-sw.js",
-  "package.json",
-  "package-lock.json",
-  "scripts/browser-ci.mjs",
-  "scripts/browser-shards.mjs",
-  "scripts/browser-shards-check.mjs",
-  "scripts/browser-ci-durations.json",
-  "scripts/test-env.sh",
-  "scripts/report-test-failures.mjs",
-]);
+// Browser journeys instantiate the real server and share fixtures, helpers,
+// translations and runtime assets. An executable-path allowlist silently
+// misses new dependencies. Skip only known documentation locations; new or
+// unknown inputs run conservatively until their independence is established.
+const BROWSER_DOC_PATTERNS = [
+  "*.md",
+  "docs/**/*.md",
+  "docs/**/*.txt",
+];
 
 function globToRegExp(pattern) {
   let re = "^";
@@ -78,11 +67,17 @@ function matchesAny(file, patterns) {
 
 function browserSuitePaths() {
   const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-  return String(pkg.scripts?.["test:browser"] ?? "").split(/\s+/).filter(path => path.startsWith("scripts/"));
+  const suite = String(pkg.scripts?.["test:browser"] ?? "").split(/\s+/).filter(path => path.startsWith("scripts/"));
+  if (!suite.length) throw new Error("cannot classify browser changes without a test:browser suite");
+  return suite;
 }
 
 export function classifyChanges(files, suite = browserSuitePaths()) {
-  const browser = files.some(file => BROWSER_EXACT.has(file) || file.startsWith("src/") || file.startsWith("og/") || file.startsWith("client/") || suite.includes(file));
+  // Markdown can be runtime input: legal pages are rendered, agent guides
+  // generate served pages, and the host guide is copied by browser fixtures.
+  // Generic searchable prose is not used by the current browser journeys.
+  const browser = files.some(file => suite.includes(file) || file.startsWith("docs/legal/") ||
+    file.startsWith("docs/agents/") || file === "docs/CODEX-ROOM-HOST.md" || !matchesAny(file, BROWSER_DOC_PATTERNS));
   const evalSuite = files.some(file => matchesAny(file, EVAL_PATTERNS));
   return { browser, eval: evalSuite, coverage: coverageRelevant(files) };
 }
