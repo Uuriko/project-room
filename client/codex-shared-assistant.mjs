@@ -119,7 +119,8 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   const runtime = createCodexRuntimeHost({ db, rpc, cwd, policy, emit: event => draft.emit(event), timeoutMs, scope: connection,
     authorize: async (bound, action) => {
       const current = await read();
-      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt || current.sourceDeleted)
+      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt
+        || current.sourceDeleted && !(stops.has(current.status) && ["read", "interrupt"].includes(action)))
         throw new Error("Shared runtime attempt was revoked");
       if (["start", "steer"].includes(action)) {
         if (current.status !== "working") throw new Error("Shared runtime is stopping");
