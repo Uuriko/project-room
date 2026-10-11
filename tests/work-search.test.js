@@ -34,6 +34,14 @@ test('work search caps results and query while preserving total and useful Unico
   assert.equal(searchWork(state, 'agenda').work.length, 25);
   assert.equal(searchWork(state, 'agenda').total, 31);
   assert.equal(searchWork(state, 'agenda', 2).work.length, 2);
+  const older = searchWork(state, 'agenda', 25, { offset: 25 });
+  assert.equal(older.total, 31);
+  assert.deepEqual(older.work.map(hit => hit.item.id), ['25', '26', '27', '28', '29', '30'],
+    'a later page reaches the matches omitted by the bounded first page');
+  assert.deepEqual(searchWork(state, 'agenda', 25, { offset: 31 }).work, []);
+  for (const offset of [-1, 1.5, '25', Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => searchWork(state, 'agenda', 25, { offset }), RangeError);
+  }
   for (const limit of [0, -1, 26, 1.5, '2']) assert.throws(() => searchWork(state, '', limit), RangeError);
   const long = room(item('long', { title: 'x'.repeat(200), definitionOfDone: '🚀'.repeat(300) + 'needle' + '🚀'.repeat(300) }));
   assert.equal(searchWork(long, 'x'.repeat(220)).total, 1);
