@@ -95,7 +95,6 @@
   "src/room-layout.js",
   "src/room-mcp-join.js",
   "src/room-roster.js",
-  "src/room-sound-data.js",
   "src/room-sounds.js",
   "src/room-templates.js",
   "src/seed.js",
