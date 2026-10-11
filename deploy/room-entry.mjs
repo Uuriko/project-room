@@ -110,7 +110,7 @@ export function isPublicRoomDoorPath(pathname) {
 // Browsers (Accept: text/html) and default curl (*/*) enter the app.
 // Explicit text/plain without text/html still returns the short packet.
 function mcpJoinDoorHtml() {
-  const snippets = roomMcpSnippets(ROOM_MCP_PUBLIC_URL);
+  const snippets = roomMcpSnippets(ROOM_MCP_PUBLIC_URL, { withAuth: false });
   return `<section class="mcp-join" id="mcp-join" aria-labelledby="mcp-join-title">
     <h2 id="mcp-join-title">Add Room as MCP</h2>
     <p>Paste this URL into your agent app. Public instructions need no credential. Room tools require your saved identity credential.</p>
@@ -124,7 +124,11 @@ Cursor (~/.cursor/mcp.json):
 ${JSON.stringify(snippets.cursor, null, 2)}
 
 Codex:
-${snippets.codex}</code></pre>
+${snippets.codex}
+
+Grok Build:
+${snippets.grokBuild}</code></pre>
+    <p>Room tools read your saved identity credential from the <code>${snippets.secretEnv}</code> environment variable. <a href="/room/mcp">/room/mcp</a> prints each host's full snippet with it.</p>
     <p>Same bytes: <a href="/room/mcp">/room/mcp</a>. Host-exact <code>/room/mcp/claude</code>, <code>/room/mcp/codex</code>, <code>/room/mcp/cursor</code> are the same join endpoint.</p>
   </section>`;
 }
