@@ -35,14 +35,14 @@ export function openQuestionsModel(data) {
 }
 
 // Pure HTML render of the model. Tested without DOM.
-export function openQuestionsHtml(model) {
+export function openQuestionsHtml(model, authorName = () => "") {
   const items = model?.items ?? [];
   if (items.length === 0) {
     return `<div id="open-questions-list" class="open-questions-list"><p class="form-hint">No open questions right now.</p></div>`;
   }
   const rows = items.map(item =>
-    `<li class="open-question-row"><span class="open-question-excerpt">${escapeHtml(item.excerpt)}</span>` +
-    `<span class="form-hint"> ${escapeHtml(item.authorId)}${item.when ? ` · ${escapeHtml(item.when)}` : ""}</span></li>`
+    `<li class="open-question-row">${item.messageId ? `<a class="open-question-excerpt" href="#pr-record/message/${encodeURIComponent(item.messageId)}">${escapeHtml(item.excerpt)}</a>` : `<span class="open-question-excerpt">${escapeHtml(item.excerpt)}</span>`}` +
+    `<span class="form-hint"> ${escapeHtml(authorName(item.authorId))}${item.when ? ` · ${escapeHtml(item.when)}` : ""}</span></li>`
   ).join("");
   return `<div id="open-questions-list" class="open-questions-list"><ul>${rows}</ul></div>`;
 }
@@ -53,42 +53,57 @@ export function installOpenQuestionsPanel({ client, getState, getSession }) {
   const status = $("#open-questions-status");
   if (!panel) return { sync() {}, reset() {} };
 
-  let loaded = false, busy = false, generation = 0;
-
+  let loaded = false, generation = 0, completedSequence, completedSession, flight = null;
+  const host = $("#open-questions-list-host");
   const setStatus = text => { if (status) status.textContent = text ?? ""; };
+  const clearRows = () => { if (host) host.innerHTML = ""; if (chip) chip.textContent = ""; };
 
   function render(data) {
     const model = openQuestionsModel(data);
     if (chip) chip.textContent = String(model.count);
-    const host = $("#open-questions-list-host");
-    if (host) host.innerHTML = openQuestionsHtml(model);
+    if (host) host.innerHTML = openQuestionsHtml(model,
+      id => getState?.()?.members?.[id]?.displayName ?? "");
     setStatus("");
   }
 
-  async function load() {
-    const session = getSession(), epoch = generation;
-    if (!session || loaded || busy) return;
-    const current = () => epoch === generation && getSession() === session;
-    busy = true;
-    try {
-      const data = await client.request(client.path("/open-questions"), { method: "GET" });
-      if (current()) { render(data); loaded = true; }
-    } catch {
-      if (current()) setStatus("Could not load open questions. Close and reopen to retry.");
-    } finally { if (current()) busy = false; }
+  function load(force = false) {
+    const session = getSession(), sequence = client.sequence;
+    if (!session || !panel.open) return;
+    if (flight?.session === session) {
+      if (sequence !== flight.sequence || force) flight.dirty = true;
+      return flight.promise;
+    }
+    if (!force && loaded && completedSession === session && completedSequence === sequence) return;
+    const ticket = { session, generation, sequence, dirty: false };
+    flight = ticket;
+    const current = () => flight === ticket && generation === ticket.generation && getSession() === session;
+    ticket.promise = (async () => {
+      do {
+        ticket.dirty = false; ticket.sequence = client.sequence;
+        try {
+          const data = await client.request(client.path("/open-questions"), { method: "GET" });
+          if (!current()) return;
+          render(data); loaded = true; completedSession = session; completedSequence = ticket.sequence;
+        } catch {
+          if (!current()) return;
+          clearRows(); loaded = false; ticket.dirty = false;
+          setStatus("Could not load open questions. Close and reopen to retry.");
+          return;
+        }
+      } while (ticket.dirty && panel.open && current());
+    })().finally(() => { if (flight === ticket) flight = null; });
+    return ticket.promise;
   }
 
-  panel.addEventListener("toggle", () => { if (panel.open) void load(); });
+  panel.addEventListener("toggle", () => { if (panel.open) return load(true); });
 
   return {
-    sync() { if (panel.open) return load(); },
+    sync() { return load(); },
     reset() {
       generation++;
-      loaded = false;
-      busy = false;
+      loaded = false; flight = null; completedSession = null; completedSequence = undefined;
       panel.open = false;
-      if (chip) chip.textContent = "";
-      setStatus("");
+      clearRows(); setStatus("");
     },
   };
 }
