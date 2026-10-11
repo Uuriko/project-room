@@ -352,7 +352,7 @@ test("auto-approve: subset of the configured rule is approved and linked inline"
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto1"
-  });
+  }, identity.secret);
   assert.equal(approved.status, "approved");
   assert.equal(approved.memberId, identity.identityId);
   assert.deepEqual(approved.grantedPermissions, ["accept_work"]);
@@ -376,7 +376,7 @@ test("auto-approve: audit fields on the request row", async t => {
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work", "complete_work"], requestId: "ar_auto_audit"
-  });
+  }, identity.secret);
   assert.equal(approved.status, "approved");
   assert.equal(approved.decidedBy, "auto-approve");
   assert.ok(typeof approved.decidedAt === "number" && approved.decidedAt > 0);
@@ -403,6 +403,54 @@ test("auto-approve: empty request and no rule stay pending without a note", asyn
   });
   assert.equal(pending.status, "pending");
   assert.equal(pending.pendingNote, undefined);
+});
+
+// WAVE-500 G1 (identity-link proof-of-ownership): auto-approve links the
+// identity with no human review, so the filer must prove ownership of the
+// named identity — the same proof upgrades require. A stranger naming
+// someone else's identity must never get an automatic link.
+test("auto-approve: proof-less filing for someone else's identity stays pending and links nothing", async t => {
+  const { store, requests, ownerToken } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "complete_work"] });
+  const victim = store.identities.create("Victim Agent");
+  // No secret: a stranger naming the victim's identity, with an
+  // attacker-chosen display name.
+  const filed = requests.request("commons", {
+    identityId: victim.identityId, displayName: "Totally Legit Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_stranger"
+  });
+  assert.equal(filed.status, "pending");
+  assert.match(filed.pendingNote, /secret as Bearer/i);
+  // Nothing linked: no member record, no identity link, no grant.
+  assert.equal(store.room("commons").state.members[victim.identityId], undefined);
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM identity_links WHERE room_id=? AND identity_id=?")
+    .get("commons", victim.identityId).n, 0);
+});
+
+test("auto-approve: the holder presenting their own secret is still admitted inline", async t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "complete_work"] });
+  const approved = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_holder"
+  }, identity.secret);
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.memberId, identity.identityId);
+  assert.deepEqual(store.room("commons").state.members[identity.identityId].permissions, ["accept_work"]);
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM identity_links WHERE room_id=? AND identity_id=?")
+    .get("commons", identity.identityId).n, 1);
+});
+
+test("auto-approve: another identity's secret is rejected 401, never admitted", async t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work", "complete_work"] });
+  const other = store.identities.create("Other Agent");
+  assert.throws(() => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_auto_cross"
+  }, other.secret), err => err.status === 401 && err.code === "unauthenticated");
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM identity_links WHERE room_id=? AND identity_id=?")
+    .get("commons", identity.identityId).n, 0);
 });
 
 test("auto-approve: config rejects elevated permissions (manage_members, decide, manage_claims, write_external, invite_member)", async t => {
@@ -466,7 +514,7 @@ test("auto-approve: verified-only rooms never auto-approve the unverified", asyn
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_verified"
-  });
+  }, identity.secret);
   assert.equal(approved.status, "approved");
   assert.equal(approved.decidedBy, "auto-approve");
 });
@@ -488,7 +536,7 @@ test("auto-approve: rule suspends when its author loses membership administratio
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_demoted"
-  });
+  }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.match(pending.pendingNote, /suspended/);
 });
@@ -499,12 +547,12 @@ test("auto-approve: idempotent retry on an approved request returns the approval
   const first = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_retry"
-  });
+  }, identity.secret);
   assert.equal(first.status, "approved");
   const retry = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_retry"
-  });
+  }, identity.secret);
   assert.equal(retry.status, "approved");
   assert.equal(retry.decidedBy, "auto-approve");
   assert.equal(retry.memberId, identity.identityId);

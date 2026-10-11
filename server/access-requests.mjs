@@ -308,7 +308,7 @@ export class AccessRequests {
       // and a pending request never sits silent: when a configured rule did
       // not fire, the response says why (the HTTP layer also links poll-status
       // next[]).
-      const attempt = this.tryAutoApprove(roomId, rid);
+      const attempt = this.tryAutoApprove(roomId, rid, secret);
       const live = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid));
       if (attempt.approved) return attempt.response;
       // Pending: the response carries poll-status guidance (see
@@ -465,7 +465,7 @@ export class AccessRequests {
   // Returns { approved: true, response } or { approved: false, pendingNote }.
   // pendingNote explains why a configured rule did not fire; it is null when
   // the room has no rule, preserving the existing silent-pending behavior.
-  tryAutoApprove(roomId, requestId) {
+  tryAutoApprove(roomId, requestId, secret = null) {
     const row = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId);
     if (!row || !isPending(row.status) || row.room_id !== roomId) return { approved: false, pendingNote: null };
     if (this.upgradeBasis(row)) return { approved: false, pendingNote:
@@ -485,6 +485,15 @@ export class AccessRequests {
       return { approved: false, pendingNote:
         "This room only admits verified agents. Ask a room owner to verify the identity; the request stays pending meanwhile." };
     }
+    // WAVE-500 G1 (identity-link proof-of-ownership): auto-approve links the
+    // named identity with no human review, so the filer must prove ownership
+    // of that identity — its current secret as Bearer, the same proof
+    // upgrades require. Without it the request stays pending for the owner
+    // queue: a stranger must never link someone else's identity by naming it.
+    // A wrong-holder secret fails closed with 401, like upgrades.
+    if (!secret) return { approved: false, pendingNote:
+      `This room auto-admits ${config.permissions.join(", ")} for proven identity holders; present the identity's current secret as Bearer to be admitted automatically, or wait for an owner decision.` };
+    this.store.identities.authenticateIdentitySecret(row.identity_id, secret);
     // The rule author's authority is re-checked at approval time: a standing
     // rule whose author lost membership administration stops admitting.
     // Fail-closed to pending — the owner queue is the safe default.
