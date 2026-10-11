@@ -473,3 +473,92 @@ for (const stage of ["rollup", "queue"]) {
     assert.equal(timers.size, 0);
   });
 }
+
+// WAVE-500 guild 3: unread/stale marker regressions in src/needs-attention.js.
+//
+// Test audit gate:
+// 1. Protects: (a) sync() must not mark a room update as observed when it
+//    skips the refresh (busy reader, open partial selection, or a later
+//    page) — the update has to be fetched once the reader is free, otherwise
+//    the badge and list go stale until the next room event; (b) a failed
+//    refresh must clear the count badge and page range so they don't show the
+//    previous load's numbers next to the error.
+// 2. Fails when: (a) `observed = next` runs before the skip guard (the
+//    pre-fix ordering); (b) the refresh() catch clears the list but leaves
+//    the count/range showing stale numbers.
+// 3. No existing test covers either: the retry tests assert unhide/status/
+//    retry-scheduling but not the badge, and no test exercises the
+//    observed-marking vs skip-guard ordering.
+// 4. No production seam added: the module already takes { client, section,
+//    getState }; both tests use fakes at that boundary.
+
+test("sync does not swallow a room update that arrives while a refresh is in flight", async t => {
+  const { section, timers } = attentionEnvironment(t);
+  const state = attentionState();
+  const pending = deferredAttentionRead(), entered = deferredAttentionRead();
+  let holdRead = false;
+  const { client, calls } = attentionClient({
+    read: async () => { if (!holdRead) return null; entered.resolve(); return pending.promise; },
+  });
+  const card = createNeedsAttentionCard({ client, section, getState: () => state });
+  card.sync(); // Establish current room scope; the manual read supersedes this initial read.
+  await card.refresh();
+  assert.equal(calls.rollup.length, 2, "initial reads complete");
+  assert.equal(section._elements["#attention-count"].textContent, "1");
+
+  holdRead = true;
+  const inFlight = card.refresh(); // Third rollup read; it stays outstanding.
+  await entered.promise; // The rollup read is outstanding: the card is busy.
+  assert.equal(calls.rollup.length, 3, "the in-flight read started");
+  client.sequence++;
+  card.sync();
+  assert.equal(calls.rollup.length, 3, "no refresh starts while the reader is busy");
+  pending.resolve(null);
+  await inFlight;
+  assert.equal(section._elements["#attention-refresh"].disabled, false, "the in-flight read settled");
+
+  // The update that landed mid-read was not marked observed, so the next sync
+  // picks it up instead of leaving the badge/list stale until another event.
+  card.sync();
+  assert.equal(calls.rollup.length, 4, "a catch-up refresh fetches the update skipped while busy");
+  assert.equal(timers.size, 0);
+});
+
+test("failed refresh clears the stale count badge and page range", async () => {
+  const section = makeSection();
+  let calls = 0;
+  const client = {
+    session: { id: "sess-1" },
+    generation: 1,
+    needsAttention: async () => {
+      calls++;
+      if (calls === 1) return {
+        items: [{ kind: "decision", id: "decision-1", severity: "action", title: "Owner review", detail: "Review this decision", actions: [] }],
+        itemCount: 7, pageOffset: 0, previousCursor: null, nextCursor: "page-2",
+      };
+      throw new Error("network down");
+    },
+  };
+  const card = createNeedsAttentionCard({ client, section });
+  const prevDocument = globalThis.document;
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  globalThis.document = { activeElement: null };
+  globalThis.setTimeout = () => 0;
+  globalThis.clearTimeout = () => {};
+  try {
+    await card.refresh();
+    assert.equal(section._elements["#attention-count"].textContent, "7");
+    assert.equal(section._elements["#attention-range"].textContent, "Showing 1–1 of 7");
+    await card.refresh(); // fails
+  } finally {
+    if (prevDocument === undefined) delete globalThis.document;
+    else globalThis.document = prevDocument;
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  }
+  assert.equal(section.hidden, false, "section stays visible with the error and Refresh button");
+  assert.match(section._elements["#attention-status"].textContent, /Could not load: network down/);
+  assert.equal(section._elements["#attention-count"].textContent, "", "stale badge count is cleared on load failure");
+  assert.equal(section._elements["#attention-range"].textContent, "", "stale page range is cleared on load failure");
+});

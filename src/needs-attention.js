@@ -252,6 +252,9 @@ export function createNeedsAttentionCard(options) {
         hide(); if (error.status === 401 || error.code === "session_binding_changed") client.handleFailure(error); return;
       }
       currentReport = null; partial = null; list.innerHTML = "";
+      // The badge and range would otherwise keep showing the previous load's
+      // numbers next to the error — a stale "needs you" count.
+      count.textContent = ""; range.textContent = "";
       setBusy(false);
       setStatus(`Could not load: ${error.message}`);
       // E-H1: unhide so the owner sees the error and the Refresh button, and
@@ -283,10 +286,13 @@ export function createNeedsAttentionCard(options) {
     authority = grants;
     const next = `${identity}:${client.sequence}:${includeShadow()}`;
     if (next === observed) return;
-    observed = next;
     // Preserve the reader's selected page and unsent partial selection. Manual
-    // Next/Previous still exercise the server's stale-continuation reset.
+    // Next/Previous still exercise the server's stale-continuation reset. The
+    // update is marked observed only when a refresh actually starts: an update
+    // that arrives while busy, mid-partial, or off page one must be picked up
+    // by the next sync instead of being silently forgotten.
     if (busy || partial || currentReport?.pageOffset > 0) return;
+    observed = next;
     void refresh();
   }
   return { refresh, hide, sync };
