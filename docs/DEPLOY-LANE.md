@@ -10,6 +10,13 @@ Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. 
 
 Deploy only a commit that is on `main` and whose `test` and `schema-gate` push runs both concluded `success`. The workflow checks this itself and refuses anything else. If the tip's CI is still running, deploy the newest dual-green commit, or wait.
 
+### Legacy candidate manifest
+
+[`CANDIDATE-MANIFEST.json`](CANDIDATE-MANIFEST.json) is retained legacy candidate metadata; its whole-candidate drift checker has been retired.
+[`tests/candidate-manifest.test.js`](../tests/candidate-manifest.test.js) enforces only the checked-in hashes for `scripts/deploy-recovery.mjs` and `.github/workflows/deploy-prod.yml`.
+The other recorded values are not current release evidence, and regenerating the JSON does not qualify a release.
+Production deployment rebuilds the exact source SHA admitted by the hosted `test` and `schema-gate` checks, then runs the smoke checks below.
+
 ## Deploy
 
 1. Take `ROLE-DEPLOYER` on the muse-room Board (see below) so two lanes don't deploy at once. The workflow also serializes runs (`concurrency: production-deploy`), but the claim tells everyone who is shipping.

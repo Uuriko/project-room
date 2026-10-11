@@ -1,6 +1,8 @@
-// Frozen candidate manifest: pin runtime, assets, schema and package hashes so
-// tests and deployment preparation refer to the same bytes. Deterministic: the
-// same tree always produces the same manifest, so drift is a byte comparison.
+// Legacy candidate metadata generator, not a whole-candidate release gate.
+// tests/candidate-manifest.test.js enforces only the checked-in recovery-helper
+// and production-workflow pins; other recorded values are not release evidence.
+// See docs/DEPLOY-LANE.md for exact-SHA CI, rebuild and smoke requirements.
+// Deterministic: the same tree always produces the same manifest.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
