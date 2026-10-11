@@ -545,7 +545,21 @@ export class InboxCollabStore {
 
   listApprovals(roomId, { status = null } = {}) {
     const entry = this.#entry(roomId);
-    return entry.approvals.list({ status });
+    // R36-1 UI read guard: the queue's in-memory copy is what the human's
+    // list renders, but the persisted journal head (record_json) is the
+    // authoritative revision — e.g. resubmit() returns the new revision
+    // without storing it, so the queue copy can be a stale v1 draft while
+    // the response showed v2. Never silently present a stale copy as
+    // decidable: flag the disagreement so the UI holds the verdict instead
+    // of approving the wrong draft. No-op once the queue and journal agree.
+    const heads = new Map(this.db.prepare(
+      "SELECT proposal_id, record_json FROM collab_approvals WHERE room_id=?")
+      .all(roomId).map(row => [row.proposal_id, row.record_json]));
+    return Object.freeze(entry.approvals.list({ status }).map(proposal => {
+      const head = heads.get(proposal.proposalId);
+      if (head === undefined || JSON.stringify(proposal) === head) return proposal;
+      return Object.freeze({ ...proposal, staleRevision: true });
+    }));
   }
 
   decideApproval(roomId, proposalId, { decision, by, note = null, editedBody = null, reason = null }) {
