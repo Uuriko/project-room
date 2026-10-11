@@ -3,8 +3,9 @@ import { setTimeout as delay } from "node:timers/promises";
 // Discovery only. The existing runner owns durable claims, execution journals,
 // stop handling and publication. Never steal or restart an existing attempt.
 export async function watchSharedAssistant({ client, memberId, execute, signal,
-  pollMs = 1000, emit = () => {} }) {
-  if (!memberId || typeof execute !== "function" || !Number.isInteger(pollMs) || pollMs < 100 || pollMs > 30000)
+  pollMs = 1000, readTimeoutMs = 15000, emit = () => {} }) {
+  if (!memberId || typeof execute !== "function" || !Number.isInteger(pollMs) || pollMs < 100 || pollMs > 30000
+    || !Number.isInteger(readTimeoutMs) || readTimeoutMs < 1 || readTimeoutMs > 120000)
     throw new Error("Invalid shared assistant watcher configuration");
   let lastState;
   const status = state => {
@@ -14,7 +15,8 @@ export async function watchSharedAssistant({ client, memberId, execute, signal,
     while (!signal?.aborted) {
       // Read errors end this process. A supervisor can reconnect, but execution
       // errors require explicit reconciliation with the original journal.
-      const projection = await client.assistant(undefined, { signal });
+      const timeout = AbortSignal.timeout(readTimeoutMs);
+      const projection = await client.assistant(undefined, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       if (signal?.aborted) break;
       if (projection.assistant.coordinatorMemberId !== memberId) {
         status("not_configured");

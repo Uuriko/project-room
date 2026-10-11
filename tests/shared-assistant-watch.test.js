@@ -72,8 +72,7 @@ test('watch discovers a real human request over HTTP and uses the existing fence
   const assistant = new RoomAssistant(f.store);
   const apply = (actor, input) => assistant.apply('commons', { requestId: randomUUID(), ...input }, () => f.store.authenticate(f.keys[actor], 'commons'));
   apply('owner', { action: 'configure', name: 'Room', expectedRevision: 0, coordinatorMemberId: 'producer' });
-  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'message.posted', data: { messageId: 'human-ask', body: 'Please check this project.' } });
-  apply('owner', { action: 'invoke', runId: 'shared', sourceMessageId: 'human-ask' });
+  assistant.apply('commons', { action: 'invoke', requestId: 'atomic-human-ask', runId: 'shared', sourceMessageId: 'human-ask', message: { body: 'Please check this project.' } }, () => f.store.authenticate(f.keys.owner, 'commons'), f.keys.owner);
   const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'producer', token: f.keys.producer });
   const controller = new AbortController();
   await watchSharedAssistant({ client, memberId: 'producer', signal: controller.signal,
@@ -89,4 +88,19 @@ test('watch discovers a real human request over HTTP and uses the existing fence
   const messages = f.store.room('commons').state.messages.filter(message => message.id === run.resultMessageId);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].replyToId, 'human-ask');
+});
+
+test('a stalled discovery read times out without dispatching work', async () => {
+  let calls = 0;
+  // Keep the test alive while AbortSignal.timeout uses an unrefed timer.
+  const keepAlive = setTimeout(() => {}, 1000);
+  try {
+    await assert.rejects(watchSharedAssistant({ memberId: 'room', readTimeoutMs: 20,
+      client: { assistant: async (_, { signal }) => {
+        calls++;
+        return new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+      } }, execute: () => assert.fail('An unconfirmed read must not dispatch')
+    }), { name: 'TimeoutError' });
+    assert.equal(calls, 1);
+  } finally { clearTimeout(keepAlive); }
 });

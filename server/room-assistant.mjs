@@ -19,7 +19,7 @@ const hostStaleAfterMs = 120000;
 // A queued run nobody claimed within this window reads not picked up.
 const notPickedUpAfterMs = 10000;
 const keys = {
-  configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId'],
+  configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId', 'message'],
   contribute: ['runId', 'sourceMessageId', 'expectedRevision', 'conflict'],
   resolve: ['runId', 'sourceMessageId', 'expectedRevision'],
   claim: ['runId', 'attemptId', 'expectedRevision'],
@@ -110,8 +110,8 @@ export class RoomAssistant {
     });
   }
   // postToken is the host's own credential, threaded from the route or MCP
-  // dispatch. publish is the only action that needs it: the server posts the
-  // run's answer as the coordinator inside the run transaction (SV-1 fence).
+  // dispatch. Atomic invoke posts the human prompt; publish posts the
+  // coordinator answer. Both use ordinary commands within the run transaction.
   apply(roomId, input, authorize, postToken = null) {
     if (!input || Array.isArray(input) || !Object.hasOwn(keys, input.action) || !validId(input.requestId)
       || Object.keys(input).some(key => !['action', 'requestId', ...keys[input.action]].includes(key)))
@@ -121,7 +121,8 @@ export class RoomAssistant {
     if (Object.hasOwn(input, 'expectedAttemptId') && input.expectedAttemptId !== null && !validId(input.expectedAttemptId))
       fail('invalid_assistant_action', 'Invalid expectedAttemptId', 422);
     return this.store.transaction(() => {
-      const auth = authorize(), state = this.store.room(roomId).state, actor = auth.member;
+      const auth = authorize(), actor = auth.member;
+      let state = this.store.room(roomId).state;
       if (isGuestAgentMemberId(actor.id) || actor.permissions?.some(p => p.startsWith('guest:')))
         fail('assistant_denied', 'Guests cannot coordinate shared work', 403);
       if (state.room.archivedAt) fail('assistant_archived', 'This room is archived');
@@ -183,6 +184,19 @@ export class RoomAssistant {
         let run = row && JSON.parse(row.value);
         if (input.action === 'invoke') {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
+          if (input.message !== undefined) {
+            const message = input.message;
+            if (!message || Array.isArray(message) || typeof message !== 'object'
+              || Object.keys(message).some(key => !['body', 'channelId', 'replyToId'].includes(key))
+              || typeof message.body !== 'string' || !message.body.trim() || message.body.length > MAX_MESSAGE_BODY_CHARS)
+              fail('invalid_assistant_message', 'Choose a shared message body and conversation', 422);
+            // The enclosing transaction commits both records or neither. Use
+            // normal command validation/authorization, including channel access.
+            const stamp = createHash('sha256').update(`assistant-invoke:${actor.id}:${input.requestId}`).digest('hex').slice(0, 32);
+            this.store.command(postToken, roomId, { id: `assistant-invoke-${stamp}`, type: 'message.posted',
+              data: { ...message, messageId: input.sourceMessageId } });
+            state = this.store.room(roomId).state;
+          }
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
