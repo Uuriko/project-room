@@ -1,26 +1,49 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { CUES, cueFor, createRoomSounds, createAskCues, installAskSounds, mountSoundSetting, soundsEnabled, setSoundsEnabled } from '../src/room-sounds.js';
-import { SOUND_DATA } from '../src/room-sound-data.js';
+import { CUES, VOICES, createRoomSounds, createCueLedger, askCueFor, installAskSounds, mountSoundSetting, soundsEnabled, setSoundsEnabled, defaultStorage } from '../src/room-sounds.js';
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
 
-const flush = () => new Promise(resolve => setImmediate(resolve));
-function memoryStorage() { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; }
+const flush = async () => { for (let i = 0; i < 5; i += 1) await new Promise(resolve => setImmediate(resolve)); };
+function memoryStorage() { const m = new Map(); return { map: m, getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; }
 const blocked = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
-function fakeAudio(played) { return class { constructor(src) { this.src = src; } play() { played.push(this.src); return Promise.resolve(); } }; }
-const visible = { visibilityState: 'visible' };
-const fakeData = async () => ({ 'result-ready': 'rr', 'picked-up': 'pu', 'needs-you': 'ny' });
+// A fake Web Audio context that records which cue voices were scheduled.
+function fakeAudio({ state = 'running', resume = () => Promise.resolve() } = {}) {
+  const started = [];
+  class Ctx {
+    constructor() { this.state = state; this.currentTime = 0; this.destination = {}; }
+    resume() { return resume(this); }
+    createGain() { return { gain: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, setTargetAtTime() {} }, connect() {} }; }
+    createOscillator() { return { frequency: { value: 0 }, connect() {}, start() { started.push(this.frequency.value); }, stop() {} }; }
+  }
+  return { Ctx, started, cues: () => started.length / 4 }; // 2 notes x (fundamental + harmonic)
+}
+// Web Locks stand-in: one holder at a time, FIFO, like navigator.locks.
+function fakeLocks() { let chain = Promise.resolve(); return { request(_name, fn) { const run = chain.then(fn); chain = run.catch(() => {}); return run; } }; }
+const visibleDoc = () => { const d = { visibilityState: 'visible' }; return d; };
 
-test('cueFor only sounds on transitions people need to notice, and never for Stop', () => {
-  assert.equal(cueFor('working', 'done'), 'result-ready');
-  assert.equal(cueFor('asked', 'working'), 'picked-up');
-  assert.equal(cueFor('not_picked_up', 'working'), 'picked-up');
-  assert.equal(cueFor('working', 'needs_input'), 'needs-you');
-  for (const [a, b] of [['working', 'working'], ['working', 'stalled'], ['asked', 'not_picked_up'], ['working', 'cancelled'], ['cancel_requested', 'cancelled'], [undefined, 'done'], [null, null]]) assert.equal(cueFor(a, b), null, `${a} -> ${b}`);
+test('askCueFor keys cues on durable identities, never on status alone', () => {
+  const run = { id: 'r1', resultMessageId: 'm1', revision: 4 };
+  assert.deepEqual(askCueFor({ status: 'working', resultId: null }, run, 'done'), { cue: 'result-ready', id: 'result:m1' });
+  assert.equal(askCueFor({ status: 'working', resultId: null }, { id: 'r1' }, 'done'), null, 'done without a stored result is silent');
+  assert.deepEqual(askCueFor({ status: 'done', resultId: null }, run, 'done'), { cue: 'result-ready', id: 'result:m1' }, 'the result arriving after done still cues');
+  assert.equal(askCueFor({ status: 'done', resultId: 'm1' }, run, 'done'), null);
+  assert.deepEqual(askCueFor({ status: 'asked' }, run, 'working'), { cue: 'picked-up', id: 'pickup:r1' });
+  assert.deepEqual(askCueFor({ status: 'working' }, run, 'needs_input'), { cue: 'needs-you', id: 'needs:r1:4' });
+  for (const [prev, status] of [['working', 'working'], ['working', 'stalled'], ['asked', 'not_picked_up'], ['working', 'cancelled'], ['cancel_requested', 'cancelled']]) assert.equal(askCueFor({ status: prev }, { id: 'r1' }, status), null, `${prev} -> ${status}`);
+  assert.equal(askCueFor(undefined, run, 'done'), null);
 });
 
-test('the per-room setting is off by default, per room, and quiet when storage is blocked', () => {
+test('a throwing localStorage getter never escapes, and the setting is off by default and per room', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('SecurityError'); } });
+  try {
+    assert.equal(defaultStorage(), null);
+    assert.equal(soundsEnabled('commons'), false);
+    assert.equal(setSoundsEnabled('commons', true), false);
+    assert.doesNotThrow(() => createCueLedger().mark('x'));
+    assert.doesNotThrow(() => installAskSounds({ getRoomId: () => 'commons', getViewerId: () => 'me', locks: null })({ id: 'r', initiatorId: 'me' }, 'asked'));
+  } finally { if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor); else delete globalThis.localStorage; }
   const s = memoryStorage();
   assert.equal(soundsEnabled('commons', s), false);
   assert.equal(setSoundsEnabled('commons', true, s), true);
@@ -30,108 +53,148 @@ test('the per-room setting is off by default, per room, and quiet when storage i
   assert.equal(soundsEnabled('commons', s), false);
   assert.equal(soundsEnabled('commons', blocked), false);
   assert.equal(setSoundsEnabled('commons', true, blocked), false);
-  assert.equal(soundsEnabled(undefined, s), false);
 });
 
-test('sounds stay silent unless enabled and visible, rate-limit bursts, and only preview bypasses', async () => {
-  const played = []; let t = 0; const state = { on: false, hidden: false };
-  const sounds = createRoomSounds({ load: fakeData, enabled: () => state.on, Audio: fakeAudio(played), doc: { get visibilityState() { return state.hidden ? 'hidden' : 'visible'; } }, now: () => t });
+test('sounds are silent unless enabled and visible, rate-limited, and only preview bypasses', () => {
+  const audio = fakeAudio(); let t = 0; const state = { on: false }, doc = visibleDoc();
+  const sounds = createRoomSounds({ enabled: () => state.on, AudioContext: audio.Ctx, doc, now: () => t });
   assert.equal(sounds.play('result-ready'), false);
   assert.equal(sounds.play('result-ready', { force: true }), false, 'no other bypass');
-  state.on = true; state.hidden = true;
+  state.on = true; doc.visibilityState = 'hidden';
   assert.equal(sounds.play('needs-you'), false);
-  state.hidden = false;
+  doc.visibilityState = 'visible';
   assert.equal(sounds.play('needs-you'), true);
   t += 500; assert.equal(sounds.play('needs-you'), false);
   t += 1100; assert.equal(sounds.play('picked-up'), true);
   assert.equal(sounds.play('agent-chatter', { preview: true }), false);
-  await flush();
-  assert.deepEqual(played, ['ny', 'pu']);
-  state.on = false;
-  assert.equal(sounds.play('result-ready', { preview: true }), true);
+  assert.equal(audio.cues(), 2);
+  state.on = false; assert.equal(sounds.play('result-ready', { preview: true }), true);
 });
 
-test('ask cues fire only on live transitions of asks the viewer started, once across tabs', () => {
-  const storage = memoryStorage();
-  const load = createAskCues({ viewerId: 'me', storage });
-  assert.equal(load({ id: 'r0', initiatorId: 'me', resultMessageId: 'm' }, 'done'), null, 'first sighting (load, reconnect, replay) is silent');
-  const tab = createAskCues({ viewerId: () => 'me', storage });
+test('a delayed audio unlock re-checks mute and visibility, and never plays a backlog', async () => {
+  let release; const audio = fakeAudio({ state: 'suspended', resume: ctx => new Promise(r => { release = () => { ctx.state = 'running'; r(); }; }) });
+  let t = 0; const state = { on: true }, doc = visibleDoc();
+  const sounds = createRoomSounds({ enabled: () => state.on, AudioContext: audio.Ctx, doc, now: () => t });
+  sounds.play('picked-up'); t += 2000; sounds.play('needs-you'); t += 2000; sounds.play('result-ready');
+  release(); await flush();
+  assert.equal(audio.cues(), 1, 'only the newest queued cue');
+  assert.equal(audio.started[0], VOICES['result-ready'][0][0]);
+  const muted = fakeAudio({ state: 'suspended', resume: ctx => new Promise(r => { release = () => { ctx.state = 'running'; r(); }; }) });
+  const later = createRoomSounds({ enabled: () => state.on, AudioContext: muted.Ctx, doc, now: () => t });
+  later.play('result-ready'); state.on = false; release(); await flush();
+  assert.equal(muted.started.length, 0, 'muted while unlocking: silent');
+  state.on = true; const hidden = fakeAudio({ state: 'suspended', resume: ctx => new Promise(r => { release = () => { ctx.state = 'running'; r(); }; }) });
+  const third = createRoomSounds({ enabled: () => state.on, AudioContext: hidden.Ctx, doc, now: () => t });
+  third.play('result-ready'); doc.visibilityState = 'hidden'; release(); await flush();
+  assert.equal(hidden.started.length, 0, 'hidden while unlocking: silent');
+  const refused = fakeAudio({ state: 'suspended', resume: () => Promise.reject(new Error('NotAllowedError')) });
+  doc.visibilityState = 'visible';
+  assert.doesNotThrow(() => createRoomSounds({ enabled: () => true, AudioContext: refused.Ctx, doc }).play('needs-you'));
+  class Throwing { constructor() { throw new Error('no audio'); } }
+  assert.equal(createRoomSounds({ enabled: () => true, AudioContext: Throwing, doc }).play('needs-you'), false);
+  assert.equal(createRoomSounds({ enabled: () => true, AudioContext: undefined, doc }).play('needs-you'), false);
+  await flush();
+});
+
+function tab({ storage, locks, viewer = 'me', on = true, doc = visibleDoc() }) {
+  if (on) setSoundsEnabled('commons', true, storage);
+  const audio = fakeAudio(); let t = 0;
+  const sounds = createRoomSounds({ enabled: () => soundsEnabled('commons', storage), AudioContext: audio.Ctx, doc, now: () => (t += 2000) });
+  return { audio, doc, observe: installAskSounds({ getRoomId: () => 'commons', getViewerId: () => viewer, storage, locks, sounds }) };
+}
+
+test('cues fire only for live transitions of the viewer\'s own asks', async () => {
+  const storage = memoryStorage(), a = tab({ storage, locks: fakeLocks() });
+  assert.equal(await a.observe({ id: 'old', initiatorId: 'me', resultMessageId: 'm0' }, 'done'), false, 'first sighting is silent');
   const mine = { id: 'r1', initiatorId: 'me' };
-  assert.equal(tab(mine, 'asked'), null);
-  assert.equal(tab(mine, 'working'), 'picked-up');
-  assert.equal(tab(mine, 'working'), null, 'repaint is silent');
-  assert.equal(tab(mine, 'done'), null, 'done without a stored result message is silent');
-  const a = createAskCues({ viewerId: 'me', storage }), b = createAskCues({ viewerId: 'me', storage });
-  const run = { id: 'r2', initiatorId: 'me', resultMessageId: 'm2' };
-  a(run, 'working'); b(run, 'working');
-  assert.equal(a(run, 'done'), 'result-ready');
-  assert.equal(b(run, 'done'), null, 'a second tab does not re-chime');
-  const theirs = createAskCues({ viewerId: 'me', storage });
-  theirs({ id: 'r3', initiatorId: 'sam' }, 'working');
-  assert.equal(theirs({ id: 'r3', initiatorId: 'sam', resultMessageId: 'm' }, 'done'), null, "someone else's ask never sounds");
-  const noStore = createAskCues({ viewerId: 'me', storage: blocked });
-  noStore(run, 'working');
-  assert.equal(noStore(run, 'done'), 'result-ready', 'blocked storage still dedupes within the tab');
+  assert.equal(await a.observe(mine, 'asked'), false);
+  assert.equal(await a.observe(mine, 'working'), true, 'picked-up');
+  assert.equal(await a.observe(mine, 'working'), false, 'repaint');
+  assert.equal(await a.observe(mine, 'done'), false, 'no stored result yet');
+  assert.equal(await a.observe({ ...mine, resultMessageId: 'm1' }, 'done'), true, 'result arrives after done: still cues');
+  assert.equal(await a.observe({ ...mine, resultMessageId: 'm1' }, 'asked'), false);
+  assert.equal(await a.observe({ ...mine, resultMessageId: 'm1' }, 'working'), false, 'picked-up is once per run');
+  assert.equal(await a.observe({ ...mine, resultMessageId: 'm1' }, 'done'), false, 'done -> asked -> working -> done does not re-chime');
+  const theirs = { id: 'r3', initiatorId: 'sam' };
+  await a.observe(theirs, 'working');
+  assert.equal(await a.observe({ ...theirs, resultMessageId: 'm3' }, 'done'), false);
+  assert.equal(a.audio.cues(), 2);
+  const off = tab({ storage: memoryStorage(), locks: null, on: false });
+  await off.observe(mine, 'working');
+  assert.equal(await off.observe({ ...mine, resultMessageId: 'm1' }, 'done'), false, 'setting off');
 });
 
-test('installAskSounds plays only when the room setting is on', async () => {
-  const played = [], storage = memoryStorage();
-  const askSounds = installAskSounds({ getRoomId: () => 'commons', getViewerId: () => 'me', storage, Audio: fakeAudio(played), doc: visible, load: fakeData });
-  const run = { id: 'r9', initiatorId: 'me', resultMessageId: 'm9' };
-  askSounds(run, 'working'); assert.equal(askSounds(run, 'done'), false, 'setting off');
-  setSoundsEnabled('commons', true, storage);
-  const run2 = { id: 'r10', initiatorId: 'me', resultMessageId: 'm10' };
-  askSounds(run2, 'working'); assert.equal(askSounds(run2, 'done'), true);
-  await flush();
-  assert.deepEqual(played, ['rr']);
+test('across tabs: one cue per identity, old results stay quiet, and a hidden tab never takes the cue', async () => {
+  const storage = memoryStorage(), locks = fakeLocks();
+  const a = tab({ storage, locks }), b = tab({ storage, locks });
+  const run = { id: 'r2', initiatorId: 'me' };
+  await Promise.all([a.observe(run, 'working'), b.observe(run, 'working')]);
+  const done = { ...run, resultMessageId: 'm2' };
+  const results = await Promise.all([a.observe(done, 'done'), b.observe(done, 'done')]);
+  assert.deepEqual(results.filter(Boolean).length, 1, 'concurrent tabs: exactly one chime');
+  const reload = tab({ storage, locks });
+  await reload.observe({ id: 'r4', initiatorId: 'me', resultMessageId: 'm4' }, 'done');
+  const other = tab({ storage, locks });
+  await other.observe({ id: 'r4', initiatorId: 'me' }, 'working');
+  assert.equal(await other.observe({ id: 'r4', initiatorId: 'me', resultMessageId: 'm4' }, 'done'), false, 'a result first seen finished is recorded durably');
+  const hiddenDoc = visibleDoc(); hiddenDoc.visibilityState = 'hidden';
+  const hidden = tab({ storage, locks, doc: hiddenDoc }), shown = tab({ storage, locks });
+  const r5 = { id: 'r5', initiatorId: 'me' };
+  await hidden.observe(r5, 'working'); await shown.observe(r5, 'working');
+  assert.equal(await hidden.observe({ ...r5, resultMessageId: 'm5' }, 'done'), false);
+  assert.equal(await shown.observe({ ...r5, resultMessageId: 'm5' }, 'done'), true, 'the visible tab still gets it');
+});
+
+test('the cue ledger is bounded and tolerates blocked or corrupt storage', async () => {
+  const storage = memoryStorage(), ledger = createCueLedger({ storage, locks: null });
+  for (let i = 0; i < 10000; i += 1) await ledger.claim(`result:m${i}`);
+  assert.ok(JSON.parse(storage.getItem('room.sounds.cued')).length <= 200);
+  assert.equal(await ledger.claim('result:m9999'), false);
+  storage.setItem('room.sounds.cued', '{not json');
+  assert.equal(await createCueLedger({ storage, locks: null }).claim('result:new'), true);
+  const noStore = createCueLedger({ storage: blocked, locks: null });
+  assert.equal(await noStore.claim('result:x'), true); assert.equal(await noStore.claim('result:x'), false, 'memory still dedupes');
+  const failingLocks = { request() { return Promise.reject(new Error('lock')); } };
+  assert.equal(await createCueLedger({ storage, locks: failingLocks }).claim('result:y'), false, 'a lock failure stays quiet');
 });
 
 function fakeDoc() {
   const el = tag => ({ tag, children: [], listeners: {}, append(...c) { this.children.push(...c); }, addEventListener(type, fn) { this.listeners[type] = fn; } });
   return { createElement: el };
 }
-test('the sound setting control reflects the room, previews once when turned on, and reverts if storage fails', () => {
+test('the sound setting control is off by default, per room, previews once, and reverts if it cannot save', () => {
   const doc = fakeDoc(), container = { children: [], append(c) { this.children.push(c); } }, storage = memoryStorage();
   const previews = []; const sounds = { play: (name, opts) => previews.push([name, opts]) };
   let room = 'commons';
   const ui = mountSoundSetting(container, { getRoomId: () => room, storage, doc, sounds });
-  assert.equal(ui.input.type, 'checkbox'); assert.equal(ui.input.checked, false, 'off by default');
+  assert.equal(ui.input.type, 'checkbox'); assert.equal(ui.input.checked, false);
   assert.match(container.children[0].children[1].textContent, /Play sounds in this room/);
   ui.input.checked = true; ui.input.listeners.change();
   assert.equal(soundsEnabled('commons', storage), true);
   assert.deepEqual(previews, [['result-ready', { preview: true }]]);
-  room = 'other'; ui.sync(); assert.equal(ui.input.checked, false, 'per room');
+  room = 'other'; ui.sync(); assert.equal(ui.input.checked, false);
   const failing = mountSoundSetting(container, { getRoomId: () => 'commons', storage: blocked, doc, sounds });
   failing.input.checked = true; failing.input.listeners.change();
-  assert.equal(failing.input.checked, false, 'reverts when the choice cannot be saved');
+  assert.equal(failing.input.checked, false);
 });
 
-test('audio failures never throw into the caller', async () => {
-  class Refusing { play() { return Promise.reject(new Error('NotAllowedError')); } }
-  class Throwing { constructor() { throw new Error('no audio'); } }
-  for (const Audio of [Refusing, Throwing]) assert.doesNotThrow(() => createRoomSounds({ enabled: () => true, Audio, doc: visible, load: fakeData }).play('needs-you'));
-  assert.doesNotThrow(() => createRoomSounds({ enabled: () => true, Audio: class {}, doc: visible, load: () => Promise.reject(new Error('offline')) }).play('needs-you'));
-  await flush();
-});
-
-test('shipped cues are small embedded MP3 data, loaded lazily, and packaged', () => {
-  assert.deepEqual(Object.keys(SOUND_DATA).sort(), [...CUES].sort());
-  for (const cue of CUES) {
-    const [head, body] = SOUND_DATA[cue].split(',');
-    assert.equal(head, 'data:audio/mpeg;base64');
-    assert.ok(Buffer.from(body, 'base64').length < 20 * 1024, `${cue} under 20 KB`);
-  }
-  for (const path of ['src/room-sounds.js', 'src/room-sound-data.js', 'src/ask-motion.css']) assert.ok(publicAssetPaths.includes(path), path);
-  assert.doesNotMatch(readFileSync(new URL('../src/room-sounds.js', import.meta.url), 'utf8'), /^import .*room-sound-data/m, 'audio bytes never load with the page');
+test('cues are synthesized in code: no audio files, no media fetch, CSP unchanged', () => {
+  assert.deepEqual(Object.keys(VOICES).sort(), [...CUES].sort());
+  const source = readFileSync(new URL('../src/room-sounds.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /new Audio\b|data:audio|\.mp3|\.ogg|fetch\(/);
+  assert.ok(publicAssetPaths.includes('src/room-sounds.js'));
+  assert.ok(publicAssetPaths.includes('src/ask-motion.css'));
+  const edge = readFileSync(new URL('../cloudflare/edge-public.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(edge, /media-src/, 'no CSP widening was needed');
 });
 
 test('ask status motion is linked, finite, and only runs without a reduced-motion preference', () => {
   assert.match(readFileSync(new URL('../index.html', import.meta.url), 'utf8'), /<link rel="stylesheet" href="\.\/src\/ask-motion\.css">/);
   const css = readFileSync(new URL('../src/ask-motion.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /\binfinite\b/);
-  for (const m of css.matchAll(/animation:\s*[\w-]+\s+[\d.]+m?s\s+[^;]*?\s(\d+)(\s|;)/g)) assert.ok(Number(m[1]) <= 3, m[0]);
   const start = css.indexOf('@media (prefers-reduced-motion: no-preference)');
   assert.ok(start > 0);
   assert.doesNotMatch(css.slice(0, start), /\banimation\s*:/, 'no animation outside the no-preference block');
+  for (const m of css.slice(start).matchAll(/animation:[^;]*?\s(\d+)(?:\s+both)?;/g)) assert.ok(Number(m[1]) <= 3, m[0]);
   for (const state of ['asked', 'working', 'done', 'not_picked_up', 'stalled', 'failed']) assert.match(css, new RegExp(`data-face-status="${state}"`));
 });
