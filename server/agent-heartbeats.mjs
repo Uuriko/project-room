@@ -111,10 +111,11 @@ const checkHostId = hostId =>
     422, "invalid_heartbeat", "hostId must match [A-Za-z0-9._-]{1,128}");
 
 // RC-2026-09-24-203: cadence is the host's declared poll interval in
-// seconds. Positive and finite; absent means the 180s default window.
-// Bounded above: the window is cadence x 1.5, so an unbounded cadence (1e300)
-// kept one heartbeat "online" for good and land-queue wakes (sent only to
-// offline claimants) never fired for an agent that had stopped.
+// seconds. Positive and finite; absent on the wire keeps the previously
+// declared value (a host that never declared one reads the 180s default
+// window). Bounded above: the window is cadence x 1.5, so an unbounded
+// cadence (1e300) kept one heartbeat "online" for good and land-queue wakes
+// (sent only to offline claimants) never fired for an agent that had stopped.
 export const MAX_CADENCE_SECONDS = 7 * 24 * 3600;
 const checkCadenceSeconds = cadenceSeconds =>
   check(Number.isFinite(cadenceSeconds) && cadenceSeconds > 0 && cadenceSeconds <= MAX_CADENCE_SECONDS,
@@ -353,11 +354,17 @@ export class AgentHeartbeats {
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
+    // cadence_seconds is sticky the same way: a body that carries
+    // cadenceSeconds replaces it, a bare heartbeat keeps the previously
+    // declared value (COALESCE) instead of wiping it back to null — the
+    // declared poll cadence drives the per-host reachability window, and
+    // slow pollers declare once, then beat bare.
     this.db.prepare(`INSERT INTO agent_push_configs
       (agent_id, host_id, cadence_seconds, updated_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(agent_id, host_id) DO UPDATE SET
-        cadence_seconds=excluded.cadence_seconds, updated_at=excluded.updated_at`)
+        cadence_seconds=COALESCE(excluded.cadence_seconds, agent_push_configs.cadence_seconds),
+        updated_at=excluded.updated_at`)
       .run(agentId, hostId, cadenceSeconds ?? null, at);
     if (push) {
       this.db.prepare(`UPDATE agent_push_configs
@@ -366,12 +373,16 @@ export class AgentHeartbeats {
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
     if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
-    const cadence = cadenceSeconds ?? null;
+    // The effective cadence is the stored one: the body may have carried a
+    // fresh declaration, kept silent (sticky), or never declared one (null
+    // -> the 180s default window). The response reports what statusOf will
+    // use, so the heartbeat's reachability never disagrees with presence.
+    const pushRow = this.db.prepare(
+      "SELECT push_url AS pushUrl, push_suspended AS pushSuspended, cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+      .get(agentId, hostId);
+    const cadence = pushRow?.cadenceSeconds ?? null;
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
-    const pushRow = this.db.prepare(
-      "SELECT push_url AS pushUrl, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=? AND host_id=?")
-      .get(agentId, hostId);
     const pushConfigured = pushRow?.pushUrl != null;
     const pushSuspended = pushRow?.pushSuspended === 1;
     const windowMs = this.windowFor(cadence);

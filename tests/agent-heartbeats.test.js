@@ -504,3 +504,27 @@ test("cadenceSeconds is bounded so one heartbeat cannot stay online indefinitely
  advance(604800 * 1500 + 1);
  assert.equal(hb.statusOf("ai_testagent").status, "offline", "the longest window still ends");
 });
+
+// WAVE-500 guild 5: a bare heartbeat (no cadenceSeconds) must not wipe the
+// host's previously declared cadence — the per-host reachability window is
+// max(180s, cadence * 1.5), and slow pollers declare once, then beat bare.
+test("declared cadenceSeconds survives bare heartbeats (sticky per host)", t => {
+ const { hb, advance } = unit(t);
+ let res = hb.heartbeat({ ...wakeable(), cadenceSeconds: 3600 });
+ assert.equal(res.reachability.reachableUntil - res.host.lastSeenAt, 3600 * 1500);
+ assert.equal(res.host.cadenceSeconds, 3600);
+ // Steady-state bare heartbeats carry no cadence.
+ res = hb.heartbeat(wakeable());
+ assert.equal(res.host.cadenceSeconds, 3600, "response reports the effective cadence");
+ assert.equal(res.reachability.reachableUntil - res.host.lastSeenAt, 3600 * 1500,
+   "response window uses the stored cadence");
+ // 4000s later: inside the 5400s declared window, past the 180s default.
+ advance(4_000_000);
+ const status = hb.statusOf("ai_testagent");
+ assert.equal(status.status, "online", "declared window still applies");
+ assert.equal(status.hosts[0].state, "online");
+ assert.equal(status.hosts[0].cadenceSeconds, 3600);
+ // Re-declaring replaces the stored cadence.
+ hb.heartbeat({ ...wakeable(), cadenceSeconds: 120 });
+ assert.equal(hb.statusOf("ai_testagent").hosts[0].cadenceSeconds, 120);
+});
