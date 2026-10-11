@@ -91,18 +91,26 @@ export function createFrameParser(onMessage, { maxBytes = 8 * 1024 * 1024, onToo
 
 // Outbound socket. The machine token is an Authorization header, not a URL
 // query and not a child argument.
-export function connectSocket(url, { headers = {}, onText, onClose, onOpen }) {
+export function connectSocket(url, { headers = {}, onText, onClose, onOpen, connectTimeoutMs = 10000 }) {
+  if (!Number.isFinite(connectTimeoutMs) || connectTimeoutMs <= 0) throw new Error("Invalid socket connection timeout");
   const parsed = new URL(url);
   const tls = parsed.protocol === "wss:";
   const port = parsed.port || (tls ? 443 : 80);
   const key = randomBytes(16).toString("base64");
   const socket = (tls ? tlsConnect : netConnect)({ host: parsed.hostname, port: Number(port), servername: parsed.hostname });
   let opened = false;
-  const fail = () => { if (!opened) onClose?.(); };
-  socket.on("error", fail);
+  let closed = false;
+  const deadline = setTimeout(() => socket.destroy(), connectTimeoutMs);
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(deadline);
+    onClose?.();
+  };
+  socket.on("error", () => socket.destroy());
   const headerLines = Object.entries(headers).map(([name, value]) => `${name}: ${value}`);
   const path = `${parsed.pathname || "/"}${parsed.search}`;
-  socket.once("connect", () => {
+  socket.once(tls ? "secureConnect" : "connect", () => {
     socket.write([
       `GET ${path} HTTP/1.1`,
       `Host: ${parsed.host}`,
@@ -128,26 +136,30 @@ export function connectSocket(url, { headers = {}, onText, onClose, onOpen }) {
     if (!opened) {
       handshake = Buffer.concat([handshake, chunk]);
       const end = handshake.indexOf("\r\n\r\n");
-      if (end === -1) return;
+      if (end === -1 || end > 16384) {
+        if (handshake.length > 16384) socket.destroy();
+        return;
+      }
       const head = handshake.subarray(0, end).toString("utf8");
       const rest = handshake.subarray(end + 4);
-      if (!head.startsWith("HTTP/1.1 101")) { socket.destroy(); onClose?.(); return; }
+      if (!head.startsWith("HTTP/1.1 101")) { socket.destroy(); return; }
       // L7: validate the server's accept key against our nonce — a proxy
       // that answers 101 without completing the WebSocket handshake is not
       // a WebSocket peer.
       const accept = /^sec-websocket-accept:\s*(\S+)/im.exec(head)?.[1] ?? "";
-      if (accept !== acceptKey(key)) { socket.destroy(); onClose?.(); return; }
+      if (accept !== acceptKey(key)) { socket.destroy(); return; }
       opened = true;
+      clearTimeout(deadline);
       onOpen?.();
       if (rest.length) parser(rest);
       return;
     }
     parser(chunk);
   });
-  socket.on("close", () => onClose?.());
+  socket.on("close", finish);
   return {
     socket,
-    send(text) { if (opened) socket.write(encodeFrame(1, text, { mask: true })); },
+    send(text) { if (opened && !closed && !socket.destroyed) socket.write(encodeFrame(1, text, { mask: true })); },
     close() { socket.end(); socket.destroy(); },
   };
 }

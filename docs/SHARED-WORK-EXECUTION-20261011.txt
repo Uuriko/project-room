@@ -1,0 +1,73 @@
+PROJECT ROOM: SHARED WORK THAT CONTINUES
+Plan and execution prompt — 11 October 2026
+
+Product decision
+Make Project Room the place where a team can continue each other's AI work without starting over. Initial audience: small product teams with mixed agent tools. One human conversation is the default. Individuals may address a specific agent, but do not need to manage a swarm to get useful work done.
+
+Evidence and limits
+People report context trapped in private AI conversations, repeating explanations and duplicating attempts. Others solve this with Git and maintained handoff documents. Our baseline competitor is that working setup, not an imaginary product with no memory.
+https://www.reddit.com/r/ClaudeAI/comments/1vzy03q/everyone_on_my_team_uses_ai_and_teamwork_got/
+Teams also request one shared assistant connected to their existing tools, with less routing/setup maintenance:
+https://www.reddit.com/r/AI_Agents/comments/1vr5rwk/best_setup_for_a_small_team_using_multiple_ai/
+Users report inconsistent repetition after refining a successful task:
+https://www.reddit.com/r/ClaudeCowork/comments/1tqixxg/what_is_the_number_one_frustrationproblem_you/
+These are qualitative, self-selected reports, not validated willingness to pay. Promotional replies are not independent confirmation. Claude already provides cloud execution and shared projects; OpenClaw documents multi-user sessions and model accounts. Memory, background execution, and a model picker alone do not distinguish us.
+https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork
+https://docs.openclaw.ai/concepts/multi-user
+
+Existing implementation to preserve
+Source baseline: local 016013a9, pr-coordinator-watch-1011. Not a claim about deployed behavior.
+- server/work-handoff.mjs: structured status handoffs and persisted typed delegation envelopes with provenance and termination conditions. Extend its contract only after testing the actual continuation journey.
+- server/room-activation-pack.mjs: existing bounded room entry context and event cursor.
+- server/return-brief.mjs: existing returning-user context; do not create another summary sidebar.
+- tests/work-recipes.test.js and tests/shared-procedures.test.js: recipe and procedure mechanisms already exist; a docs-generated global procedure catalog is not the same as saving a team's accepted result.
+- client/codex-supervisor.mjs: existing persistent shared-request supervisor, retry state and ownership lock.
+- Existing atomic request admission, attempt journal, revision-fenced completion, Stop and multiplayer input handling remain authoritative.
+- Existing Mac local-tools service, persistent Pause/Resume and menu bar are the local access surface. Do not install a competing daemon merely to present a new status badge.
+
+Sequence and acceptance
+1. Repair persistence failures before building on them.
+   First slice: close a silent current machine connection promptly, bound connection/upgrade waiting, fence retired socket callbacks and queued work, and prevent old results from being published on a replacement link. Stop must close transport before potentially slow cleanup. Prove with real local sockets plus isolated daemon fixtures. Do not replay uncertain tool calls.
+   Next: separate complete dispatch discovery from bounded recent history. Current assistant list can omit the oldest of 101 unfinished requests. Add authorization-filtered keyset pages and exact active-run recovery. Keep existing atomic claim as execution authority. Test 1,001 mixed private/public/terminal requests, revocation, identical timestamps, racing hosts, and oldest Stop outside the history window.
+2. Make connection and readiness factual.
+   Register host session and capabilities independently of active work. Distinguish connected transport, usable provider credentials, capacity and paused state. Idle means no model calls. Keep backoff bounded and cancellation immediate; stop auth-rejection loops with a useful reconnect action. Test reboot, sleep/wake, logout, upgrade, dead sockets and stale callbacks. Provider protocol compatibility is not proof of authentication.
+3. Turn accepted work into a continuation package using current records.
+   Package objective, accepted decisions, current artifact versions, failed approaches, pending steps, result evidence and scoped authority. Reference canonical records; do not copy all private transcripts into the room. Retain authorship, source revisions and superseded decisions. On continuation, reread permissions and artifact versions; flag stale references and unresolved side effects before execution. Missing context must be visible, not fabricated.
+   Acceptance: person A and agent A make an artifact; person B and agent B continue it without a manual briefing. Revoked/private content stays inaccessible; a stale handoff cannot silently overwrite newer work. Test through public API, not validator-only tests.
+4. Present one calm conversation.
+   Human messages appear immediately. Server receipt, host pickup and runtime progress are distinct facts. Activity bubbles reflect actual activity; no filler messages or fabricated acknowledgments. Show brief public progress summaries and one integrated answer. Put individual agent activity and evidence behind expansion. Preserve individual mentions. Conflicting human directions produce one concise choice in the existing attention UI. Keyboard and machine interfaces use the same actions and authorization as the UI.
+   Acceptance: two people contribute during one task; attribution survives, neither input is lost, Stop works, and the result accounts for the latest accepted scope. Browser tests cover reconnect, delayed snapshots and duplicated delivery.
+5. Turn accepted outcomes into repeatable team procedures.
+   Reuse recipes/procedures. Save an accepted example, inputs, output contract, checks, required capabilities and version. Re-running creates new work linked to that version; it must not overwrite the template or silently grant new permissions. Compare outputs to checks rather than promise identical prose. Let the team revise a procedure after a successful run. Private team procedures must not enter the public generated catalog automatically.
+6. Demonstrate and measure the complete product.
+   Local acceptance scenario: two people, two adapter identities, one deliverable, interruption, handoff, continuation, correction, completion, then reuse. A fake runtime qualifies state transitions only; a real supported provider run qualifies integration. No claim of cross-provider completion until both integrations actually run.
+   Measure receipt-to-pickup, first useful progress, human interventions, repeated explanation, duplicate attempts, successful continuation and repeat use. Initial latency targets from the host design are hypotheses, not published performance claims.
+   After local qualification, recruit five small mixed-tool teams for their own real projects. Compare against their existing Git/docs workflow and ask whether they return and would pay. Charge for durable shared execution/coordination only if this solves a problem they value; do not infer demand from forum comments alone.
+
+Scope controls
+Do not add a second queue, memory store, workflow engine, coordinator, model picker, or setup wizard where the existing primitive can do the job. Keep supported provider entitlements; never market subscription pooling as guaranteed. Local machine actions require a reachable connected computer. Cloud execution cannot magically access a sleeping Mac. Preserve paused state and existing permissions. Do not expose private chain-of-thought; use progress and evidence.
+
+EXECUTION PROMPT
+Act as the engineering and product owner for the existing Project Room. Deliver the promise: a team can pick up each other's AI work without starting over. Combine persistent agent hosting, responsive shared conversation, cross-person/provider continuation, accepted-outcome reuse and useful Mac access in one coherent product.
+
+Before changing code, inspect the current source, dirty files, relevant claims, recent research and existing tests. Identify which pieces already exist, which are merely disconnected, and which are absent. Respect peer edits and release holds. Prefer connecting or repairing existing machinery over adding parallel abstractions. Explicitly distinguish local, merged, deployed and live-tested state.
+
+Work in the sequence above. Start by reproducing a persistence failure, write a behavioral regression, repair the smallest responsible layer and run relevant transport/control checks. Then inspect the continuation path end to end: how a human starts work, how a host claims it, where decisions/artifacts live, how another agent receives them, and how completion is proven. Build a real integration test for the missing seam before adding UI. Keep authority and side-effect ambiguity attached to the original execution attempt; an agent change is not authorization to rerun an uncertain action.
+
+For the human, keep one primary conversation and compact attention requests. For agents, expose bounded structured reads, event cursors, exact lookup, idempotent actions and batch operations where useful. Never require computer-use clicking when an equivalent machine command is available. Do not duplicate business logic between those surfaces.
+
+For every slice, record the user benefit, existing components reused, observed failure, implemented repair, meaningful validation, limits and next unfinished step. Tests must cover real failure modes: backlog starvation, silent links, stale callbacks, concurrent contributors, revoked access, failed handoffs, interrupted tools and artifact version conflict. Do not label mock-provider tests as real provider or production evidence.
+
+Continue through useful reviewable checkpoints. Avoid broad rewrites and speculative infrastructure that does not improve the acceptance scenario. Keep the plan updated as evidence changes. Ship only through the existing CI and serialized release process; local tests alone are not release qualification.
+
+EXECUTION RECORD
+Initial audit complete: reuse map above. First bounded implementation slice is machine transport recovery. Room board CLI returned invalid_config; MCP board call rejected arguments. Live lease not verified. Local board and bus scope recorded; no landing or production changes in this slice.
+
+First implementation checkpoint complete (local only)
+- Silent relay timeout closes and retires its socket before guest suspension, allowing reconnect; a fresh peer heartbeat clears the deadman gate.
+- A ten-second connection/upgrade deadline and 16 KiB handshake-header bound prevent unbounded wait/accumulation. TLS waits for secureConnect. Socket closure notifies its owner once.
+- Queued work from retired sockets is discarded; old in-flight results cannot be sent over a replacement session. Stop retires transport before awaiting bot/guest cleanup.
+- Eight new regression cases tested against original HEAD: six failures and two timeout cancellations. All eight pass on repaired code, including a real local relay reconnection.
+- 53 focused tests pass; affected test selection against pre-change HEAD: 107 pass across 12 files. Full lint passes (existing warnings remain); git diff --check passes.
+- No production test, Mac sleep/reboot qualification, or live provider handoff claimed. In-flight tool side effects are not rolled back by dropping their stale response; durable outcome reconciliation remains necessary. Reconnect jitter/auth-rejection classification, fragmented-frame aggregate limits, complete queue discovery, readiness and continuation integration remain next work.
+- Next implementation: exact active-run recovery plus bounded authorized dispatch pages, then a public-API two-person continuation test grounded in existing handoff envelopes.
