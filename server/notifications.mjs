@@ -4,7 +4,8 @@
 // (server/human-push.mjs) and does not read this feed. Every read re-authenticates, so a member
 // whose access ended gets 401/403 and never a stale list.
 import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
-import { messageAddressesMember } from "../src/conversation.js";
+import { messageMentionsMember } from "../src/conversation.js";
+import { resolveMentionTargetsInText, identityNamesForRoom } from "./mention-lifecycle.mjs";
 import { ServiceError } from "./store.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
@@ -42,7 +43,7 @@ const involvedIn = (item, memberId) => Boolean(item) && (ROLE_FIELDS.some(field 
 // and deletions are honoured without a second store. `mutedThreadIds` is the
 // member's muted thread-root ids (a Set); items from muted threads are
 // skipped at read time, so unmuting restores them on the next read.
-export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map() }) {
+export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map(), identityNames = {} }) {
   const preferences = { ...defaultNotificationPreferences(), ...(member.notificationPreferences ?? {}) };
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
   const muted = mutedThreadIds instanceof Set ? mutedThreadIds : new Set();
@@ -98,7 +99,18 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       // from a conversation they have no access to. The sender is already
       // skipped above; this leaves the recipient, who is owed their message.
       if (message.toMemberId && message.toMemberId !== member.id) continue;
-      const addressed = messageAddressesMember(message, member);
+      // Mention targeting matches the delivery path (server/mention-lifecycle.mjs):
+      // longest-label-first over the room roster, never a shorter display-name
+      // prefix. Without it, "@Jill - Dot" also fires for "Jill" (the "@Jill"
+      // prefix ends at a space, passing the substring boundary guard), which
+      // diverges from the mention_states rows, wakes, and pushes that only
+      // name the real target. When the roster carries no entry for the viewer
+      // (pure-function tests), fall back to the legacy display-name check.
+      const rosterKnown = Boolean(member?.id) && Boolean((state.members ?? {})[member.id]);
+      const mentionedByName = rosterKnown
+        ? resolveMentionTargetsInText(state.members, identityNames, message.body ?? "", event.actorId).includes(member.id)
+        : messageMentionsMember(message?.body, member);
+      const addressed = (message?.toMemberId === member?.id) || mentionedByName;
       const parent = message.replyToId ? messages.get(message.replyToId) : null;
       const replyToMe = Boolean(parent) && parent.authorId === member.id;
       // One message yields one item: a reply to you is the more specific relation;
@@ -248,7 +260,7 @@ export class Notifications {
       const floor = this.store.historyFloor(roomId, auth.member.id, room.sequence);
       const floorMessages = floor ? indexMessages(room.state.messages) : null;
       const visibleRows = rows.filter(row => rowInHistory(row, floor, floorMessages));
-      const notifications = deriveNotifications({ events: visibleRows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, visibleRows) });
+      const notifications = deriveNotifications({ events: visibleRows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, visibleRows), identityNames: identityNamesForRoom(this.db, roomId) });
       const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
         : truncated ? rows[0].sequence : null;
       // Tag acknowledgment (2026-09-23): per-member mention ack rate over the

@@ -300,3 +300,43 @@ test("notification item limits also provide a continuation without skipping item
   } while (before !== null);
   assert.deepEqual(found, [4,3,2,1,0].map(i => `mention:page-${i}`));
 });
+
+test("a mention of a longer display name does not notify the shorter prefix member (no near-miss delivery)", () => {
+  // Room with "Jill" and "Jill - Dot". A mention of "@Jill - Dot" must reach
+  // only Jill - Dot; the naive display-name substring match would also fire
+  // for Jill (the "@Jill" prefix ends at a space, passing the boundary guard).
+  const members = {
+    owner: { id: "owner", displayName: "Owner", kind: "human" },
+    jill: { id: "jill", displayName: "Jill", kind: "human" },
+    "jill-dot": { id: "jill-dot", displayName: "Jill - Dot", kind: "agent" },
+  };
+  const state = {
+    messages: [{ id: "m1", authorId: "owner", body: "@Jill - Dot please review the plan" }],
+    workItems: {},
+    members,
+  };
+  const events = [{ sequence: 7, event: { id: "e1", type: T.MESSAGE_POSTED, actorId: "owner", at: "2026-10-10T00:00:00.000Z", data: { messageId: "m1", body: "@Jill - Dot please review the plan" } } }];
+  const forDot = deriveNotifications({ events, state, member: members["jill-dot"] });
+  assert.deepEqual(forDot.map(item => item.kind), ["mention"]);
+  const forJill = deriveNotifications({ events, state, member: members.jill });
+  assert.deepEqual(forJill, [], "near-miss delivery: Jill must not be notified for \"@Jill - Dot\"");
+});
+
+test("identity display-name aliases resolve through the feed's mention targeting", () => {
+  // list() passes identityNamesForRoom into deriveNotifications; an agent
+  // identity alias must address its member exactly like a display name does.
+  const members = {
+    owner: { id: "owner", displayName: "Owner", kind: "human" },
+    agent: { id: "agent", displayName: "Dot", kind: "agent" },
+  };
+  const state = {
+    messages: [{ id: "m1", authorId: "owner", body: "@Jill - Dot please review" }],
+    workItems: {},
+    members,
+  };
+  const events = [{ sequence: 7, event: { id: "e1", type: T.MESSAGE_POSTED, actorId: "owner", at: "2026-10-10T00:00:00.000Z", data: { messageId: "m1", body: "@Jill - Dot please review" } } }];
+  const withAlias = deriveNotifications({ events, state, member: members.agent, identityNames: { agent: "Jill - Dot" } });
+  assert.deepEqual(withAlias.map(item => item.kind), ["mention"]);
+  const withoutAlias = deriveNotifications({ events, state, member: members.agent });
+  assert.deepEqual(withoutAlias, [], "no alias, no mention");
+});
