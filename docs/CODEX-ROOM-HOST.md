@@ -127,3 +127,39 @@ Room HTTP fixture, including atomic result publication. They also cover scoped
 threads, private process environment, unsupported interactive requests, malformed
 output, disconnects, timeouts and duplicate profile locks. Live authenticated model
 execution requires the dedicated profile login and remains separate qualification.
+
+## Keep the host listening
+
+After dedicated login and the protocol check, keep one supervisor running:
+
+```sh
+ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch \
+  /absolute/private-room-journal.sqlite /absolute/runtime.json
+```
+
+This picks up explicitly invoked public asks assigned to this member, one at a
+time. It polls the authoritative assistant queue every two seconds because room
+event notifications do not cover every assistant state change. It does not turn
+ordinary chat messages into execution requests. An unresolved owned attempt is
+reconciled before any new ask. Retry delays are persisted and back off to thirty
+seconds; restarting the process does not erase the original execution journal.
+
+The existing watcher ownership lock lives beside the journal in `.sqlite.watch`.
+A second supervisor using that directory fails instead of competing for work.
+The separate runtime-profile lock also prevents two live Codex processes sharing
+one profile. Keep both paths stable. Ctrl-C/SIGTERM interrupts owned work and
+closes the runtime process group; uncertain outcomes remain recoverable in Room.
+
+JSON status lines distinguish `watching_room`, `protocol_qualified`, `running`,
+`settled`, `recovery_pending`, `retrying_room`, and `stopped`. Protocol qualification
+still does not prove provider login. Missing credentials require dedicated login;
+unsupported runtime questions require a separately connected decision interface.
+An idle supervisor currently has local status only: Room's existing connected
+indicator is based on recent active-run reports, not a persistent idle heartbeat.
+
+This command is a foreground service; it does not install a login item or modify
+host settings. For desktop computer tools, explicitly configure the dedicated
+Codex profile's MCP server with `ProjectRoomTools --connection /absolute/path/to/connection.json`.
+The native application must supply that connection file and the user must enable
+its grants. The supervisor neither enables computer access nor imports another
+Codex profile's MCP settings.
