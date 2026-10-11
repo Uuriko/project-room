@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { createRoomClient } from "../client/room-assistant-client.mjs";
 export { createRoomClient } from "../client/room-assistant-client.mjs";
@@ -62,11 +63,12 @@ export function memberNames(client) {
   };
 }
 
-export async function runHostOnce(client, { memberId, hostId = memberId, execute = scriptedExecute, controlPollMs = 1000, log = () => {}, names = memberNames(client) } = {}) {
+export async function runHostOnce(client, { memberId, hostId = memberId, execute = scriptedExecute, controlPollMs = 1000, signal, log = () => {}, names = memberNames(client) } = {}) {
   const outcomes = [];
   const { runs, assistant } = await client.assistant();
   if (assistant.coordinatorMemberId !== memberId) return { outcomes, skipped: "not_coordinator" };
   for (let run of runs) {
+    signal?.throwIfAborted();
     if (run.coordinatorMemberId !== memberId || TERMINAL.has(run.status) || run.sourceDeleted) continue;
     const attemptId = `${hostId}-${run.id}`.slice(0, 128);
     const report = (state, summary, extra = {}) => client.act({ action: "report", requestId: stable("report", run.id, run.revision, state, extra.resultMessageId ?? ""), runId: run.id, attemptId, expectedRevision: run.revision, state, summary, ...extra });
@@ -85,7 +87,13 @@ export async function runHostOnce(client, { memberId, hostId = memberId, execute
     if (stopped) { outcomes.push({ runId: run.id, state: stopped }); continue; }
     if (run.status === "resume_requested") run = (await report("working", "Resumed.")).result;
     if (run.status !== "working") { outcomes.push({ runId: run.id, waiting: run.status }); continue; }
-    const reread = async signal => (await client.assistant({ signal })).runs.find(r => r.id === run.id);
+    const reread = async signal => {
+      const snapshot = await client.assistant({ signal });
+      const current = snapshot.runs.find(r => r.id === run.id);
+      if (current?.status === "working" && (snapshot.assistant.coordinatorMemberId !== memberId || snapshot.assistant.availability === "not_connected"))
+        throw Object.assign(new Error("Assistant execution authority was removed"), { code: "assistant_authority_removed" });
+      return current;
+    };
     // Each attempt: brief, execute, re-read, then publish only if the run is
     // still working at the same revision. A Stop or Pause during execution
     // publishes nothing; a late addition re-briefs before anything is posted.
@@ -95,8 +103,9 @@ export async function runHostOnce(client, { memberId, hostId = memberId, execute
     for (let attempt = 0; attempt < 4 && !outcome; attempt++) {
       const input = await brief(client, run, names);
       let answer;
-      try { answer = await executeWatchingRun(execute, input, run, reread, controlPollMs); }
+      try { answer = await executeWatchingRun(execute, input, run, reread, controlPollMs, signal); }
       catch (failure) {
+        signal?.throwIfAborted();
         if (failure.code === "executor_stop_failed") throw failure;
         const current = await reread();
         if (current?.sourceDeleted) {
@@ -155,12 +164,21 @@ async function host(opts) {
   const execute = opts.exec ? commandExecutor(String(opts.exec)) : scriptedExecute;
   if (!opts.exec) console.error(`${SCRIPTED_LABEL}: results prove the run contract, not a model runtime.`);
   const interval = Math.max(2, Number(opts.interval) || 5) * 1000;
-  for (;;) {
-    try { const { outcomes, skipped } = await runHostOnce(client, { memberId, execute, log: m => console.error(m) }); if (skipped) console.error(`not the configured coordinator (${skipped})`); else for (const o of outcomes) console.log(JSON.stringify(o)); }
-    catch (failure) { console.error(`host pass failed: ${failure.code || failure.status || ""} ${failure.message}`); }
-    if (opts.once) return;
-    await new Promise(r => setTimeout(r, interval));
-  }
+  const controller = new AbortController();
+  const stop = name => { process.exitCode = name === "SIGINT" ? 130 : 143; controller.abort(new Error(`Host received ${name}`)); };
+  const interrupt = () => stop("SIGINT"), terminate = () => stop("SIGTERM");
+  process.on("SIGINT", interrupt); process.on("SIGTERM", terminate);
+  try {
+    while (!controller.signal.aborted) {
+      try { const { outcomes, skipped } = await runHostOnce(client, { memberId, execute, signal: controller.signal, log: m => console.error(m) }); if (skipped) console.error(`not the configured coordinator (${skipped})`); else for (const o of outcomes) console.log(JSON.stringify(o)); }
+      catch (failure) {
+        if (!controller.signal.aborted) { console.error(`host pass failed: ${failure.code || failure.status || ""} ${failure.message}`); process.exitCode = 1; }
+        return; // Require operator reconciliation after an uncertain host pass.
+      }
+      if (opts.once || controller.signal.aborted) return;
+      await delay(interval, undefined, { signal: controller.signal }).catch(error => { if (!controller.signal.aborted) throw error; });
+    }
+  } finally { process.removeListener("SIGINT", interrupt); process.removeListener("SIGTERM", terminate); }
 }
 
 // Two humans and one host against a disposable local server, all over HTTP.

@@ -107,3 +107,36 @@ test('a custom executor must settle before the host acknowledges Stop', async t 
   assert.equal((await pass).outcomes[0].state, 'cancelled');
   assert.equal((await owner.recent()).filter(message => message.authorId === 'producer').length, 0);
 });
+for (const shutdown of ['SIGINT', 'SIGTERM']) test(`host ${shutdown} waits for resistant descendant cleanup`, { skip: process.platform === 'win32' }, async t => {
+  const { spawn } = await import('node:child_process');
+  const { f, server } = await setup(t);
+  const child = await slowCommand(t, f.directory);
+  await writeFile(join(f.directory, 'connection.json'), JSON.stringify({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys.producer, memberId: 'producer' }));
+  const host = spawn(process.execPath, ['scripts/room-assistant-scratch.mjs', 'host', '--config', f.directory, '--exec', child.command], { stdio: 'ignore' });
+  t.after(() => { if (host.exitCode === null) host.kill('SIGKILL'); });
+  const exited = new Promise(resolve => host.once('exit', (code, signal) => resolve({ code, signal })));
+  const pid = await child.ready(); host.kill(shutdown);
+  await exited;
+  assert.equal(alive(pid), false, 'host exited before owned descendant stopped');
+});
+for (const when of ['running', 'brief']) test(`HTTP execution permission removal during ${when} prevents continued effects`, { skip: process.platform === 'win32' }, async t => {
+  const { f, producer, current } = await setup(t);
+  const child = await slowCommand(t, f.directory); let calls = 0;
+  const revoke = () => f.store.command(f.keys.owner, 'commons', { id: `revoke-${when}`, type: 'member.access_changed', data: { memberId: 'producer', expectedMemberRevision: 0, permissions: ['complete_work'], active: true } });
+  if (when === 'brief') { const message = producer.message; producer.message = async id => { const result = await message(id); revoke(); return result; }; }
+  const execute = commandExecutor(child.command, { timeoutMs: 15000 });
+  const pass = runHostOnce(producer, { memberId: 'producer', controlPollMs: 25, execute: (...args) => { calls++; return execute(...args); } });
+  const settled = pass.catch(() => {}); t.after(() => settled);
+  if (when === 'running') { const pid = await child.ready(); revoke(); await until(() => !alive(pid), 'revoked executor continues', 2500); }
+  else { await Promise.race([settled, delay(600)]); assert.equal(calls, 0, 'revoked executor launched during brief'); }
+  assert.equal((await current()).resultMessageId ?? null, null);
+});
+
+for (const status of [429, 503]) test(`first ${status} control read stops execution without an automatic retry`, async t => {
+  const { producer, current } = await setup(t); const read = producer.assistant; let reads = 0, starts = 0, stopped = false;
+  producer.assistant = async options => { if (++reads === 3) throw Object.assign(new Error("Control read unavailable"), { status }); return read(options); };
+  const execute = (_brief, { signal }) => { starts++; return new Promise((_resolve, reject) => signal.addEventListener('abort', () => { stopped = true; reject(signal.reason); }, { once: true })); };
+  const result = await runHostOnce(producer, { memberId: 'producer', execute, controlPollMs: 10 });
+  assert.equal(stopped, true); assert.equal(starts, 1); assert.equal(result.outcomes[0].state, 'failed');
+  assert.equal((await current()).resultMessageId ?? null, null);
+});

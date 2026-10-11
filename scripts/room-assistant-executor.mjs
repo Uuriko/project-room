@@ -54,7 +54,7 @@ export function commandExecutor(command, { timeoutMs = 120000, stopGraceMs = 500
 
 // Watch authority while the executor runs, not only after it returns. The
 // executor must settle its own cancellation before this function can return.
-export async function executeWatchingRun(execute, brief, run, reread, pollMs) {
+export async function executeWatchingRun(execute, brief, run, reread, pollMs, signal) {
   const execution = new AbortController(), watcher = new AbortController();
   let interruption;
   const changed = current => !current || current.status !== 'working' || current.revision !== run.revision
@@ -62,7 +62,11 @@ export async function executeWatchingRun(execute, brief, run, reread, pollMs) {
   const superseded = () => Object.assign(new Error('Assistant instructions or execution authority changed'), { code: 'assistant_execution_superseded' });
   // Brief assembly makes network reads too; a stop during those reads must
   // be observed before starting a command capable of external effects.
-  if (changed(await reread())) throw superseded();
+  signal?.throwIfAborted();
+  if (changed(await reread(signal))) throw superseded();
+  signal?.throwIfAborted();
+  const abort = () => { interruption = signal.reason ?? new Error('Host shutting down'); execution.abort(interruption); };
+  signal?.addEventListener('abort', abort, { once: true });
   const monitor = (async () => {
     while (!watcher.signal.aborted) {
       await delay(pollMs, undefined, { signal: watcher.signal });
@@ -82,6 +86,7 @@ export async function executeWatchingRun(execute, brief, run, reread, pollMs) {
     return answer;
   } finally {
     watcher.abort();
+    signal?.removeEventListener('abort', abort);
     await monitor;
   }
 }
