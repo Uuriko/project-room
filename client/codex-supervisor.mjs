@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { RoomAgentClient } from "./room-agent.mjs";
 import { WatchJournal } from "./watch-journal.mjs";
-import { runCodexSharedAssistant } from "./codex-shared-assistant.mjs";
+import { runCodexSharedAssistant, initSharedRunJournal, sharedRunScope } from "./codex-shared-assistant.mjs";
 
 const recoverable = new Set(["working", "unknown", "resume_requested", "pause_requested", "cancel_requested"]);
 export function scopedCodexThreads(db, connection) {
@@ -24,11 +24,12 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   let rpc, control, monitorError, failures = 0;
-  const scope = JSON.stringify([connection.origin, connection.roomId, connection.memberId]);
+  const scope = sharedRunScope(connection);
   const state = (status, extra = {}) => emit({ type: "host_status", status, ...extra });
   const pause = ms => delay(ms, undefined, { signal: controller.signal }).catch(error => { if (!controller.signal.aborted) throw error; });
   try {
     const client = new RoomAgentClient(connection);
+    initSharedRunJournal(db);
     db.exec("CREATE TABLE IF NOT EXISTS codex_supervisor_retry (scope TEXT NOT NULL, run_id TEXT NOT NULL, failures INTEGER NOT NULL, retry_at INTEGER NOT NULL, PRIMARY KEY(scope,run_id))");
     control = setInterval(() => {
       try { if (owner.shouldStop()) abort(); }
@@ -40,16 +41,38 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
         const owned = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_shared_runs'").get()
           ? new Set(db.prepare("SELECT attempt_id FROM codex_shared_runs").all().map(row => row.attempt_id)) : new Set();
         let cursor = null, recovering = null, queued = null, hasRecovery = false;
-        do {
+        const ready = row => (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now();
+        // Reconcile local attempts independently of backlog size or visibility.
+        // Missing/revoked work is not evidence that its external effects ended.
+        const pending = db.prepare("SELECT id,attempt_id,run_id,run_created_at FROM codex_shared_runs WHERE scope=? AND settled=0 ORDER BY rowid").all(scope);
+        for (const record of pending) {
+          const exact = await client.assistant(undefined, { runId: record.run_id,
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+          const row = exact.runs[0];
+          if (String(row.createdAt) !== record.run_created_at || row.stopOutcome === "attempt_revoked"
+            || row.attemptId !== null && row.attemptId !== record.attempt_id)
+            throw Object.assign(new Error("Owned execution needs reconciliation"), { code: "assistant_recovery_unresolved" });
+          if (["done", "cancelled", "failed"].includes(row.status)) {
+            db.prepare("UPDATE codex_shared_runs SET settled=1 WHERE id=?").run(record.id);
+            continue;
+          }
+          if (row.coordinatorMemberId !== connection.memberId)
+            throw Object.assign(new Error("Owned execution was reassigned"), { code: "assistant_recovery_unresolved" });
+          if (recoverable.has(row.status) || row.status === "queued" && !row.attemptId) {
+            hasRecovery = true;
+            if (ready(row) && !recovering) recovering = row;
+          }
+        }
+        if (!hasRecovery) do {
           const page = await client.assistant(undefined, { work: true, cursor,
             signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
           for (const row of page.runs) {
             if (row.coordinatorMemberId !== connection.memberId) continue;
-            const ready = (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now();
+            // Legacy pre-metadata records still recover through complete pages.
             if (owned.has(row.attemptId) && recoverable.has(row.status)) {
               hasRecovery = true;
-              if (ready && !recovering) recovering = row;
-            } else if (ready && !queued && row.status === "queued" && !row.attemptId && !row.sourceDeleted) queued = row;
+              if (ready(row) && !recovering) recovering = row;
+            } else if (ready(row) && !queued && row.status === "queued" && !row.attemptId && !row.sourceDeleted) queued = row;
           }
           cursor = page.nextCursor;
         } while (cursor !== null && !controller.signal.aborted);

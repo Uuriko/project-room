@@ -1,3 +1,4 @@
+import { initSharedRunJournal, sharedRunScope } from "../client/codex-shared-assistant.mjs";
 import { RoomAssistant } from "../server/room-assistant.mjs";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -37,6 +38,8 @@ default:throw Error('Unexpected RPC '+m.method);}
 save(d);send({id:m.id,result});});`);
   chmodSync(command, 0o700);
   const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store });
+  const reads = [];
+  server.on("request", req => { if (req.method === "GET" && req.url.includes("/assistant")) reads.push(req.url); });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const connection = { version: 1, origin, roomId: "commons", memberId: "producer", token: f.keys.producer };
@@ -63,7 +66,7 @@ save(d);send({id:m.id,result});});`);
   const run = (options = {}) => superviseCodexRoom({ connection, db, directory, cwd, policy: settings.policy, pollMs: 100, retryMaxMs: 400, timeoutMs: 1000,
     connect: async allowedThreadIds => { const rpc = openCodexStdio(settings, { allowedThreadIds }); try { await checkCodexProtocol(rpc, settings, { threadId: allowedThreadIds[0] }); return rpc; } catch (e) { await rpc.close(); throw e; } }, ...options });
   t.after(async () => { db.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(root, { recursive: true, force: true }); });
-  return { run, invoke, addBacklog, owner, directory, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => JSON.parse(readFileSync(data)), db, connection };
+  return { run, invoke, addBacklog, owner, directory, reads, store: f.store, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => JSON.parse(readFileSync(data)), db, connection };
 }
 const waitUntil = async predicate => { const until = Date.now() + 8000; while (!await predicate()) { if (Date.now() > until) throw Error("Timed out waiting for fixture"); await delay(20); } };
 
@@ -184,4 +187,78 @@ test("owned ambiguous execution outside history still blocks a newer backlog", a
   await f.run({ signal: restart.signal, emit: e => { events.push(e); if (e.status === "recovery_pending") restart.abort(); } });
   assert.equal(events.find(e => e.status === "running").runId, "owned-oldest");
   assert.equal(f.runtime().starts, 1, "uncertain start is never repeated and successors stay queued");
+});
+
+
+test("restart reconciles its journal before reading any queue pages", async t => {
+  const f = await fixture(t, "ambiguous"); await f.invoke("first");
+  const first = new AbortController();
+  await f.run({ signal: first.signal, emit: e => { if (e.status === "recovery_pending") first.abort(); } });
+  f.addBacklog(105); f.reads.length = 0;
+  const restart = new AbortController();
+  await f.run({ signal: restart.signal, emit: e => { if (e.status === "recovery_pending") restart.abort(); } });
+  assert.ok(f.reads.some(url => url.includes("runId=first")));
+  assert.equal(f.reads.some(url => url.includes("view=work")), false);
+  assert.equal(f.runtime().starts, 1);
+});
+
+test("revoked publication is unresolved execution and blocks queue discovery", async t => {
+  const f = await fixture(t, "ambiguous"); await f.invoke("first");
+  const first = new AbortController();
+  await f.run({ signal: first.signal, emit: e => { if (e.status === "recovery_pending") first.abort(); } });
+  f.addBacklog(105); // advances server clock past the host heartbeat window
+  const stored = JSON.parse(f.store.db.prepare("SELECT value FROM room_assistant_runs WHERE run_id='first'").get().value);
+  const cancelled = await f.owner.assistant({ action: "cancel", requestId: randomUUID(), runId: "first", expectedRevision: stored.revision });
+  assert.equal(cancelled.result.stopOutcome, "attempt_revoked");
+  f.reads.length = 0;
+  const restart = new AbortController(), events = [];
+  await f.run({ signal: restart.signal, emit: e => { events.push(e); if (e.status === "retrying_room") restart.abort(); } });
+  assert.equal(events.find(e => e.status === "retrying_room").code, "assistant_recovery_unresolved");
+  assert.equal(f.reads.some(url => url.includes("view=work")), false);
+  assert.equal(f.runtime().starts, 1);
+  assert.equal(f.db.prepare("SELECT settled FROM codex_shared_runs").get().settled, 0);
+});
+
+test("legacy journal metadata comes from its original runtime binding and remains scoped", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE codex_shared_runs(id TEXT PRIMARY KEY,attempt_id TEXT,publish TEXT); CREATE TABLE codex_runtime_attempts(binding TEXT)");
+    const connection = { origin: "https://room.example", roomId: "one", memberId: "agent" };
+    const binding = { ...connection, kind: "shared-assistant", runId: "old", runCreatedAt: "123", attemptId: "original" };
+    db.prepare("INSERT INTO codex_shared_runs VALUES(?,?,NULL)").run("journal-key", "original");
+    db.prepare("INSERT INTO codex_runtime_attempts VALUES(?)").run(JSON.stringify(binding));
+    initSharedRunJournal(db); initSharedRunJournal(db);
+    const row = db.prepare("SELECT * FROM codex_shared_runs").get();
+    assert.equal(row.scope, sharedRunScope(connection));
+    assert.equal(row.run_id, "old"); assert.equal(row.run_created_at, "123");
+    assert.equal(row.attempt_id, "original"); assert.equal(row.settled, 0);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM codex_shared_runs WHERE scope=?").get(sharedRunScope({ ...connection, roomId: "two" })).n, 0);
+  } finally { db.close(); }
+});
+
+
+test("confirmed terminal work is retired from recovery reads", async t => {
+  const f = await fixture(t); await f.invoke("finished");
+  const first = new AbortController();
+  await f.run({ signal: first.signal, emit: e => { if (e.status === "settled") first.abort(); } });
+  f.reads.length = 0;
+  const restart = new AbortController(), timeout = setTimeout(() => restart.abort(), 450);
+  try { await f.run({ signal: restart.signal }); } finally { clearTimeout(timeout); }
+  assert.equal(f.reads.filter(url => url.includes("runId=finished")).length, 1);
+  assert.equal(f.db.prepare("SELECT settled FROM codex_shared_runs").get().settled, 1);
+  assert.equal(f.runtime().starts, 1);
+});
+
+test("unreadable owned work does not clear recovery or start queued work", async t => {
+  const f = await fixture(t, "ambiguous"); await f.invoke("owned");
+  const first = new AbortController();
+  await f.run({ signal: first.signal, emit: e => { if (e.status === "recovery_pending") first.abort(); } });
+  await f.invoke("successor");
+  f.store.issueAccessKey("commons", "producer"); // revokes the host's old key
+  f.reads.length = 0;
+  const restart = new AbortController();
+  await f.run({ signal: restart.signal, emit: e => { if (e.status === "retrying_room") restart.abort(); } });
+  assert.equal(f.reads.some(url => url.includes("view=work")), false);
+  assert.equal(f.db.prepare("SELECT settled FROM codex_shared_runs").get().settled, 0);
+  assert.equal(f.runtime().starts, 1);
 });
