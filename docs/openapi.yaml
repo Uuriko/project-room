@@ -1279,6 +1279,131 @@ paths:
         '403': { description: Origin or CSRF rejected. }
         '422': { description: Invalid request or connection needs attention. }
         '503': { description: Gmail is not configured on this deployment. }
+  /api/rooms/{roomId}/approvals:
+    get:
+      summary: List approval cards
+      description: |
+        Approval inbox (WAVE-500 guild 10): the room's pending HUMAN decisions
+        as cards — money, identity, deploy, permission, publish, or other —
+        one live surface for items agents surface as genuinely undecidable.
+        Optional `kind` and `status` filters narrow the list; an unknown enum
+        value is 422 `approval_invalid`. Expiry is projected on reads: a
+        pending card whose `expiresAt` passed reads as `expired` while the
+        stored state stays `pending`. Members only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: kind
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ApprovalKind' }
+        - name: status
+          in: query
+          required: false
+          schema: { $ref: '#/components/schemas/ApprovalStatus' }
+      responses:
+        '200':
+          description: Cards (expiry-projected), with a count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+    post:
+      summary: Open an approval card
+      description: |
+        Any member may open a card — agents included; deciding is
+        human-only. The create policy gate rejects optionless or
+        pre-decided cards with 422 `approval_invalid`: a card needs `kind`,
+        `title`, `what`, and 1..8 `options`, each with a `label` and its
+        `consequence`. `requestedBy` defaults to the calling member;
+        `expiresAt` must be a future ISO timestamp when given. Answers 201
+        with the frozen card; new cards are always `pending` with a null
+        `decision`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalCardInput'
+      responses:
+        '201':
+          description: Card opened
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalCard'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+  /api/rooms/{roomId}/approvals/{id}:
+    get:
+      summary: Read one approval card
+      description: |
+        One card by id. Expiry is projected: an expired pending card reads as
+        `expired` without mutating stored state. Members only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      responses:
+        '200':
+          description: The card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalCard'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/rooms/{roomId}/approvals/{id}/decide:
+    post:
+      summary: Decide an approval card (human only)
+      description: |
+        Human-only: the deciding identity must be human — an agent identity
+        gets 403 `approval_not_human`. `decision` is `approve`,
+        `approve-session` (approved, scoped to the current session), or
+        `deny-stop`. Deciding an expired card is 409 `approval_expired`;
+        deciding a non-pending card is 409 `approval_invalid_transition`.
+        Answers 200 with the frozen decided card (`decision` carries the
+        type, the deciding member, an optional note, and the timestamp).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionInput'
+      responses:
+        '200':
+          description: Decided card
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalCard'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '403':
+          description: Agent identity tried to decide (approval_not_human)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
   /api/rooms/{roomId}/commands:
     post:
       summary: Append an event command
@@ -17322,6 +17447,92 @@ components:
         actorId: { type: string }
         at: { type: string, format: date-time }
         data: { type: object }
+    ApprovalKind:
+      type: string
+      enum: [money, identity, deploy, permission, publish, other]
+    ApprovalStatus:
+      type: string
+      enum: [pending, approved, rejected, changes, expired]
+    ApprovalDecisionType:
+      type: string
+      enum: [approve, approve-session, deny-stop]
+    ApprovalOption:
+      type: object
+      additionalProperties: false
+      required: [label, consequence]
+      properties:
+        label: { type: string, minLength: 1, maxLength: 80 }
+        consequence: { type: string, minLength: 1, maxLength: 500 }
+    ApprovalDecision:
+      type: object
+      description: Set once a card is decided; null while the card is pending
+      additionalProperties: false
+      required: [type, by, at]
+      properties:
+        type: { $ref: '#/components/schemas/ApprovalDecisionType' }
+        by: { type: string, description: Deciding human member id }
+        note: { type: [string, 'null'], maxLength: 500 }
+        at: { type: string, format: date-time }
+        session: { type: boolean, description: Present and true when the decision was approve-session }
+    ApprovalCard:
+      type: object
+      description: One approval-inbox card — a genuine question for a human. Grounded in server/approval-inbox-routes.mjs (WAVE-500 guild 10 slice 5).
+      additionalProperties: false
+      required: [id, kind, title, what, options, requestedBy, createdAt, expiresAt, status, decision]
+      properties:
+        id: { type: string }
+        kind: { $ref: '#/components/schemas/ApprovalKind' }
+        title: { type: string, maxLength: 200 }
+        what: { type: string, maxLength: 2000, description: What is being asked }
+        context: { type: [string, 'null'], maxLength: 2000, description: Optional extra context }
+        options:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { $ref: '#/components/schemas/ApprovalOption' }
+        requestedBy: { type: string, description: Member id that opened the card }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: [string, 'null'], format: date-time, description: Null when the card never expires }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        decision:
+          anyOf:
+            - $ref: '#/components/schemas/ApprovalDecision'
+            - { type: 'null' }
+          description: Null while the card is pending
+    ApprovalCardInput:
+      type: object
+      description: Body for POST /api/rooms/{roomId}/approvals. requestedBy defaults to the calling member.
+      additionalProperties: false
+      required: [kind, title, what, options]
+      properties:
+        kind: { $ref: '#/components/schemas/ApprovalKind' }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        what: { type: string, minLength: 1, maxLength: 2000 }
+        context: { type: string, minLength: 1, maxLength: 2000 }
+        options:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { $ref: '#/components/schemas/ApprovalOption' }
+        requestedBy: { type: string, minLength: 1, maxLength: 128 }
+        expiresAt: { type: string, format: date-time, description: Must be a future ISO timestamp }
+    ApprovalDecisionInput:
+      type: object
+      description: Body for POST /api/rooms/{roomId}/approvals/{id}/decide
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: { $ref: '#/components/schemas/ApprovalDecisionType' }
+        note: { type: string, minLength: 1, maxLength: 500 }
+    ApprovalList:
+      type: object
+      description: Body of GET /api/rooms/{roomId}/approvals
+      required: [approvals, total]
+      properties:
+        approvals:
+          type: array
+          items: { $ref: '#/components/schemas/ApprovalCard' }
+        total: { type: integer }
     PinnedList:
       type: object
       description: Pinned messages in pin order (issue #6 B2). Tombstoned messages are excluded.
