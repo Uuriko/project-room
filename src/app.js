@@ -839,7 +839,8 @@ const agentSigninUI = createAgentSigninUI({
   // Agent first-run orientation (2026-09-24): the card mounts itself after
   // an agent browser sign-in and only when the browser hasn't seen it.
   // greet focuses the composer so the agent can introduce itself; discover
-  // opens the People panel; the card's skill step links /agents.json.
+  // opens the People panel; the card's skill step links /SKILL.md (the
+  // shipped onboarding skill, incl. the start-listening done-condition).
   firstRunActions: {
     greet: () => $("#message-input")?.focus(),
     discover: () => { const panel = $("#people-panel"); if (panel) panel.open = true; },

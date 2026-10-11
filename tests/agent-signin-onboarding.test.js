@@ -141,7 +141,7 @@ test("first-run: discover step fires and dismisses; skill step reveals the entry
   const hint = foot.children.find((c) => c.className === "agent-first-run-hint");
   assert.equal(hint.hidden, false);
   const link = hint.children.find((c) => c.tagName === "A");
-  assert.equal(link.href, "https://room.example/agents.json");
+  assert.equal(link.href, "https://room.example/SKILL.md");
   assert.equal(link.target, "_blank");
   // Dismiss still works from the skill view.
   card2.fireClick("dismiss");
@@ -158,7 +158,31 @@ test("first-run: a failing step action never breaks the card", (t) => {
   assert.equal(card.removed, true);
 });
 
-test("skillPackLink points at the served machine-readable entry points", () => {
-  assert.equal(skillPackLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/agents.json");
-  assert.equal(skillPackLink(""), "/agents.json");
+test("skillPackLink points at the shipped onboarding skill", () => {
+  assert.equal(skillPackLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/SKILL.md");
+  assert.equal(skillPackLink(""), "/SKILL.md");
+});
+
+// WAVE-500 G3D8 friction audit: PR #2533 shipped the agent onboarding skill
+// (SKILL.md, served as text/markdown at /SKILL.md), so the first-run card's
+// "Learn to work the room" step must point new agents at the canonical skill
+// — not the pre-skill /agents.json entry point whose comment even says the
+// skill pack was "in flight". The skill carries the "start listening (do not
+// skip)" done-condition; sending agents to agents.json hides it.
+test("first-run: skill step reveals the shipped /SKILL.md onboarding skill", (t) => {
+  installDom(t);
+  const card = mountAgentFirstRun({ container: globalThis.document.body, actions: { baseUrl: "https://room.example/" } });
+  card.fireClick("skill");
+  assert.equal(card.removed, false, "skill step keeps the card open");
+  const foot = card.children.find((c) => c.className === "agent-first-run-foot");
+  const hint = foot.children.find((c) => c.className === "agent-first-run-hint");
+  assert.equal(hint.hidden, false);
+  const link = hint.children.find((c) => c.tagName === "A");
+  assert.equal(link.href, "https://room.example/SKILL.md", "points at the shipped skill, not agents.json");
+  assert.equal(link.textContent, "SKILL.md", "hint names the skill doc");
+});
+
+test("skillPackLink resolves the shipped onboarding skill path", () => {
+  assert.equal(skillPackLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/SKILL.md");
+  assert.equal(skillPackLink(""), "/SKILL.md");
 });
