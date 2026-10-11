@@ -2273,7 +2273,7 @@ function renderTyping(typists) {
   for (const person of visible) {
     const label = person.displayName || person.memberId;
     const bubble = document.createElement("span");
-    bubble.className = "typing-bubble"; bubble.title = `${label} is typing`;
+    bubble.className = "typing-bubble"; bubble.title = uiText("chat.typingStatus", { name: label });
     const avatar = document.createElement("span");
     avatar.className = "typing-avatar"; avatar.setAttribute("aria-hidden", "true");
     avatar.textContent = label.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || "").join("").toUpperCase();
@@ -2285,7 +2285,7 @@ function renderTyping(typists) {
     }
     const dots = document.createElement("span"); dots.className = "typing-dots"; dots.setAttribute("aria-hidden", "true");
     for (let i = 0; i < 3; i++) dots.append(document.createElement("i"));
-    const accessible = document.createElement("span"); accessible.className = "sr-only"; accessible.textContent = `${label} is typing`;
+    const accessible = document.createElement("span"); accessible.className = "sr-only"; accessible.textContent = uiText("chat.typingStatus", { name: label });
     bubble.append(avatar, dots, accessible); el.append(bubble);
   }
   if (people.length > visible.length) {
@@ -2408,6 +2408,12 @@ function renderMessages() {
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
           if (!after) { before.remove(); continue; }
           if (before.className !== after.className) before.className = after.className;
+          if (selector === ".message-links") {
+            // A reply count or save-state refresh must not dismiss an open menu.
+            const menu = before.querySelector("details.message-more");
+            const nextMenu = after.querySelector("details.message-more");
+            if (menu?.open && nextMenu) nextMenu.open = true;
+          }
           if (selector === ".message-body") {
             // Expansion is local reading state, independent of reactions and
             // edits. Copy it before comparing so unchanged text stays selected.
@@ -4065,7 +4071,7 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || command.id);
     try {
-      await client.send(command, { waitForRefresh: !fastText });
+      await client.send(command, { waitForRefresh: !(fastText || askRoom && !composerFiles.length && !assistantDraft) });
     } catch (error) {
       if (generation !== client.generation || !state) return;
       localMessageEchoes.delete(echoId);
@@ -4073,7 +4079,8 @@ $("#message-form").addEventListener("submit", e => {
     }
     if (generation !== client.generation || !state) return;
     if (fastText) {
-      localMessageEchoes.get(echoId)?.node.setAttribute("aria-busy", "false");
+      const confirmedEcho = localMessageEchoes.get(echoId)?.node;
+      if (confirmedEcho) { confirmedEcho.setAttribute("aria-busy", "false"); confirmedEcho.style.removeProperty("opacity"); }
       // Navigation may have restored another destination's draft while the receipt was pending.
       if (drafts.get(draftKey)?.pending?.command?.id === command.id) drafts.clear(draftKey);
       if (composerKey() === draftKey && pendingMessage?.command?.id === command.id) {

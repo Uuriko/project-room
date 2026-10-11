@@ -28,9 +28,10 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
   return summary;
 }
 
-// Room events that only append: they never change a message already held, so
+// Room events that append or only change non-message state: they never change a message already held, so
 // a live refresh for them can read `?messages=recent` and keep older history.
-const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated"]);
+const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated",
+  "member.status_updated", "capabilities.advertised", "claim.acquired", "claim.released", "claim.renewed"]);
 // Join held history with a `?messages=recent` window. The window must start on
 // a held message with exactly `omitted` messages before it; anything else
 // returns null and the caller reads the full snapshot.

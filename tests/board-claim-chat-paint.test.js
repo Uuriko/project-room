@@ -10,6 +10,7 @@ import { paintClaimChat } from "../src/board-ui.js";
 function fakeDom(messageIds) {
   const children = messageIds.map(id => ({ kind: "message", dataset: { messageRecordId: id }, remove() { children.splice(children.indexOf(this), 1); } }));
   const list = {
+    dataset: { view: "room:general" },
     children,
     querySelectorAll(selector) {
       if (selector === "[data-claim-update]") return children.filter(node => node.dataset.claimUpdate);

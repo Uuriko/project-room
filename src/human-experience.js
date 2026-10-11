@@ -47,13 +47,13 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
   composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
-  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
+  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); paint(); $('#message-input').focus(); });
   const advanced = document.createElement('label'); advanced.className = 'check';
   advanced.innerHTML = uiText("human.copy.003");
   $('#settings-dialog').append(advanced);
   $('#human-advanced').addEventListener('change', () => {
     document.body.classList.toggle('human-advanced', $('#human-advanced').checked);
-    refreshTranscript();
+    paint(); refreshTranscript();
     try { sessionStorage.setItem(`room-human-advanced:${boundary}`, String($('#human-advanced').checked)); } catch { /* session only */ }
   });
   const dialog = document.createElement('dialog'); dialog.id = 'human-project-dialog'; dialog.setAttribute('aria-labelledby', 'human-project-title');
@@ -90,8 +90,12 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     finally { button.disabled = false; }
   };
   function paint() {
-    if (!human() || !projection) return;
+    if (!human() || !projection) { section.hidden = true; return; }
     const assistant = projection.assistant;
+    // An unconfigured assistant is not an error or useful ambient status.
+    // Reveal setup when explicitly requested, while preserving recovery and run controls.
+    section.hidden = !assistant.coordinatorMemberId && !Object.keys(projection.runs ?? {}).length
+      && !selected && !operation && !rejectedOperation && !error && !document.body.classList.contains('human-advanced');
     section.querySelector('strong').textContent = assistant.name || 'Room';
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
@@ -252,7 +256,8 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     sync() {
       const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
-      section.hidden = !active; ask.hidden = !active; advanced.hidden = !active;
+      if (!active) section.hidden = true;
+      ask.hidden = !active; advanced.hidden = !active;
       if (active) {
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');

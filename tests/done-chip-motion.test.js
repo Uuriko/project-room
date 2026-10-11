@@ -34,7 +34,11 @@ test("Done-chip spring uses transform/opacity only and is instant under reduced 
   }
   assert.doesNotMatch(keyframes, /gradient|confetti|filter|box-shadow|left|top|margin|width|height|background/i);
 
-  const motion = blockAfter(css, "@media (prefers-reduced-motion: no-preference)");
+  const marker = "@media (prefers-reduced-motion: no-preference)";
+  const motion = [...css.matchAll(/@media \(prefers-reduced-motion: no-preference\)/g)]
+    .map(match => blockAfter(css.slice(match.index), marker))
+    .find(block => /\.done-chip\s*\{/.test(block));
+  assert.ok(motion, "done-chip animation has its own reduced-motion guard");
   assert.match(motion, /\.done-chip\s*\{[^}]*animation:\s*done-chip-pop/);
   assert.doesNotMatch(css.replace(motion, ""), /\.done-chip\s*\{[^}]*animation:\s*done-chip-pop/);
 
