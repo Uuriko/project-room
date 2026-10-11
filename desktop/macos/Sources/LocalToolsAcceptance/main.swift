@@ -53,6 +53,11 @@ final class LocalToolsTests {
         let path = shot["path"] as! String
         expectEqual(try Data(contentsOf: URL(fileURLWithPath: path)).count, shot["bytes"] as! Int)
         expectEqual((try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        let unrelated = tools.directory.appendingPathComponent("capture-personal.png")
+        try Data("preserve unrelated file".utf8).write(to: unrelated)
+        for _ in 0..<10 { _ = try tools.call("mac_screenshot", arguments: ["windowId": 42], grantRevision: revision) }
+        expectEqual(try String(contentsOf: unrelated, encoding: .utf8), "preserve unrelated file")
+        expectEqual(try FileManager.default.contentsOfDirectory(atPath: tools.directory.path).filter { $0.hasPrefix("capture-") }.count, 9)
         let count = try FileManager.default.contentsOfDirectory(atPath: tools.directory.path).filter { $0.hasPrefix("capture-") }.count
         provider.beforeReturn = { tools.setEnabled(false) }
         refusal("mac_tools_paused") { try tools.call("mac_screenshot", arguments: ["windowId": 42], grantRevision: revision) }
