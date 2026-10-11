@@ -130,7 +130,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     if (emailMethod === "password") {
       const signup = passwordMode === "signup";
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10"' : "", fragmentD: "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
+      // The log-in form is the first stop for every passwordless stranger too.
+      // Surface passkey and email-link options here instead of burying them
+      // behind the wrongly-labeled "Forgot password?" recovery step.
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      const loginOptions = signup ? "" : uiText("signin.login-options")
+        + (passkeySupported ? uiText("signin.passkey.action") : "")
+        + uiText("signin.magic-link.action");
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10"' : "", fragmentD: "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: loginOptions });
     }
     if (magicPhase === "sent") return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
     return uiText("signin.copy.015", { fragmentA: escapeHtml(magicEmail), fragmentB: busy ? "disabled" : "" });
