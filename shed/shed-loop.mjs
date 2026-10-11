@@ -20,7 +20,8 @@
 // SHED_AGENT_CMD which they configured explicitly.
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { agentConnectionFromEnvironment, ConnectionError } from "../client/agent-connection.mjs";
@@ -47,12 +48,24 @@ function readJson(path, fallback) {
 }
 
 function writeHeartbeat(status, detail) {
+  let temp, fd, owned = false;
   try {
-    writeFileSync(heartbeatPath, JSON.stringify({
+    // Publish one complete snapshot. Same-directory rename gives readers
+    // atomic visibility; this best-effort heartbeat is not a durability log.
+    temp = `${heartbeatPath}.${randomUUID()}`;
+    fd = openSync(temp, "wx", 0o600);
+    owned = true;
+    writeFileSync(fd, JSON.stringify({
       ts: new Date().toISOString(), status, detail: detail || null,
       pid: process.pid, executeMode: Boolean(agentCmd),
-    }, null, 1) + "\n", { mode: 0o600 });
+    }, null, 1) + "\n");
+    closeSync(fd); fd = undefined;
+    renameSync(temp, heartbeatPath); owned = false;
   } catch { /* heartbeat is best-effort */ }
+  finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* best-effort */ } }
+    if (owned) { try { unlinkSync(temp); } catch { /* renamed or best-effort cleanup */ } }
+  }
 }
 
 // Summarize an attention item without echoing untrusted room text.
