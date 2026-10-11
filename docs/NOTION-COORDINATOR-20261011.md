@@ -1,5 +1,7 @@
 # Notion lessons and the Room coordinator
 
+> Integration correction: the simple watcher described below was superseded locally by existing PR2612 (`147c1027`), which also handles owned-attempt recovery and exclusive ownership. See `COORDINATOR-EXECUTION-PLAN-20261011.md` for current implementation status. Earlier test receipts remain historical.
+
 Research and source inspection: 2026-10-11. Recommendations below are Project Room design decisions, not claims about Notion's private implementation. No upstream code has been copied or dependency installed.
 
 ## Decision
