@@ -86,6 +86,10 @@ export const KEEP = [
   // runtime-package registration). Not orphans; remove from KEEP when wired.
   "server/session-adapter.mjs",
   "server/session-adapter/herdr-bridge-adapter.mjs",
+  // WAVE-500 guild 10 unified approval inbox: the inbox store calls
+  // notify() on card transitions (PR #2577). Not an orphan; remove from
+  // KEEP when the store wires it.
+  "server/approval-inbox-webhooks.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
