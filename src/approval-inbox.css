@@ -1,0 +1,199 @@
+/* Approval inbox — WAVE-500 GUILD 10/10 slice 17/50.
+ *
+ * Dark-first styles for the unified approval inbox: one live surface for
+ * pending HUMAN decisions, rendered as calm ask cards.
+ *
+ * Slice 16's markup contract is NOT in the repo yet, so this file defines the
+ * class contract slice 16 (or any other UI) should emit:
+ *
+ *   <section class="approval-inbox">
+ *     <header class="approval-inbox__head">
+ *       <h2 class="approval-inbox__title">…</h2>
+ *       <p class="approval-inbox__count">2 need your tap</p>   (optional)
+ *     </header>
+ *     <ul class="approval-inbox__list">
+ *       <li class="approval-card" data-kind="money" data-state="pending">
+ *         <div class="approval-card__top">
+ *           <span class="approval-kind approval-kind--money">Money</span>
+ *           <span class="approval-card__time">asked 5m ago by jill</span>
+ *         </div>
+ *         <h3 class="approval-card__title">Spend 40 Dasha Connects?</h3>
+ *         <div class="approval-changes">
+ *           <h4 class="approval-changes__label">What changes</h4>
+ *           <ul><li>…</li></ul>
+ *         </div>
+ *         <div class="approval-options">
+ *           <button class="approval-option approval-option--approve">
+ *             <span class="approval-option__label">Approve</span>
+ *             <span class="approval-option__consequence">Sends the payment from the room pot</span>
+ *           </button>
+ *           <button class="approval-option approval-option--reject">
+ *             <span class="approval-option__label">Reject</span>
+ *             <span class="approval-option__consequence">Nothing happens; the agent is told no</span>
+ *           </button>
+ *         </div>
+ *         <p class="approval-card__verdict">Approved by john · just now</p>
+ *       </li>
+ *     </ul>
+ *     <div class="approval-empty">
+ *       <h3 class="approval-empty__title">Nothing needs your tap</h3>
+ *       <p class="approval-empty__body">When an agent needs a human decision, it shows up here.</p>
+ *     </div>
+ *   </section>
+ *
+ * data-kind: money | identity | deploy | permission | publish | other
+ * data-state: pending | approved | rejected | expired
+ *
+ * Design rules (Grok Bot design sync, room seq 10497): dark is the default,
+ * motion only for state changes someone caused, no purple gradients, no
+ * glass, no slop. Colors and type come from src/design-tokens.js via var() —
+ * this file declares no tokens of its own.
+ */
+
+.approval-inbox {
+  display: grid;
+  gap: var(--space-4);
+  font-family: var(--font-sans);
+  color: var(--text);
+}
+
+/* Header: title + live pending count. */
+.approval-inbox__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.approval-inbox__title { margin: 0; font-size: var(--text-lg); }
+.approval-inbox__count { margin: 0; font-size: var(--text-sm); color: var(--muted); }
+
+/* Card list: single column, the ask card is the center of the surface. */
+.approval-inbox__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* Calm card: panel background, one hairline border, no shadow play. */
+.approval-card {
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.approval-card__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.approval-card__title { margin: 0 0 var(--space-3); font-size: var(--text-md); overflow-wrap: anywhere; }
+.approval-card__time { font-size: var(--text-xs); color: var(--muted); }
+
+/* Kind badge: colored text + hairline border, no fills or gradients. */
+.approval-kind {
+  display: inline-block;
+  padding: .15rem .6rem;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.approval-kind--money      { color: var(--amber);  border-color: var(--amber); }
+.approval-kind--identity   { color: var(--violet); border-color: var(--violet); }
+.approval-kind--deploy     { color: var(--blue);   border-color: var(--blue); }
+.approval-kind--permission { color: var(--green);  border-color: var(--green); }
+.approval-kind--publish    { color: var(--text);   border-color: var(--text); }
+.approval-kind--other       { color: var(--muted);  border-color: var(--muted); }
+
+/* "What changes" block: raised panel so the facts sit apart from the ask. */
+.approval-changes {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+}
+.approval-changes__label {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.approval-changes ul { margin: 0; padding-left: 1.25rem; font-size: var(--text-sm); }
+.approval-changes li { margin-bottom: var(--space-1); }
+.approval-changes li:last-child { margin-bottom: 0; }
+
+/* Option buttons: label plus honest consequence text, 44px touch floor. */
+.approval-options {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+.approval-option {
+  display: grid;
+  gap: var(--space-1);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.approval-option:hover { background: var(--panel-hover); }
+.approval-option__label { font-weight: 700; }
+.approval-option__consequence { color: var(--muted); font-size: var(--text-xs); }
+/* Approve is the commitment: solid accent, contrast-checked pair. */
+.approval-option--approve { background: var(--blue-strong); border-color: var(--blue-strong); color: var(--on-accent); }
+.approval-option--approve:hover { background: var(--blue-strong-hover); }
+.approval-option--approve .approval-option__consequence { color: var(--on-accent); opacity: .85; }
+.approval-option:disabled { opacity: .55; cursor: default; }
+.approval-option:focus-visible,
+.approval-card:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+/* Settled states: border + verdict line carry the meaning, nothing flashes. */
+.approval-card[data-state="approved"] { border-left-color: var(--green); }
+.approval-card[data-state="rejected"] { border-left-color: var(--red); }
+.approval-card[data-state="expired"]  { border-left-color: var(--line); }
+.approval-card__verdict { display: none; margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--muted); }
+.approval-card[data-state="approved"] .approval-card__verdict { display: block; color: var(--green); }
+.approval-card[data-state="rejected"] .approval-card__verdict { display: block; color: var(--red); }
+.approval-card[data-state="expired"]  .approval-card__verdict { display: block; }
+.approval-card[data-state="approved"] .approval-options,
+.approval-card[data-state="rejected"] .approval-options,
+.approval-card[data-state="expired"] .approval-options { display: none; }
+
+/* Honest empty state: says what the surface is for, nothing decorative. */
+.approval-empty {
+  padding: var(--space-6) var(--space-4);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+.approval-empty__title { margin: 0 0 var(--space-2); font-size: var(--text-md); }
+.approval-empty__body { margin: 0 auto; max-width: 32rem; font-size: var(--text-sm); color: var(--muted); }
+
+/* Motion: only for state changes someone caused — button press, decision
+   landed. Nothing animates on mount; no entrance choreography. */
+.approval-option { transition: background-color 120ms ease; }
+.approval-card { transition: border-color 160ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .approval-option,
+  .approval-card { transition: none; }
+}
