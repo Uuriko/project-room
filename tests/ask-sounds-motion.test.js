@@ -153,7 +153,7 @@ test('the cue ledger is bounded and tolerates blocked or corrupt storage', async
   storage.setItem('room.askSounds.cued', '{not json');
   assert.equal(await createCueLedger({ storage, locks: null }).claim('result:new'), true);
   const noStore = createCueLedger({ storage: blocked, locks: null });
-  assert.equal(await noStore.claim('result:x'), true); assert.equal(await noStore.claim('result:x'), false, 'memory still dedupes');
+  assert.equal(await noStore.claim('result:x'), false, 'no durable record, no cue');
   const failingLocks = { request() { return Promise.reject(new Error('lock')); } };
   assert.equal(await createCueLedger({ storage, locks: failingLocks }).claim('result:y'), false, 'a lock failure stays quiet');
 });
@@ -197,4 +197,56 @@ test('ask status motion is linked, finite, and only runs without a reduced-motio
   assert.doesNotMatch(css.slice(0, start), /\banimation\s*:/, 'no animation outside the no-preference block');
   for (const m of css.slice(start).matchAll(/animation:[^;]*?\s(\d+)(?:\s+both)?;/g)) assert.ok(Number(m[1]) <= 3, m[0]);
   for (const state of ['asked', 'working', 'done', 'not_picked_up', 'stalled', 'failed']) assert.match(css, new RegExp(`data-face-status="${state}"`));
+});
+
+function unlockable() {
+  let release; const audio = fakeAudio({ state: 'suspended', resume: ctx => new Promise(r => { release = () => { ctx.state = 'running'; r(); }; }) });
+  return { audio, release: () => release() };
+}
+
+test('a pending sample is cancelled by turning the setting off or hiding the tab', async () => {
+  const doc = visibleDoc();
+  let u = unlockable(); let s = createRoomSounds({ AudioContext: u.audio.Ctx, doc });
+  s.play('result-ready', { preview: true }); s.cancel(); u.release(); await flush();
+  assert.equal(u.audio.started.length, 0, 'cancelled');
+  u = unlockable(); s = createRoomSounds({ AudioContext: u.audio.Ctx, doc });
+  s.play('result-ready', { preview: true }); doc.visibilityState = 'hidden'; u.release(); await flush();
+  assert.equal(u.audio.started.length, 0, 'hidden');
+  doc.visibilityState = 'visible'; u = unlockable(); s = createRoomSounds({ AudioContext: u.audio.Ctx, doc });
+  s.play('result-ready', { preview: true }); u.release(); await flush();
+  assert.equal(u.audio.cues(), 1, 'an intentional audition still plays');
+  const dom = fakeDoc(), container = { children: [], append(c) { this.children.push(c); } }, storage = memoryStorage();
+  u = unlockable(); s = createRoomSounds({ AudioContext: u.audio.Ctx, doc });
+  const ui = mountSoundSetting(container, { getRoomId: () => 'commons', storage, doc: dom, sounds: s });
+  ui.input.checked = true; ui.input.listeners.change(); ui.input.checked = false; ui.input.listeners.change();
+  u.release(); await flush();
+  assert.equal(u.audio.started.length, 0, 'on then off before audio unlocks: silent');
+});
+
+test('the rate-limit gap counts from real playback, not from a delayed request', async () => {
+  const u = unlockable(); let t = 0;
+  const s = createRoomSounds({ enabled: () => true, AudioContext: u.audio.Ctx, doc: visibleDoc(), now: () => t });
+  s.play('picked-up'); t = 5000; u.release(); await flush();
+  assert.equal(u.audio.cues(), 1);
+  t = 5001; assert.equal(s.play('result-ready'), false, '1 ms after actual playback is too soon');
+  t = 6600; assert.equal(s.play('result-ready'), true);
+});
+
+test('marking an old result takes the same lock and never overwrites another tab\'s claim', async () => {
+  const storage = memoryStorage(), locks = fakeLocks();
+  const a = createCueLedger({ storage, locks }), b = createCueLedger({ storage, locks });
+  await Promise.all([a.claim('result:m1'), b.mark('result:m2'), a.claim('result:m3'), b.mark('result:m4')]);
+  assert.deepEqual(JSON.parse(storage.getItem('room.askSounds.cued')).sort(), ['result:m1', 'result:m2', 'result:m3', 'result:m4']);
+});
+
+test('a readable ledger that cannot be written reports no claim and plays nothing', async () => {
+  const storage = memoryStorage(); setSoundsEnabled('commons', true, storage);
+  const quota = { getItem: k => storage.getItem(k), setItem(k, v) { if (k === 'room.askSounds.cued') throw new Error('QuotaExceededError'); storage.setItem(k, v); }, removeItem: k => storage.removeItem(k) };
+  assert.equal(await createCueLedger({ storage: quota, locks: null }).claim('result:q'), false);
+  const audio = fakeAudio(); let t = 0;
+  const sounds = createRoomSounds({ enabled: () => soundsEnabled('commons', quota), AudioContext: audio.Ctx, doc: visibleDoc(), now: () => (t += 2000) });
+  const observe = installAskSounds({ getRoomId: () => 'commons', getViewerId: () => 'me', storage: quota, locks: null, sounds });
+  await observe({ id: 'rq', initiatorId: 'me' }, 'working');
+  assert.equal(await observe({ id: 'rq', initiatorId: 'me', resultMessageId: 'mq' }, 'done'), false);
+  assert.equal(audio.started.length, 0);
 });

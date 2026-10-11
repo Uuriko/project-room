@@ -32,9 +32,12 @@ export function setSoundsEnabled(roomId, on, storage = defaultStorage()) {
 }
 
 export function createRoomSounds({ enabled = () => false, doc = globalThis.document, AudioContext = globalThis.AudioContext ?? globalThis.webkitAudioContext, now = () => Date.now() } = {}) {
-  let last = -Infinity, ctx = null, pending = null;
-  const eligible = () => safe(() => enabled() && doc?.visibilityState !== 'hidden', false);
+  let last = -Infinity, ctx = null, pending = null, unlocking = false;
+  const visible = () => safe(() => doc?.visibilityState !== 'hidden', false);
+  const eligible = () => safe(() => enabled(), false) && visible();
+  const spaced = () => now() - last >= MIN_GAP_MS;
   function schedule(name) {
+    last = now(); // the gap counts from real playback, not from the request
     const at = ctx.currentTime + 0.01, master = ctx.createGain();
     master.gain.value = MASTER_GAIN; master.connect(ctx.destination);
     for (const [freq, start, decay, gain] of VOICES[name]) for (const [mult, level] of [[1, 1], [2, 0.18]]) {
@@ -46,49 +49,58 @@ export function createRoomSounds({ enabled = () => false, doc = globalThis.docum
       osc.connect(env); env.connect(master); osc.start(t); osc.stop(t + 0.004 + decay * 6);
     }
   }
+  // A sample (preview) must still be wanted when it would actually sound:
+  // visible, and not cancelled by turning the setting back off.
+  const stillWanted = job => job && (job.preview ? visible() : eligible() && spaced());
   // preview is only for the sample the setting plays when someone turns it on.
   function play(name, { preview = false } = {}) {
     if (!CUES.includes(name) || !AudioContext) return false;
-    if (!preview && (!eligible() || now() - last < MIN_GAP_MS)) return false;
-    last = now();
+    if (!preview && !(eligible() && spaced())) return false;
     try {
       ctx ??= new AudioContext();
       if (ctx.state === 'running') { schedule(name); return true; }
       // Resuming is async and may be refused. Keep only the newest request and
-      // re-check the gate when it resolves, so a delayed resume never plays
-      // after mute or a hidden tab, and never plays a backlog.
-      const first = pending === null; pending = { name, preview };
-      if (first) Promise.resolve(ctx.resume()).then(() => {
-        const job = pending; pending = null;
-        if (job && ctx.state === 'running' && (job.preview || eligible())) schedule(job.name);
-      }, () => { pending = null; });
+      // re-check everything when it resolves: no sound after mute, a hidden
+      // tab or a cancelled sample, and never a backlog.
+      pending = { name, preview };
+      if (!unlocking) {
+        unlocking = true;
+        Promise.resolve(ctx.resume()).then(() => {
+          unlocking = false; const job = pending; pending = null;
+          if (ctx.state === 'running' && stillWanted(job)) schedule(job.name);
+        }, () => { unlocking = false; pending = null; });
+      }
     } catch { return false; }
     return true;
   }
-  return { play, eligible };
+  return { play, eligible, cancel() { pending = null; } };
 }
 
-// Durable, bounded record of cued identities shared by tabs. The claim is
-// atomic across same-origin tabs through Web Locks when available; without
-// it, read-then-write is best effort.
+// Durable, bounded record of cued identities shared by tabs.
+// Limits, stated plainly: the claim is atomic across same-origin tabs only
+// through Web Locks; without it, read-then-write is best effort and two tabs
+// can both chime in a narrow race. The ledger keeps the newest 200
+// identities, so an identity older than that could cue again if it were
+// replayed as a live transition (a first sighting never cues). If the ledger
+// can't be written, no cue plays: missing a chime beats repeating one.
 export function createCueLedger({ storage = defaultStorage(), locks = safe(() => globalThis.navigator?.locks, null) } = {}) {
   const memory = new Set();
   const read = () => safe(() => { const list = JSON.parse(storage?.getItem(CUED_KEY) ?? '[]'); return Array.isArray(list) ? list : []; }, []);
-  const write = list => safe(() => storage?.setItem(CUED_KEY, JSON.stringify(list.slice(-RETAIN))), undefined);
-  const claimNow = id => {
+  const write = list => safe(() => { storage.setItem(CUED_KEY, JSON.stringify(list.slice(-RETAIN))); return true; }, false);
+  const record = (id, claiming) => {
     if (memory.has(id)) return false;
-    const list = read(); memory.add(id);
+    memory.add(id);
+    const list = read();
     if (list.includes(id)) return false;
-    list.push(id); write(list); return true;
+    list.push(id);
+    return write(list) && claiming;
   };
+  const exclusive = fn => (locks?.request ? Promise.resolve(locks.request('room-ask-sounds-cue', fn)).catch(() => false) : Promise.resolve(fn()));
   return {
-    // Record without sounding (first sighting of an old result).
-    mark(id) { if (!memory.has(id)) { memory.add(id); const list = read(); if (!list.includes(id)) { list.push(id); write(list); } } },
-    claim(id) {
-      if (memory.has(id)) return Promise.resolve(false);
-      if (locks?.request) return Promise.resolve(locks.request('room-ask-sounds-cue', () => claimNow(id))).catch(() => false);
-      return Promise.resolve(claimNow(id));
-    },
+    // Record without sounding (first sighting of an old result), under the
+    // same lock so it never overwrites another tab's claim.
+    mark(id) { return memory.has(id) ? Promise.resolve(false) : exclusive(() => record(id, false)); },
+    claim(id) { return memory.has(id) ? Promise.resolve(false) : exclusive(() => record(id, true)); },
   };
 }
 
@@ -120,7 +132,7 @@ export function installAskSounds({ getRoomId, getViewerId, storage = defaultStor
     seen.set(run.id, { status: displayStatus, resultId: run.resultMessageId ?? null });
     const viewer = safe(() => getViewerId?.(), null);
     if (!viewer || run.initiatorId !== viewer) return Promise.resolve(false);
-    if (!prev) { if (run.resultMessageId) ledger.mark(`result:${run.resultMessageId}`); return Promise.resolve(false); }
+    if (!prev) return run.resultMessageId ? ledger.mark(`result:${run.resultMessageId}`).then(() => false) : Promise.resolve(false);
     const next = askCueFor(prev, run, displayStatus);
     if (!next || !player.eligible()) return Promise.resolve(false);
     return ledger.claim(next.id).then(ok => ok && player.play(next.cue));
@@ -140,8 +152,9 @@ export function mountSoundSetting(container, { getRoomId, storage = defaultStora
   const sync = () => { input.checked = soundsEnabled(safe(() => getRoomId?.(), null), storage); };
   input.addEventListener('change', () => {
     const roomId = safe(() => getRoomId?.(), null);
-    if (!setSoundsEnabled(roomId, input.checked, storage)) { sync(); return; }
+    if (!setSoundsEnabled(roomId, input.checked, storage)) { preview.cancel?.(); sync(); return; }
     if (input.checked) preview.play('result-ready', { preview: true });
+    else preview.cancel?.();
   });
   sync();
   return { input, sync };
