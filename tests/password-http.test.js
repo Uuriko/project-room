@@ -267,6 +267,35 @@ for (const mutation of ["logout", "rotate login slot"]) {
   });
 }
 
+test("password change kills other devices' sessions and account keys, but keeps the current session", async t => {
+  const { f, origin } = await startServer(t);
+  const created = await post(origin, "/api/auth/password/signup", { email: email(12), password: password(12), ...freshSlot(f) });
+  assert.equal(created.status, 202);
+  const accountId = f.store.authenticateAccountSession(accountCookie(created)).account.id;
+  const accessKey = f.store.issueAccountAccessKey(accountId); // minting an API key clears browser sessions (existing behavior)...
+  // ...so re-establish both devices after minting.
+  const loginA = await post(origin, "/api/auth/password/login", { email: email(12), password: password(12), ...freshSlot(f) });
+  assert.equal(loginA.status, 200);
+  const tokenA = accountCookie(loginA), cookieA = `account_session=${tokenA}`;
+  // A second device signs in with the same password.
+  const loginB = await post(origin, "/api/auth/password/login", { email: email(12), password: password(12), ...freshSlot(f) });
+  assert.equal(loginB.status, 200);
+  const tokenB = accountCookie(loginB);
+  f.store.authenticateAccountSession(tokenA);
+  f.store.authenticateAccountSession(tokenB);
+  f.store.authenticateAccountAccessKey(accessKey); // API key alive before change
+  const changed = await post(origin, "/api/auth/password/change",
+    { currentPassword: password(12), newPassword: "rotated-password-long-99" }, cookieA);
+  assert.equal(changed.status, 200);
+  assert.deepEqual(await changed.json(), { status: "ok" });
+  assert.throws(() => f.store.authenticateAccountSession(tokenB), { code: "unauthenticated" },
+    "the other device's session must die on password change");
+  assert.throws(() => f.store.authenticateAccountAccessKey(accessKey), { code: "unauthenticated" },
+    "account access keys must die on password change");
+  const sessionA = f.store.authenticateAccountSession(tokenA);
+  assert.equal(sessionA.account.id, accountId, "the session that changed the password stays signed in");
+});
+
 test("password-change cannot overwrite a verifier changed before its writer transaction", async t => {
   const { f, origin, res } = await signup(t, 31);
   const token = accountCookie(res);

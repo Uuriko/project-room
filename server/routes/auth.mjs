@@ -350,6 +350,18 @@ export async function handleAuthGroup(ctx) {
         reject(409, "password_changed", "The password changed; retry with the current password");
       }
       store.accountLogins.setPasswordVerifier(session.account.id, replacementVerifier);
+      // A password change is a credential rotation: every other browser
+      // session and every account key dies with the old password — the same
+      // posture as the password-reset flow (invalidateHumanAccountCredentials).
+      // The device that proved the current password is then re-logged in on
+      // its existing slot token, so it stays signed in: the invalidation
+      // above clears each slot exactly once, so the expected revision is one
+      // past the pre-change session revision.
+      const passwordMethod = store.accountLogins.listMethods(session.account.id).find(m => m.type === "password");
+      store.invalidateHumanAccountCredentials(session.account.id);
+      store.loginAccountSessionWithMethod(slotToken, session.account.id, session.sessionRevision + 1, {
+        method: { kind: "password", ref: passwordMethod?.id ?? "password" }
+      });
     });
     return json(res, 200, { status: "ok" });
   }
