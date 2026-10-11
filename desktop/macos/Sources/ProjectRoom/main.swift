@@ -8,11 +8,8 @@ import ProjectRoomKit
     init(url: URL) { initialURL = url }
     func applicationDidFinishLaunching(_ notification: Notification) {
         room = RoomWindow(url: initialURL)
-        menuBar = RoomMenuBar(status: { [weak self] in self?.room?.localToolStatus ?? [:] },
-            openRoom: { [weak self] in self?.room?.show() },
-            openMac: { [weak self] in self?.room?.showMyMac() },
-            permissions: { [weak self] in self?.room?.showMacPermissions() },
-            pause: { [weak self] in self?.room?.pauseLocalTools() })
+        room?.restoreLocalTools()
+        if let room { menuBar = RoomMenuBar(room: room) }
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
         let appMenu = NSMenu(title: "Project Room"); appItem.submenu = appMenu
@@ -32,6 +29,8 @@ import ProjectRoomKit
             let item = view.addItem(withTitle: title, action: selector, keyEquivalent: key)
             item.target = title == "Open Room" ? self : room
         }
+        let quick = view.addItem(withTitle: "Quick prompt", action: #selector(RoomMenuBar.toggle), keyEquivalent: "")
+        quick.target = menuBar
         let auth = view.addItem(withTitle: "Sign in with browser…", action: #selector(RoomWindow.signIn), keyEquivalent: "")
         auth.target = room
         let mac = view.addItem(withTitle: "My Mac…", action: #selector(RoomWindow.showMyMac), keyEquivalent: ",")

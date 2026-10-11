@@ -1,0 +1,50 @@
+Compact menu panel — 2026-10-11
+
+Open the green cube, or View > Quick prompt. Global shortcut defaults to
+Control-Option-Space; Settings offers Control-Shift-Space or Off. Escape and
+clicking outside close the panel. Input is focused on each opening. In-memory
+panel drafts survive close/reopen; existing room drafts are never overwritten.
+
+Quick prompt uses the existing room composer and Ask Room action. Destination
+is shown. Room/channel/recipient/reply-context changes reject stale sends.
+Submission opens the actual conversation, which owns delivery and error feedback.
+A connected room assistant is still required to execute requested agent work.
+
+Needs you reflects the current room's rendered attention state; unavailable
+counts are a dash. It opens the existing review/activity flow. Approvals are
+not duplicated inline in this panel. The quiet cube dot means attention exists.
+
+Tasks shows local process names plus room runs with existing Stop controls
+(up to 20 room runs currently rendered). Room Stop revalidates context and
+revision, then invokes the canonical UI action and opens its outcome. It does
+not claim to list every agent running outside Project Room.
+
+The same button switches between Pause and Resume. It affects this Mac's local
+tools only. Enabled/paused preference persists
+across app restarts, and enabled tools reconnect automatically at startup.
+Quitting still stops the broker and its processes; it does not erase the saved
+choice. Each new connection still receives a fresh authentication nonce.
+macOS Accessibility/Screen Recording/Full Disk permissions are separate.
+
+Launch at login is optional under Settings, using SMAppService. It was built,
+but no login/reboot was performed and the user's login setting was not changed.
+
+Validation:
+- Native Swift build and packaged app signing verification.
+- Native WebKit acceptance: literal text, destination, existing draft protection,
+  changed-recipient refusal, stale/current room-stop revision, attention state,
+  idempotent Resume (does not revoke active work through a revision change),
+  popover draft retention, persisted enable/pause through broker recreation.
+- Six existing native broker acceptance groups: actual processes, journal replay,
+  pause/cancel, real MCP stdio, native authenticated IPC and revocation.
+- Installed app smoke: all five tools discovered, enabled immediately on startup,
+  temporary file write/read, actual sleep process, cancellation observed, idle.
+- CUA verified compact popover, focused input, real Muse room destination,
+  attention count, task disclosure and settings. Control-Option-Space opened the
+  installed panel with input focused; Resume was visible and enabled while paused.
+  View > Quick prompt also worked.
+- npm run lint passed with zero errors and 128 existing warnings.
+
+Local installation retained the existing green Dock ICNS. build.sh still uses
+legacy icons/icon-512.png: canonical cube packaging remains a release cleanup.
+No server deployment performed for this change.

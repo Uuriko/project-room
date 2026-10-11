@@ -5,21 +5,25 @@ import CoreGraphics
 @MainActor public final class LocalToolsWindow: NSObject {
     public let window: NSWindow
     private let service: LocalTools
+    private let preferences: UserDefaults
+    public static let enabledPreference = "localToolsEnabled"
     private let connection: LocalToolConnection
     private let state = NSTextField(wrappingLabelWithString: "")
     private let permissions = NSTextField(wrappingLabelWithString: "")
     private let toggle = NSButton(title: "Enable local tools", target: nil, action: nil)
     private var timer: Timer?
     private let permissionSetup = MacPermissionSetup()
-    public init(service: LocalTools? = nil) throws {
+    public init(service: LocalTools? = nil, preferences: UserDefaults = .standard) throws {
         let owned = try service ?? LocalTools()
+        self.preferences = preferences
+        if preferences.bool(forKey: Self.enabledPreference) { owned.setEnabled(true) }
         self.service = owned; connection = try LocalToolConnection(service: owned)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 380), styleMask: [.titled,.closable], backing: .buffered, defer: false)
         super.init()
         window.title = "My Mac · Project Room"; window.isReleasedWhenClosed = false
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "Let agents work on this Mac"); title.font = .systemFont(ofSize: 21, weight: .semibold)
-        let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files and run programs as you. Enable them for this app session, then connect your agent. Pause stops new operations and running process groups.")
+        let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files and run programs as you. Your enabled or paused choice stays after restarting. Connect your agent once. Pause stops new operations and running process groups.")
         let scope = NSTextField(wrappingLabelWithString: "This connects local agents. Web and shared-room device access are still being built."); scope.textColor = .secondaryLabelColor
         toggle.target = self; toggle.action = #selector(changeEnabled); toggle.bezelStyle = .rounded
         let setup = NSButton(title: "macOS permissions…", target:self, action:#selector(openPermissions)); setup.bezelStyle = .rounded
@@ -33,7 +37,21 @@ import CoreGraphics
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     public var toolStatus: [String: Any] { service.status() }
+    public func cancel(_ id: String) throws {
+        let revision = service.status()["grantRevision"] as? Int ?? -1
+        _ = try service.call("mac_process_cancel", arguments: ["requestId": UUID().uuidString, "targetRequestId": id], grantRevision: revision)
+        refresh()
+    }
+    public func resume() throws {
+        if service.status()["enabled"] as? Bool == true { return }
+        service.setEnabled(true)
+        do { try connection.publish() }
+        catch { service.setEnabled(false); preferences.set(false, forKey: Self.enabledPreference); refresh(); throw error }
+        preferences.set(true, forKey: Self.enabledPreference)
+        refresh()
+    }
     public func pause() {
+        preferences.set(false, forKey: Self.enabledPreference)
         service.setEnabled(false)
         do { try connection.publish() } catch { /* Revocation already applies in the service. */ }
         refresh()
@@ -42,9 +60,11 @@ import CoreGraphics
     public func stop() { timer?.invalidate(); connection.stop() }
     @objc private func changeEnabled() {
         let enabled = service.status()["enabled"] as? Bool == true
-        service.setEnabled(!enabled)
-        do { try connection.publish() } catch { service.setEnabled(false); state.stringValue = "Connection could not update. Tools paused."; return }
-        refresh()
+        if enabled { pause() }
+        else {
+            do { try resume() }
+            catch { state.stringValue = "Connection could not update. Tools paused." }
+        }
     }
     private func refresh() {
         let snapshot = service.status(), enabled = snapshot["enabled"] as? Bool == true

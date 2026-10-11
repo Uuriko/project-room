@@ -303,6 +303,11 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         }
     }
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
+    public func restoreLocalTools() {
+        guard UserDefaults.standard.bool(forKey: LocalToolsWindow.enabledPreference) else { return }
+        do { if localTools == nil { localTools = try LocalToolsWindow() } }
+        catch { tell("Local tools could not reconnect. Open My Mac to try again.") }
+    }
     @objc public func showMyMac() {
         do { if localTools == nil { localTools = try LocalToolsWindow() }; localTools?.show() }
         catch let failure as LocalToolFailure {
@@ -310,6 +315,11 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         } catch { tell("Local tools could not open. Try again after restarting Project Room.") }
     }
     public var localToolStatus: [String: Any] { localTools?.toolStatus ?? ["enabled": false, "runningProcesses": 0] }
+    public func cancelLocalTask(_ id: String) throws { try localTools?.cancel(id) }
+    public func resumeLocalTools() throws {
+        if localTools == nil { localTools = try LocalToolsWindow() }
+        try localTools?.resume()
+    }
     public func pauseLocalTools() { localTools?.pause() }
     public func showMacPermissions() { showMyMac(); localTools?.showPermissions() }
     public func stopLocalTools() { localTools?.stop() }
