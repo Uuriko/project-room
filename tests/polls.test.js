@@ -9,7 +9,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, replay } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
-import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from "../src/polls.js";
+import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS, POLL_OPTION_EMOJIS } from "../src/polls.js";
+import { canonicalReaction } from "../src/emoji.js";
 
 const at = "2026-10-06T22:30:00.000Z";
 const fixed = (id, type, actorId, data) => ({ id, idempotencyKey: `key-${id}`, roomId: "room-project-room-v0", type, actorId, at, causationId: null, data });
@@ -142,4 +143,28 @@ test("polls replay deterministically", () => {
     return pollTally(pollOf(state));
   };
   assert.deepEqual(run(), run());
+});
+
+test("every option emoji is a votable reaction", () => {
+  // Regression: the 10th key used to be "10\uFE0F\u20E3" (two graphemes),
+  // which canonicalReaction rejects, so votes for option 10 of a max-size
+  // poll threw "Invalid reaction choice" and were never recorded.
+  assert.equal(POLL_OPTION_EMOJIS.length, POLL_MAX_OPTIONS);
+  assert.equal(new Set(POLL_OPTION_EMOJIS).size, POLL_MAX_OPTIONS, "option emojis stay distinct");
+  for (const emoji of POLL_OPTION_EMOJIS) {
+    assert.equal(canonicalReaction(emoji), emoji, `option emoji ${JSON.stringify(emoji)} must round-trip through canonicalReaction`);
+  }
+});
+
+test("the 10th option of a max-size poll accepts votes", () => {
+  let state = postPoll(twoMembers(), "poll-1", "pv-a", {
+    question: "Pick one",
+    options: Array.from({ length: POLL_MAX_OPTIONS }, (_, i) => `option ${i + 1}`),
+  });
+  const emojis = pollOf(state).poll.options.map(o => o.emoji);
+  assert.equal(emojis.length, POLL_MAX_OPTIONS);
+  state = vote(state, "v1", "pv-a", "poll-1", emojis[POLL_MAX_OPTIONS - 1]);
+  const tally = pollTally(pollOf(state));
+  assert.equal(tally.results[POLL_MAX_OPTIONS - 1].votes, 1);
+  assert.equal(tally.total, 1);
 });

@@ -9,10 +9,15 @@ export const POLL_MAX_LABEL_CHARS = 120;
 export const POLL_MAX_QUESTION_CHARS = 500;
 
 // Digit keycap emoji, the stable vote keys (1..10). Single graphemes that
-// canonicalReaction accepts.
+// canonicalReaction accepts. Note: "10\uFE0F\u20E3" is two graphemes, which
+// canonicalReaction rejects, so a vote for a 10th option could never be
+// recorded ("Invalid reaction choice"). The 10th key therefore uses U+1F51F,
+// the single-grapheme keycap-ten the reaction plumbing accepts.
 const KEYCAP = digit => `${digit}\uFE0F\u20E3`;
+const KEYCAP_TEN = "🔟"; // U+1F51F keycap-ten (single grapheme; renders as 10 in a keycap)
 export const POLL_OPTION_EMOJIS = Object.freeze(
-  Array.from({ length: POLL_MAX_OPTIONS }, (_, i) => KEYCAP(String(i + 1)))
+  Array.from({ length: POLL_MAX_OPTIONS }, (_, i) =>
+    i === POLL_MAX_OPTIONS - 1 ? KEYCAP_TEN : KEYCAP(String(i + 1)))
 );
 
 function fail(message) {
