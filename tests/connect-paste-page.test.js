@@ -90,3 +90,37 @@ test("agents reading the page get their own line, and the new blocks name the ap
     assert.doesNotMatch(text, CREDENTIAL);
   }
 });
+
+// The DIY step-1 preview call ships without a bearer, and checkPreviewOrigin
+// denies a missing Origin with 403 origin_denied — so the page must document
+// the Origin header or step 1 fails exactly as written.
+test("POST /api/share-links/preview without an Origin header is denied", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-paste-origin-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  // Exactly the documented step-1 request shape: JSON body, no Origin, no bearer.
+  const response = await fetch(`${origin}/api/share-links/preview`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ linkToken: "no-such-token" }),
+  });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "origin_denied");
+});
+
+test("the Do it yourself preview step documents the Origin header the route requires", () => {
+  const html = agentPages().get(PASTE_PAGE.htmlFile);
+  const diy = unescape(html).split("<h2>Do it yourself instead</h2>")[1].split("<h2>Pause or remove an agent</h2>")[0];
+  const step1 = diy.split("2. Create an agent identity")[0];
+  assert.match(step1, /share-links\/preview/, "step 1 previews the invite");
+  assert.match(step1, /Origin:\s*https:\/\/room\.trydemigod\.com/, "step 1 sets the Origin header POST /api/share-links/preview requires");
+});
