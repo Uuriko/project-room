@@ -125,6 +125,30 @@ test("binary numstat rows (dash counts) count as zero lines", () => {
   assert.equal(r.counted, 0);
 });
 
+test("a git-quoted generated path is excluded; a quoted source path still counts", () => {
+  const generated = checkDiffSize({
+    numstat: "400\t0\t\"dist/caf\\303\\251.min.js\"\n",
+    prBody: "",
+    threshold: 300,
+  });
+  assert.equal(generated.counted, 0);
+  assert.equal(generated.ok, true);
+  const renamed = checkDiffSize({
+    numstat: "400\t0\t\"src/a.mjs\" => \"dist/caf\\303\\251.min.js\"\n",
+    prBody: "",
+    threshold: 300,
+  });
+  assert.equal(renamed.counted, 0);
+  assert.equal(renamed.ok, true);
+  const source = checkDiffSize({
+    numstat: "400\t0\t\"server/caf\\303\\251.mjs\"\n",
+    prBody: "",
+    threshold: 300,
+  });
+  assert.equal(source.counted, 400);
+  assert.equal(source.ok, false);
+});
+
 test("justification content stops at the next markdown heading", () => {
   const r = checkDiffSize({
     numstat: over,
