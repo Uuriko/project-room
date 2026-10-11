@@ -147,15 +147,39 @@ export class AgentRooms {
     if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
     if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
       fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
-    const links = this.store.db.prepare(`SELECT l.room_id AS roomId, r.archived_at AS archivedAt,
+    // Inactive links do not fill a slot. A page cut before that recheck hid a
+    // later live room and pointed nextCursor at a room the caller cannot open.
+    const pageSize = 100;
+    const select = this.store.db.prepare(`SELECT l.room_id AS roomId, r.archived_at AS archivedAt,
         json_extract(r.projection, '$.room.title') AS title
       FROM identity_links l JOIN rooms r ON r.id=l.room_id
-      WHERE l.identity_id=? AND l.room_id>? ORDER BY l.room_id LIMIT 101`).all(identity.identityId, after);
-    const rooms = links.slice(0, 100).flatMap(link => {
-      const auth = this.store.identities.resolveIdentityLink(identity.identityId, link.roomId);
-      return auth ? [{ ...link, memberId: auth.member.id }] : [];
-    });
-    return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
+      WHERE l.identity_id=? AND l.room_id>? ORDER BY l.room_id LIMIT ?`);
+    const rooms = [];
+    let cursor = after;
+    let nextCursor = null;
+    while (rooms.length < pageSize) {
+      const links = select.all(identity.identityId, cursor, pageSize + 1);
+      if (links.length === 0) break;
+      for (const link of links) {
+        cursor = link.roomId;
+        const auth = this.store.identities.resolveIdentityLink(identity.identityId, link.roomId);
+        if (!auth) continue;
+        if (rooms.length === pageSize) {
+          nextCursor = rooms[pageSize - 1].roomId;
+          break;
+        }
+        rooms.push({ ...link, memberId: auth.member.id });
+      }
+      if (nextCursor) break;
+      if (links.length <= pageSize) break;
+    }
+    if (!nextCursor && rooms.length === pageSize) {
+      const more = this.store.db.prepare(
+        "SELECT 1 AS more FROM identity_links WHERE identity_id=? AND room_id>? LIMIT 1"
+      ).get(identity.identityId, rooms[pageSize - 1].roomId);
+      if (more) nextCursor = rooms[pageSize - 1].roomId;
+    }
+    return { identityId: identity.identityId, rooms, nextCursor };
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):
