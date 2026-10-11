@@ -301,6 +301,8 @@ let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Ephemeral previews never enter authoritative room state or draft recovery.
+const localMessageEchoes = new Map();
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
 const workNavigationOrigins = new Map();
@@ -445,6 +447,8 @@ const client = new RoomClient({
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
   onAccessEnded() {
+    for (const echo of localMessageEchoes.values()) echo.node.remove();
+    localMessageEchoes.clear();
     closeRoomActions(false);
     const endedContext = accessEndContext;
     accessEndContext = null;
@@ -2259,16 +2263,35 @@ $("#chat-suggestions")?.addEventListener("click", e => {
 function renderTyping(typists) {
   const el = $("#typing-indicator");
   if (!el) return;
-  const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
-  const extra = (typists ?? []).length - names.length;
-  if (!names.length) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
+  const people = (typists ?? []).filter(t => t.memberId && t.memberId !== session?.member?.id);
+  const visible = people.slice(0, 3);
+  const signature = JSON.stringify(visible.map(t => [t.memberId, t.displayName, t.avatarUrl]).concat(people.length));
+  if (el.dataset.typists === signature) return; // Preserve dot animation across heartbeats.
+  el.dataset.typists = signature;
+  el.replaceChildren();
+  el.hidden = !visible.length;
+  for (const person of visible) {
+    const label = person.displayName || person.memberId;
+    const bubble = document.createElement("span");
+    bubble.className = "typing-bubble"; bubble.title = uiText("chat.typingStatus", { name: label });
+    const avatar = document.createElement("span");
+    avatar.className = "typing-avatar"; avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = label.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || "").join("").toUpperCase();
+    let imageUrl;
+    try { const url = new URL(person.avatarUrl); if (url.protocol === "https:" && !url.username && !url.password) imageUrl = url.href; } catch { /* Initials cover missing profile photos. */ }
+    if (imageUrl) {
+      const image = document.createElement("img"); image.src = imageUrl; image.alt = ""; image.referrerPolicy = "no-referrer";
+      image.addEventListener("error", () => image.remove(), { once: true }); avatar.append(image);
+    }
+    const dots = document.createElement("span"); dots.className = "typing-dots"; dots.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < 3; i++) dots.append(document.createElement("i"));
+    const accessible = document.createElement("span"); accessible.className = "sr-only"; accessible.textContent = uiText("chat.typingStatus", { name: label });
+    bubble.append(avatar, dots, accessible); el.append(bubble);
   }
-  const who = extra > 0 ? `${names.join(", ")} and ${extra} other${extra === 1 ? "" : "s"}` : names.join(" and ");
-  el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
-  el.hidden = false;
+  if (people.length > visible.length) {
+    const extra = document.createElement("span"); extra.className = "typing-extra";
+    extra.textContent = `+${people.length - visible.length}`; extra.setAttribute("aria-label", people.slice(visible.length).map(person => person.displayName || person.memberId).join(", ")); el.append(extra);
+  }
 }
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
@@ -2285,6 +2308,10 @@ function renderMessages() {
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
   const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  for (const [id, echo] of localMessageEchoes) {
+    if (echo.generation !== client.generation || echo.memberId !== session?.member?.id || conversation.byId.has(id)) localMessageEchoes.delete(id);
+  }
+  const localEchoes = [...localMessageEchoes.values()].filter(echo => echo.roomId === state.room.id && echo.channelId === activeChannelId && echo.threadId === currentThreadId);
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
@@ -2336,6 +2363,7 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
+  for (const echo of localEchoes) keep.add(echo.node.dataset.key);
   if (hiddenCount) keep.add(TIMELINE_PAGER_KEY);
   // Board claim lines carry no data-key, so the map above holds only the last
   // one; any left in the list made the reorder below move every message row
@@ -2380,6 +2408,12 @@ function renderMessages() {
           if (!before) { node.insertBefore(after, node.firstChild); continue; }
           if (!after) { before.remove(); continue; }
           if (before.className !== after.className) before.className = after.className;
+          if (selector === ".message-links") {
+            // A reply count or save-state refresh must not dismiss an open menu.
+            const menu = before.querySelector("details.message-more");
+            const nextMenu = after.querySelector("details.message-more");
+            if (menu?.open && nextMenu) nextMenu.open = true;
+          }
           if (selector === ".message-body") {
             // Expansion is local reading state, independent of reactions and
             // edits. Copy it before comparing so unchanged text stays selected.
@@ -2444,8 +2478,9 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
+  merged.push(...localEchoes.map(echo => echo.node));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  if (!messages.length && !workEntries.length && !localEchoes.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -4019,18 +4054,44 @@ $("#message-form").addEventListener("submit", e => {
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
-  const generation = client.generation, draftKey = composerKey();
+  const generation = client.generation, draftKey = composerKey(), command = pendingMessage.command;
+  const echoId = data.messageId || command.id;
+  const fastText = session.member.kind === "human" && !assistantDraft && !composerFiles.length && localMessageEchoes.size < 50;
+  if (fastText) {
+    const node = document.createElement("li");
+    node.className = "message"; node.dataset.key = `local:${echoId}`;
+    node.dataset.localMessageId = echoId; node.setAttribute("aria-busy", "true");
+    node.style.opacity = "0.65";
+    node.innerHTML = `<div class="message-avatar human" aria-hidden="true">${initials(session.member.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(name(session.member.id))}</strong></div>${data.toMemberId ? `<div class="message-context"><span class="audience-chip">To ${esc(name(data.toMemberId))} · private</span></div>` : ""}<div class="message-body">${bodyHtmlCache.html(data.body, Object.values(state.members), esc, echoId)}</div></div>`;
+    localMessageEchoes.set(echoId, { node, generation, memberId: session.member.id, roomId: state.room.id, channelId: activeChannelId, threadId: currentThreadId });
+    renderMessages();
+  }
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
-    locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+    locallyOwnedMessageIds.add(data.messageId || command.id);
     try {
-      await client.send(pendingMessage.command);
+      await client.send(command, { waitForRefresh: !(fastText || askRoom && !composerFiles.length && !assistantDraft) });
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
+      localMessageEchoes.delete(echoId);
+      throw mapDmConsentRefusal(command, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
+    if (fastText) {
+      const confirmedEcho = localMessageEchoes.get(echoId)?.node;
+      if (confirmedEcho) { confirmedEcho.setAttribute("aria-busy", "false"); confirmedEcho.style.removeProperty("opacity"); }
+      // Navigation may have restored another destination's draft while the receipt was pending.
+      if (drafts.get(draftKey)?.pending?.command?.id === command.id) drafts.clear(draftKey);
+      if (composerKey() === draftKey && pendingMessage?.command?.id === command.id) {
+        $("#message-input").value = ""; pendingMessage = null; clearReply();
+        $("#also-send-to-channel").checked = false;
+      }
+      persistDrafts();
+      await humanExperience.posted(data.messageId, askRoom);
+      maybeShowGuestUpgradeHint();
+      return;
+    }
     await commitComposerFiles(data.messageId);
     if (generation !== client.generation || !state) return;
     drafts.clear(draftKey);
