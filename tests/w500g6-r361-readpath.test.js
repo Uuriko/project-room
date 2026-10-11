@@ -59,20 +59,16 @@ test("R36-1 readpath: get()/list() agree with the returned record after resubmit
 test("R36-1 readpath: observers agree at every step of a multi-cycle flow", () => {
   const queue = makeQueue();
   const steps = [];
+  // Assert immediately after each mutation: observers must serve exactly
+  // what the mutation just returned, before the next op moves the state on.
+  const step = (name, returned, id) => { assertReadConsistent(queue, id, returned, name); steps.push([name, returned]); };
   const p = queue.propose("thread:1", { draft: draft1, byAgent: agent, channel: "email" });
-  steps.push(["propose", p]);
-  const e1 = queue.requestEdits(p.proposalId, { by: human, edits: "First pass notes." });
-  steps.push(["requestEdits#1", e1]);
-  const r1 = queue.resubmit(p.proposalId, { draft: draft2, byAgent: agentB });
-  steps.push(["resubmit#1", r1]);
-  const e2 = queue.requestEdits(p.proposalId, { by: human, edits: "Second pass notes." });
-  steps.push(["requestEdits#2", e2]);
-  const r2 = queue.resubmit(p.proposalId, { draft: draft3, byAgent: agentB });
-  steps.push(["resubmit#2", r2]);
-  const approved = queue.approve(p.proposalId, { by: human });
-  steps.push(["approve", approved]);
-
-  for (const [name, returned] of steps) assertReadConsistent(queue, p.proposalId, returned, name);
+  step("propose", p, p.proposalId);
+  step("requestEdits#1", queue.requestEdits(p.proposalId, { by: human, edits: "First pass notes." }), p.proposalId);
+  step("resubmit#1", queue.resubmit(p.proposalId, { draft: draft2, byAgent: agentB }), p.proposalId);
+  step("requestEdits#2", queue.requestEdits(p.proposalId, { by: human, edits: "Second pass notes." }), p.proposalId);
+  step("resubmit#2", queue.resubmit(p.proposalId, { draft: draft3, byAgent: agentB }), p.proposalId);
+  step("approve", queue.approve(p.proposalId, { by: human }), p.proposalId);
 
   assert.deepEqual(steps.map(([, r]) => r.version), [1, 1, 2, 2, 3, 3], "versions must advance on resubmit only");
   assert.deepEqual(steps.map(([, r]) => r.draft.body),
@@ -164,20 +160,15 @@ test("R36-1 readpath (store): resubmit keeps record_json, listApprovals and the 
 test("R36-1 readpath (store): observers agree at every step of a multi-cycle flow", () => {
   const { store, collab } = openCollab(":memory:");
   const steps = [];
+  // Assert immediately after each mutation — same rationale as above.
+  const step = (name, returned, id) => { assertStoreConsistent(collab, store, ROOM, id, returned, name); steps.push([name, returned]); };
   const p = collab.proposeDraft(ROOM, "thread:1", { draft: draft1, byAgent: agent, channel: "email" });
-  steps.push(["proposeDraft", p]);
-  const e1 = collab.decideApproval(ROOM, p.proposalId, { decision: "edit", by: human, editedBody: "First pass." });
-  steps.push(["edit#1", e1]);
-  const r1 = collab.resubmitApproval(ROOM, p.proposalId, { draft: draft2, byAgent: agentB });
-  steps.push(["resubmit#1", r1]);
-  const e2 = collab.decideApproval(ROOM, p.proposalId, { decision: "edit", by: human, editedBody: "Second pass." });
-  steps.push(["edit#2", e2]);
-  const r2 = collab.resubmitApproval(ROOM, p.proposalId, { draft: draft3, byAgent: agentB });
-  steps.push(["resubmit#2", r2]);
-  const approved = collab.decideApproval(ROOM, p.proposalId, { decision: "approve", by: human });
-  steps.push(["approve", approved]);
-
-  for (const [name, returned] of steps) assertStoreConsistent(collab, store, ROOM, p.proposalId, returned, name);
+  step("proposeDraft", p, p.proposalId);
+  step("edit#1", collab.decideApproval(ROOM, p.proposalId, { decision: "edit", by: human, editedBody: "First pass." }), p.proposalId);
+  step("resubmit#1", collab.resubmitApproval(ROOM, p.proposalId, { draft: draft2, byAgent: agentB }), p.proposalId);
+  step("edit#2", collab.decideApproval(ROOM, p.proposalId, { decision: "edit", by: human, editedBody: "Second pass." }), p.proposalId);
+  step("resubmit#2", collab.resubmitApproval(ROOM, p.proposalId, { draft: draft3, byAgent: agentB }), p.proposalId);
+  step("approve", collab.decideApproval(ROOM, p.proposalId, { decision: "approve", by: human }), p.proposalId);
   assert.deepEqual(steps.map(([, r]) => r.version), [1, 1, 2, 2, 3, 3]);
   assert.deepEqual(steps.map(([, r]) => r.draft.body),
     ["original body", "original body", "revised body", "revised body", "final body", "final body"]);
