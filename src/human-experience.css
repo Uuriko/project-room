@@ -37,3 +37,14 @@
 .assistant-face-status { font-size: var(--text-sm); color: var(--muted); }
 .assistant-face-status[data-face-status="not_picked_up"], .assistant-face-status[data-face-status="stalled"] { color: var(--amber); }
 #assistant-face .assistant-face-actions > .text-button { margin-right: .6rem; margin-block: .2rem; }
+
+/* DESIGN SYNC 10497: ask-card status changes are one-shot and INSTANT under
+   prefers-reduced-motion. The status words carry the state; nothing moves.
+   The guard lives on the card's own stylesheet (and wins over later motion
+   stylesheets) so a transition can never replay when folded updates re-mount
+   the card — status motion is keyed to actual status CHANGE events, not mount. */
+@media (prefers-reduced-motion: reduce) {
+  #assistant-face .assistant-face-status,
+  #assistant-face .assistant-face-status::before,
+  #assistant-face .assistant-face-actions > .text-button { animation: none !important; transition: none !important; }
+}
