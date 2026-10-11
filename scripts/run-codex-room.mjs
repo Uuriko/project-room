@@ -6,14 +6,16 @@ import { agentConnectionFromEnvironment } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { openRequestJournal } from "../client/request-runner.mjs";
 import { openCodexStdio, validateCodexRuntimeConfig, checkCodexProtocol } from "../client/codex-stdio.mjs";
+import { superviseCodexRoom, scopedCodexThreads } from "../client/codex-supervisor.mjs";
 import { runCodexSharedAssistant } from "../client/codex-shared-assistant.mjs";
 
 export async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "--help") {
     console.log(`Usage:
-  ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs --list
+  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --list
   node scripts/run-codex-room.mjs --check /absolute/runtime.json
-  ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
+  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch /absolute/journal.sqlite /absolute/runtime.json
+  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
 
 Runtime JSON requires command (absolute Codex executable), cwd (real workspace), codexHome (dedicated private directory outside workspace and operator Codex home), policy {approvalPolicy:"never",sandbox:"read-only"|"workspace-write"}; optional model, requestTimeoutMs, turnTimeoutMs.
 Authenticate the dedicated Codex home explicitly using Codex login with CODEX_HOME set to that directory and cli_auth_credentials_store="file". No operator credentials or sessions are imported.
@@ -27,22 +29,28 @@ Normal invocation executes one already-created public Room assistant run assigne
     console.log(JSON.stringify(runs.filter(run => run.coordinatorMemberId === connection.memberId).map(run => ({ runId: run.id, status: run.status, sourceMessageId: run.sourceMessageId }))));
     return;
   }
-  const check = argv[0] === "--check";
+  const check = argv[0] === "--check", watch = argv[0] === "--watch";
   const [runId, journal, configPath] = check ? [null, null, argv[1]] : argv;
   if (argv.length !== (check ? 2 : 3) || !isAbsolute(configPath ?? "") || !check && (!runId || !isAbsolute(journal ?? "")))
     throw new Error("Invalid arguments; use --help");
   const settings = validateCodexRuntimeConfig(JSON.parse(readFileSync(configPath, "utf8")));
   const connection = check ? null : agentConnectionFromEnvironment();
   const db = check ? null : openRequestJournal(journal);
-  const threads = db?.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_runtime_attempts'").get()
-    ? db.prepare("SELECT binding,thread_id FROM codex_runtime_attempts WHERE thread_id IS NOT NULL").all().filter(row => {
-      const binding = JSON.parse(row.binding);
-      return ["origin", "roomId", "memberId"].every(key => binding[key] === connection[key]);
-    }).map(row => row.thread_id) : [];
+  const threads = db ? scopedCodexThreads(db, connection) : [];
   let rpc;
   const controller = new AbortController(), stop = () => controller.abort();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   try {
+    if (watch) {
+      await superviseCodexRoom({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy,
+        signal: controller.signal, timeoutMs: settings.turnTimeoutMs, emit: event => console.log(JSON.stringify(event)),
+        connect: async allowedThreadIds => {
+          const transport = openCodexStdio(settings, { allowedThreadIds, onAttention: event => console.error(JSON.stringify(event)) });
+          try { await checkCodexProtocol(transport, settings, { threadId: allowedThreadIds[0] }); return transport; }
+          catch (error) { await transport.close(); throw error; }
+        } });
+      return;
+    }
     rpc = openCodexStdio(settings, { allowedThreadIds: threads, onAttention: event => {
       console.error(JSON.stringify({ ...event, message: "Interactive request denied: this host has no connected approval/input UI." }));
     } });
