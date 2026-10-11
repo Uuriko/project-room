@@ -284,6 +284,13 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const context=await call('room_assistant_context',{});
   assert.equal(context.result.structuredContent.runs[0].status,'queued');
   assert.equal(context.result.structuredContent.assistant.availability,'awaiting_host');
+  const exactContext=await call('room_assistant_context',{runId:'mcp-shared'});
+  assert.equal(exactContext.result.structuredContent.runs[0].id,'mcp-shared');
+  const workContext=await call('room_assistant_context',{view:'work',limit:1});
+  assert.equal(workContext.result.structuredContent.runs[0].id,'mcp-shared');
+  assert.equal(workContext.result.structuredContent.nextCursor,null);
+  assert.ok((await call('room_assistant_context',{view:'work',limit:101})).error);
+
   const args={action:'claim',requestId:'mcp-claim-once',runId:'mcp-shared',attemptId:'saved-host-attempt',expectedRevision:0};
   const claimed=await call('room_assistant_action',args);
   assert.equal(claimed.result.structuredContent.result.status,'working');
