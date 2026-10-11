@@ -3,7 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync, s
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
-const METHODS = new Set(["initialize", "thread/start", "thread/read", "thread/resume", "thread/name/set", "turn/start", "turn/steer", "turn/interrupt"]);
+const METHODS = new Set(["initialize", "account/read", "thread/start", "thread/read", "thread/resume", "thread/name/set", "turn/start", "turn/steer", "turn/interrupt"]);
 const inside = (root, path) => path === root || (!relative(root, path).startsWith(`..${sep}`) && relative(root, path) !== ".." && !isAbsolute(relative(root, path)));
 
 export function validateCodexRuntimeConfig(config) {
@@ -117,7 +117,9 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
     request(method, params = {}) {
       if (method === "initialize" && initialization) return initialization;
       if (!METHODS.has(method)) return Promise.reject(new Error("Runtime method is outside the Room protocol"));
-      if (method !== "initialize" && method !== "thread/start" && !threads.has(params.threadId))
+      if (method === "account/read" && (params.refreshToken !== false || Object.keys(params).some(key => key !== "refreshToken")))
+        return Promise.reject(new Error("Account preflight requires refreshToken false"));
+      if (!["initialize", "account/read", "thread/start"].includes(method) && !threads.has(params.threadId))
         return Promise.reject(new Error("Runtime thread is outside this Room journal"));
       if (pending.size >= 128) return Promise.reject(new Error("Too many pending runtime requests"));
       const result = new Promise((resolve, reject) => {
@@ -156,4 +158,18 @@ export async function checkCodexProtocol(rpc, config, { threadId } = {}) {
     if (resumed.thread?.id !== id) throw new Error("invalid resume");
     return { status: "protocol_ready", modelTurnExecuted: false, historyRead: true, resume: true };
   } catch { throw new Error("Codex runtime lacks the required thread history/read/resume protocol or is unavailable. Use a qualified standalone Codex release (tested rust-v0.162.1) and run --check before starting Room work."); }
+}
+
+
+// Reads only the explicitly configured isolated profile. No proactive refresh,
+// model request, credential import, or account identity leaves this function.
+export async function checkCodexCredentials(rpc) {
+  try {
+    const result = await rpc.request("account/read", { refreshToken: false });
+    return { credentials: result?.account != null ? "present" : result?.requiresOpenaiAuth === false ? "not_required"
+      : result?.requiresOpenaiAuth === true ? "login_required" : "unknown", modelExecution: "not_tested" };
+  } catch (error) {
+    if (error.code === -32601) return { credentials: "unknown", modelExecution: "not_tested" };
+    throw error;
+  }
 }

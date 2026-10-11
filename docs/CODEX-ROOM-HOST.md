@@ -163,3 +163,43 @@ Codex profile's MCP server with `ProjectRoomTools --connection /absolute/path/to
 The native application must supply that connection file and the user must enable
 its grants. The supervisor neither enables computer access nor imports another
 Codex profile's MCP settings.
+
+## Desktop host control contract
+
+The desktop launches the same foreground host. It does not need a separate
+runtime scheduler. `--watch` checks protocol and dedicated-profile credentials at
+startup, even when no ask is queued. A missing login produces `login_required`
+and bounded retries before any claim or model call.
+
+```sh
+node scripts/run-codex-room.mjs --preflight /absolute/runtime.json
+node scripts/run-codex-room.mjs --status-watch /absolute/private-room-journal.sqlite
+node scripts/run-codex-room.mjs --stop-watch /absolute/private-room-journal.sqlite
+```
+
+Preflight uses App Server `account/read` with `refreshToken: false`. Only
+`credentials: present | login_required | not_required | unknown` is returned;
+account email, plan, account ID, and credential values are discarded. `present`
+means the runtime reported configured credentials, not that a model call has
+succeeded. `modelExecution` remains `not_tested`.
+
+The owner writes `<journal>.watch/status.json` atomically with mode 0600. Schema 1
+contains `sessionId`, `pid`, `startedAt`, `updatedAt`, `origin`, `roomId`, `memberId`,
+`phase`, `protocol`, `credentials`, `modelExecution`, and an optional `runId`.
+The heartbeat refreshes every five seconds, including while idle or executing.
+It contains no prompts, answers, tool arguments, tokens, or provider identity.
+The status command also reports `processState`, `fresh`, and `stopRequested`.
+A missing ownership lock reports stopped; a heartbeat older than fifteen seconds
+reports unknown and clears readiness. Native callers must also compare the PID
+with their actual child process. Do not infer readiness from an old JSON file.
+
+Stop writes the existing watcher control request and returns immediately. The
+caller must still wait for the owned process to exit. A stop request or process
+exit alone does not prove that external tool effects were cancelled; Room's
+attempt journal and Stop acknowledgement remain the execution authority.
+
+For a compact read-only queue view, use
+`ROOM_AGENT_CONFIG=/absolute/room-connection node scripts/agent-resume.mjs --focus assistant`.
+This shows this agent's current shared requests, pending input IDs, and Stop/Resume
+state without acknowledging, claiming, or executing work. An unchanged room
+context version never suppresses current shared requests.

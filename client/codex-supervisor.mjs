@@ -29,7 +29,7 @@ export function scopedCodexThreads(db, connection) {
 // Reuse the watcher lifetime ownership lock and stop control; execution ownership
 // remains the existing shared-attempt journal and server claim, never a new lease.
 export async function superviseCodexRoom({ connection, db, directory, connect, cwd, policy,
-  signal, emit = () => {}, pollMs = 2000, retryMaxMs = 30000, timeoutMs = 300000 }) {
+  signal, emit = () => {}, connectOnStart = false, pollMs = 2000, retryMaxMs = 30000, timeoutMs = 300000 }) {
   if (!Number.isInteger(pollMs) || pollMs < 100 || pollMs > 30000 || !Number.isInteger(retryMaxMs) || retryMaxMs < pollMs || retryMaxMs > 300000)
     throw new Error("Invalid supervisor polling/backoff interval");
   const owner = new WatchJournal(directory), controller = new AbortController();
@@ -38,7 +38,11 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
   if (signal?.aborted) abort();
   let rpc, control, monitorError, authError, failures = 0;
   const scope = JSON.stringify([connection.origin, connection.roomId, connection.memberId]);
-  const state = (status, extra = {}) => emit({ type: "host_status", status, ...extra });
+  let lastStatus;
+  const state = (status, extra = {}) => {
+    const event = { type: "host_status", status, ...extra }, key = JSON.stringify(event);
+    if (key !== lastStatus) { lastStatus = key; emit(event); }
+  };
   const pause = ms => delay(ms, undefined, { signal: controller.signal }).catch(error => { if (!controller.signal.aborted) throw error; });
   try {
     const client = new RoomAgentClient(connection);
@@ -51,7 +55,12 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
     while (!controller.signal.aborted) {
       try {
         const snapshot = await client.assistant(undefined, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
-        owner.health("watching"); failures = 0;
+        owner.health("watching");
+        if (connectOnStart && !rpc) {
+          rpc = await connect(scopedCodexThreads(db, connection));
+          state("protocol_qualified", { providerAuthentication: "unverified" });
+        }
+        failures = 0;
         const owned = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_shared_runs'").get()
           ? new Set(db.prepare("SELECT attempt_id FROM codex_shared_runs").all().map(row => row.attempt_id)) : new Set();
         const assigned = snapshot.runs.filter(run => run.coordinatorMemberId === connection.memberId);
@@ -61,7 +70,7 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
         const candidates = recovering.length ? recovering : assigned.filter(run => run.status === "queued" && !run.attemptId && !run.sourceDeleted);
         candidates.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.id.localeCompare(b.id));
         const run = candidates.find(row => (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now());
-        if (!run) { await pause(pollMs); continue; }
+        if (!run) { if (!candidates.length) state("watching_room"); await pause(pollMs); continue; }
         try {
           if (!rpc) { rpc = await connect(scopedCodexThreads(db, connection)); state("protocol_qualified", { providerAuthentication: "unverified" }); }
           if (controller.signal.aborted) break;
