@@ -1097,9 +1097,17 @@ summary { overflow-wrap: anywhere; }
   .room-heading .room-about { grid-column: 1; align-self: center; }
   .room-heading-actions { grid-column: 2; grid-row: 2; }
 }
-.app-shell:has(#inbox-panel:not([hidden])) .connection-bar,
+/* The inbox declutters room chrome, but the room stream stays alive behind it, so
+   an interrupted stream must keep its banner visible, its live-region
+   announcement, and its manual refresh control. display:none would drop the
+   role="status" region from the accessibility tree and swallow the
+   announcement, so healthy states keep the sr-only clip the connected bar
+   already uses instead. */
+.app-shell:has(#inbox-panel:not([hidden])) .connection-bar:not(:has(#connection-status[data-state="other"])) {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 .app-shell:has(#inbox-panel:not([hidden])) #invite-people-button,
-.app-shell:has(#inbox-panel:not([hidden])) #refresh-button { display: none; }
+.app-shell:has(#inbox-panel:not([hidden])):not(:has(.connection-bar #connection-status[data-state="other"])) #refresh-button { display: none; }
 .app-shell:has(#inbox-panel:not([hidden])) .workspace-nav {
   position: sticky; top: 0; z-index: 3; background: var(--bg);
 }
@@ -1463,12 +1471,12 @@ summary { overflow-wrap: anywhere; }
   .room-topbar .session-menu-panel { min-width: 0; }
   .room-topbar .room-more-actions .topbar-button { white-space: normal; }
   /* Recovery text gets a full line before its controls. Limit this to an
-     interrupted active room; signed-out, inbox and healthy bars stay as-is. */
-  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) { padding: .25rem .75rem; }
-  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-status { flex: 1 0 100%; padding: .2rem 0; overflow-wrap: normal; }
-  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details { flex: none; max-width: 100%; margin: 0; }
-  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details > summary { min-width: 44px; min-height: 44px; white-space: nowrap; overflow-wrap: normal; }
-  .app-shell:has(#main:not([hidden])) > .connection-bar:has(#connection-status[data-state="other"]) > #refresh-button { flex: none; min-width: min-content; min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: normal; }
+     interrupted room or inbox; signed-out and healthy bars stay as-is. */
+  .app-shell:is(:has(#main:not([hidden])), :has(#inbox-panel:not([hidden]))) > .connection-bar:has(#connection-status[data-state="other"]) { padding: .25rem .75rem; }
+  .app-shell:is(:has(#main:not([hidden])), :has(#inbox-panel:not([hidden]))) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-status { flex: 1 0 100%; padding: .2rem 0; overflow-wrap: normal; }
+  .app-shell:is(:has(#main:not([hidden])), :has(#inbox-panel:not([hidden]))) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details { flex: none; max-width: 100%; margin: 0; }
+  .app-shell:is(:has(#main:not([hidden])), :has(#inbox-panel:not([hidden]))) > .connection-bar:has(#connection-status[data-state="other"]) > #connection-details > summary { min-width: 44px; min-height: 44px; white-space: nowrap; overflow-wrap: normal; }
+  .app-shell:is(:has(#main:not([hidden])), :has(#inbox-panel:not([hidden]))) > .connection-bar:has(#connection-status[data-state="other"]) > #refresh-button { flex: none; min-width: min-content; min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: normal; }
 }
 @media (max-width: 520px) {
   .composer-row { display: flex; flex-wrap: wrap; }
