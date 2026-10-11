@@ -75,7 +75,13 @@ const cleanText = (value, max = MAX_TEXT_CHARS) => {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  return trimmed.length > max ? trimmed.slice(0, max) : trimmed;
+  if (trimmed.length <= max) return trimmed;
+  let text = trimmed.slice(0, max);
+  // A code-unit cut can leave a high surrogate. Drop it so the public
+  // field stays well-formed UTF-16.
+  const last = text.charCodeAt(text.length - 1);
+  if (last >= 0xD800 && last <= 0xDBFF) text = text.slice(0, -1);
+  return text || null;
 };
 
 const LABEL_RE = /^[a-z0-9-]{1,32}$/;
