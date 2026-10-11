@@ -70,6 +70,19 @@ test("an email address is not an already asked agent", () => {
   assert.equal(askAgentSuggestion(asked("See (@Builder) for the log?"), { members: people, now: later }), null);
 });
 
+test("a unicode email address is not an already asked agent", () => {
+  assert.deepEqual(
+    askAgentSuggestion(asked("Is josé@Builder on call?"), { members: people, now: later }),
+    { memberId: "builder", name: "Builder" },
+    "a unicode letter before @ is still an address, not a mention",
+  );
+  assert.deepEqual(
+    askAgentSuggestion(asked("Mail zoë@Builder the report?"), { members: people, now: later }),
+    { memberId: "builder", name: "Builder" },
+  );
+  assert.equal(askAgentSuggestion(asked("@Builder, is the build green?"), { members: people, now: later }), null);
+});
+
 test("askAgentSuggestion offers a working agent once a person's question waits", () => {
   assert.deepEqual(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later }), { memberId: "builder", name: "Builder" });
   assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later - 1 }), null, "not before the wait");

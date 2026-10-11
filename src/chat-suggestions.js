@@ -96,10 +96,11 @@ function handleContinues(text, index) {
   return ch != null && /[A-Za-z0-9_-]/.test(ch);
 }
 
-// An address is not a mention. A word character, dot, or another @ before
-// the mark keeps ops@Builder and lee.ops@Builder from naming Builder.
+// An address is not a mention. A word character (ASCII or unicode, so
+// josé@Builder counts), dot, or another @ before the mark keeps
+// ops@Builder and lee.ops@Builder from naming Builder.
 function mentionBound(text, index) {
-  return index > 0 && /[A-Za-z0-9_.@]/.test(text[index - 1]);
+  return index > 0 && /[\p{L}\p{N}_.@]/u.test(text[index - 1]);
 }
 
 function bodyMentionsAgent(body, displayName) {
