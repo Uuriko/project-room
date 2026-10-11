@@ -73,10 +73,65 @@ test("a parent segment is the same file as the path it climbs to", () => {
   assert.equal(collisions.length, 1);
   assert.equal(collisions[0].file, "src/app.js");
   assert.deepEqual([...collisions[0].claims], ["lane-a", "lane-b"]);
-  assert.equal(findClaimCollisions([
-    claim("lane-a", ["app.js"]),
-    claim("lane-b", ["../app.js"]),
-  ]).length, 0, "a path that climbs out of the repo is not the root file");
+  assert.throws(
+    () => findClaimCollisions([
+      claim("lane-a", ["app.js"]),
+      claim("lane-b", ["../app.js"]),
+    ]),
+    ClaimCollisionError,
+    "a path that climbs out of the repo is rejected, not silently keyed",
+  );
+});
+
+test("NFD and NFC spellings of the same file collide (unicode canonicalization)", () => {
+  // "café.mjs": NFD spells it e + U+0301, NFC spells it U+00E9 — same file
+  // on disk. Without canonicalization the two claims silently miss.
+  const collisions = findClaimCollisions([
+    claim("lane-a", ["server/café.mjs"]),
+    claim("lane-b", ["server/café.mjs"]),
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].file, "server/café.mjs");
+});
+
+test("paths that escape the repo root are rejected", () => {
+  for (const files of [["../app.js"], ["server/../../etc/passwd"], [".."], ["a/b/../../../x"]]) {
+    assert.throws(
+      () => findClaimCollisions([claim("lane-a", files)]),
+      ClaimCollisionError,
+      JSON.stringify(files),
+    );
+  }
+});
+
+test("absolute paths are rejected", () => {
+  assert.throws(
+    () => findClaimCollisions([claim("lane-a", ["/etc/passwd"])]),
+    ClaimCollisionError,
+  );
+  assert.throws(
+    () => findClaimCollisions([claim("lane-a", ["/server/store.mjs"])]),
+    ClaimCollisionError,
+  );
+});
+
+test("null bytes and control characters are rejected", () => {
+  for (const files of [["server/\0store.mjs"], ["server/a\x01b.mjs"], ["server/a\x7fb.mjs"]]) {
+    assert.throws(
+      () => findClaimCollisions([claim("lane-a", files)]),
+      ClaimCollisionError,
+      JSON.stringify(files),
+    );
+  }
+});
+
+test("interior .. still resolves inside the root", () => {
+  const collisions = findClaimCollisions([
+    claim("lane-a", ["server/store.mjs"]),
+    claim("lane-b", ["server/../server/store.mjs"]),
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].file, "server/store.mjs");
 });
 
 test("a dot segment is the same file as the path without it", () => {

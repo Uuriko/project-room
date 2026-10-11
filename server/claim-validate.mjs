@@ -34,6 +34,7 @@ export const CLAIM_TEXT_MAX_LENGTH = 65536;
 // (trailing spaces/tabs allowed, nothing else), the body runs to a
 // line-start closing fence; the match is the first such block.
 const FENCE_RE = /```room-claim[ \t]*\n([\s\S]*?)\n```/;
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
 export function extractClaimBlock(text) {
   const match = FENCE_RE.exec(text);
   return match ? match[1] : null;
@@ -70,6 +71,24 @@ export function validateClaimFields(fields) {
   const files = fields.files ?? "";
   if (files === "") errors.push("missing files");
   else if (files.includes("*")) errors.push("files: * forbidden");
+  else {
+    // Path hygiene is a second intentional deviation from the jq: the
+    // rebuild's validate_claim only forbids `*`, so it still accepts
+    // absolute/traversal/control-char spellings. The pre-post validator
+    // refuses them here so agents fix the declaration before posting
+    // instead of landing a degenerate claim on the board; matching checks
+    // belong in scripts/room's validate_claim as a follow-up.
+    for (const entry of files.split(",").map(part => part.trim()).filter(part => part !== "")) {
+      if (CONTROL_CHAR_RE.test(entry)) {
+        // Never echo the raw entry: it may carry the control chars themselves.
+        errors.push("files: control characters rejected");
+      } else if (entry.startsWith("/")) {
+        errors.push("files: absolute path rejected: " + entry);
+      } else if (entry.split("/").includes("..")) {
+        errors.push("files: parent segment (..) rejected: " + entry);
+      }
+    }
+  }
   const lease = fields.lease ?? "";
   if (lease === "") {
     errors.push("missing lease");

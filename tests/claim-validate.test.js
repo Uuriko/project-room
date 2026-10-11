@@ -126,6 +126,51 @@ test("violations accumulate in field order", () => {
   ]);
 });
 
+test("files entries must be repo-relative: absolute and traversal paths rejected", () => {
+  const base = {
+    "task-id": "RC-2026-09-24-204", lane: "jill", files: "a.mjs",
+    lease: "lease=6h", state: "working", reason: "r",
+  };
+  const mutate = value => block(Object.entries({ ...base, files: value }).map(([k, v]) => `${k}: ${v}`));
+  const cases = [
+    ["/etc/passwd", ["files: absolute path rejected: /etc/passwd"]],
+    ["/server/store.mjs", ["files: absolute path rejected: /server/store.mjs"]],
+    ["../secrets/key", ["files: parent segment (..) rejected: ../secrets/key"]],
+    ["server/../../etc/passwd", ["files: parent segment (..) rejected: server/../../etc/passwd"]],
+    ["server/a.mjs, /etc/passwd", ["files: absolute path rejected: /etc/passwd"]],
+    ["server/a.mjs, ../x.mjs", ["files: parent segment (..) rejected: ../x.mjs"]],
+  ];
+  for (const [value, error] of cases) {
+    const result = validateClaimText(mutate(value));
+    assert.equal(result.valid, false, value);
+    assert.deepEqual(result.errors, error, value);
+  }
+});
+
+test("files entries with control characters are rejected", () => {
+  const base = {
+    "task-id": "RC-2026-09-24-204", lane: "jill", files: "a.mjs",
+    lease: "lease=6h", state: "working", reason: "r",
+  };
+  const mutate = value => block(Object.entries({ ...base, files: value }).map(([k, v]) => `${k}: ${v}`));
+  for (const value of ["server/a\0.mjs", "server/a\x01b.mjs", "server/a\x7fb.mjs"]) {
+    const result = validateClaimText(mutate(value));
+    assert.equal(result.valid, false, JSON.stringify(value));
+    assert.deepEqual(result.errors, ["files: control characters rejected"], JSON.stringify(value));
+  }
+});
+
+test("legit files lists still validate", () => {
+  const base = {
+    "task-id": "RC-2026-09-24-204", lane: "jill", files: "a.mjs",
+    lease: "lease=6h", state: "working", reason: "r",
+  };
+  const mutate = value => block(Object.entries({ ...base, files: value }).map(([k, v]) => `${k}: ${v}`));
+  for (const value of ["a.mjs", "server/a.mjs, docs/b.md", "server/a.mjs, ", "a:b.mjs"]) {
+    assert.equal(validateClaimText(mutate(value)).valid, true, value);
+  }
+});
+
 test("duplicate keys: last wins, first-insertion order kept", () => {
   const fields = parseClaimFields([
     "task-id: RC-2026-09-24-204", "lane: jill", "lane: jill2",

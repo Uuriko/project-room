@@ -20,20 +20,30 @@ const CLOSED_STATUSES = ["done", "withdrawn", "closed", "expired", "released", "
 // Normalize a claimed path: trim, drop leading ./, collapse duplicate
 // slashes, drop trailing slashes. Case is preserved (repo paths are
 // case-sensitive).
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
 const normalizeFile = path => {
   check(typeof path === "string" && path.trim().length > 0, "files must be non-empty strings");
-  let p = path.trim().replace(/\/+/g, "/");
+  check(!CONTROL_CHAR_RE.test(path), "files must not contain control characters");
+  // Unicode canonicalization: NFD and NFC spellings name the same file
+  // (e.g. café.mjs); without it two claims on the same file silently miss.
+  let p = path.normalize("NFC").trim().replace(/\/+/g, "/");
+  // Absolute paths are outside the repo-relative contract. Folding /x into
+  // x would hide the author's intent instead of refusing it.
+  check(!p.startsWith("/"), "files must be repo-relative paths, not absolute");
   while (p.startsWith("./")) p = p.slice(2);
   while (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
   const parts = [];
   for (const part of p.split("/")) {
-    // A "." segment is never a directory, so src/./app.js is src/app.js and
-    // src/./../app.js climbs to app.js. Empty segments come from duplicate
-    // slashes; both are dropped before ".." resolution.
+    // A "." segment is never a directory, so src/./app.js is src/app.js.
+    // Empty segments come from duplicate slashes; both are dropped before
+    // ".." resolution.
     if (part === "" || part === ".") continue;
     if (part === "..") {
-      if (parts.length === 0 || parts[parts.length - 1] === "..") parts.push("..");
-      else parts.pop();
+      // Interior ".." climbs inside the root (src/foo/../app.js). A ".."
+      // with nothing left to pop escapes the repo root and is rejected —
+      // keeping it as a key would silently bless a traversal.
+      if (parts.length === 0) fail("invalid_collision_input", "files must not escape the repo root (..)");
+      parts.pop();
       continue;
     }
     parts.push(part);
