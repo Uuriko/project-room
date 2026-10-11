@@ -1184,7 +1184,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         let stage = "provider";
         try {
-          const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
+          // Bind the callback to the browser session that started the flow: a
+          // cross-session (or cookie-less) completion fails closed in
+          // complete() instead of adopting the state's slot (login CSRF).
+          const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search,
+            expectedSlotToken: cookie(req, accountCookieName) ?? null });
           // Shared-model linking (RC-2026-09-17-017): the callback links the
           // Google subject through the account-login model. A link intent
           // attaches to the signed-in account; otherwise find-or-provision
