@@ -39,7 +39,16 @@
 /* M-02 mobile: the per-card file list disclosure had no touch sizing
    (~20px tall) — below the 44px coarse-pointer floor from PR 2034. */
 .claim-files summary { min-height: 44px; padding-block: .65rem; cursor: pointer; }
+/* 360px: raw file paths (e.g. tests/agent-wake-listener-lease.test.js) have no
+   CSS soft wrap opportunities, so a long path overflows the card on narrow
+   viewports. Wrap it, like the card's other free-text rows. */
+.claim-files li { overflow-wrap: anywhere; }
 .claim-owner { display: flex; align-items: center; gap: var(--space-2); }
+/* 360px: the owner name <span> is a flex item with the default min-width:auto,
+   so a long unbreakable identity (raw member id, @-prefixed agent display
+   name) refuses to shrink and widens the card past the viewport. Let it
+   shrink and wrap, like the card's other free-text rows. */
+.claim-owner span { min-width: 0; overflow-wrap: anywhere; }
 .claim-deps, .claim-chain { overflow-wrap: anywhere; }
 .claim-files, .claim-reviews, .claim-deps { margin: 0 0 var(--space-2); }
 .claim-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
