@@ -43,6 +43,7 @@ import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
+import { tabTarget } from "./dialog-focus-trap.mjs";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 const bodyHtmlCache = createBodyHtmlCache();
@@ -3616,12 +3617,15 @@ for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-d
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
-  const first = controls[0], last = controls.at(-1), active = document.activeElement;
-  if (!first || !controls.includes(active) || (e.shiftKey ? active === first : active === last)) {
-    e.preventDefault();
-    (e.shiftKey ? last : first)?.focus();
-    if (!first) (id === "invitation-dialog" ? $("#invitation-title") : e.currentTarget).focus();
-  }
+  // tabTarget (src/dialog-focus-trap.mjs): only wrap when focus has actually
+  // left the dialog. Focus inside the dialog but not on a tabbable control —
+  // e.g. a claim-card h4 focused by board j/k navigation — lets Tab continue
+  // in DOM order instead of being teleported to the first/last control.
+  const { wrap, target } = tabTarget(controls, e.currentTarget, document.activeElement, e.shiftKey);
+  if (!wrap) return;
+  e.preventDefault();
+  target?.focus();
+  if (!controls[0]) (id === "invitation-dialog" ? $("#invitation-title") : e.currentTarget).focus();
 });
 $("#invitation-dialog").addEventListener("cancel", e => {
   e.preventDefault();

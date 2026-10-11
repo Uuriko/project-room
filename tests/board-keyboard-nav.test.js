@@ -57,7 +57,7 @@ test("isEditableTarget leaves buttons and plain containers alone", () => {
 // --- shouldHandleBoardKey: the guard the listener consults ---
 
 const keyEvent = (over = {}) => ({
-  key: "j", ctrlKey: false, metaKey: false, altKey: false, isComposing: false,
+  key: "j", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, isComposing: false,
   defaultPrevented: false, target: { tagName: "DIV", isContentEditable: false },
   preventDefault() { this.defaultPrevented = true; },
   ...over,
@@ -75,6 +75,15 @@ test("shouldHandleBoardKey rejects modifiers, composing, and other keys", () => 
   assert.equal(shouldHandleBoardKey(keyEvent({ isComposing: true })), false);
   assert.equal(shouldHandleBoardKey(keyEvent({ key: "Enter" })), false);
   assert.equal(shouldHandleBoardKey(keyEvent({ key: "J" })), false);
+});
+
+test("shouldHandleBoardKey rejects shift+j/k so screen-reader reverse quick-nav keeps working", () => {
+  // NVDA/JAWS use Shift+letter for the reverse quick-nav command (Shift+H =
+  // previous heading, Shift+K = previous link, …). Swallowing Shift+j/Shift+k
+  // with preventDefault steals that command while focus sits on the board.
+  assert.equal(shouldHandleBoardKey(keyEvent({ shiftKey: true })), false);
+  assert.equal(shouldHandleBoardKey(keyEvent({ key: "k", shiftKey: true })), false);
+  assert.equal(shouldHandleBoardKey(keyEvent({ shiftKey: true, target: { tagName: "BUTTON", isContentEditable: false } })), false);
 });
 
 test("shouldHandleBoardKey rejects editable targets", () => {

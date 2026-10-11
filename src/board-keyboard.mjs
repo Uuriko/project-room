@@ -8,7 +8,9 @@
 // Guard rails:
 // - Ignored inside text-entry controls (INPUT/TEXTAREA/SELECT,
 //   contenteditable) so typing URLs, notes, and file lists never triggers it.
-// - Ignored with Ctrl/Cmd/Alt held (Cmd+K opens room actions; leave it alone).
+// - Ignored with Ctrl/Cmd/Alt/Shift held (Cmd+K opens room actions; leave it
+//   alone — and Shift+letter is the screen-reader convention for reverse
+//   quick-nav, e.g. Shift+H = previous heading, which we must not swallow).
 // - The listener sits on #work-board itself, so board repaints (which replace
 //   innerHTML) never drop it, and attachBoardKeyboard is idempotent.
 
@@ -24,6 +26,10 @@ export function isEditableTarget(target) {
 export function shouldHandleBoardKey(event) {
   if (!event || event.defaultPrevented || event.isComposing) return false;
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  // Shift+letter is the screen-reader convention for reverse quick-nav
+  // (Shift+H = previous heading, Shift+K = previous link, …); swallowing it
+  // here would steal that command while focus sits on the board.
+  if (event.shiftKey) return false;
   if (!NAV_KEYS.has(event.key)) return false;
   return !isEditableTarget(event.target);
 }
