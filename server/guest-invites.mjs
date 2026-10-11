@@ -263,6 +263,18 @@ export class GuestInvites {
     return row && row.status === "active" && row.redeem_by > this.store.now();
   }
 
+  // Dead-invite error quality: an invite that is still "active" in the DB
+  // but past its redeem_by window tells the invitee it lapsed (410
+  // invite_expired, matching agent-invites and referral-invites) instead of
+  // the generic invite_unavailable "not valid", which reads as "you typed
+  // the wrong code" when the code was right but the clock ran out.
+  rejectUnavailableInvite(row) {
+    if (row && row.status === "active" && row.redeem_by <= this.store.now()) {
+      fail(410, "invite_expired", "This guest invite has expired. Ask the owner for a fresh code.");
+    }
+    fail(410, "invite_unavailable", "This guest invite is not valid.");
+  }
+
   // One active seat per identity per room: faces are cheap, seats are not.
   seatOf(roomId, identityId) {
     return this.db.prepare("SELECT * FROM guest_members WHERE room_id=? AND guest_identity_id=?").get(roomId, identityId);
@@ -506,7 +518,7 @@ export class GuestInvites {
     if (!isGuestInviteCode(code)) fail(410, "invite_unavailable", "This guest invite is not valid.");
     return this.store.readTransaction(() => {
       const row = this.inviteRow(hash(code));
-      if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
+      if (!this.liveInvite(row)) this.rejectUnavailableInvite(row);
       const room = this.store.room(row.room_id).state.room;
       return {
         room: { id: room.id, title: room.title },
@@ -538,7 +550,7 @@ export class GuestInvites {
     const { card } = assertCardShape(cardInput);
     return this.store.transaction(() => {
       const row = this.inviteRow(hash(code));
-      if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
+      if (!this.liveInvite(row)) this.rejectUnavailableInvite(row);
       const roomId = row.room_id;
       let room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
