@@ -103,6 +103,9 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
       if (!eligible()) { hide(); return; }
       const sessionKey = client.session?.member?.id ?? "";
       if (resolvedFor === sessionKey) return;
+      // A new member must not inherit the previous member's subscription
+      // state: the app re-resolves on switch without calling reset().
+      subscribed = false;
       const config = await client.humanPushConfig();
       if (ticket !== serial || !eligible()) return;
       resolvedFor = sessionKey;
@@ -153,7 +156,9 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
   if (prefDm) prefDm.addEventListener("change", savePrefs);
 
   button.addEventListener("click", async () => {
-    const ticket = serial;
+    // Claim a fresh ticket: an in-flight refresh must not survive the tap and
+    // save a second subscription.
+    const ticket = ++serial;
     button.disabled = true;
     try {
       const config = await client.humanPushConfig();

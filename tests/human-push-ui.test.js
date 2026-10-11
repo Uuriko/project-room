@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installHumanPush } from '../src/human-push.js';
+import { uiText } from '../src/strings.js';
 
 function control() {
   const handlers = new Map();
@@ -105,4 +106,28 @@ test('missing configuration, browser denial and server refusal never claim notif
   f.ui.reset(); f.config.configured = true; globalThis.Notification.permission = 'granted';
   f.client.saveHumanPush = async () => ({ saved: false }); await f.ui.refresh();
   assert.equal(f.button.hidden, true); assert.match(f.note.textContent, /could|try|failed|unable/i);
+});
+
+test('enable click cancels an in-flight refresh: exactly one subscription save', async t => {
+  const f = setup(t, { permission: 'granted' });
+  const gate = deferred();
+  f.client.humanPushConfig = () => gate.promise;
+  const refresh = f.ui.refresh();
+  const click = f.button.fire('click');
+  gate.resolve(f.config);
+  await refresh; await click;
+  assert.equal(f.saved.length, 1, 'a tap must not double-save when a refresh is still resolving');
+});
+
+test('a member switch without reset does not inherit the previous subscription state', async t => {
+  const f = setup(t, { permission: 'granted' });
+  await f.ui.refresh();
+  assert.equal(f.saved.length, 1);
+  globalThis.Notification.permission = 'default';
+  f.client.session = { member: { id: 'other' } }; // the app re-resolves here; it never calls reset()
+  await f.ui.refresh();
+  assert.equal(f.button.hidden, false);
+  f.dm.checked = false; await f.dm.fire('change');
+  assert.equal(f.note.textContent, uiText('push.copy.012'),
+    'the new member has not subscribed on this device: the not-subscribed flash, not the subscribed note');
 });
