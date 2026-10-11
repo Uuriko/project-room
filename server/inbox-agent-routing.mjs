@@ -30,11 +30,15 @@ export const routingStatuses = Object.freeze(["routed", "escalated", "resolved"]
 const transitions = Object.freeze({ routed: ["escalated", "resolved"], escalated: ["resolved"], resolved: [] });
 
 const mentionPattern = /(?<![A-Za-z0-9_.@])@([A-Za-z0-9][A-Za-z0-9_.:-]{0,63})/g;
+// A letter, number, or mark after the ASCII handle continues the token.
+// "@Groké" is not a mention of Grok. A hyphen still belongs to the handle.
+const tokenContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}]/u.test(text[end]);
 export function extractAgentMentions(text) {
   check(typeof text === "string" && text.isWellFormed(), "routing_invalid", "text must be a well-formed string");
   check(text.length <= 20000, "routing_invalid", "text must be at most 20000 characters");
   const seen = new Set(), mentions = [];
   for (const match of text.matchAll(mentionPattern)) {
+    if (tokenContinues(text, match.index + match[0].length)) continue;
     // A sentence colon is not part of the handle. "@Grok:" is Grok.
     // An interior colon stays, so "@codex-bot:1" is unchanged.
     // A trailing period is a different miss and is left as matched.

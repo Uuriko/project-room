@@ -23,6 +23,17 @@ test("extractAgentMentions finds ordered, unique mentions and skips emails", () 
   assert.ok(Object.isFrozen(extractAgentMentions("@claude hi")));
   expectCode(() => extractAgentMentions(null), "routing_invalid");
 });
+test("extractAgentMentions does not route a shorter handle inside a longer token", () => {
+  assert.deepEqual(extractAgentMentions("ping @Groké please"), []);
+  assert.deepEqual(extractAgentMentions("ask @Groké and @Codex please"), ["Codex"]);
+  assert.deepEqual(extractAgentMentions("ping @Grok\u0301 please"), []);
+  assert.deepEqual(extractAgentMentions("ping @Grok please"), ["Grok"]);
+  assert.deepEqual(extractAgentMentions("ping @Instinct-3 please"), ["Instinct-3"]);
+  const router = createAgentRouter({ clock: fixedClock([1000]), id: () => "route-suffix" });
+  const routed = router.route("thread:1", { text: "ping @Groké please", from: human });
+  assert.deepEqual(routed.mentions, []);
+  assert.equal(routed.records.length, 0);
+});
 test("extractAgentMentions drops a trailing colon and keeps an interior one", () => {
   assert.deepEqual(extractAgentMentions("ask @Grok: please review"), ["Grok"]);
   assert.deepEqual(extractAgentMentions("ask @Grok: please, and @Codex: too"), ["Grok", "Codex"]);
