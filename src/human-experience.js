@@ -43,6 +43,19 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   face.append(faceRequest, faceStatus, faceAnswer, faceActions);
   $('#assistant-activity').before(face);
   const faceButton = (label, data) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = label; Object.assign(button.dataset, data); return button; };
+  // The face keeps its own DOM across repaints; reset it whenever the card no
+  // longer belongs to this session or room, so a stale card (and its draft
+  // answer text) never survives sign-out or a room switch.
+  function resetFace() {
+    if (faceActions.contains(document.activeElement)) document.activeElement.blur();
+    face.hidden = true;
+    delete face._key;
+    faceStatus.dataset.faceStatus = '';
+    faceStatus.textContent = '';
+    answerText.replaceData(0, answerText.length, '');
+    faceAnswer.hidden = true;
+    faceActions.replaceChildren();
+  }
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'ask-room'; ask.className = 'button ghost';
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
@@ -123,7 +136,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         faceRequest.textContent = faceSource?.body?.slice(0, 120) || uiText('human.face.sharedRequest');
         if (current.resultMessageId) faceActions.append(faceButton(uiText('human.face.openResult'), { assistantMessage: current.resultMessageId }));
         if (!CLOSED.includes(current.status) && !['cancel_requested', 'needs_input'].includes(current.status)) faceActions.append(faceButton(uiText('human.face.addContext'), { contributeRun: current.id, revision: String(current.revision) }));
-        if (faceControls && !CLOSED.includes(current.status)) faceActions.insertAdjacentHTML('beforeend', uiText('human.stopRequest', { runId: esc(current.id), revision: current.revision }));
+        // The card must offer the decision the run is waiting on; the activity
+        // list already does. Wired through the shared data-resolve handler.
+        if (faceControls && current.status === 'needs_input') faceActions.append(faceButton(uiText('human.face.resolveDirection'), { contributeRun: current.id, revision: String(current.revision), resolve: 'true' }));
+        // No Stop while a stop is already in flight; the list hides it there too.
+        if (faceControls && !CLOSED.includes(current.status) && current.status !== 'cancel_requested') faceActions.insertAdjacentHTML('beforeend', uiText('human.stopRequest', { runId: esc(current.id), revision: current.revision }));
         // R5-1: keep keyboard focus on the same control (or the card) across a repaint.
         if (focusedData) ([...faceActions.querySelectorAll('button')].find(button => button.dataset.pauseRun === focusedData.pauseRun && button.dataset.cancel === focusedData.cancel && button.dataset.contributeRun === focusedData.contributeRun) || faceStatus).focus({ preventScroll: true });
       }
@@ -257,11 +274,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
-      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; boundary = ''; selected = false; section.querySelector('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
+      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; boundary = ''; selected = false; resetFace(); section.querySelector('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
       if (boundary !== key()) {
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
         resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
-        boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
+        boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0; selected = false; resetFace(); ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
           if (pending && ['invoke','contribute','resolve','pause','resume','cancel'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'

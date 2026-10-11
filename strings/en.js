@@ -371,6 +371,7 @@ export default {
   "human.face.sharedRequest": "Shared request",
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
+  "human.face.resolveDirection": "Resolve direction",
   "human.assistantChange": "Change",
   "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
 };
