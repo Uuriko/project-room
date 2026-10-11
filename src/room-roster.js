@@ -1,3 +1,10 @@
+import {
+  DARK,
+  AVATAR_TILE_BASE,
+  avatarTilePick
+} from "./design-tokens.js";
+import { avatarInitials } from "./member-display-names.js";
+
 const ACCESS = new Set(["chat", "contribute", "review"]);
 const ROUTES = new Set(["packet", "mcp", "direct"]);
 const WRITE_FLAGS = new Set(["--write", "--install", "--apply", "--save", "--config", "--config-file"]);
@@ -535,4 +542,28 @@ function shellSingle(value) {
 
 function indent(text) {
   return text.trimEnd().split("\n").map(line => `    ${line}`).join("\n");
+}
+
+// Default agent avatar tile (DESIGN SYNC): initials on a token-colored
+// geometric tile, inline SVG, no faces. The tile is deterministic per member
+// id — two different agents never share one by construction — and initials in
+// --text on the dark base keep WCAG AA (gated in CONTRAST_PAIRS). The svg is
+// sized to its container, so it drops into the existing .member-avatar /
+// .message-avatar slots without CSS changes.
+const AVATAR_SHAPES = {
+  "corner-circle": accent => `<circle cx="37" cy="11" r="8" fill="${accent}"/>`,
+  "corner-triangle": accent => `<polygon points="48,2 48,20 30,2" fill="${accent}"/>`,
+  "corner-diamond": accent => `<polygon points="37,3 44,11 37,19 30,11" fill="${accent}"/>`,
+  "top-bar": accent => `<rect x="0" y="0" width="48" height="7" fill="${accent}"/>`
+};
+
+function avatarText(value) {
+  return String(value).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
+}
+
+export function memberAvatarSvg(member) {
+  const id = member?.id ?? "";
+  const { accent, shape } = avatarTilePick(id || member?.displayName || "");
+  const initials = avatarInitials(member?.displayName);
+  return `<svg viewBox="0 0 48 48" width="100%" height="100%" style="display:block;border-radius:inherit;overflow:hidden" aria-hidden="true" focusable="false"><rect width="48" height="48" fill="${AVATAR_TILE_BASE}"/>${AVATAR_SHAPES[shape](accent)}<text x="24" y="31" text-anchor="middle" font-family="Inter,ui-sans-serif,system-ui,sans-serif" font-size="17" font-weight="800" fill="${DARK["--text"]}">${avatarText(initials)}</text></svg>`;
 }

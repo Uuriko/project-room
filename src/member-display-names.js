@@ -15,3 +15,15 @@ export function createMemberDisplayNames(members) {
       : member.displayName;
   };
 }
+
+// Avatar initials for the default tiles: first letter or digit of each of the
+// first two words, so "Maya (tester)" is "MT". Astral-plane safe (regex match,
+// never UTF-16 indexing — a lone surrogate would render as �); words with no
+// letter or digit (emoji, punctuation) contribute nothing; a missing or blank
+// name falls back to "?".
+export function avatarInitials(displayName) {
+  const parts = String(displayName ?? "").replace(/^@/, "").trim().split(/\s+/).filter(Boolean);
+  const firstLetter = part => part.match(/[\p{L}\p{N}]/u)?.[0] ?? "";
+  const letters = `${firstLetter(parts[0] ?? "")}${firstLetter(parts[1] ?? "")}`;
+  return letters.toUpperCase() || "?";
+}

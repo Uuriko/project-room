@@ -4,6 +4,7 @@
 
 import { needsMeHtml } from "./board-mine.js";
 import { uiText } from "./strings.js";
+import { memberAvatarSvg } from "./room-roster.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -113,12 +114,6 @@ export function filterEmptyCopy(filter, matched) {
   const query = String(filter?.q ?? "").trim();
   const sentence = uiText("board.filter.empty", { query: query ? ` “${escapeHtml(query)}”` : "" });
   return `<p class="form-hint board-filter-empty" role="status">${sentence}</p>`;
-}
-
-function initials(name) {
-  const parts = String(name).replace(/^@/, "").trim().split(/\s+/).filter(Boolean);
-  const letters = `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`;
-  return (letters || "?").toUpperCase();
 }
 
 function leasePhrase(event) {
@@ -412,7 +407,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     else if (opener) actions.push(button("cancel", "Cancel", "secondary"));
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${memberAvatarSvg({ id: ownerId, displayName: owner })}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {

@@ -110,5 +110,43 @@ export const CONTRAST_PAIRS = Object.freeze([
   ["light muted on raised panel", LIGHT["--muted"], LIGHT["--panel-raised"], 4.5],
   ["light link on background", LIGHT["--blue"], LIGHT["--bg"], 4.5],
   ["light accent label", LIGHT["--on-accent"], LIGHT["--blue-strong"], 4.5],
-  ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5]
+  ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5],
+  ["avatar initials on tile base", DARK["--text"], DARK["--panel-raised"], 4.5]
 ]);
+
+// Default agent avatar tiles (DESIGN SYNC): initials on token-colored
+// geometric tiles (SVG, no faces). The tile base stays dark so initials in
+// --text keep WCAG AA on the dark default; the per-agent accent is a
+// decorative geometric mark in a vivid token color. avatarTilePick hashes the
+// member id so every agent gets a stable, distinct tile.
+export const AVATAR_TILE_BASE = DARK["--panel-raised"];
+export const AVATAR_TILE_ACCENTS = Object.freeze([
+  DARK["--violet"],
+  DARK["--green"],
+  DARK["--amber"],
+  DARK["--blue"],
+  DARK["--red"]
+]);
+export const AVATAR_TILE_SHAPES = Object.freeze([
+  "corner-circle",
+  "corner-triangle",
+  "corner-diamond",
+  "top-bar"
+]);
+
+// djb2 over code points: deterministic across processes, no seeding.
+function tileHash(key) {
+  let hash = 5381;
+  for (const char of String(key ?? "")) {
+    hash = ((hash << 5) + hash + char.codePointAt(0)) >>> 0;
+  }
+  return hash;
+}
+
+export function avatarTilePick(key) {
+  const hash = tileHash(key);
+  return {
+    accent: AVATAR_TILE_ACCENTS[hash % AVATAR_TILE_ACCENTS.length],
+    shape: AVATAR_TILE_SHAPES[(hash >>> 4) % AVATAR_TILE_SHAPES.length]
+  };
+}
