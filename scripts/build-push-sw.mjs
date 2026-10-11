@@ -52,6 +52,9 @@ self.addEventListener("fetch", event => {
 self.addEventListener("push", event => {
   let payload = {};
   try { payload = event.data && event.data.json ? event.data.json() : {}; } catch { payload = {}; }
+  // Out-of-order delivery: an older push must not replace a newer
+  // notification already on screen for the same room.
+  if (pushSuperseded(payload)) return;
   const note = notificationFromPush(payload);
   const options = { body: note.body, tag: note.tag, renotify: false, data: note.data };
   const actionsSupported = typeof Notification === "function" && "actions" in Notification.prototype;

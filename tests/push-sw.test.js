@@ -153,3 +153,19 @@ test("a click focuses an existing Room window, and opens one when none is open",
   });
   assert.deepEqual(empty.opened, ["/m/needs-you"]);
 });
+
+test("an out-of-order push does not replace a newer notification", async () => {
+  // Push delivery is concurrent: an older event's push can arrive after a
+  // newer one. Same tag would replace the fresh notification with stale
+  // counts; the sequence guard keeps the newer one on screen.
+  const worker = load();
+  const push = sequence => ({ v: 1, roomId: "commons", sequence, counts: { mention: 1 } });
+  await fire(worker.listeners, "push", { data: { json: () => push(9) } });
+  await fire(worker.listeners, "push", { data: { json: () => push(7) } });
+  assert.equal(worker.notifications.length, 1, "older push is suppressed");
+  assert.equal(worker.notifications[0].options.body, "1 waiting in the room");
+  await fire(worker.listeners, "push", { data: { json: () => push(10) } });
+  assert.equal(worker.notifications.length, 2, "newer push still shows");
+  await fire(worker.listeners, "push", { data: { json: () => ({ v: 1, roomId: "commons", counts: { dm: 1 } }) } });
+  assert.equal(worker.notifications.length, 3, "a push with no sequence is never suppressed");
+});

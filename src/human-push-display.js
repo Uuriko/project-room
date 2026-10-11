@@ -48,6 +48,33 @@ export function needsMeCountFromPush(payload) {
   return Number.isInteger(value) && value >= 0 && value <= 99 ? value : null;
 }
 
+export function pushTag(payload) {
+  const roomId = typeof payload?.roomId === "string" && payload.roomId ? payload.roomId : null;
+  return roomId ? `room:${roomId}` : "room";
+}
+
+// Out-of-order pushes: delivery is concurrent, so a push for an older event
+// can arrive after a newer one for the same room. The payload names the
+// newest event its counts were evaluated through (sequence); an older
+// sequence must not replace the newer notification already on screen, or
+// the lock screen shows stale counts over fresh ones. Payloads with no
+// sequence are never suppressed. Best-effort: the per-tag record lives as
+// long as the service worker does; a cold worker shows what arrives,
+// exactly as before.
+const shownSequenceByTag = new Map();
+
+// True when this payload is older than the newest already shown for its
+// tag. Pass a map in tests; the service worker uses the module record.
+export function pushSuperseded(payload, shownByTag = shownSequenceByTag) {
+  const sequence = Number.isInteger(payload?.sequence) ? payload.sequence : null;
+  if (sequence === null) return false;
+  const tag = pushTag(payload);
+  const shown = shownByTag.get(tag);
+  if (shown !== undefined && sequence < shown) return true;
+  shownByTag.set(tag, shown === undefined ? sequence : Math.max(shown, sequence));
+  return false;
+}
+
 // Rich (v2) rendering: a payload that carries the member's preview
 // preference shows who wrote and the start of what they wrote. Anything
 // else — v1 payloads, or v2 payloads where the member turned preview off —
@@ -84,7 +111,7 @@ export function notificationFromPush(payload) {
   return {
     title,
     body,
-    tag: roomId ? `room:${roomId}` : "room",
+    tag: pushTag(payload),
     data: { roomId, url },
     actions: notificationActions(payload),
     needsMeCount: needsMeCountFromPush(payload)
