@@ -23,6 +23,10 @@
 #auth-panel #agent-signin-button { font-size: var(--text-sm); }
 #auth-panel #terms-notice { line-height: 1.5; }
 #auth-panel #terms-notice a { display: inline-block; min-height: 24px; }
+/* magic-sent / reset-sent hints interpolate the raw user email (up to 254
+   chars, no natural wrap points); without a break the panel overflows and the
+   page scrolls horizontally at 360px. Matches .status banners (styles.css). */
+#auth-panel .form-hint { overflow-wrap: anywhere; }
 @media (max-height: 600px) {
   #auth-panel.auth-panel { margin-top: var(--space-3); }
   #auth-panel .signin-logo { width: 36px; height: 36px; }
