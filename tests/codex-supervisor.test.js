@@ -52,7 +52,7 @@ save(d);send({id:m.id,result});});`);
   const run = (options = {}) => superviseCodexRoom({ connection, db, directory, cwd, policy: settings.policy, pollMs: 100, retryMaxMs: 400, timeoutMs: 1000,
     connect: async allowedThreadIds => { const rpc = openCodexStdio(settings, { allowedThreadIds }); try { await checkCodexProtocol(rpc, settings, { threadId: allowedThreadIds[0] }); return rpc; } catch (e) { await rpc.close(); throw e; } }, ...options });
   t.after(async () => { db.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(root, { recursive: true, force: true }); });
-  return { run, invoke, owner, directory, runtime: () => JSON.parse(readFileSync(data)), db, connection };
+  return { run, invoke, owner, directory, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => JSON.parse(readFileSync(data)), db, connection };
 }
 const waitUntil = async predicate => { const until = Date.now() + 8000; while (!await predicate()) { if (Date.now() > until) throw Error("Timed out waiting for fixture"); await delay(20); } };
 
@@ -132,4 +132,23 @@ test("damaged stop-control storage aborts and releases ownership after interrupt
   assert.equal(f.runtime().interrupted, 1);
   const lock = new DatabaseSync(join(f.directory, "ownership.sqlite"));
   lock.exec("BEGIN IMMEDIATE; ROLLBACK"); lock.close();
+});
+
+
+test("deleted owned source blocks successor work and later Stop reconciles without another model turn", async t => {
+  const f = await fixture(t, "hold"); await f.invoke("first"); await f.invoke("second");
+  const first = new AbortController(), active = f.run({ signal: first.signal });
+  await waitUntil(() => f.runtime().starts === 1); await delay(50); first.abort(); await active;
+  f.deleteSource("first");
+  const blocked = new AbortController(), events = [];
+  await f.run({ signal: blocked.signal, emit: e => { events.push(e); if (e.status === "recovery_pending") blocked.abort(); } });
+  assert.equal(f.runtime().starts, 1);
+  const before = (await f.owner.assistant()).runs.find(r => r.id === "first");
+  await f.owner.assistant({ action: "cancel", requestId: randomUUID(), runId: "first", expectedRevision: before.revision });
+  const restart = new AbortController();
+  const safety = setTimeout(() => restart.abort(), 4000);
+  await f.run({ signal: restart.signal, emit: e => { if (e.status === "settled") restart.abort(); } });
+  clearTimeout(safety);
+  assert.equal((await f.owner.assistant()).runs.find(r => r.id === "first").status, "cancelled");
+  assert.equal(f.runtime().starts, 1);
 });
