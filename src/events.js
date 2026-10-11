@@ -1200,6 +1200,10 @@ function postMessage(state, incoming) {
     ...(incoming.data.kind === "receipt_card" ? {
       kind: "receipt_card",
       claimId: incoming.data.claimId,
+      // Run-receipt link (rc_<claimId>): newer posters carry receiptId on the
+      // event; older cards derive it so every card projects the link the
+      // receipts surface resolves.
+      receiptId: incoming.data.receiptId || `rc_${incoming.data.claimId}`,
       title: incoming.data.title,
       closedBy: incoming.data.closedBy,
       deliveryMode: incoming.data.deliveryMode,
