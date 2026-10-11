@@ -171,7 +171,8 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     };
     const unsubscribe = rpc.subscribe(receive);
     const timer = setTimeout(() => fail(new Error("Runtime outcome uncertain; reconcile original turn")), timeoutMs);
-    const abort = () => { stopOwned(id).catch(() => {}); fail(new Error("Runtime cancellation requested; reconcile settlement")); };
+    let interruption;
+    const abort = () => { interruption ??= stopOwned(id).catch(() => {}); fail(new Error("Runtime cancellation requested; reconcile settlement")); };
     input.signal?.addEventListener("abort", abort, { once: true });
     // Attach rejection handler before awaiting turn/start (notifications may race).
     completed.catch(() => {});
@@ -184,7 +185,12 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
       if (terminal.has(value.turn.status)) receive({ method: "turn/completed", params: { threadId: started.thread.id, turn: value.turn } });
       if (input.signal?.aborted) abort();
       return await completed;
-    } finally { clearTimeout(timer); unsubscribe(); input.signal?.removeEventListener("abort", abort); }
+    } finally {
+      clearTimeout(timer); input.signal?.removeEventListener("abort", abort);
+      // Let the bounded interrupt RPC reach the process before callers close it.
+      // Its acknowledgement still does not prove terminal execution.
+      await interruption; unsubscribe();
+    }
   };
   return Object.assign(execute, { steer, interrupt, reconcile });
 }
