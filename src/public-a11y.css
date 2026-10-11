@@ -8,6 +8,18 @@
 .agent-invite-instructions > summary,
 .inbox-gmail summary,
 #agent-local-client > summary { display: flex; align-items: center; min-width: 24px; min-height: 24px; }
+/* WAVE-500 G8-07 touch audit: 24px meets WCAG 2.5.8 AA on fine pointers, but
+   these disclosures are finger taps on touch screens. Coarse pointers get the
+   44px floor (same pattern as the BU-04 coarse block in styles.css); desktop
+   keeps the 24px rule above. */
+@media (pointer: coarse) {
+  #room-about > summary,
+  #account-settings > summary,
+  .agent-advanced > summary,
+  .agent-invite-instructions > summary,
+  .inbox-gmail summary,
+  #agent-local-client > summary { min-width: 44px; min-height: 44px; }
+}
 .button.destructive { color: var(--red); background: var(--panel); border: 1px solid var(--red); }
 .deletion-summary { white-space: pre-wrap; }
 .deletion-summary pre { white-space: pre-wrap; overflow-wrap: anywhere; }

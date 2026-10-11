@@ -1,5 +1,5 @@
 {
-  "_comment": "D-fo-6 step 1 ratchet baseline. NEVER add NEW entries here \u2014 new raw hex colors or font-size declarations must use design tokens instead. Remove entries only when the corresponding violation is fixed out of the CSS tree.",
+  "_comment": "D-fo-6 step 1 ratchet baseline. NEVER add NEW entries here — new raw hex colors or font-size declarations must use design tokens instead. Remove entries only when the corresponding violation is fixed out of the CSS tree.",
   "entries": {
     "src/operator.css ::: body { margin: 0; font: 15px/1.5 system-ui, -apple-system, \"Segoe UI\", sans-serif; color: var(--op-fg); background: var(--op-bg); }": 1,
     "src/operator.css ::: h1 { font-size: 1.5rem; margin: 0 0 4px; }": 1,
@@ -101,7 +101,7 @@
     "src/styles.css ::: .brand-mark { width: 2rem; font-size: .66rem; }": 1,
     "src/styles.css ::: .button { padding: .58rem .85rem; border: 1px solid transparent; border-radius: .42rem; color: var(--text); font-size: .78rem; font-weight: 600; }": 1,
     "src/styles.css ::: .catchup-signals, .catchup-signals small { font-size: .875rem; font-weight: 400; }": 1,
-    "src/styles.css ::: .channel { display: flex; align-items: center; gap: .45rem; width: 100%; min-height: 40px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: .88rem; font-weight: 600; text-align: left; cursor: pointer; }": 1,
+    "src/styles.css ::: .channel { display: flex; align-items: center; gap: .45rem; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: .88rem; font-weight: 600; text-align: left; cursor: pointer; } /* WAVE-500 G8-07 touch audit: channel nav buttons were 40px with no coarse-pointer floor. */": 1,
     "src/styles.css ::: .channel.is-active { background: #37374e; color: #f2f0ff; }": 2,
     "src/styles.css ::: .chat-divider { grid-column: 1 / -1; margin: .55rem 0 .2rem; color: var(--muted); font-size: .68rem; font-weight: 700; letter-spacing: .06em; text-align: center; text-transform: uppercase; }": 1,
     "src/styles.css ::: .claim { margin-top: .75rem; color: var(--muted); font-size: .7rem; }": 1,
@@ -112,7 +112,7 @@
     "src/styles.css ::: .composer-options-panel .composer-add-label { display: inline; font-size: inherit; }": 1,
     "src/styles.css ::: .composer-options-panel > button { display: flex; align-items: center; justify-content: flex-start; gap: .5rem; width: 100%; min-height: 44px; height: auto; padding: .6rem; font-size: .85rem; text-align: left; }": 1,
     "src/styles.css ::: .composer-options-panel { position: absolute; bottom: calc(100% + .5rem); left: 0; z-index: 25; width: min(18rem, calc(100vw - 4rem)); padding: .4rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel); box-shadow: 0 .4rem 1.5rem #0005; }": 1,
-    "src/styles.css ::: .composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 32px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; }": 1,
+    "src/styles.css ::: .composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 44px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; } /* WAVE-500 G8-07 touch audit: was 32px with no coarse-pointer floor; the sibling panel rule already floors this control at 44px. */": 1,
     "src/styles.css ::: .composer-row #request-reply { padding-inline: .35rem; font-size: .68rem; }": 1,
     "src/styles.css ::: .composer-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 40px; align-items: end; gap: .5rem; padding: .5rem; border: 1px solid #50515f; border-radius: .75rem; background: var(--panel-raised); }": 1,
     "src/styles.css ::: .composer-toolbar .text-button { margin-left: auto; font-size: .875rem; }": 1,

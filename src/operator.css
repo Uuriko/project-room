@@ -10,7 +10,7 @@ h2 { font-size: 1.15rem; margin: 24px 0 8px; border-top: 1px solid var(--op-line
 label { display: block; font-weight: 600; margin-top: 8px; }
 input, select, textarea, button { font: inherit; color: inherit; }
 input, select, textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--op-line); border-radius: 6px; background: transparent; }
-button { margin-top: 8px; padding: 6px 12px; border: 1px solid var(--op-accent); border-radius: 6px; background: transparent; color: var(--op-accent); cursor: pointer; min-height: 36px; }
+button { margin-top: 8px; padding: 6px 12px; border: 1px solid var(--op-accent); border-radius: 6px; background: transparent; color: var(--op-accent); cursor: pointer; min-height: 44px; } /* WAVE-500 G8-07 touch audit: was 36px; this standalone stylesheet had no coarse-pointer floor. */
 button:disabled { opacity: 0.55; cursor: not-allowed; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--op-accent); outline-offset: 2px; }
 #op-execute { border-color: var(--op-danger); color: var(--op-danger); }

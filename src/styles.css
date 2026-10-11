@@ -277,7 +277,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .room-archived-note { margin: 0; font-size: .75rem; color: var(--muted); }
 .sidebar-label { margin: 0 0 .3rem; color: var(--muted); font-size: .75rem; font-weight: 600; letter-spacing: 0; }
 .channel-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .15rem; }
-.channel { display: flex; align-items: center; gap: .45rem; width: 100%; min-height: 40px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: .88rem; font-weight: 600; text-align: left; cursor: pointer; }
+.channel { display: flex; align-items: center; gap: .45rem; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: .88rem; font-weight: 600; text-align: left; cursor: pointer; } /* WAVE-500 G8-07 touch audit: channel nav buttons were 40px with no coarse-pointer floor. */
 .channel:hover { background: rgb(255 255 255 / 4%); }
 .channel.is-active { background: #37374e; color: #f2f0ff; }
 .channels-label { display: flex; align-items: center; justify-content: space-between; }
@@ -331,12 +331,15 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .composer-row:focus-within { border-color: var(--blue); }
 .composer-row textarea { grid-column: 2; min-height: 3rem; max-height: 25dvh; border: 0; border-radius: .35rem; background: transparent; padding: .45rem .25rem; }
 .composer-row textarea:focus { outline: 0; }
-.composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 32px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; }
+.composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 44px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; } /* WAVE-500 G8-07 touch audit: was 32px with no coarse-pointer floor; the sibling panel rule already floors this control at 44px. */
 .composer-attach { grid-column: 3; grid-row: 1 / span 2; align-self: end; }
 .composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; }
 .composer-attachments, .message-files { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
 .file-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: 100%; padding: .15rem .45rem; border: 1px solid var(--line); border-radius: 999px; font-size: .8rem; }
-.file-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; min-height: 1.5rem; }
+/* WAVE-500 G8-07 touch audit: the chip's remove button is a standalone tap
+   target in the composer (no coarse-pointer floor covered it) — 24px is
+   untappable on touch, so it carries the 44px floor at base. */
+.file-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; min-height: 44px; }
 #message-form.composer-drop { outline: 2px dashed var(--blue); outline-offset: 2px; }
 .composer-add { display: inline-grid; place-items: center; width: 36px; min-height: 36px; height: 36px; border-radius: .4rem; border: 0; background: transparent; color: var(--muted); font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .composer-add:hover { background: rgb(255 255 255 / 6%); }
@@ -1434,7 +1437,7 @@ summary { overflow-wrap: anywhere; }
 .invite-navigation > summary { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding-inline: .5rem; cursor: pointer; font-size: .85rem; color: var(--muted); list-style: none; }
 .invite-navigation > summary::-webkit-details-marker { display: none; }
 .invite-navigation[open] > summary { color: var(--text); }
-.invite-navigation .button { width: 100%; min-height: 40px; border: 0; background: transparent; color: var(--text); text-align: left; justify-content: flex-start; padding: .5rem; }
+.invite-navigation .button { width: 100%; min-height: 44px; border: 0; background: transparent; color: var(--text); text-align: left; justify-content: flex-start; padding: .5rem; } /* WAVE-500 G8-07 touch audit: invite action buttons were 40px with no coarse-pointer floor. */
 .invite-navigation .button:hover { background: var(--panel-raised); }
 .invite-navigation .people-actions { display: grid; gap: .15rem; }
 .composer-row textarea { grid-column: 1 / -1; grid-row: 1; }
