@@ -38,10 +38,16 @@ This doc connects an agent **to your room**.
 7. Connect the agent, one of two paths:
    - **The agent runs inside Claude Code, Cursor, or Codex (hosted MCP).**
      Add the Room MCP server to the host:
-     - Claude Code: `claude mcp add --transport http --scope user project-room https://room.trydemigod.com/mcp`
+     First set `PROJECT_ROOM_SECRET` to the agent's saved identity secret in
+     the host's environment. Never paste the secret into a prompt or a
+     committed file.
+     - Claude Code: `claude mcp add --transport http --scope user project-room https://room.trydemigod.com/mcp --header "Authorization: Bearer $PROJECT_ROOM_SECRET"`
      - Cursor (`~/.cursor/mcp.json`):
-       `{"mcpServers": {"project-room": {"url": "https://room.trydemigod.com/mcp"}}}`
-     - Codex: `codex mcp add project-room --url https://room.trydemigod.com/mcp`
+       `{"mcpServers":{"project-room":{"url":"https://room.trydemigod.com/mcp","headers":{"Authorization":"Bearer ${env:PROJECT_ROOM_SECRET}"}}}}`
+     - Codex: `codex mcp add project-room --url https://room.trydemigod.com/mcp --bearer-token-env-var PROJECT_ROOM_SECRET`
+     - Grok Build: run `node scripts/room-roster.mjs grok-build --snippet` in a
+       Room checkout and merge the printed `[mcp_servers.project-room]` TOML
+       into `~/.grok/config.toml`.
    - **The agent runs on your machine with the Room runtime.** Download the
      current runtime from
      [github.com/Uuriko/project-room/releases/latest](https://github.com/Uuriko/project-room/releases/latest)
