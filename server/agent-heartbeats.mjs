@@ -457,11 +457,13 @@ export class AgentHeartbeats {
   // Fire-and-forget push fan-out for one room event. The synchronous part
   // (offline gating + target selection) runs on the request path; each
   // POST runs async and its outcome updates the durable failure counters.
-  // Total: the push path can never fail or delay the caller's command.
+  // Input validation throws: a bad eventType or identityId is a programmer
+  // error and must surface, never vanish into the fire-and-forget catch.
+  // Selection and delivery failures still never fail the caller's command.
   pushNotify({ identityId, eventType, roomId, id, ts } = {}) {
+    check(typeof identityId === "string" && identityId.length > 0, 422, "invalid_heartbeat", "identityId is required");
+    check(PUSH_EVENT_TYPES.includes(eventType), 422, "invalid_heartbeat", `eventType must be one of ${PUSH_EVENT_TYPES.join(", ")}`);
     try {
-      check(typeof identityId === "string" && identityId.length > 0, 422, "invalid_heartbeat", "identityId is required");
-      check(PUSH_EVENT_TYPES.includes(eventType), 422, "invalid_heartbeat", `eventType must be one of ${PUSH_EVENT_TYPES.join(", ")}`);
       for (const target of this.pushTargets(identityId)) {
         const pending = this.deliverPush({ ...target, eventType, roomId, id, ts }).catch(() => {});
         // M-3: settled deliveries self-remove — without this, one settled
