@@ -51,3 +51,21 @@ and real provider execution remain release qualification prerequisites.
 
 Local validation logs live under .tmp/ and are excluded from source publication.
 The continuation screenshot is test-results/shared-continuation.png.
+
+Validation checkpoint
+- 2023 affected tests passed against base932ddc32 on the committed change.
+- 36 focused browser checks passed, plus the three work-resume desktop/phone/
+  shared-continuation journeys in the focused acceptance run.
+- Supervisor/shared-runtime/packaging/asset focused run:61 of62 passed before
+  repairing the candidate fixture's missing supervisor dependency. Subsequent
+  packaging/retry-auth run:10 of10 passed, including the repaired fixture and
+  separate provider histories. The two-host race also passed five repeated runs.
+- Eight Miniflare/workerd public-edge/store checks passed.
+- Mac ProjectRoom Swift build passed with compiler warnings; no app installation.
+- Lint passed:zero errors,130 warnings, clean design/reachability/i18n ratchets.
+- Exact committed runtime package verified:547 files,134 public assets,schema38.
+- Broad npm test was attempted on Node26/macOS and is not green. Unchanged Linux
+  host isolation tests require /usr/bin/bwrap, absent here. i18n probe checks
+  that failed before committing passed against the committed tree. The broad
+  run was stopped after six minutes with backfill/recovery checks still running;
+  this is not a complete full-suite pass. Hosted Linux CI remains required.
