@@ -1,6 +1,7 @@
 import { RoomAssistant } from '../room-assistant.mjs';
 import { validId } from '../../src/events.js';
-import { FULL_READ_HINT_MS, assistantChangeKind, assistantChangeState, changedRuns, parseAssistantCursor } from '../room-assistant-changes.mjs';
+import { FULL_READ_HINT_MS, assistantChangeKind, assistantChangeState, assistantVisibilityMark, changedRuns, parseAssistantCursor } from '../room-assistant-changes.mjs';
+import { historyFloor } from '../history-visibility.mjs';
 const id={type:'string',minLength:1,maxLength:128};
 const params={type:'object',required:['roomId'],properties:{roomId:id}};
 const body={type:'object',required:['action','requestId'],additionalProperties:false,properties:{
@@ -38,7 +39,11 @@ export async function roomAssistantRoute(ctx) {
   // projection, so a concurrent write is delivered again, never lost.
   const since=parseAssistantCursor(ctx.url.searchParams.get('since'));
   if(since?.invalid) ctx.reject(422,'invalid_assistant_cursor','Pass since exactly as the cursor from a previous read');
-  const current=assistantChangeState(ctx.store.db,roomId);
+  // The visibility mark makes a deleted opening message or a moved history
+  // floor answer full, since neither writes a run.
+  const roomState=ctx.store.room(roomId).state;
+  const visibility=assistantVisibilityMark(roomState.messages,historyFloor(ctx.store.db,roomState,roomId,auth.member.id));
+  const current=assistantChangeState(ctx.store.db,roomId,visibility);
   const kind=assistantChangeKind(since,current);
   let value;
   const quiet={contractVersion:1,roomId,cursor:current.cursor,changes:'none',runs:[],fullReadHintMs: FULL_READ_HINT_MS};

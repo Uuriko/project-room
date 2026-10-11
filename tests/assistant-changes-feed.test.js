@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { LOOKBACK_MS, assistantChangeKind, changedRuns, parseAssistantCursor } from '../server/room-assistant-changes.mjs';
+import { LOOKBACK_MS, assistantChangeKind, assistantVisibilityMark, changedRuns, parseAssistantCursor } from '../server/room-assistant-changes.mjs';
 
 async function setup(t) {
   const f = createAcceptanceFixture({ dmConsent: true });
@@ -41,7 +41,7 @@ test('the plain read carries a cursor and is otherwise unchanged', async t => {
   const { api } = await setup(t);
   const full = await api('producer');
   assert.equal(full.status, 200, JSON.stringify(full.body));
-  assert.match(full.body.cursor, /^v1\.\d+\.\d+\.[0-9a-f]{16}$/);
+  assert.match(full.body.cursor, /^v1\.\d+\.\d+\.[0-9a-f]{8}\.[0-9a-f]{16}$/);
   assert.deepEqual(ids(full.body), ['a', 'b']);
   assert.equal(full.body.changes, undefined);
 });
@@ -125,14 +125,14 @@ test('a settings change answers full (it edits pending runs without updatedAt)',
 
 test('malformed cursors are refused; one from the future answers full', async t => {
   const { api, since } = await setup(t);
-  for (const bad of ['', '7', 'v1.x.0.0000000000000000', 'v2.1.1.0123456789abcdef', 'v1.1.1.XYZ', 'v1.99999999999999999.1.0123456789abcdef']) {
+  for (const bad of ['', '7', 'v1.x.0.00000000.0000000000000000', 'v2.1.1.00000000.0123456789abcdef', 'v1.1.1.XYZ', 'v1.1.1.0123456789abcdef', 'v1.99999999999999999.1.00000000.0123456789abcdef']) {
     const response = await api('producer', null, since(bad));
     assert.equal(response.status, 422, `since=${bad}`);
     assert.equal(response.body.error.code, 'invalid_assistant_cursor');
   }
   const { cursor } = (await api('producer')).body;
-  const [, newest, rev, digest] = cursor.split('.');
-  const ahead = await api('producer', null, since(`v1.${Number(newest) + 3600000}.${rev}.${digest}`));
+  const [, newest, rev, visibility, digest] = cursor.split('.');
+  const ahead = await api('producer', null, since(`v1.${Number(newest) + 3600000}.${rev}.${visibility}.${digest}`));
   assert.equal(ahead.body.changes, 'full');
   assert.deepEqual(ids(ahead.body), ['a', 'b']);
 });
@@ -145,7 +145,7 @@ test('the delta never shows a run the full read hides, for every role', async t 
   message('owner', 'd-opening', 'Work on d.');
   await api('owner', { action: 'invoke', runId: 'd', sourceMessageId: 'd-opening' });
   for (const actor of ['owner', 'producer', 'guest']) {
-    const plain = await api(actor), delta = await api(actor, null, since(cursors[actor] ?? 'v1.0.0.0000000000000000'));
+    const plain = await api(actor), delta = await api(actor, null, since(cursors[actor] ?? 'v1.0.0.00000000.0000000000000000'));
     assert.equal(delta.status, plain.status, actor);
     if (plain.status !== 200) continue;
     const visible = new Set(plain.body.runs.map(run => run.id));
@@ -156,16 +156,44 @@ test('the delta never shows a run the full read hides, for every role', async t 
 
 test('cursor parsing and change kinds, without a server', () => {
   assert.equal(parseAssistantCursor(null), null);
-  for (const bad of ['', 'v2.1.0.0123456789abcdef', 'v1.01.0.0123456789abcdef', 'v1.1.0.0123456789ABCDEF', 'v1.99999999999999999.0.0123456789abcdef'])
+  for (const bad of ['', 'v2.1.0.00000000.0123456789abcdef', 'v1.01.0.00000000.0123456789abcdef', 'v1.1.0.00000000.0123456789ABCDEF', 'v1.1.0.0123456789abcdef', 'v1.99999999999999999.0.00000000.0123456789abcdef'])
     assert.deepEqual(parseAssistantCursor(bad), { invalid: true }, bad);
-  const since = parseAssistantCursor('v1.20000.3.0123456789abcdef');
-  assert.deepEqual({ newest: since.newest, configRevision: since.configRevision, digest: since.digest }, { newest: 20000, configRevision: 3, digest: '0123456789abcdef' });
-  const same = { newest: 20000, configRevision: 3, digest: '0123456789abcdef' };
+  const since = parseAssistantCursor('v1.20000.3.89abcdef.0123456789abcdef');
+  assert.deepEqual({ newest: since.newest, configRevision: since.configRevision, visibility: since.visibility, digest: since.digest }, { newest: 20000, configRevision: 3, visibility: '89abcdef', digest: '0123456789abcdef' });
+  const same = { newest: 20000, configRevision: 3, visibility: '89abcdef', digest: '0123456789abcdef' };
   assert.equal(assistantChangeKind(null, same), 'plain');
   assert.equal(assistantChangeKind(since, same), 'none');
   assert.equal(assistantChangeKind(since, { ...same, digest: 'ffffffffffffffff' }), 'delta');
   assert.equal(assistantChangeKind(since, { ...same, configRevision: 4 }), 'full');
+  assert.equal(assistantChangeKind(since, { ...same, visibility: '00000000', digest: 'ffffffffffffffff' }), 'full');
   assert.equal(assistantChangeKind(since, { ...same, newest: 10000, digest: 'ffffffffffffffff' }), 'full');
   const runs = [{ id: 'old', updatedAt: 20000 - LOOKBACK_MS - 1 }, { id: 'edge', updatedAt: 20000 - LOOKBACK_MS }, { id: 'new', updatedAt: 25000 }, { id: 'none' }];
   assert.deepEqual(changedRuns(runs, since).map(run => run.id), ['edge', 'new']);
+  // The visibility mark moves with a deletion and with the reader's floor.
+  const live = [{ id: 'm1' }, { id: 'm2' }];
+  assert.match(assistantVisibilityMark(live, null), /^[0-9a-f]{8}$/);
+  assert.notEqual(assistantVisibilityMark([{ id: 'm1', deletedAt: 5 }, { id: 'm2' }], null), assistantVisibilityMark(live, null));
+  assert.notEqual(assistantVisibilityMark(live, 12), assistantVisibilityMark(live, null));
+});
+
+test('deleting a run\'s opening message answers full, so the run disappears at once (review 12188)', async t => {
+  const { f, api, since, tick } = await setup(t);
+  for (const actor of ['guest', 'owner', 'producer']) {
+    const before = (await api(actor)).body;
+    assert.deepEqual(ids(before), ['a', 'b'], actor);
+    t.diagnostic(`${actor} cursor ${before.cursor}`);
+  }
+  const cursors = {};
+  for (const actor of ['guest', 'owner', 'producer']) cursors[actor] = (await api(actor)).body.cursor;
+  tick();
+  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'message.deleted', data: { messageId: 'a-opening', expectedMessageRevision: 0, reason: 'cleanup' } });
+  for (const actor of ['guest', 'owner', 'producer']) {
+    const plain = (await api(actor)).body, after = (await api(actor, null, since(cursors[actor]))).body;
+    assert.equal(after.changes, 'full', actor);
+    assert.notEqual(after.cursor, cursors[actor], actor);
+    assert.deepEqual(after.runs, plain.runs, actor);
+    assert.equal((await api(actor, null, since(after.cursor))).body.changes, 'none', actor);
+  }
+  // The guest no longer sees run a at all; it is not quoted from a stale delta.
+  assert.deepEqual(ids((await api('guest', null, since(cursors.guest))).body), ['b']);
 });

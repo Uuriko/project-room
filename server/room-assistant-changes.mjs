@@ -16,10 +16,14 @@
 // after the previous cursor's newest write minus LOOKBACK_MS, so a write in
 // the same millisecond, or a small clock step back, is delivered again
 // rather than lost. Readers dedupe on (id, revision, answerDraftSequence).
-// Not covered: display-only changes that are not writes, such as a source
-// message deleted, a history floor moving, or time-derived "not picked up"
-// and "unknown". Readers that show those recompute from hostReportedAt or do
-// a plain full read now and then (FULL_READ_HINT_MS).
+// Visibility: a run's opening message being deleted, or the reader's history
+// floor moving, changes what the full read shows without writing any run.
+// The cursor carries a short visibility mark (deleted-message count, newest
+// deletion time, the reader's floor) and answers "full" when it moves, so a
+// deletion reaches every reader at once (review of #2633, muse-room 12188).
+// Not covered: time-derived "not picked up" and "unknown". Readers that show
+// those recompute from hostReportedAt or do a plain full read now and then
+// (FULL_READ_HINT_MS).
 // Privacy: the cursor is an opaque digest plus the room's newest write time,
 // so it says only that something in this room changed and when, which room
 // members can already see from the room's own live updates.
@@ -27,16 +31,28 @@ import { createHash } from 'node:crypto';
 
 export const LOOKBACK_MS = 5000;
 export const FULL_READ_HINT_MS = 60000;
-const CURSOR = /^v1\.(0|[1-9][0-9]{0,15})\.(0|[1-9][0-9]{0,9})\.([0-9a-f]{16})$/;
+const CURSOR = /^v1\.(0|[1-9][0-9]{0,15})\.(0|[1-9][0-9]{0,9})\.([0-9a-f]{8})\.([0-9a-f]{16})$/;
 
 export function parseAssistantCursor(raw) {
   if (raw === null || raw === undefined) return null;
   const match = CURSOR.exec(raw);
   if (!match || !Number.isSafeInteger(Number(match[1]))) return { invalid: true };
-  return { newest: Number(match[1]), configRevision: Number(match[2]), digest: match[3], raw };
+  return { newest: Number(match[1]), configRevision: Number(match[2]), visibility: match[3], digest: match[4], raw };
 }
 
-export function assistantChangeState(db, roomId) {
+// What the reader may see of the runs' opening messages, as 8 hex chars.
+export function assistantVisibilityMark(messages, floor) {
+  let deleted = 0, newestDeletion = '';
+  for (const message of messages ?? []) {
+    if (!message?.deletedAt) continue;
+    deleted++;
+    const at = String(message.deletedAt);
+    if (at > newestDeletion) newestDeletion = at;
+  }
+  return createHash('sha256').update([deleted, newestDeletion, floor ?? '-'].join('\u0000')).digest('hex').slice(0, 8);
+}
+
+export function assistantChangeState(db, roomId, visibility = '00000000') {
   const configRow = db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get()
     ? db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId) : null;
   let configRevision = 0;
@@ -51,15 +67,15 @@ export function assistantChangeState(db, roomId) {
       FROM room_assistant_runs WHERE room_id=?`).get(roomId) ?? empty
     : empty;
   const newest = Number.isSafeInteger(row.newest) && row.newest >= 0 ? row.newest : 0;
-  const digest = createHash('sha256').update([roomId, row.count, row.revisions, row.drafts, newest, row.bytes, configRevision].join('\u0000')).digest('hex').slice(0, 16);
-  return { newest, configRevision, digest, cursor: `v1.${newest}.${configRevision}.${digest}` };
+  const digest = createHash('sha256').update([roomId, row.count, row.revisions, row.drafts, newest, row.bytes, configRevision, visibility].join('\u0000')).digest('hex').slice(0, 16);
+  return { newest, configRevision, visibility, digest, cursor: `v1.${newest}.${configRevision}.${visibility}.${digest}` };
 }
 
 // Decide the answer for a parsed cursor against the current state.
 export function assistantChangeKind(since, current) {
   if (!since) return 'plain';
-  if (since.digest === current.digest && since.configRevision === current.configRevision && since.newest === current.newest) return 'none';
-  if (since.configRevision !== current.configRevision || since.newest > current.newest) return 'full';
+  if (since.digest === current.digest && since.configRevision === current.configRevision && since.newest === current.newest && since.visibility === current.visibility) return 'none';
+  if (since.configRevision !== current.configRevision || since.visibility !== current.visibility || since.newest > current.newest) return 'full';
   return 'delta';
 }
 
