@@ -82,6 +82,12 @@ export class MachineDaemon {
   async tick() {
     if (!this.lastInbound || this.stopped) return;
     if (Date.now() - this.lastInbound < this.deadmanMs()) return;
+    // Retire the transport before guest suspension, which can itself stall.
+    // A new connection does not clear deadman until a peer heartbeat arrives.
+    const socket = this.socket;
+    this.socket = null;
+    this.lastInbound = 0;
+    socket?.close();
     if (!this.state.deadman) {
       this.state.deadman = true;
       await suspendGuests(this.state);
@@ -93,20 +99,26 @@ export class MachineDaemon {
       if (this.stopped) return;
       await new Promise(resolve => {
         let settled = false;
-        const done = () => { if (!settled) { settled = true; resolve(); } };
-        this.socket = connectSocket(this.config.relayUrl, {
+        let socket;
+        const done = () => {
+          if (this.socket === socket) this.socket = null;
+          if (!settled) { settled = true; resolve(); }
+        };
+        socket = connectSocket(this.config.relayUrl, {
           headers: { Authorization: `Bearer ${this.token}` },
           onOpen: () => {
+            if (this.stopped || this.socket !== socket) return;
             this.connections += 1;
             this.lastInbound = Date.now();
-            this.socket.send(JSON.stringify({
+            socket.send(JSON.stringify({
               type: "hello", protocol: PROTOCOL_VERSION, machineId: this.config.machineId,
               label: this.config.label, version: DAEMON_VERSION,
             }));
           },
-          onText: text => { this.receive(text); },
+          onText: text => { if (!this.stopped && this.socket === socket) this.receive(text, socket); },
           onClose: done,
         });
+        this.socket = socket;
       });
       if (this.stopped) return;
       await new Promise(resolve => setTimeout(resolve, this.config.reconnectBackoffMs || 1000));
@@ -120,8 +132,11 @@ export class MachineDaemon {
   // a Halt or Pause queued behind it lands only after that call has acted.
   // Control frames get their own queue; a call still waits for the control
   // frames that arrived before it, so a halt finishes before the next call.
-  receive(text) {
-    const run = () => spawnContext.run({ env: this.env }, () => this.handleRaw(text));
+  receive(text, socket = this.socket) {
+    const run = () => {
+      if (this.stopped || socket && this.socket !== socket) return;
+      return spawnContext.run({ env: this.env }, () => this.handleRaw(text, socket));
+    };
     if (frameType(text) === "call") {
       const control = this.control;
       this.queue = this.queue.then(() => control).then(run).catch(() => {});
@@ -131,7 +146,7 @@ export class MachineDaemon {
     return this.control;
   }
 
-  async handleRaw(text) {
+  async handleRaw(text, socket = this.socket) {
     const gap = this.lastInbound ? Date.now() - this.lastInbound : 0;
     const tripped = this.lastInbound > 0 && gap > this.deadmanMs();
     this.lastInbound = Date.now();
@@ -176,6 +191,9 @@ export class MachineDaemon {
     if (message.type === "bye") return;
     if (message.type !== "call") return;
     const result = await this.call(message);
+    // An old call may finish after reconnect. Its outcome is not a reply on
+    // the new session; never route it to a different caller with the same id.
+    if (this.stopped || socket !== this.socket) return;
     const encoded = JSON.stringify(result);
     if (Buffer.byteLength(encoded) > SCREENSHOT_MAX_BYTES) {
       this.socket?.send(JSON.stringify(errorResult(message.id, ERROR.TOO_LARGE, "Result exceeds 4 MiB.")));
@@ -324,11 +342,13 @@ export class MachineDaemon {
   async stop() {
     this.stopped = true;
     clearInterval(this.timer);
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
     if (this.botStop) await this.botStop();
     for (const stop of this.frameStops.values()) stop();
     this.frameStops.clear();
     await stopAllGuests(this.state);
-    this.socket?.close();
   }
 
   status() {
