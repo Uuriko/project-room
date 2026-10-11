@@ -48,7 +48,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
   });
   const origin = 'https://room.example.test';
   let assetFetches = 0;
-  const wordmarkFont = readFileSync(new URL('../og/fonts/Inter-Regular.ttf', import.meta.url));
+  const wordmarkFont = readFileSync(new URL('../og/fonts/RoomWordmark.ttf', import.meta.url));
   const fontLicense = readFileSync(new URL('../og/fonts/OFL.txt', import.meta.url));
   const mf = new Miniflare({
     modules: true, script: bundled.outputFiles[0].text,
@@ -59,7 +59,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
       ASSETS: async request => {
         assetFetches += 1;
         const path = new URL(request.url).pathname;
-        if (path === '/og/fonts/Inter-Regular.ttf') return new Response(wordmarkFont);
+        if (path === '/og/fonts/RoomWordmark.ttf') return new Response(wordmarkFont);
         if (path === '/og/fonts/OFL.txt') return new Response(fontLicense);
         const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/manifest.webmanifest': '{"name":"Room"}' };
         if (!bodies[path]) return new Response(null, { status: 404 });
@@ -107,12 +107,12 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(alias.headers.get('location'), '/about');
     assert.equal(alias.headers.get('x-test-do-fetches'), '0');
 
-    const fontResponse = await call('/og/fonts/Inter-Regular.ttf');
+    const fontResponse = await call('/og/fonts/RoomWordmark.ttf');
     assert.equal(fontResponse.status, 200);
     assert.equal(fontResponse.headers.get('content-type'), 'font/ttf');
     assert.equal(fontResponse.headers.get('x-test-do-fetches'), '0');
     assert.deepEqual(Buffer.from(await fontResponse.arrayBuffer()), wordmarkFont, 'Worker preserves the actual font bytes');
-    const fontHead = await call('/og/fonts/Inter-Regular.ttf', { method: 'HEAD' });
+    const fontHead = await call('/og/fonts/RoomWordmark.ttf', { method: 'HEAD' });
     assert.equal(fontHead.status, 200);
     assert.equal(fontHead.headers.get('content-type'), 'font/ttf');
     assert.equal(fontHead.headers.get('content-length'), String(wordmarkFont.byteLength));
