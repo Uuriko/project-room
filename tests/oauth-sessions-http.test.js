@@ -47,11 +47,14 @@ async function grantTokens(origin, login, client) {
     + "&state=s1&code_challenge=" + challenge + "&code_challenge_method=S256";
   const screen = await fetch(origin + authz, { headers: { cookie } });
   assert.equal(screen.status, 200);
-  const csrf = (await screen.text()).match(/name="csrf_token" value="([^"]+)"/)[1];
+  const screenHtml = await screen.text();
+  const csrf = screenHtml.match(/name="csrf_token" value="([^"]+)"/)[1];
+  const requestId = screenHtml.match(/name="request_id" value="([^"]+)"/)[1];
   const formBody = "decision=allow&client_id=" + client.clientId
     + "&redirect_uri=" + encodeURIComponent(client.redirectUris[0])
     + "&scope=chat%3Aread&state=s1&code_challenge=" + challenge
-    + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf);
+    + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf)
+    + "&request_id=" + encodeURIComponent(requestId);
   const consent = await fetch(origin + "/oauth/authorize", {
     method: "POST", redirect: "manual",
     headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin },

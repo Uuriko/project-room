@@ -336,3 +336,32 @@ test("F-02: revokeSession kills one family, ownership-checked", () => {
   // Unknown family: no-op.
   assert.equal(provider.revokeSession({ userId: "alice", familyId: "oarf_nope" }), 0);
 });
+
+test("authorization request binding: create/consume round-trips the displayed request", () => {
+  const { provider } = setup();
+  const created = provider.createAuthorizationRequest({ userId: "alice", ...authParams() });
+  assert.match(created.requestId, /^oarqr_[A-Za-z0-9_-]{32}$/);
+  assert.deepEqual([...created.scopes], ["rooms:read", "chat:read"]);
+  const resolved = provider.getAuthorizationRequest({ requestId: created.requestId, userId: "alice" });
+  assert.equal(resolved.client.clientId, "muse");
+  assert.equal(resolved.redirectUri, "https://muse.ai/oauth/callback");
+  assert.deepEqual([...resolved.scopes], ["rooms:read", "chat:read"]);
+  assert.equal(resolved.state, "xyz");
+  // Unknown, malformed, and cross-user ids fail closed.
+  assert.equal(provider.getAuthorizationRequest({ requestId: "oarqr_" + "x".repeat(32), userId: "alice" }), null);
+  assert.equal(provider.getAuthorizationRequest({ requestId: "not-an-id", userId: "alice" }), null);
+  assert.equal(provider.getAuthorizationRequest({ requestId: created.requestId, userId: "bob" }), null);
+  assert.equal(provider.getAuthorizationRequest({ requestId: created.requestId }), null);
+  // Invalid underlying request never creates a binding.
+  assert.throws(() => provider.createAuthorizationRequest({ userId: "alice", ...authParams({ scopes: ["nope:read"] }) }), OAuthProviderError);
+  assert.throws(() => provider.createAuthorizationRequest({ ...authParams() }), OAuthProviderError);
+});
+
+test("authorization request binding expires after its TTL", () => {
+  const { provider, advance } = setup();
+  const created = provider.createAuthorizationRequest({ userId: "alice", ...authParams() });
+  advance(9 * 60 * 1000);
+  assert.ok(provider.getAuthorizationRequest({ requestId: created.requestId, userId: "alice" }), "still valid before TTL");
+  advance(61 * 1000);
+  assert.equal(provider.getAuthorizationRequest({ requestId: created.requestId, userId: "alice" }), null, "expired binding is gone");
+});

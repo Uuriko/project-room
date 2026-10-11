@@ -1458,16 +1458,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         let validated;
         try {
-          validated = oauthProvider.validateAuthorizationRequest({
+          // The consent screen binds the follow-up decision POST to this
+          // exact validated request (request_id): the grant can never exceed
+          // what the user sees here, even if the submitted form fields are
+          // tampered with on the way back.
+          if (url.searchParams.get("code_challenge_method") !== "S256") {
+            throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
+          }
+          validated = oauthProvider.createAuthorizationRequest({
+            userId: auth.account.id,
             clientId: url.searchParams.get("client_id"),
             redirectUri: url.searchParams.get("redirect_uri"),
             scopes: (url.searchParams.get("scope") || "").split(" ").filter(Boolean),
             state: url.searchParams.get("state"),
             codeChallenge: url.searchParams.get("code_challenge"),
           });
-          if (url.searchParams.get("code_challenge_method") !== "S256") {
-            throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
-          }
         } catch (error) {
           const code = error instanceof ServiceError ? error.code : "invalid_request";
           return json(res, 400, { error: code, error_description: error.message });
@@ -1493,7 +1498,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const nativeAccountLabel = [nativeAccountName, nativeAccountEmail].filter(Boolean).join(" · ") || "Current signed-in account";
         const nativeConsentWarning = validated.client.clientId === "project-room-macos"
           ? `<p data-native-account>Account: ${esc(nativeAccountLabel)}</p><p>Only allow this if you just chose Sign in in the Project Room Mac app.</p>` : "";
-        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="client_id" value="${esc(url.searchParams.get("client_id"))}"><input type="hidden" name="redirect_uri" value="${esc(url.searchParams.get("redirect_uri"))}"><input type="hidden" name="scope" value="${esc(url.searchParams.get("scope") || "")}"><input type="hidden" name="state" value="${esc(url.searchParams.get("state") || "")}"><input type="hidden" name="code_challenge" value="${esc(url.searchParams.get("code_challenge"))}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
+        const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect ${esc(validated.client.name)}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.25rem}ul{padding-left:1.25rem}.actions{margin-top:1.5rem;display:flex;gap:.75rem}button{padding:.6rem 1.25rem;border-radius:.5rem;border:1px solid #ccc;font-size:1rem;cursor:pointer}.primary{background:#0066cc;color:#fff;border-color:#0066cc}</style></head><body><h1>Connect ${esc(validated.client.name)} to Project Room?</h1><p><strong>${esc(validated.client.name)}</strong> is requesting access to your Project Room account. It will be able to:</p><ul>${scopeItems}</ul><p>${esc(revocationHelp)}</p>${nativeConsentWarning}<form method="post" action="/oauth/authorize"><input type="hidden" name="request_id" value="${esc(validated.requestId)}"><input type="hidden" name="csrf_token" value="${esc(auth.csrf)}"><div class="actions"><button type="submit" name="decision" value="allow" class="primary">Allow</button><button type="submit" name="decision" value="deny">Deny</button></div></form></body></html>`;
         const bytes = Buffer.from(html, "utf8");
         res.setHeader("Referrer-Policy", "same-origin");
         res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; style-src 'unsafe-inline'");
@@ -1535,21 +1540,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // redirect, and a malformed URI threw an uncaught 500. Per
         // RFC 6749 §4.1.2.1, error responses redirect only when the
         // redirect_uri itself is valid; otherwise 400 JSON directly.
+        //
+        // WAVE-500 g1: the interactive consent form resolves its request_id
+        // to the server-side validated request the screen displayed, so the
+        // grant can never exceed the consented scopes — tampered body fields
+        // are ignored. API clients (x-csrf-token header) post the fields
+        // directly: no screen was displayed, and the caller is the session
+        // owner naming their own grant.
+        const apiClient = typeof req.headers["x-csrf-token"] === "string";
         let validated;
-        try {
-          validated = oauthProvider.validateAuthorizationRequest({
-            clientId: data.client_id,
-            redirectUri: data.redirect_uri,
-            scopes: String(data.scope || "").split(" ").filter(Boolean),
-            state: data.state,
-            codeChallenge: data.code_challenge,
-          });
-          if (data.code_challenge_method !== "S256") {
-            throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
+        if (!apiClient) {
+          validated = oauthProvider.getAuthorizationRequest({ requestId: data.request_id, userId: accountId });
+          if (!validated) {
+            return json(res, 400, { error: "invalid_request",
+              error_description: "This consent request expired or is invalid; restart the authorization flow from the client." });
           }
-        } catch (error) {
-          const code = error instanceof ServiceError ? error.code : "invalid_request";
-          return json(res, 400, { error: code, error_description: error.message });
+        } else {
+          try {
+            validated = oauthProvider.validateAuthorizationRequest({
+              clientId: data.client_id,
+              redirectUri: data.redirect_uri,
+              scopes: String(data.scope || "").split(" ").filter(Boolean),
+              state: data.state,
+              codeChallenge: data.code_challenge,
+            });
+            if (data.code_challenge_method !== "S256") {
+              throw new ServiceError(400, "invalid_request", "code_challenge_method must be S256");
+            }
+          } catch (error) {
+            const code = error instanceof ServiceError ? error.code : "invalid_request";
+            return json(res, 400, { error: code, error_description: error.message });
+          }
         }
         const decision = data.decision;
         const state = validated.state;

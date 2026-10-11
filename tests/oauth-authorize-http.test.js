@@ -156,7 +156,8 @@ test("authenticated GET renders the consent screen (not a login redirect)", asyn
   const html = await res.text();
   assert.ok(html.includes("Connect Muse QA to Project Room?"));
   assert.ok(html.includes("Post messages"), "write scope is disclosed");
-  assert.ok(html.includes('name="code_challenge_method" value="S256"'), "form carries the S256 method for the POST");
+  assert.match(html, /name="request_id" value="oarqr_[A-Za-z0-9_-]{32}"/,
+    "form binds the POST to the displayed request instead of echoing raw fields");
 });
 
 test("unauthenticated consent POST -> 401 before any request validation", async t => {

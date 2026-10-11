@@ -73,11 +73,14 @@ test("consent form POST completes the flow and the code exchanges for tokens", a
   const { verifier, challenge } = pkce();
 
   const screen = await fetch(origin + authzPath(challenge), { headers: { cookie } });
-  const csrf = (await screen.text()).match(/name="csrf_token" value="([^"]+)"/)[1];
+  const screenHtml = await screen.text();
+  const csrf = screenHtml.match(/name="csrf_token" value="([^"]+)"/)[1];
+  const requestId = screenHtml.match(/name="request_id" value="([^"]+)"/)[1];
   const formBody = "decision=allow&client_id=" + CLIENT.clientId
     + "&redirect_uri=" + encodeURIComponent(CLIENT.redirectUris[0])
     + "&scope=chat%3Aread&state=s1&code_challenge=" + challenge
-    + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf);
+    + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf)
+    + "&request_id=" + encodeURIComponent(requestId);
   const consent = await fetch(origin + "/oauth/authorize", {
     method: "POST", redirect: "manual",
     headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin },
@@ -183,14 +186,17 @@ test("POST /oauth/token: reuse of a rotated refresh token is invalid_grant with 
   const { verifier, challenge } = pkce();
 
   const screen = await fetch(origin + authzPath(challenge), { headers: { cookie } });
-  const csrf = (await screen.text()).match(/name="csrf_token" value="([^"]+)"/)[1];
+  const screenHtml = await screen.text();
+  const csrf = screenHtml.match(/name="csrf_token" value="([^"]+)"/)[1];
+  const requestId = screenHtml.match(/name="request_id" value="([^"]+)"/)[1];
   const consent = await fetch(origin + "/oauth/authorize", {
     method: "POST", redirect: "manual",
     headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin },
     body: "decision=allow&client_id=" + CLIENT.clientId
       + "&redirect_uri=" + encodeURIComponent(CLIENT.redirectUris[0])
       + "&scope=chat%3Aread&state=s1&code_challenge=" + challenge
-      + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf),
+      + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf)
+      + "&request_id=" + encodeURIComponent(requestId),
   });
   assert.equal(consent.status, 302);
   const code = new URL(consent.headers.get("location")).searchParams.get("code");
@@ -222,4 +228,107 @@ test("POST /oauth/token: reuse of a rotated refresh token is invalid_grant with 
   assert.equal(dead.status, 400);
   assert.equal(dead.body.error, "invalid_request");
   assert.match(dead.body.error_description, /refresh token revoked/);
+});
+
+// WAVE-500 g1: the consent screen must bind the grant. The GET renders what
+// the user consents to; the POST must not be able to widen the scopes (or
+// swap client/redirect) beyond what was displayed. The form carries a
+// request_id resolving the server-side validated request; tampered body
+// fields are ignored.
+function requestIdOf(html) {
+  return html.match(/name="request_id" value="([^"]+)"/)?.[1];
+}
+
+test("consent POST cannot grant scopes beyond what the consent screen displayed", async t => {
+  const f = createAcceptanceFixture();
+  const { origin } = await startServer(t, f);
+  const { slot, session } = loginAccount(f);
+  const cookie = "account_session=" + slot.token;
+  const { verifier, challenge } = pkce();
+
+  // The client asks for chat:read only; the screen shows "Read messages".
+  const screen = await fetch(origin + authzPath(challenge), { headers: { cookie } });
+  assert.equal(screen.status, 200);
+  const html = await screen.text();
+  assert.match(html, /Read messages/);
+  assert.ok(!html.includes("Post messages"), "screen must not advertise chat:write");
+  const csrf = html.match(/name="csrf_token" value="([^"]+)"/)[1];
+  const requestId = requestIdOf(html); // undefined pre-fix: the binding does not exist yet
+
+  // Tamper: submit the allow decision with a WIDER scope than consented to.
+  const tampered = "decision=allow&client_id=" + CLIENT.clientId
+    + "&redirect_uri=" + encodeURIComponent(CLIENT.redirectUris[0])
+    + "&scope=chat%3Aread+chat%3Awrite&state=s1&code_challenge=" + challenge
+    + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(csrf)
+    + (requestId ? "&request_id=" + encodeURIComponent(requestId) : "");
+  const consent = await fetch(origin + "/oauth/authorize", {
+    method: "POST", redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin },
+    body: tampered,
+  });
+  assert.equal(consent.status, 302);
+  const code = new URL(consent.headers.get("location")).searchParams.get("code");
+  assert.ok(code, "consent redirect must carry an authorization code");
+
+  const token = await fetch(origin + "/oauth/token", {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify({ grant_type: "authorization_code", code, redirect_uri: CLIENT.redirectUris[0], client_id: CLIENT.clientId, code_verifier: verifier }),
+  });
+  assert.equal(token.status, 200);
+  const tokens = await token.json();
+  assert.equal(tokens.scope, "chat:read", "grant must not exceed the consented scopes");
+  assert.ok(session, "session fixture present");
+});
+
+test("consent form POST without a request_id is rejected", async t => {
+  const f = createAcceptanceFixture();
+  const { origin } = await startServer(t, f);
+  const { slot, session } = loginAccount(f);
+  const cookie = "account_session=" + slot.token;
+  const { challenge } = pkce();
+
+  const res = await fetch(origin + "/oauth/authorize", {
+    method: "POST", redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin },
+    body: "decision=allow&client_id=" + CLIENT.clientId
+      + "&redirect_uri=" + encodeURIComponent(CLIENT.redirectUris[0])
+      + "&scope=chat%3Aread&state=s1&code_challenge=" + challenge
+      + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(session.csrf),
+  });
+  assert.equal(res.status, 400);
+  const err = await res.json();
+  assert.equal(err.error, "invalid_request");
+});
+
+test("a consent request_id cannot be replayed from another user's session", async t => {
+  const f = createAcceptanceFixture();
+  const { origin } = await startServer(t, f);
+  const { slot } = loginAccount(f);
+  const cookieA = "account_session=" + slot.token;
+  // Second user with their own session.
+  f.store.createAccount("consent-user-b");
+  const keyB = f.store.issueAccountAccessKey("consent-user-b");
+  const slotB = f.store.createAccountSessionSlot();
+  const sessionB = f.store.loginAccountSession(slotB.token, keyB, 0);
+  const cookieB = "account_session=" + slotB.token;
+  const { challenge } = pkce();
+
+  const screen = await fetch(origin + authzPath(challenge), { headers: { cookie: cookieA } });
+  assert.equal(screen.status, 200);
+  const requestId = requestIdOf(await screen.text());
+
+  const res = await fetch(origin + "/oauth/authorize", {
+    method: "POST", redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookieB, origin },
+    body: "decision=allow&client_id=" + CLIENT.clientId
+      + "&redirect_uri=" + encodeURIComponent(CLIENT.redirectUris[0])
+      + "&scope=chat%3Aread&state=s1&code_challenge=" + challenge
+      + "&code_challenge_method=S256&csrf_token=" + encodeURIComponent(sessionB.csrf)
+      + (requestId ? "&request_id=" + encodeURIComponent(requestId) : ""),
+  });
+  // Pre-fix there is no binding: B's own raw fields validate and the POST
+  // succeeds (302). Post-fix the request_id belongs to user A → 400.
+  if (requestId) assert.equal(res.status, 400);
+  else assert.equal(res.status, 302);
 });

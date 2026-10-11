@@ -5,6 +5,7 @@ export const OAUTH_PROVIDER_TABLES = Object.freeze([
   "oauth_provider_codes",
   "oauth_provider_access_tokens",
   "oauth_provider_refresh_tokens",
+  "oauth_provider_auth_requests",
 ]);
 
 const SCHEMA = `
@@ -64,6 +65,23 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS oauth_provider_refresh_tokens_expires ON oauth_provider_refresh_tokens(expires_at);
   CREATE INDEX IF NOT EXISTS oauth_provider_refresh_tokens_family ON oauth_provider_refresh_tokens(family_id);
   CREATE INDEX IF NOT EXISTS oauth_provider_refresh_tokens_user ON oauth_provider_refresh_tokens(user_id);
+
+  -- Consent-screen binding: the exact authorization request the user saw,
+  -- so the decision POST cannot widen scopes (or swap client/redirect)
+  -- beyond what was displayed. Short TTL; rows are small and pruned.
+  CREATE TABLE IF NOT EXISTS oauth_provider_auth_requests (
+    request_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    scopes_json TEXT NOT NULL,
+    state TEXT,
+    code_challenge TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS oauth_provider_auth_requests_expires ON oauth_provider_auth_requests(expires_at);
+  CREATE INDEX IF NOT EXISTS oauth_provider_auth_requests_user ON oauth_provider_auth_requests(user_id);
 `;
 
 const ready = new WeakSet();
@@ -90,6 +108,7 @@ const PRUNE = Object.freeze([
   ["oauth_provider_codes", "code_hash"],
   ["oauth_provider_access_tokens", "token_hash"],
   ["oauth_provider_refresh_tokens", "token_hash"],
+  ["oauth_provider_auth_requests", "request_id"],
 ]);
 
 // Bounded delete of expired rows. Does not create the tables: a cron tick
@@ -211,5 +230,27 @@ export function createOAuthProviderSqlite(db) {
         .map(row => refreshTokens.get(row.token_hash));
     }
   };
-  return { clients, codes, accessTokens, refreshTokens, prune: (now, limit) => pruneOAuthProvider(db, { now, limit }) };
+  // Consent-screen binding records. Never mutated after insert (no watch):
+  // the decision POST only reads them within their TTL.
+  const saveAuthRequest = row => db.prepare(
+    `INSERT INTO oauth_provider_auth_requests(request_id,user_id,client_id,redirect_uri,scopes_json,state,code_challenge,created_at,expires_at)
+     VALUES(?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(request_id) DO NOTHING`
+  ).run(row.requestId, row.userId, row.clientId, row.redirectUri, JSON.stringify(row.scopes),
+    row.state ?? null, row.codeChallenge, row.createdAt, row.expiresAt);
+  const authRequests = {
+    get(requestId) {
+      touch();
+      const row = db.prepare("SELECT * FROM oauth_provider_auth_requests WHERE request_id=?").get(requestId);
+      if (!row) return undefined;
+      return {
+        requestId: row.request_id, userId: row.user_id, clientId: row.client_id, redirectUri: row.redirect_uri,
+        scopes: scopesOf(row.scopes_json), state: row.state ?? null, codeChallenge: row.code_challenge,
+        createdAt: row.created_at, expiresAt: row.expires_at,
+      };
+    },
+    set(_requestId, record) { touch(); saveAuthRequest(record); return this; },
+    delete(requestId) { touch(); db.prepare("DELETE FROM oauth_provider_auth_requests WHERE request_id=?").run(requestId); },
+  };
+  return { clients, codes, accessTokens, refreshTokens, authRequests, prune: (now, limit) => pruneOAuthProvider(db, { now, limit }) };
 }

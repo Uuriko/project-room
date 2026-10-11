@@ -47,6 +47,8 @@ const AUTH_CODE_TTL_MS = 10 * 60 * 1000;          // 10 minutes, single use
 const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000;       // 1 hour
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const CLIENT_TTL_MS = REFRESH_TOKEN_TTL_MS;
+const AUTH_REQUEST_TTL_MS = 10 * 60 * 1000;       // 10 minutes: consent screen -> decision POST
+const REQUEST_ID_PATTERN = /^oarqr_[A-Za-z0-9_-]{32}$/;
 
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 const base64url = bytes => Buffer.from(bytes).toString("base64url");
@@ -54,13 +56,14 @@ const newSecret = (bytes = 32) => base64url(randomBytes(bytes));
 
 const isExpired = (record, now) => record.expiresAt !== null && now() >= record.expiresAt;
 
-export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, db, clock, onSecurityEvent, isAccountActive } = {}) {
-  check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined),
+export function createOAuthProvider({ clients, codes, accessTokens, refreshTokens, requests, db, clock, onSecurityEvent, isAccountActive } = {}) {
+  check(db === undefined || (clients === undefined && codes === undefined && accessTokens === undefined && refreshTokens === undefined && requests === undefined),
     "sqlite storage replaces the in-memory maps");
   check(clients === undefined || clients instanceof Map, "clients must be a Map if given");
   check(codes === undefined || codes instanceof Map, "codes must be a Map if given");
   check(accessTokens === undefined || accessTokens instanceof Map, "accessTokens must be a Map if given");
   check(refreshTokens === undefined || refreshTokens instanceof Map, "refreshTokens must be a Map if given");
+  check(requests === undefined || requests instanceof Map, "requests must be a Map if given");
   check(db === undefined || typeof db?.prepare === "function", "db must be a SQLite database if given");
   check(clock === undefined || typeof clock === "function", "clock must be a function if given");
   check(onSecurityEvent === undefined || typeof onSecurityEvent === "function",
@@ -73,6 +76,7 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
   const codeStore = codes ?? sqlite?.codes ?? new Map();
   const accessStore = accessTokens ?? sqlite?.accessTokens ?? new Map();
   const refreshStore = refreshTokens ?? sqlite?.refreshTokens ?? new Map();
+  const requestStore = requests ?? sqlite?.authRequests ?? new Map();
   const now = clock ?? Date.now;
   const pruneLazy = () => { if (sqlite) sqlite.prune(now(), 32); };
   // Caller-owned sink for security signals (e.g. reuse-detected). The module
@@ -144,6 +148,61 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     check(typeof codeChallenge === "string" && CODE_CHALLENGE_PATTERN.test(codeChallenge),
       "code_challenge (PKCE S256) is required");
     return Object.freeze({ client, redirectUri, scopes: validScopes, state: state ?? null, codeChallenge });
+  };
+
+  // Step 1b: persist the validated authorization request the consent screen
+  // displays, so the decision POST is bound to exactly what the user saw.
+  // Without this, the POST re-parses client_id/redirect_uri/scope from its
+  // own body fields, and a tampered form can widen the grant beyond the
+  // consented scopes. Returns { requestId, expiresAt, ...validatedRequest }.
+  const createAuthorizationRequest = ({ userId, clientId, redirectUri, scopes, state, codeChallenge }) => {
+    check(typeof userId === "string" && userId.length > 0 && userId.length <= 128,
+      "userId must be a non-empty string up to 128 chars");
+    const validated = validateAuthorizationRequest({ clientId, redirectUri, scopes, state, codeChallenge });
+    // Bounded cleanup for in-memory mode (sqlite prunes via pruneLazy).
+    if (requestStore instanceof Map && requestStore.size >= 512) {
+      for (const [id, record] of requestStore) {
+        if (isExpired(record, now)) requestStore.delete(id);
+        if (requestStore.size < 512) break;
+      }
+    }
+    const requestId = `oarqr_${newSecret(24)}`;
+    const at = now();
+    requestStore.set(requestId, {
+      requestId,
+      userId,
+      clientId: validated.client.clientId,
+      redirectUri: validated.redirectUri,
+      scopes: validated.scopes,
+      state: validated.state,
+      codeChallenge: validated.codeChallenge,
+      createdAt: at,
+      expiresAt: at + AUTH_REQUEST_TTL_MS,
+    });
+    pruneLazy();
+    return Object.freeze({ ...validated, requestId, expiresAt: at + AUTH_REQUEST_TTL_MS });
+  };
+
+  // Resolve the pending authorization request for a decision POST. Returns
+  // the validated request ({ client, redirectUri, scopes, state,
+  // codeChallenge }) or null when the id is unknown, expired, or belongs to
+  // a different user — the HTTP layer then fails closed with 400 instead of
+  // trusting the POST body's own fields.
+  const getAuthorizationRequest = ({ requestId, userId } = {}) => {
+    if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) return null;
+    const record = requestStore.get(requestId);
+    if (!record) return null;
+    if (record.userId !== userId) return null;
+    if (isExpired(record, now)) { requestStore.delete(requestId); return null; }
+    const client = getClient(record.clientId);
+    if (!client) return null;
+    return Object.freeze({
+      client,
+      redirectUri: record.redirectUri,
+      scopes: record.scopes,
+      state: record.state,
+      codeChallenge: record.codeChallenge,
+    });
   };
 
   // Step 2: after the user approves, issue an authorization code.
@@ -430,6 +489,8 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     registerClient,
     getClient,
     validateAuthorizationRequest,
+    createAuthorizationRequest,
+    getAuthorizationRequest,
     issueCode,
     exchangeCode,
     refresh,
