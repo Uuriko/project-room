@@ -207,6 +207,7 @@
   "tests/ci-changes.test.js": 2561,
   "tests/clean-main-baseline.test.js": 1000,
   "tests/cli-invite.test.js": 6679,
+  "tests/client-expiry-matrix.test.js": 1200,
   "tests/client-recent-refresh.test.js": 1696,
   "tests/client-stream.test.js": 7512,
   "tests/client.test.js": 8531,
