@@ -6,6 +6,17 @@
 // pure, dependency-free detector: given board claims with file lists, it
 // returns every file claimed by two or more open claims.
 //
+// Paths are normalized before comparison: trim, drop leading ./, collapse
+// duplicate slashes, drop trailing slashes, resolve "." and ".." segments.
+// Case is preserved by default because repo (git/GitHub) paths are
+// case-sensitive. Pass { caseInsensitive: true } when the claims target a
+// case-insensitive working copy (macOS/Windows default filesystems), where
+// SERVER/x.mjs and server/x.mjs name the same file and must collide.
+//
+// LIMITATION: this module is pure (no I/O), so it cannot resolve symlinks:
+// a claim through a symlinked directory alias is compared literally. Claims
+// should declare real repo paths.
+//
 // Pure module: no I/O, frozen outputs, malformed inputs throw
 // ClaimCollisionError (coded errors).
 class ClaimCollisionError extends Error {
@@ -19,8 +30,9 @@ const CLOSED_STATUSES = ["done", "withdrawn", "closed", "expired", "released", "
 
 // Normalize a claimed path: trim, drop leading ./, collapse duplicate
 // slashes, drop trailing slashes. Case is preserved (repo paths are
-// case-sensitive).
-const normalizeFile = path => {
+// case-sensitive) unless opts.caseInsensitive folds it for case-insensitive
+// filesystems.
+const normalizeFile = (path, opts = {}) => {
   check(typeof path === "string" && path.trim().length > 0, "files must be non-empty strings");
   let p = path.trim().replace(/\/+/g, "/");
   while (p.startsWith("./")) p = p.slice(2);
@@ -40,10 +52,10 @@ const normalizeFile = path => {
   }
   p = parts.join("/");
   check(p.length > 0 && p !== ".", "files must name a real path");
-  return p;
+  return opts.caseInsensitive ? p.toLowerCase() : p;
 };
 
-const validateClaim = claim => {
+const validateClaim = (claim, opts = {}) => {
   check(claim !== null && typeof claim === "object", "claims must be objects");
   check(typeof claim.id === "string" && claim.id.length > 0, "claim.id must be a non-empty string");
   check(Array.isArray(claim.files), "claim.files must be an array");
@@ -51,7 +63,7 @@ const validateClaim = claim => {
     "claim.status must be a string if given");
   check(claim.lane === undefined || typeof claim.lane === "string",
     "claim.lane must be a string if given");
-  const files = [...new Set(claim.files.map(normalizeFile))].sort();
+  const files = [...new Set(claim.files.map(f => normalizeFile(f, opts)))].sort();
   return { id: claim.id, lane: claim.lane ?? null, status: claim.status ?? "submitted", files };
 };
 
@@ -59,9 +71,13 @@ const validateClaim = claim => {
 // { file, claims: [ids], lanes: [lanes] } sorted by file. Claims in a closed
 // status (done/withdrawn/closed/expired/released/rejected) are ignored, as
 // are duplicate file entries within a single claim.
-export function findClaimCollisions(claims) {
+//
+// opts.caseInsensitive (default false): fold case before comparing, for
+// claims against case-insensitive working copies (macOS/Windows). Default
+// keeps git semantics: SERVER/x.mjs and server/x.mjs are different files.
+export function findClaimCollisions(claims, opts = {}) {
   check(Array.isArray(claims), "claims must be an array");
-  const open = claims.map(validateClaim)
+  const open = claims.map(c => validateClaim(c, opts))
     .filter(c => !CLOSED_STATUSES.includes(c.status.toLowerCase()));
   const byFile = new Map();
   for (const claim of open) {
@@ -83,8 +99,8 @@ export function findClaimCollisions(claims) {
 }
 
 // Convenience: true when the claim set has no open file collisions.
-export function claimsAreCollisionFree(claims) {
-  return findClaimCollisions(claims).length === 0;
+export function claimsAreCollisionFree(claims, opts = {}) {
+  return findClaimCollisions(claims, opts).length === 0;
 }
 
 export { ClaimCollisionError };

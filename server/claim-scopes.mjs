@@ -29,9 +29,16 @@ export function claimScope(claim) {
   return claim.paths.map(pathScope);
 }
 
-const covers = (scope, other) => scope.path === other.path || (scope.subtree && (!scope.path || other.path.startsWith(scope.path + '/')));
+const covers = (scope, other, fold) => fold(scope.path) === fold(other.path)
+  || (scope.subtree && (!scope.path || fold(other.path).startsWith(fold(scope.path) + '/')));
 
-export function conflictingClaim(workItems, candidate, now) {
+export function conflictingClaim(workItems, candidate, now, opts = {}) {
+  // opts.caseInsensitive (default false): fold case before comparing scopes,
+  // for claims against case-insensitive working copies (macOS/Windows
+  // default filesystems), where SERVER/x.mjs and server/x.mjs name the same
+  // file. Default keeps git semantics: they are different files. The stored
+  // scope keeps its original case; folding happens at comparison time only.
+  const fold = opts.caseInsensitive ? p => p.toLowerCase() : p => p;
   const paths = claimScope(candidate.claim);
   for (const item of Object.values(workItems)) {
     if (item.id === candidate.id || !activeClaim(item, now)) continue;
@@ -42,7 +49,7 @@ export function conflictingClaim(workItems, candidate, now) {
     let existing;
     try { existing = claimScope(claim); }
     catch { return item; } // Ambiguous legacy scope needs explicit release/review.
-    if (paths.some(path => existing.some(other => covers(path, other) || covers(other, path)))) return item;
+    if (paths.some(path => existing.some(other => covers(path, other, fold) || covers(other, path, fold)))) return item;
   }
   return null;
 }
