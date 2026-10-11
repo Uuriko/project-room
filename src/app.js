@@ -7726,6 +7726,11 @@ if (initialInvitationFragment && !initialInvitationFragment.redirect && !initial
       if (initialDesktopProvider && !initialGoogleFailed && !initialGitHubFailed) {
         const provider = initialDesktopProvider;
         initialDesktopProvider = null;
+        // The OAuth round-trip drops the #invite/ fragment (it never reaches
+        // the server): stash the live invitation exactly like the OAuth
+        // buttons do, so the dialog re-opens after sign-in instead of the
+        // invitation being silently lost.
+        stashInviteForOAuth();
         location.assign(`/api/auth/${provider}/start`);
         return;
       }
