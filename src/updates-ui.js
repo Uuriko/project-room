@@ -66,6 +66,10 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   let cursor = null, hasMore = false, loadedPages = 0, incomplete = false;
   let visitedCursors = new Set();
   let badgeMore = false, badgeIncomplete = false, loading = false;
+  // Browsed page depth, remembered per filter. Returning to a filter (or
+  // refreshing it) replays its own budget; a single shared counter would
+  // replay the last filter's depth instead and drop already-browsed pages.
+  const filterBudgets = new Map();
   let ticket = 0;
   let interaction = 0;
   let owner = null;
@@ -77,6 +81,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   function reset() {
     ticket++; interaction++; owner = null; items = []; actionable = 0; filter = "needs"; operations.clear();
     cursor = null; hasMore = false; loadedPages = 0; incomplete = false; visitedCursors = new Set();
+    filterBudgets.clear();
     badgeMore = false; badgeIncomplete = false; loading = false;
     if (dialog.open) dialog.close();
     list.replaceChildren(); status.textContent = ""; summary.textContent = ""; partial.textContent = "";
@@ -191,7 +196,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
     paintOperations(); paintPaging();
   }
-  async function load(next = filter, { append = false, budget = next === filter ? Math.max(1, loadedPages) : 1, notice = "" } = {}) {
+  async function load(next = filter, { append = false, budget = Math.max(1, filterBudgets.get(next) ?? 1), notice = "" } = {}) {
     const owned = currentContext();
     if (!owned || (append && (loading || !hasMore || !cursor))) return false;
     const mine = ++ticket;
@@ -231,14 +236,17 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     };
     try {
       const [window, needs] = await Promise.all([
-        readWindow(), next === "needs" ? null : client.roomRead("/updates?state=actionable&limit=100")
+        readWindow(), next === "needs" ? null : client.roomRead("/updates?state=actionable&limit=100").catch(() => null)
       ]);
-      if (!window || !current() || (next !== "needs" && !needs)) return false;
+      if (!window || !current()) return false;
       filter = next; items = window.items; cursor = window.cursor; hasMore = window.hasMore;
       loadedPages = window.pages; incomplete = window.incomplete; visitedCursors = window.seen;
+      filterBudgets.set(next, window.pages);
+      // The badge count is best-effort: a failed companion read keeps the
+      // previous badge instead of aborting the list the window already read.
       const counted = next === "needs" ? window : needs;
-      actionable = (counted.items ?? []).filter(item => item.state === "unread" || item.state === "read").length;
-      badgeMore = counted.hasMore === true;
+      actionable = (counted?.items ?? []).filter(item => item.state === "unread" || item.state === "read").length;
+      badgeMore = counted?.hasMore === true;
       badgeIncomplete = next === "needs" ? incomplete : partialSources(counted);
       loading = false; paintBadge(); paint();
       status.textContent = window.stalled ? "Loading stopped because the page did not advance. Refresh updates to continue." : notice;
@@ -352,7 +360,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     document.addEventListener("focusin", movedFocus);
     document.addEventListener("pointerdown", movedPointer);
     try {
-      const loaded = await load(filter, hasMore && cursor ? { append: true } : { budget: 1 });
+      const loaded = await load(filter, hasMore && cursor ? { append: true } : {});
       if (!retainFocus || mine !== interaction || !owns(owned) || !dialog.open) return;
       // Disabling the pending control can drop keyboard focus. On failure,
       // return to the same enabled retry control without moving into old rows.
