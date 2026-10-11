@@ -93,7 +93,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     section.querySelector('strong').textContent = assistant.name || 'Room';
-    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
+    $('#room-assistant-status').textContent = uiText(assistant.availability === 'connected' ? 'human.assistantConnected' : assistant.availability === 'awaiting_host' ? 'human.copy.009' : 'human.assistantDisconnected');
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     const runs = Object.values(projection.runs ?? {});

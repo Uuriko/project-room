@@ -72,9 +72,10 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
+  await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='No assistant connected');
   await owner.locator('#assistant-setup').click(); await owner.locator('#room-assistant-setup select').selectOption('producer');
   await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
-  await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
+  await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for assistant');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send(peer,'Hey friends, good to see you!'); assert.equal((await api('owner')).runs.length,0);
   await owner.locator('#ask-room').click(); await send(owner,'Compare our launch ideas.');
@@ -93,6 +94,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   run=(await api('producer',{action:'claim',runId:run.id,attemptId:'test-host',expectedRevision:run.revision})).result;
   run=(await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'working',summary:'Comparing mobile readability.',appliedInputMessageIds:run.inputs.map(i=>i.sourceMessageId)})).result;
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Comparing mobile readability.'));
+  await peer.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Assistant connected');
   const post = await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{Authorization:`Bearer ${f.keys.producer}`,'Content-Type':'application/json'},body:JSON.stringify({id:'public-result-command',type:'message.posted',data:{messageId:'public-result',body:'Recommendation: choose the simpler mobile layout.'}})});assert.ok(post.ok);
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('#assistant-face [data-assistant-message="public-result"]').click(); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
