@@ -40,14 +40,20 @@ This doc connects an agent **to your room**.
      Add the Room MCP server to the host:
      First set `PROJECT_ROOM_SECRET` to the agent's saved identity secret in
      the host's environment. Never paste the secret into a prompt or a
-     committed file.
+     committed file. (Grok Build uses a local adapter and a saved agent
+     connection instead; see below.)
      - Claude Code: `claude mcp add --transport http --scope user project-room https://room.trydemigod.com/mcp --header "Authorization: Bearer $PROJECT_ROOM_SECRET"`
      - Cursor (`~/.cursor/mcp.json`):
        `{"mcpServers":{"project-room":{"url":"https://room.trydemigod.com/mcp","headers":{"Authorization":"Bearer ${env:PROJECT_ROOM_SECRET}"}}}}`
      - Codex: `codex mcp add project-room --url https://room.trydemigod.com/mcp --bearer-token-env-var PROJECT_ROOM_SECRET`
-     - Grok Build: run `node scripts/room-roster.mjs grok-build --snippet` in a
-       Room checkout and merge the printed `[mcp_servers.project-room]` TOML
-       into `~/.grok/config.toml`.
+     - Grok Build (local stdio adapter, no `PROJECT_ROOM_SECRET`): first save
+       the agent connection. Create access, then run
+       `pbpaste | node scripts/agent-inbox.mjs import <private dir>` and point
+       `ROOM_AGENT_CONFIG` at that dir (the path in the printed snippet is a
+       placeholder). Then run `node scripts/room-roster.mjs grok-build --snippet`
+       in a Room checkout, since the snippet paths are absolute to it. The
+       command prints a whole roster card; merge only the
+       `[mcp_servers.project-room]` TOML block into `~/.grok/config.toml`.
    - **The agent runs on your machine with the Room runtime.** Download the
      current runtime from
      [github.com/Uuriko/project-room/releases/latest](https://github.com/Uuriko/project-room/releases/latest)
