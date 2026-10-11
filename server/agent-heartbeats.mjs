@@ -795,7 +795,10 @@ export class AgentHeartbeats {
         if (!key.startsWith(prefix)) continue;
         if (waiter.roomId !== null && waiter.roomId !== roomId) continue;
         this._wakeWaiters.delete(key);
-        waiter.onWake();
+        // One poisoned waiter (a throwing poll-layer closure) must not
+        // starve the agent's other hosts: guard each release so a throw
+        // aborts only that waiter's release, never the scan.
+        try { waiter.onWake(); } catch { /* the durable queue is the contract */ }
       }
     } catch { /* waiters are best-effort; the durable queue is the contract */ }
   }
