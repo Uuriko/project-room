@@ -107,3 +107,58 @@ test('a custom executor must settle before the host acknowledges Stop', async t 
   assert.equal((await pass).outcomes[0].state, 'cancelled');
   assert.equal((await owner.recent()).filter(message => message.authorId === 'producer').length, 0);
 });
+
+// assistant() call #1 is the host's initial listing; call #2 is
+// executeWatchingRun's initial authority check; later calls are monitor polls
+// and catch-block rereads.
+const blipOn = (producer, callsToFail) => {
+  let calls = 0;
+  return { ...producer, assistant: async options => {
+    calls++;
+    if (callsToFail.includes(calls)) throw new TypeError('fetch failed');
+    return producer.assistant(options);
+  } };
+};
+const producerAnswers = async (owner, producer) =>
+  (await owner.recent()).filter(m => m.authorId === 'producer').length;
+
+test('a brief authority-read blip before launch does not fail the run', async t => {
+  const { owner, producer, current } = await setup(t);
+  let executions = 0;
+  const host = blipOn(producer, [2]);
+  const { outcomes } = await runHostOnce(host, { memberId: 'producer', execute: async () => { executions++; return 'answer'; }, controlPollMs: 25 });
+  assert.equal(executions, 1, 'the blip is ridden out; the executor still launches');
+  assert.equal(outcomes[0].state, 'done');
+  assert.equal((await current()).status, 'done');
+  assert.equal(await producerAnswers(owner, producer), 1);
+});
+
+test('a brief authority-read blip mid-execution does not kill the run', async t => {
+  const { owner, producer, current } = await setup(t);
+  let executions = 0, aborted = false;
+  const host = blipOn(producer, [4]); // second monitor poll while the executor runs
+  const execute = async (_brief, { signal } = {}) => {
+    executions++;
+    signal?.addEventListener('abort', () => { aborted = true; });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    if (signal?.aborted) throw signal.reason;
+    return 'answer';
+  };
+  const { outcomes } = await runHostOnce(host, { memberId: 'producer', execute, controlPollMs: 25 });
+  assert.equal(aborted, false, 'a transient poll failure must not abort a healthy executor');
+  assert.equal(executions, 1);
+  assert.equal(outcomes[0].state, 'done');
+  assert.equal((await current()).status, 'done');
+});
+
+test('a persistently unreadable authority read fails closed without a fabricated failed report', async t => {
+  const { owner, producer, current } = await setup(t);
+  let executions = 0;
+  const host = blipOn(producer, [2, 3, 4]); // every initial authority attempt fails
+  const pass = runHostOnce(host, { memberId: 'producer', execute: async () => { executions++; return 'answer'; }, controlPollMs: 25 });
+  await assert.rejects(pass, /fetch failed/);
+  t.after(async () => { await pass.catch(() => {}); });
+  assert.equal(executions, 0, 'executor must not launch when authority is unreadable');
+  assert.equal((await current()).status, 'working', 'no fabricated failed report for a lost control read');
+  assert.equal(await producerAnswers(owner, producer), 0);
+});

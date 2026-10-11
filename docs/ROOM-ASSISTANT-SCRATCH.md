@@ -39,7 +39,7 @@ To use a real model, pass `--exec "<command>"`. The host writes the brief as JSO
 
 On macOS/Linux the CLI runs in its own process group. Cancellation and timeout send SIGTERM, then SIGKILL after a 500 ms grace period, including ordinary descendant processes. Windows currently terminates only the direct child; process-tree cancellation is not qualified there. Processes that deliberately detach and remote actions need their own cancellation mechanisms. Killing a process does not undo an already completed external action.
 
-Custom executors receive `execute(brief, { signal })`. They must honor the abort signal and settle only after their work stops. A custom executor that ignores it delays acknowledgement; the host does not claim cancellation while that execution promise remains active. Control requests time out after ten seconds; a failed control read aborts execution rather than allowing it to continue unchecked. Successful publication still requires current server authority.
+Custom executors receive `execute(brief, { signal })`. They must honor the abort signal and settle only after their work stops. A custom executor that ignores it delays acknowledgement; the host does not claim cancellation while that execution promise remains active. Control requests time out after ten seconds; a control read is retried briefly, and a persistently failed read aborts execution rather than allowing it to continue unchecked. The host never reports such a run failed: the run stays working and a later pass retries it. Successful publication still requires current server authority.
 
 ## Run it
 

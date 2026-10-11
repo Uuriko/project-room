@@ -119,6 +119,9 @@ export async function runHostOnce(client, { memberId, hostId = memberId, execute
       try { answer = await executeWatchingRun(execute, input, run, reread, controlPollMs); }
       catch (failure) {
         if (failure.code === "executor_stop_failed") throw failure;
+        // A lost control read fails closed without fabricating a 'failed'
+        // report: the run stays working and a later host pass retries it.
+        if (failure.code === "assistant_authority_unreadable") throw failure;
         const current = await reread();
         if (current?.sourceDeleted) {
           run = current;

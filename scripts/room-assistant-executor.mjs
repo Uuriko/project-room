@@ -60,13 +60,31 @@ export async function executeWatchingRun(execute, brief, run, reread, pollMs) {
   const changed = current => !current || current.status !== 'working' || current.revision !== run.revision
     || current.attemptId !== run.attemptId || current.sourceDeleted;
   const superseded = () => Object.assign(new Error('Assistant instructions or execution authority changed'), { code: 'assistant_execution_superseded' });
+  // A lost control read is not a failed run: ride out a brief blip, then fail
+  // closed with a marked error. The host aborts local execution on it but
+  // must not fabricate a server-side 'failed' report for a healthy run.
+  const AUTHORITY_READ_ATTEMPTS = 3;
+  const unreadable = error => Object.assign(error ?? new Error('assistant authority unreadable'), { code: 'assistant_authority_unreadable' });
+  const readAuthority = async signal => {
+    let error;
+    for (let attempt = 0; attempt < AUTHORITY_READ_ATTEMPTS; attempt++) {
+      if (signal?.aborted) throw signal.reason;
+      try { return await reread(signal); }
+      catch (readError) {
+        error = readError;
+        if (signal?.aborted) throw readError;
+        await delay(pollMs, undefined, { signal }).catch(() => {});
+      }
+    }
+    throw unreadable(error);
+  };
   // Brief assembly makes network reads too; a stop during those reads must
   // be observed before starting a command capable of external effects.
-  if (changed(await reread())) throw superseded();
+  if (changed(await readAuthority(undefined))) throw superseded();
   const monitor = (async () => {
     while (!watcher.signal.aborted) {
       await delay(pollMs, undefined, { signal: watcher.signal });
-      const current = await reread(watcher.signal);
+      const current = await readAuthority(watcher.signal);
       if (changed(current)) {
         interruption = superseded();
         execution.abort(interruption);
