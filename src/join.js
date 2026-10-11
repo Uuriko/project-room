@@ -262,7 +262,9 @@ async function boot() {
     const expiryEl = $("join-session-expiry");
     const expiryText = formatSessionExpiry(sessionExpiresAt);
     if (expiryEl) {
-      if (expiryText) { expiryEl.textContent = `This browser's session expires ${expiryText}.`; expiryEl.hidden = false; }
+      // Name the recovery alongside the expiry: the saved access key on this
+      // screen is how the member signs in again after the session ends.
+      if (expiryText) { expiryEl.textContent = `This browser's session expires ${expiryText}. After that, sign in again with your saved access key.`; expiryEl.hidden = false; }
       else expiryEl.hidden = true;
     }
     const secretEl = $("join-secret");

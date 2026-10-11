@@ -1405,7 +1405,10 @@ function syncSessionMenu() {
     const accountExpiry = !state && accountClient.session?.authenticated ? accountClient.session.expiresAt : null;
     const formatted = signedIn ? formatSessionExpiry(roomExpiry ?? accountExpiry) : null;
     if (formatted) {
-      expiryEl.textContent = `${roomExpiry != null ? "Session" : "Account session"} expires ${formatted}`;
+      // The expiry line is the one place the human learns WHEN the session
+      // ends — name the recovery too: sign in again on this page (the auth
+      // panel reappears automatically).
+      expiryEl.textContent = `${roomExpiry != null ? "Session" : "Account session"} expires ${formatted} — sign in again on this page when it does`;
       expiryEl.hidden = false;
     } else {
       expiryEl.textContent = "";
@@ -5849,7 +5852,11 @@ document.addEventListener("click", async e => {
     accessPreviews.set(workId, { summary: context.accessSummary, evaluatedAt: context.evaluatedAt });
   } catch (error) {
     if (!sameSession(generation, roomId, memberId)) return;
-    accessPreviews.set(workId, { error: `Access preview could not be loaded (${error.code || error.status || "request failed"}); try again.` });
+    // client.request() already translated this error to catalog copy via
+    // humanErrorMessage (error.message); show the human the translated
+    // message, never the raw server code (item 3: shown codes match the
+    // errors catalog vocabulary).
+    accessPreviews.set(workId, { error: error.message || "The access preview could not be loaded; try again." });
   } finally {
     button.disabled = false;
   }

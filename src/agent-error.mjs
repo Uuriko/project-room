@@ -707,7 +707,11 @@ export function errorTrace({ httpStatus = 0, code = "request_failed", message = 
 
 export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType } = {}) {
   const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType });
-  const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
+  // error.code stays the server's code, but normalized: the AX reason,
+  // status, hint, next, and the trace below are all derived from the public
+  // code, so the wire must carry that same code — never an absent or
+  // unusable one disagreeing with reason.
+  const body = { error: { code: publicCode(code), message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
   if (trace) {
     body.errorId = trace.errorId;
