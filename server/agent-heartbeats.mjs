@@ -651,7 +651,9 @@ export class AgentHeartbeats {
 
   // Release every waiter held by the agent's hosts when a new signal lands
   // (roomId-scoped). Never throws — the wake path must not fail the
-  // message post.
+  // message post. Each waiter's callback is isolated: one throwing onWake
+  // must not starve the remaining waiters (a sibling host's long poll
+  // would otherwise hang until its timeout).
   _releaseWakeWaiter(agentId, roomId) {
     try {
       const prefix = `${agentId}\0`;
@@ -659,7 +661,7 @@ export class AgentHeartbeats {
         if (!key.startsWith(prefix)) continue;
         if (waiter.roomId !== null && waiter.roomId !== roomId) continue;
         this._wakeWaiters.delete(key);
-        waiter.onWake();
+        try { waiter.onWake(); } catch { /* a throwing waiter must not break the others */ }
       }
     } catch { /* waiters are best-effort; the durable queue is the contract */ }
   }
