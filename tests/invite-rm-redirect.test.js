@@ -16,7 +16,7 @@ test("agent invite code pattern accepts RM- codes, rejects human tokens", () => 
   assert.ok(AGENT_INVITE_CODE_PATTERN.test(LEGACY_CODE));
   assert.ok(!AGENT_INVITE_CODE_PATTERN.test("a".repeat(43)));
   assert.ok(!AGENT_INVITE_CODE_PATTERN.test("RM-"));
-  assert.ok(!AGENT_INVITE_CODE_PATTERN.test("RM-abc")); // lowercase is not minted
+  assert.ok(AGENT_INVITE_CODE_PATTERN.test("rm-0123456789abcde")); // lowercase is transcribed, not minted — still routes
   assert.ok(!AGENT_INVITE_CODE_PATTERN.test("#invite/" + V2_CODE));
 });
 
@@ -28,6 +28,11 @@ test("RM- fragment maps to the join page on the bare door", () => {
 test("RM- fragment keeps the www-door /room prefix", () => {
   assert.equal(agentInviteJoinPath(`#invite/${V2_CODE}`, "/room/"), `/room/join/${V2_CODE}`);
   assert.equal(agentInviteJoinPath(`#invite/${V2_CODE}`, "/room"), `/room/join/${V2_CODE}`);
+});
+
+test("lowercase fragments route to the canonical uppercase join path", () => {
+  assert.equal(agentInviteJoinPath(`#invite/${V2_CODE.toLowerCase()}`, "/"), `/join/${V2_CODE}`);
+  assert.equal(agentInviteJoinPath(`#invite/${V2_CODE.toLowerCase()}`, "/room"), `/room/join/${V2_CODE}`);
 });
 
 test("non-agent fragments return null (SPA keeps its existing behavior)", () => {

@@ -26,17 +26,23 @@ const INVITE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 // unavailable." before any API call, even though the code is perfectly
 // redeemable. agentInviteJoinPath() maps that dead-end fragment onto the
 // real join page so the SPA redirects instead of stranding the invitee.
-export const AGENT_INVITE_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
+// Case-insensitive: the server folds case and confusables on redeem ("a
+// transcribed code still works") and the join page uppercases before
+// calling the API, so a lowercased #invite/rm-<code> fragment must reach
+// the join page too — not dead-end in the dialog exactly like #2465's bug.
+export const AGENT_INVITE_CODE_PATTERN = /^RM-[A-Z0-9]+$/i;
 
 // Pure: returns the door-aware join path for a #invite/RM-<code> fragment,
 // or null for anything else. pathname selects the www-door /room prefix
 // (mirrors src/join.js serviceApiBase/parseJoinCode conventions).
 export function agentInviteJoinPath(hash, pathname) {
-  const match = /^#invite\/(RM-[A-Z0-9]+)$/.exec(String(hash ?? ""));
+  const match = /^#invite\/(RM-[A-Z0-9]+)$/i.exec(String(hash ?? ""));
   if (!match) return null;
   const p = String(pathname ?? "");
   const door = (p === "/room" || p.startsWith("/room/")) ? "/room" : "";
-  return [door, "/join/", match[1]].join("");
+  // Normalize to the canonical uppercase form: the join page and the server
+  // both accept it, and the address bar shows the real code.
+  return [door, "/join/", match[1].toUpperCase()].join("");
 }
 
 // Mirror the invitation secret at OAuth-start so the round-trip cannot drop
