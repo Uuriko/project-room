@@ -166,7 +166,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (busy) return;
     busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
     try { await fn(); }
-    catch (error) { setStatus(failureText(error), true); }
+    catch (error) { setStatus(failureText(error), true); return error; }
     finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
   }
 
@@ -309,8 +309,10 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         setStatus(uiText("signin.copy.024"), true); return;
       }
       if (await beforeSignIn?.() === false) return;
-      await withBusy(async () => {
+      let loginAttempt;
+      const failure = await withBusy(async () => {
         const session = await authedSession();
+        loginAttempt = { generation: accountClient.generation, session };
         if (passwordMode === "signup") {
           // Signup also rotates the account cookie. Reconcile an uncertain
           // result and ignore obsolete replies just as password login does.
@@ -336,7 +338,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         }
         const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
         await finish(view);
-      }); return;
+      });
+      if (failure?.status === 401 && failure.code === "invalid_credentials"
+        && currentView() === "password-login" && accountClient.owns(loginAttempt?.generation, loginAttempt?.session)) {
+        surface()?.querySelector('[name="password"]')?.focus();
+      }
+      return;
     }
     if (form.dataset.signinForm === "magic-code") {
       const code = [...form.querySelectorAll('input[name]')].find(input => input.name === "code")?.value?.trim() ?? "";
