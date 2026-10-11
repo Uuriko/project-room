@@ -1,0 +1,184 @@
+diff --git a/server/work-claim-routes.mjs b/server/work-claim-routes.mjs
+index 46ec29c70..5332a2ae5 100644
+--- a/server/work-claim-routes.mjs
++++ b/server/work-claim-routes.mjs
+@@ -35,7 +35,7 @@
+ // path — never wrapped, so no internal detail leaks.
+ import {
+   createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+-  renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
++  creatorOf, renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
+   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
+   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
+   openClaimCount, STALE_UNCLAIMED_DAYS,
+@@ -439,13 +439,21 @@ const RECEIPT_MAX_Q = 500;
+ // completion timestamp and its `note` is the completion note. Done is
+ // immutable, so there is exactly one. A released claim stamps
+ // "state:unclaimed" on the release transition — the run still settled, so it
+-// still gets a receipt with outcome "released". Work that was never claimed
+-// has no settlement stamp and projects no receipt.
++// still gets a receipt with outcome "released". Auto-settlement stamps the
++// same round-ending actions the pure machine records: the lease sweep stamps
++// "lease_expired" (server/work-claims.mjs releaseExpired) and the PR
++// auto-settler stamps "pr_merged"/"pr_closed" (server/claim-coordination.mjs
++// settlePullRequest) — all four are the same ROUND_ENDED_ACTIONS the machine
++// uses to close a claim round, so each settled run gets exactly one receipt
++// with outcome done|released. Work that was never claimed has no settlement
++// stamp and projects no receipt.
++const SETTLED_DONE_ACTIONS = new Set(["state:done", "pr_merged"]);
++const SETTLED_RELEASED_ACTIONS = new Set(["state:unclaimed", "lease_expired", "pr_closed"]);
+ const settledStampOf = item => {
+   const history = [...item.history].reverse();
+-  const done = history.find(entry => entry.action === "state:done");
++  const done = history.find(entry => SETTLED_DONE_ACTIONS.has(entry?.action));
+   if (done) return { outcome: "done", stamp: done };
+-  const released = history.find(entry => entry.action === "state:unclaimed");
++  const released = history.find(entry => SETTLED_RELEASED_ACTIONS.has(entry?.action));
+   if (released && item.state === "unclaimed") return { outcome: "released", stamp: released };
+   return null;
+ };
+@@ -483,7 +491,9 @@ const receiptOf = item => {
+       reviewedBy: item.reviewedBy ?? null,
+       attestations: Object.freeze([...(item.attestations ?? []).map(entry => entry?.memberId ?? entry)]),
+     }),
+-    createdBy: item.owner,
++    // The item's creator, from the creation stamp — item.owner is cleared on
++    // release, so reading the owner here reports nobody for released runs.
++    createdBy: creatorOf(item) ?? item.owner ?? null,
+     settledBy: stamp?.agentId ?? item.owner ?? null,
+     startedAt: item.claimedAt ? Date.parse(item.claimedAt) : null,
+     createdAt: settledAtMsOf(item),
+diff --git a/tests/work-claim-receipts-auto-settle.test.js b/tests/work-claim-receipts-auto-settle.test.js
+new file mode 100644
+index 000000000..9b0220965
+--- /dev/null
++++ b/tests/work-claim-receipts-auto-settle.test.js
+@@ -0,0 +1,128 @@
++// WAVE-500 guild-4: released-run receipt completeness — the auto-settlement
++// paths must project receipts exactly like their manual counterparts.
++// Fail-first: every test below fails on #2546's head because settledStampOf
++// only recognizes the manual `state:done` / `state:unclaimed` stamps, while
++// the lease sweep stamps `lease_expired` and the PR auto-settler stamps
++// `pr_merged` / `pr_closed`. A lapsed or auto-settled run is a settled run:
++// it must get a receipt with outcome done|released.
++import test from "node:test";
++import assert from "node:assert/strict";
++import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
++import { createRoomServer } from "../server/http.mjs";
++import { createWork, claimWork } from "../server/work-claims.mjs";
++import { settlePullRequest } from "../server/claim-coordination.mjs";
++
++async function serve(t) {
++  const fixture = createAcceptanceFixture();
++  const server = createRoomServer({ store: fixture.store });
++  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
++  t.after(async () => {
++    server.closeStreams(); server.closeAllConnections();
++    await new Promise(resolve => server.close(resolve));
++    fixture.store.close();
++  });
++  return { origin: `http://127.0.0.1:${server.address().port}`, ownerKey: fixture.keys.owner, store: fixture.store };
++}
++
++const post = (origin, path, body, secret = null) => fetch(`${origin}${path}`, {
++  method: "POST",
++  headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
++  body: JSON.stringify(body),
++});
++const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
++  headers: secret ? { authorization: `Bearer ${secret}` } : {},
++});
++const expectStatus = async (res, status, what) => {
++  if (res.status !== status) assert.fail(`${what}: got ${res.status}: ${await res.text()}`);
++  return res.json();
++};
++
++const PR_URL = "https://github.com/Uuriko/project-room/pull/2031";
++const uid = prefix => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
++
++// Build a claim through the real pure machine, then auto-settle it exactly
++// the way the PR poller does (settlePullRequest), and persist the result.
++function autoSettle(store, { id, title, outcome }) {
++  const now = Date.now();
++  let item = createWork({ id, title, pullRequest: PR_URL }, "owner", { now });
++  item = claimWork(item, "owner", { now });
++  const synced = new Date(now).toISOString();
++  item = { ...item,
++    pullRequests: Object.freeze(item.pullRequests.map(pull =>
++      ({ ...pull, outcome, syncedAt: synced }))),
++    pullRequest: { ...item.pullRequest, outcome, syncedAt: synced } };
++  const settled = settlePullRequest(item, outcome, now);
++  assert.ok(settled, `settlePullRequest(${outcome}) settles the claim`);
++  store.workClaims.set("commons", settled.item);
++  return settled.item;
++}
++
++async function receiptById(origin, ownerKey, workItemId) {
++  // Each test gets a fresh fixture, so an unfiltered page holds our item.
++  const { receipts } = await expectStatus(
++    await get(origin, "/api/rooms/commons/receipts?limit=50", ownerKey), 200, "receipts search");
++  return receipts.find(r => r.workItemId === workItemId) ?? null;
++}
++
++test("lease-expired run projects a released receipt", async t => {
++  const { origin, ownerKey, store } = await serve(t);
++  const id = uid("rr-lease");
++  await expectStatus(await post(origin, "/api/rooms/commons/work-claims", { id, title: "lapsed run" }, ownerKey), 201, "create");
++  await expectStatus(await post(origin, `/api/rooms/commons/work-claims/${id}/claim`, {}, ownerKey), 200, "claim");
++  // Backdate the lease; the next board read runs the lease sweep.
++  const item = store.workClaims.get("commons", id);
++  store.workClaims.set("commons", { ...item, leaseExpiresAt: new Date(Date.now() - 60000).toISOString() });
++  await expectStatus(await get(origin, "/api/rooms/commons/work-claims?limit=50", ownerKey), 200, "board (sweep)");
++  const after = store.workClaims.get("commons", id);
++  assert.equal(after.state, "unclaimed", "lease sweep auto-released the claim");
++  assert.ok(after.history.some(h => h.action === "lease_expired"), "history stamps lease_expired");
++
++  const receipt = await receiptById(origin, ownerKey, id);
++  assert.ok(receipt, "lease-expired run projects a receipt");
++  assert.equal(receipt.receiptId, `rc_${id}`);
++  assert.equal(receipt.outcome, "released");
++  assert.equal(receipt.title, "lapsed run");
++  // The run settled by the lapsed owner, and its round start is recorded.
++  assert.equal(receipt.settledBy, "owner");
++  assert.ok(Number.isFinite(receipt.startedAt), "startedAt is set");
++
++  const detail = await expectStatus(await get(origin, `/api/rooms/commons/receipts/rc_${id}`, ownerKey), 200, "receipt detail");
++  assert.equal(detail.outcome, "released");
++});
++
++test("pr-merged auto-settled run projects a done receipt", async t => {
++  const { origin, ownerKey, store } = await serve(t);
++  const id = uid("rr-merged");
++  const settled = autoSettle(store, { id, title: "merged by poller", outcome: "merged" });
++  assert.equal(settled.state, "done");
++
++  const receipt = await receiptById(origin, ownerKey, id);
++  assert.ok(receipt, "pr-merged run projects a receipt");
++  assert.equal(receipt.outcome, "done");
++  assert.equal(receipt.ran.pullRequestUrl, PR_URL);
++  assert.equal(receipt.ran.deliveryMode, "merged");
++});
++
++test("pr-closed auto-settled run projects a released receipt", async t => {
++  const { origin, ownerKey, store } = await serve(t);
++  const id = uid("rr-prclosed");
++  const settled = autoSettle(store, { id, title: "closed by poller", outcome: "closed" });
++  assert.equal(settled.state, "unclaimed");
++
++  const receipt = await receiptById(origin, ownerKey, id);
++  assert.ok(receipt, "pr-closed run projects a receipt");
++  assert.equal(receipt.outcome, "released");
++  assert.equal(receipt.settledBy, "owner");
++});
++
++test("released receipt names its creator, not nobody", async t => {
++  const { origin, ownerKey } = await serve(t);
++  const id = uid("rr-creator");
++  await expectStatus(await post(origin, "/api/rooms/commons/work-claims", { id, title: "creator check" }, ownerKey), 201, "create");
++  const claimed = await expectStatus(await post(origin, `/api/rooms/commons/work-claims/${id}/claim`, {}, ownerKey), 200, "claim");
++  await expectStatus(await post(origin, `/api/rooms/commons/work-claims/${id}/release`,
++    { expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length, note: "done here" }, ownerKey), 200, "release");
++  const receipt = await receiptById(origin, ownerKey, id);
++  assert.ok(receipt, "released run projects a receipt");
++  assert.equal(receipt.createdBy, "owner", "createdBy survives the release that clears item.owner");
++});
