@@ -300,11 +300,11 @@ Proposed tasks, continuing the B-series after B46:
   (operational).
 - **B51** — operator docs: one sentence each on the rate-limit eviction model
   (#134) and the export memory bound (#137) in
-  `docs/INVITE-ONLY-CHECKLIST.md` / `docs/EXPORT-RETENTION-DELETION.md` (Info).
+  `docs/INVITE-ONLY-CHECKLIST.md` / `docs/history/EXPORT-RETENTION-DELETION.md` (Info).
 - **E5 / F6** (issue #6) — data boundaries and trust packet:
-  `docs/DATA-BOUNDARIES.md` (encryption at each boundary, secret names and
+  `docs/history/DATA-BOUNDARIES.md` (encryption at each boundary, secret names and
   rotation, subprocessors, region, the plaintext path to an external AI
-  runtime, no end-to-end encryption claimed) and `docs/TRUST-PACKET.md`
+  runtime, no end-to-end encryption claimed) and `docs/history/TRUST-PACKET.md`
   (support, incident steps, review links, retention, certifications not
   obtained). Each carries an "Owner to confirm" list for facts the
   repository cannot show.

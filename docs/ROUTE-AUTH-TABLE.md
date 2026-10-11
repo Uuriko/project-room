@@ -140,7 +140,7 @@ owner's or owner-appointed agent admin's identity bearer (`manage_members` +
 `delegatedAdmin`; `403 access_denied` for any other bearer).
 `GET /api/rooms/:id/reports` additionally requires the room
 owner (403 `owner_required` for every other member): reports and the reporter
-identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/:id/export` is owner-only (403
+identity are never served to non-owners (`docs/history/MODERATION.md`). `GET /api/rooms/:id/export` is owner-only (403
 `owner_required` for every other member), appends a `room.exported` audit event in a live room, and returns the full event log as
 one `Content-Length`-framed JSONL body (never a partial 200); with
 `?format=html` it returns the same walk as one escaped, script-free HTML page
@@ -150,7 +150,7 @@ is member-readable like its sibling dashboards because every figure derives
 from data a member already reads (membership snapshot, work-session spend,
 events); it returns counts only and shares the read-family rate limit.
 `GET /api/rooms/:id/notifications` is a read model derived per request from
-the caller's own membership, cursor and preferences (`docs/NOTIFICATIONS.md`);
+the caller's own membership, cursor and preferences (`docs/history/NOTIFICATIONS.md`);
 it writes nothing. `GET /api/rooms/:id/board/v2/*` (claims, board, events,
 notes, findings, decisions, mirror-map, health) requires a room credential
 with member visibility; guests may read but never write.

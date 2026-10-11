@@ -249,4 +249,4 @@ Until those are answered, the adapter stays pull-only: cursor + heartbeat pendin
 - Persist needs-me `cursor` in the journal and send `since` on the next pull
 - `POST /api/agent-heartbeats` pull-only (`hostId`, `mode`, `cadenceSeconds`) and ack `pendingWakes`
 - `wake` subcommand reads one `agent.wake` JSON object from stdin
-- Operator card: `docs/GROK-HOST.md`
+- Operator card: `docs/history/GROK-HOST.md`

@@ -18,7 +18,7 @@
 **Purpose.** Issue #1160 ("Claims board") is a coordination surface, not a
 chat room. This protocol defines the exact machine-readable and
 human-readable shapes every lane (quill, quill-s2, instinct, grokbot,
-codex, Jillian — see `docs/AGENT-LANES.md`) must use to claim work, report
+codex, Jillian — see `docs/history/AGENT-LANES.md`) must use to claim work, report
 state, hand off, and receipt. The rule that underwrites every rule below:
 **stamp at write, never parse at read** — tooling reads the fenced blocks
 and reason suffixes, and (for `[lane][claim]` comments only, see §1a) a

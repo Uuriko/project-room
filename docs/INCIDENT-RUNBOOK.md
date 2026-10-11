@@ -160,7 +160,7 @@ someone not in the room (host access, DNS, a vendor).
   that relationship or the credentials. Never paste credentials into the
   incident channel; use `docs/SECRETS-ROTATION.md` if a secret may have leaked.
 - **To disaster recovery:** if data is lost or the host is gone, switch to
-  `docs/V8-RECOVERY-RUNBOOK.md` — that doc owns restore procedures; this one
+  `docs/history/V8-RECOVERY-RUNBOOK.md` — that doc owns restore procedures; this one
   owns the incident around it.
 
 Escalation is not failure. It is the system working.
