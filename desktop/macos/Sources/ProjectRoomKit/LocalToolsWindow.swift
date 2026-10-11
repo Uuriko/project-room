@@ -10,6 +10,7 @@ import CoreGraphics
     private let permissions = NSTextField(wrappingLabelWithString: "")
     private let toggle = NSButton(title: "Enable local tools", target: nil, action: nil)
     private var timer: Timer?
+    private let permissionSetup = MacPermissionSetup()
     public init(service: LocalTools? = nil) throws {
         let owned = try service ?? LocalTools()
         self.service = owned; connection = try LocalToolConnection(service: owned)
@@ -50,13 +51,6 @@ import CoreGraphics
         if let data = try? JSONSerialization.data(withJSONObject:config,options:[.prettyPrinted,.sortedKeys]), let text = String(data:data,encoding:.utf8) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string) }
     }
     @objc private func openPermissions() {
-        let alert = NSAlert(); alert.messageText = "Choose what Project Room can access"
-        alert.informativeText = "In System Settings → Privacy & Security, enable Accessibility, Screen & System Audio Recording, and Full Disk Access for Project Room as desired. Automation permissions are requested per app. Local file and process tools work within the permissions macOS actually grants."
-        alert.addButton(withTitle:"Open System Settings"); alert.addButton(withTitle:"Request app control"); alert.addButton(withTitle:"Request screen access"); alert.addButton(withTitle:"Cancel")
-        alert.beginSheetModal(for:window) { response in
-            if response == .alertFirstButtonReturn, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.systempreferences") { NSWorkspace.shared.open(url) }
-            else if response == .alertSecondButtonReturn { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary) }
-            else if response == .alertThirdButtonReturn { _ = CGRequestScreenCaptureAccess() }
-        }
+        permissionSetup.show(on: window)
     }
 }
