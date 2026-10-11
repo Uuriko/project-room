@@ -1,3 +1,4 @@
+import { RoomAssistant } from "../server/room-assistant.mjs";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
@@ -46,13 +47,23 @@ save(d);send({id:m.id,result});});`);
     f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: `message-${id}`, body: `Please finish ${id}` } });
     await owner.assistant({ action: "invoke", requestId: randomUUID(), runId: id, sourceMessageId: `message-${id}` });
   };
+  const addBacklog = count => {
+    const assistant = new RoomAssistant(f.store);
+    let clock = f.store.now(); f.store.now = () => clock;
+    for (let n = 0; n < count; n++) {
+      clock += 2100;
+      const id = `backlog-${String(n).padStart(4, "0")}`;
+      f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: `message-${id}`, body: `Please finish ${id}` } });
+      assistant.apply("commons", { action: "invoke", requestId: randomUUID(), runId: id, sourceMessageId: `message-${id}` }, () => f.store.authenticate(f.keys.owner, "commons"));
+    }
+  };
   const db = openRequestJournal(join(root, "journal.sqlite"));
   const settings = { command, cwd, codexHome: home, policy: { approvalPolicy: "never", sandbox: "read-only" }, requestTimeoutMs: 1000 };
   const directory = join(root, "watch");
   const run = (options = {}) => superviseCodexRoom({ connection, db, directory, cwd, policy: settings.policy, pollMs: 100, retryMaxMs: 400, timeoutMs: 1000,
     connect: async allowedThreadIds => { const rpc = openCodexStdio(settings, { allowedThreadIds }); try { await checkCodexProtocol(rpc, settings, { threadId: allowedThreadIds[0] }); return rpc; } catch (e) { await rpc.close(); throw e; } }, ...options });
   t.after(async () => { db.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(root, { recursive: true, force: true }); });
-  return { run, invoke, owner, directory, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => JSON.parse(readFileSync(data)), db, connection };
+  return { run, invoke, addBacklog, owner, directory, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => JSON.parse(readFileSync(data)), db, connection };
 }
 const waitUntil = async predicate => { const until = Date.now() + 8000; while (!await predicate()) { if (Date.now() > until) throw Error("Timed out waiting for fixture"); await delay(20); } };
 
@@ -151,4 +162,26 @@ test("deleted owned source blocks successor work and later Stop reconciles witho
   clearTimeout(safety);
   assert.equal((await f.owner.assistant()).runs.find(r => r.id === "first").status, "cancelled");
   assert.equal(f.runtime().starts, 1);
+});
+
+
+test("supervisor executes the oldest ask beyond the UI history window", async t => {
+  const f = await fixture(t); await f.invoke("oldest"); f.addBacklog(105);
+  assert.equal((await f.owner.assistant()).runs.some(r => r.id === "oldest"), false);
+  const stop = new AbortController(), events = [];
+  await f.run({ signal: stop.signal, emit: e => { events.push(e); if (e.status === "settled") stop.abort(); } });
+  assert.equal(events.find(e => e.status === "running").runId, "oldest");
+  assert.equal(f.runtime().starts, 1);
+});
+
+test("owned ambiguous execution outside history still blocks a newer backlog", async t => {
+  const f = await fixture(t, "ambiguous"); await f.invoke("owned-oldest");
+  const first = new AbortController();
+  await f.run({ signal: first.signal, emit: e => { if (e.status === "recovery_pending") first.abort(); } });
+  f.addBacklog(105);
+  assert.equal((await f.owner.assistant()).runs.some(r => r.id === "owned-oldest"), false);
+  const restart = new AbortController(), events = [];
+  await f.run({ signal: restart.signal, emit: e => { events.push(e); if (e.status === "recovery_pending") restart.abort(); } });
+  assert.equal(events.find(e => e.status === "running").runId, "owned-oldest");
+  assert.equal(f.runtime().starts, 1, "uncertain start is never repeated and successors stay queued");
 });

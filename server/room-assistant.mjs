@@ -1,3 +1,4 @@
+import { opaqueReadCursor } from "./opaque-read-cursor.mjs";
 import { enforceAutonomyTierForAction, getTier } from './autonomy-tiers.mjs';
 import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
 import { conversationIndex } from '../src/conversation.js';
@@ -10,6 +11,9 @@ import { createHash } from 'node:crypto';
 export const roomAssistantSchema = `
 CREATE TABLE IF NOT EXISTS room_assistant_config (room_id TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS room_assistant_runs (room_id TEXT NOT NULL, run_id TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(room_id,run_id));
+CREATE INDEX IF NOT EXISTS room_assistant_work_order ON room_assistant_runs
+(room_id, json_extract(value,'$.coordinatorMemberId'), json_extract(value,'$.createdAt'), run_id)
+WHERE json_extract(value,'$.status') NOT IN ('done','cancelled','failed');
 CREATE TABLE IF NOT EXISTS room_assistant_ops (room_id TEXT NOT NULL, actor_id TEXT NOT NULL, request_id TEXT NOT NULL, input TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(room_id,actor_id,request_id));`;
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 const terminal = new Set(['done', 'cancelled', 'failed']);
@@ -107,6 +111,58 @@ export class RoomAssistant {
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
       return { contractVersion: 1, roomId, capabilities: { atomicAdmission: true }, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
+    });
+  }
+  // Machine discovery is separate from the bounded presentation history.
+  // Every page rechecks visibility; encrypted cursors reveal no hidden offsets.
+  readWork(roomId, authorize, { runId = null, cursor = null, limit = 50 } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
+      || runId !== null && (!validId(runId) || cursor !== null))
+      fail('invalid_assistant_read', 'Choose an exact run or a bounded work page', 422);
+    return this.store.readTransaction(() => {
+      const { member } = authorize();
+      const state = this.store.room(roomId).state;
+      const floor = historyFloor(this.store.db, state, roomId, member.id);
+      const scope = JSON.stringify([roomId, state.room.createdAt, member.id]);
+      const codec = opaqueReadCursor(this.store);
+      const saved = cursor === null ? null : codec.decode(cursor);
+      if (cursor !== null && (!saved || saved.kind !== 'assistant-work' || saved.scope !== scope
+        || !Number.isFinite(saved.at) || !validId(saved.id)))
+        fail('assistant_cursor_expired', 'Restart work discovery', 409);
+      const response = runs => ({ contractVersion: 1, roomId, viewerId: member.id, runs, nextCursor: null });
+      const project = value => {
+        const run = visibleRun(JSON.parse(value), state, member, floor);
+        return run && { ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt)
+          || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
+          displayStatus: derivedRunStatus(run, this.store.now()) };
+      };
+      if (!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_runs'").get()) {
+        if (runId !== null) fail('assistant_run_missing', 'Request not found', 404);
+        return response([]);
+      }
+      if (runId !== null) {
+        const row = this.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? AND run_id=?').get(roomId, runId);
+        const run = row && project(row.value);
+        if (!run) fail('assistant_run_missing', 'Request not found', 404);
+        return response([run]);
+      }
+      // Scan at most 200 records even when visibility filters every row.
+      // Empty pages can carry a continuation; callers must follow it.
+      const rows = this.store.db.prepare(`SELECT run_id,value FROM room_assistant_runs WHERE room_id=?
+        AND json_extract(value,'$.coordinatorMemberId')=?
+        AND json_extract(value,'$.status') NOT IN ('done','cancelled','failed')
+        AND (json_extract(value,'$.createdAt')>? OR (json_extract(value,'$.createdAt')=? AND run_id>?))
+        ORDER BY json_extract(value,'$.createdAt'),run_id LIMIT 201`)
+        .all(roomId, member.id, saved?.at ?? -1, saved?.at ?? -1, saved?.id ?? '');
+      const runs = []; let consumed = 0, last;
+      for (const row of rows.slice(0, 200)) {
+        last = JSON.parse(row.value); consumed++;
+        const run = project(row.value);
+        if (run) runs.push(run);
+        if (runs.length === limit) break;
+      }
+      return { ...response(runs), nextCursor: consumed < rows.length && last
+        ? codec.encode({ kind: 'assistant-work', scope, at: last.createdAt, id: last.id }) : null };
     });
   }
   // postToken is the host's own credential, threaded from the route or MCP

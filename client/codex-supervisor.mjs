@@ -37,17 +37,26 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
     state("watching_room", { providerAuthentication: "unverified" });
     while (!controller.signal.aborted) {
       try {
-        const snapshot = await client.assistant(undefined, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
-        owner.health("watching"); failures = 0;
         const owned = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_shared_runs'").get()
           ? new Set(db.prepare("SELECT attempt_id FROM codex_shared_runs").all().map(row => row.attempt_id)) : new Set();
-        const assigned = snapshot.runs.filter(run => run.coordinatorMemberId === connection.memberId);
-        const recovering = assigned.filter(run => owned.has(run.attemptId) && recoverable.has(run.status));
-        // An unresolved owned runtime gets priority over new execution. Do not
-        // pile new work onto a profile with an ambiguous prior tool outcome.
-        const candidates = recovering.length ? recovering : assigned.filter(run => run.status === "queued" && !run.attemptId && !run.sourceDeleted);
-        candidates.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.id.localeCompare(b.id));
-        const run = candidates.find(row => (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now());
+        let cursor = null, recovering = null, queued = null, hasRecovery = false;
+        do {
+          const page = await client.assistant(undefined, { work: true, cursor,
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+          for (const row of page.runs) {
+            if (row.coordinatorMemberId !== connection.memberId) continue;
+            const ready = (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now();
+            if (owned.has(row.attemptId) && recoverable.has(row.status)) {
+              hasRecovery = true;
+              if (ready && !recovering) recovering = row;
+            } else if (ready && !queued && row.status === "queued" && !row.attemptId && !row.sourceDeleted) queued = row;
+          }
+          cursor = page.nextCursor;
+        } while (cursor !== null && !controller.signal.aborted);
+        owner.health("watching"); failures = 0;
+        // Retain only two candidates, not the entire backlog. A recovery still
+        // in backoff blocks new work even when it appears on a later page.
+        const run = hasRecovery ? recovering : queued;
         if (!run) { await pause(pollMs); continue; }
         try {
           if (!rpc) { rpc = await connect(scopedCodexThreads(db, connection)); state("protocol_qualified", { providerAuthentication: "unverified" }); }

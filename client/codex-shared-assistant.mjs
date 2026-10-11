@@ -52,7 +52,7 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   if (snapshot.viewerId !== connection.memberId) throw new Error("Wrong Room identity");
   const roomCreatedAt = snapshot.state.room.createdAt;
   const read = async () => {
-    const state = await client.assistant(undefined, { signal });
+    const state = await client.assistant(undefined, { signal, runId });
     const run = state.runs.find(item => item.id === runId);
     if (!run || run.coordinatorMemberId !== connection.memberId) throw new Error("Shared run is not assigned to this member");
     return run;

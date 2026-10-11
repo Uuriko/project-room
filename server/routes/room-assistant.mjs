@@ -32,7 +32,10 @@ export async function roomAssistantRoute(ctx) {
   const assistant=new RoomAssistant(ctx.store);
   // Atomic invoke and publish post as the caller; retain the authenticated
   // credential for ordinary message validation inside the shared transaction.
-  const value=write ? assistant.apply(roomId,input,authorize,selected.token) : assistant.list(roomId,authorize);
+  const machineRead = ctx.url.searchParams.has('runId') || ctx.url.searchParams.get('view') === 'work';
+  const value=write ? assistant.apply(roomId,input,authorize,selected.token) : machineRead
+    ? assistant.readWork(roomId,authorize,{runId:ctx.url.searchParams.get('runId'),cursor:ctx.url.searchParams.get('cursor'),limit:Number(ctx.url.searchParams.get('limit') ?? 50)})
+    : assistant.list(roomId,authorize);
   return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
 }
 export const ROOM_ASSISTANT_ROUTES=Object.freeze(['GET','HEAD','POST'].map(method=>Object.freeze({id:`room-assistant-${method.toLowerCase()}`,method,path:'/api/rooms/{roomId}/assistant',auth:'room',capability:null,scope:'room',handler:roomAssistantRoute,schema:{params,...(method==='POST'?{body}:{}),response:{type:'object'}},events:[]})));
