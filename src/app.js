@@ -301,6 +301,8 @@ let retentionUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Ephemeral previews never enter authoritative room state or draft recovery.
+const localMessageEchoes = new Map();
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
 const workNavigationOrigins = new Map();
@@ -445,6 +447,8 @@ const client = new RoomClient({
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
   onAccessEnded() {
+    for (const echo of localMessageEchoes.values()) echo.node.remove();
+    localMessageEchoes.clear();
     closeRoomActions(false);
     const endedContext = accessEndContext;
     accessEndContext = null;
@@ -2285,6 +2289,10 @@ function renderMessages() {
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
   const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  for (const [id, echo] of localMessageEchoes) {
+    if (echo.generation !== client.generation || echo.memberId !== session?.member?.id || conversation.byId.has(id)) localMessageEchoes.delete(id);
+  }
+  const localEchoes = [...localMessageEchoes.values()].filter(echo => echo.roomId === state.room.id && echo.channelId === activeChannelId && echo.threadId === currentThreadId);
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
@@ -2336,6 +2344,7 @@ function renderMessages() {
   const savedSelection = captureTimelineSelection(list);
   // Message IDs are caller-controlled and may themselves begin with "work:".
   const keep = new Set(messages.map(m => `message:${m.id}`));
+  for (const echo of localEchoes) keep.add(echo.node.dataset.key);
   if (hiddenCount) keep.add(TIMELINE_PAGER_KEY);
   // Board claim lines carry no data-key, so the map above holds only the last
   // one; any left in the list made the reorder below move every message row
@@ -2444,8 +2453,9 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
+  merged.push(...localEchoes.map(echo => echo.node));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  if (!messages.length && !workEntries.length && !localEchoes.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -4019,18 +4029,42 @@ $("#message-form").addEventListener("submit", e => {
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
   saveComposer();
-  const generation = client.generation, draftKey = composerKey();
+  const generation = client.generation, draftKey = composerKey(), command = pendingMessage.command;
+  const echoId = data.messageId || command.id;
+  const fastText = session.member.kind === "human" && !askRoom && !assistantDraft && !composerFiles.length && localMessageEchoes.size < 50;
+  if (fastText) {
+    const node = document.createElement("li");
+    node.className = "message"; node.dataset.key = `local:${echoId}`;
+    node.dataset.localMessageId = echoId; node.setAttribute("aria-busy", "true");
+    node.style.opacity = "0.65";
+    node.innerHTML = `<div class="message-avatar human" aria-hidden="true">${initials(session.member.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(name(session.member.id))}</strong></div>${data.toMemberId ? `<div class="message-context"><span class="audience-chip">To ${esc(name(data.toMemberId))} · private</span></div>` : ""}<div class="message-body">${bodyHtmlCache.html(data.body, Object.values(state.members), esc, echoId)}</div></div>`;
+    localMessageEchoes.set(echoId, { node, generation, memberId: session.member.id, roomId: state.room.id, channelId: activeChannelId, threadId: currentThreadId });
+    renderMessages();
+  }
   submit(e.currentTarget, async () => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
-    locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+    locallyOwnedMessageIds.add(data.messageId || command.id);
     try {
-      await client.send(pendingMessage.command);
+      await client.send(command, { waitForRefresh: !fastText });
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
+      localMessageEchoes.delete(echoId);
+      throw mapDmConsentRefusal(command, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
+    if (fastText) {
+      localMessageEchoes.get(echoId)?.node.setAttribute("aria-busy", "false");
+      // Navigation may have restored another destination's draft while the receipt was pending.
+      if (drafts.get(draftKey)?.pending?.command?.id === command.id) drafts.clear(draftKey);
+      if (composerKey() === draftKey && pendingMessage?.command?.id === command.id) {
+        $("#message-input").value = ""; pendingMessage = null; clearReply();
+        $("#also-send-to-channel").checked = false;
+      }
+      persistDrafts();
+      maybeShowGuestUpgradeHint();
+      return;
+    }
     await commitComposerFiles(data.messageId);
     if (generation !== client.generation || !state) return;
     drafts.clear(draftKey);
