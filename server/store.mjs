@@ -1128,12 +1128,14 @@ const LOOKUP_INDEXES = `
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Commit and rollback of a write transaction drop
-// the whole cache, including a parse of uncommitted bytes. Callers receive
+// write drops the entry. Rollback drops any parse of uncommitted bytes;
+// unrelated successful side-table commits keep the frozen projection. Callers receive
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+// Conservative dependency detection also admits quoted/schema-qualified SQL,
+// conflict clauses and body-at-rest writes. False positives only cost a reload.
+const ROOMS_WRITE = /\b(?:insert|update|delete|replace|drop|alter)\b[\s\S]*\b(?:rooms|projection_bodies)\b/i;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1193,6 +1195,7 @@ export class RoomStore {
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
     this.storagePlatform = storagePlatform;
+    this._armProjectionWatch();
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
@@ -2589,8 +2592,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
+  // Discard parsed projections on rollback so uncommitted bytes cannot survive.
+  // Successful projection mutations are invalidated by the SQL watcher below.
   _dropProjectionCache() { this._projectionCache?.clear(); }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -2599,22 +2602,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
-        const run = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const result = run(...args);
-          cache()?.clear();
-          return result;
-        };
+      if (typeof sql === "string" && ROOMS_WRITE.test(sql)) {
+        for (const method of ["run", "get", "all"]) {
+          if (typeof stmt[method] !== "function") continue;
+          const execute = stmt[method].bind(stmt);
+          stmt[method] = (...args) => {
+            try { return execute(...args); }
+            finally { cache()?.clear(); }
+          };
+        }
       }
       return stmt;
     };
     if (typeof this.db.exec === "function") {
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
-        const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
-        return result;
+        try { return exec(sql); }
+        finally { if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear(); }
       };
     }
   }
@@ -2631,7 +2635,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (outermost || isolated) this._dropProjectionCache();
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
