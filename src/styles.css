@@ -233,6 +233,11 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .receipt-attribution dt { color: #87a59b; font-size: .75rem; }
 .receipt-attribution dd { margin: 0; color: #d6e8e1; font-size: .875rem; overflow-wrap: anywhere; }
 .receipt p { margin-bottom: .55rem; color: #cce2da; font-size: .77rem; line-height: 1.45; }
+/* 360px overflow: the card renders reporter-supplied summary/nextAction/
+   verification text; long unbroken tokens (hashes, URLs, file paths) must
+   wrap instead of overflowing the card. overflow-wrap is not inherited, so
+   the paragraphs need it directly (dd and code already have it). */
+.receipt p { overflow-wrap: anywhere; }
 .receipt a { display: inline-block; font-size: .72rem; text-decoration: none; }
 .receipt code { float: right; color: #9bbbae; font-size: .68rem; }
 .loop-warning { margin: .5rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--amber); background: #241b12; color: #e8caa8; font-size: .75rem; line-height: 1.5; }

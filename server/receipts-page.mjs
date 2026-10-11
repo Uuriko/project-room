@@ -24,7 +24,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:17px/1.55 var(--font-s
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:var(--blue)}
-.card,.detail{overflow-wrap:anywhere;word-break:break-word;max-width:100%}
+.card,.detail,h1{overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .card{border-top:1px solid var(--line);padding:1rem 0}
 .meta{color:var(--muted);font-size:.9rem}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
