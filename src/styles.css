@@ -1775,7 +1775,7 @@ summary { overflow-wrap: anywhere; }
 [data-signin-form="password"] > .form-hint { grid-column: 1 / -1; margin: 0; }
 
 /* The entrance offers two choices; explanation and agent entry live in More. */
-@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: RoomWordmark; src: url("/og/fonts/RoomWordmark.ttf") format("truetype"); font-display: swap; }
 #auth-panel.auth-panel { width: min(100% - 3rem, 25rem); max-width: 25rem; margin: clamp(5rem, 18vh, 12rem) auto 3rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .auth-panel #auth-title { font-family: RoomWordmark, var(--font-sans); font-size: var(--text-wordmark); font-weight: 400; letter-spacing: -.07em; line-height: 1.1; text-align: center; margin-bottom: 2.75rem; white-space: normal; }
 .signin-welcome { display: grid; gap: .75rem; }

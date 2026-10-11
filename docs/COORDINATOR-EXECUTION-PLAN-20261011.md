@@ -265,3 +265,13 @@ Human flow is the performance contract: open the app, find the conversation, typ
 6. **Release qualification:** run the coherent human-speed/admission/cache stack through exact-head CI and native smoke checks, then deploy through the shared lane and repeat the same measurements. All changes above remain local until that happens.
 
 Checkpoint validation: 1,698 affected tests passed; 13 focused backend/cache/admission tests passed; 24 browser checks passed with the then-disabled large-history case skipped. Re-enabled that existing case after confirming windowing exists: it separately passed with 2,000 stored messages and 100 live DOM message nodes. Lint passed with 0 errors/128 warnings. The sentinel render timing is post-login and must not be described as end-to-end startup latency.
+
+### Follow-up: entrance font and snapshot composition
+
+The production waterfall identified Inter-Regular.ttf as ~200KB transferred/411640 bytes decoded, solely for the fixed PROJECT ROOM title. The login now uses a 6512-byte subset of the same licensed font; the original remains available for Open Graph generation. Browser canvas comparison at 38px confirmed identical pixels and advance width (302.181640625px), and the mobile login was visually inspected. Both public asset allowlists include the new font; Miniflare verifies edge delivery, font MIME type, bytes and HEAD behavior without entering the Durable Object. Reproduction command and fonttools version are in THIRD_PARTY.md.
+
+Local throttled mobile retest transferred 2157245 bytes versus 2562375 before. LCP was 10748ms versus 10772ms: no meaningful startup latency improvement established by this single comparison. The eager module graph remains the larger startup problem. The production failed request was the Cloudflare analytics beacon, not a missing product asset.
+
+One authenticated recent-snapshot composition sample: eventLog 78508 bytes/100 entries; messages 73082 bytes/100 entries; members 19961; replyRequests 10946; workItems 9350. Roughly 40% of the ~198KB decoded response is the audit tail. Next investigate an explicitly negotiated lightweight chat snapshot with on-demand audit loading, preserving existing event-dependent UI and legacy clients. Do not simply delete eventLog: hidden record UI and other selectors still consume it. Prioritize this over shrinking already-small channels or pins.
+
+Font checkpoint validation: 1698 affected tests and 2 edge tests passed; full lint passed (0 errors,128 warnings). Rebuilding the subset with the documented command produced byte-identical output. This is local source; no production speedup claimed.
