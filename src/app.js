@@ -8,7 +8,7 @@ import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { TIMELINE_WINDOW, windowTimeline, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
-import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
+import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, settleDoneChipReplay, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
@@ -1911,7 +1911,9 @@ function renderContent(selector, html) {
   const container = $(selector);
   if (container._content === html) return;
   const saved = captureDisclosures(container);
-  container.innerHTML = html; container._content = html;
+  // One-shot done-chip pop: a re-mount of already-shown chips must not replay.
+  container.innerHTML = settleDoneChipReplay(container._content, html);
+  container._content = html;
   restoreDisclosures(container, saved);
 }
 // W4-43 H1: the three starter recipes surface as dismissible suggestion chips.
@@ -2402,7 +2404,13 @@ function renderMessages() {
                 continue;
               }
             }
-            before.innerHTML = after.innerHTML;
+            // One-shot done-chip pop: a re-mount of already-shown chips in the
+            // message links must not replay (the links render chips for
+            // terminal work, and this section re-mounts on reply/reaction
+            // changes).
+            before.innerHTML = selector === ".message-links"
+              ? settleDoneChipReplay(before.innerHTML, after.innerHTML)
+              : after.innerHTML;
           }
         }
       }
@@ -3532,7 +3540,10 @@ function makeTimelineWorkNode(entry) {
 function setTimelineWorkNode(wnode, html) {
   if (wnode._content === html) return;
   const saved = captureDisclosures(wnode);
-  wnode.innerHTML = html; wnode._content = html;
+  // One-shot done-chip pop: a re-mount of an already-shown chip must not
+  // replay (folded updates re-render the whole card on any content change).
+  wnode.innerHTML = settleDoneChipReplay(wnode._content, html);
+  wnode._content = html;
   restoreDisclosures(wnode, saved);
 }
 // Use the same interleave for background card refreshes and message arrivals.

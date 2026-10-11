@@ -254,6 +254,22 @@ export function doneChip(item) {
   return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">✓ Done</span>` : "";
 }
 
+// One-shot done-chip motion (wave500-g8-a11y-06): the pop celebrates the
+// terminal state change, not the mount. Folded updates re-render whole cards,
+// message sections, and the presence list via innerHTML swaps; with the
+// animation bound to .done-chip itself, every re-mount replayed the pop.
+// Call with the previous and next markup before swapping: when the chip was
+// already shown, the returned markup carries the settled marker and CSS
+// skips the animation. A genuinely new chip (absent before) keeps the
+// one-shot. Pure string in/out — no DOM needed, safe for isomorphic use.
+export const DONE_CHIP_SETTLED_CLASS = "done-chip--settled";
+const DONE_CHIP_CLASS_ATTR = 'class="done-chip"';
+export function settleDoneChipReplay(previousHtml, nextHtml) {
+  if (typeof previousHtml !== "string" || !previousHtml.includes(DONE_CHIP_CLASS_ATTR)) return nextHtml;
+  if (!nextHtml.includes(DONE_CHIP_CLASS_ATTR)) return nextHtml;
+  return nextHtml.replaceAll(DONE_CHIP_CLASS_ATTR, `class="done-chip ${DONE_CHIP_SETTLED_CLASS}"`);
+}
+
 // F3: derived per-item change list from the item's own revision events.
 // Read-time only: the event log is the record; this assigns each revision
 // event the revision it produced (proposal is revision 0) so a viewer holding

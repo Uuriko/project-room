@@ -459,6 +459,10 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 }
 @media (prefers-reduced-motion: no-preference) {
   .done-chip { animation: done-chip-pop .42s cubic-bezier(.22, 1.35, .36, 1) both; }
+  /* One-shot guard (wave500-g8-a11y-06): a re-mounted chip that was already
+     shown carries .done-chip--settled (see settleDoneChipReplay) and skips
+     the pop — the animation plays on the terminal transition only. */
+  .done-chip.done-chip--settled { animation: none; }
 }
 .member-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: .1rem 0 .15rem; }
 .member-actions .text-button { min-height: 24px; font-size: .75rem; }
