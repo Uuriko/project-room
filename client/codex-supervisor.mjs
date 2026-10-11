@@ -4,6 +4,19 @@ import { WatchJournal } from "./watch-journal.mjs";
 import { runCodexSharedAssistant } from "./codex-shared-assistant.mjs";
 
 const recoverable = new Set(["working", "unknown", "resume_requested", "pause_requested", "cancel_requested"]);
+// Room refusals that no retry can fix: the credential or origin is wrong. Stop
+// and tell the operator to reconnect instead of looping and respawning Codex.
+const PERMANENT_CODES = new Set(["unauthenticated", "invalid_token", "token_revoked", "origin_denied", "host_denied", "forbidden", "not_a_member", "member_removed"]);
+export const isPermanentRoomError = error => error?.status === 401 || error?.status === 403 || PERMANENT_CODES.has(error?.code);
+// A lost claim race: another host owns the attempt. Nothing is wrong locally.
+const isClaimRace = error => ["assistant_revision_conflict", "assistant_attempt_changed"].includes(error?.code)
+  || /already owned|Another host owns/.test(String(error?.message));
+// Honour the server's Retry-After when it asks for longer than our own backoff.
+export const retryDelay = (error, backoffMs, maxMs = 300000) =>
+  Math.min(maxMs, Math.max(backoffMs, Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0 ? error.retryAfterMs : 0));
+export class ReconnectAgentError extends Error {
+  constructor(cause) { super("Room refused this agent's connection; reconnect this agent"); this.code = "reconnect_agent"; this.cause = cause; }
+}
 export function scopedCodexThreads(db, connection) {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_runtime_attempts'").get()) return [];
   return db.prepare("SELECT binding,thread_id FROM codex_runtime_attempts WHERE thread_id IS NOT NULL").all()
@@ -23,7 +36,7 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
   const abort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
-  let rpc, control, monitorError, failures = 0;
+  let rpc, control, monitorError, authError, failures = 0;
   const scope = JSON.stringify([connection.origin, connection.roomId, connection.memberId]);
   const state = (status, extra = {}) => emit({ type: "host_status", status, ...extra });
   const pause = ms => delay(ms, undefined, { signal: controller.signal }).catch(error => { if (!controller.signal.aborted) throw error; });
@@ -59,18 +72,22 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
           state("settled", { runId: run.id, runStatus: result.result.status, resultMessageId: result.result.resultMessageId ?? null });
         } catch (error) {
           if (controller.signal.aborted) break;
+          if (isPermanentRoomError(error)) { authError = error; break; }
+          if (isClaimRace(error)) { state("skipped_owned_elsewhere", { runId: run.id }); await pause(pollMs); continue; }
           const count = (db.prepare("SELECT failures FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, run.id)?.failures ?? 0) + 1;
-          const retryAt = Date.now() + Math.min(retryMaxMs, pollMs * 2 ** Math.min(count, 10));
+          const retryAt = Date.now() + retryDelay(error, Math.min(retryMaxMs, pollMs * 2 ** Math.min(count, 10)));
           db.prepare("INSERT INTO codex_supervisor_retry VALUES(?,?,?,?) ON CONFLICT(scope,run_id) DO UPDATE SET failures=excluded.failures,retry_at=excluded.retry_at").run(scope, run.id, count, retryAt);
           state("recovery_pending", { runId: run.id, retryAt, code: error.code ?? "runtime_or_room_unavailable" });
-          await rpc?.close(); rpc = undefined;
+          // Only a runtime-side failure warrants a fresh Codex process.
+          if (!(error?.status > 0)) { await rpc?.close(); rpc = undefined; }
         }
         // Bound repeated revocation/conflict reads too, not only idle polling.
         await pause(pollMs);
       } catch (error) {
         if (controller.signal.aborted) break;
+        if (isPermanentRoomError(error)) { authError = error; break; }
         owner.health("retrying"); failures++;
-        const retryMs = Math.min(retryMaxMs, pollMs * 2 ** Math.min(failures, 10));
+        const retryMs = retryDelay(error, Math.min(retryMaxMs, pollMs * 2 ** Math.min(failures, 10)));
         state("retrying_room", { retryMs, code: error.code ?? "room_unavailable" });
         await pause(retryMs);
       }
@@ -80,7 +97,9 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
     try { await rpc?.close(); } finally {
       try { owner.health("stopped"); } catch (error) { monitorError ??= error; } finally { owner.close(); }
     }
+    if (authError) state("stopped_auth", { code: authError.code ?? `http_${authError.status}`, action: "reconnect_agent" });
     state("stopped");
   }
   if (monitorError) throw monitorError;
+  if (authError) throw new ReconnectAgentError(authError);
 }
