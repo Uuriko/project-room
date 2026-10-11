@@ -1,5 +1,6 @@
 import { RoomAssistant } from '../room-assistant.mjs';
 import { validId } from '../../src/events.js';
+import { FULL_READ_HINT_MS, assistantChangeKind, assistantChangeState, changedRuns, parseAssistantCursor } from '../room-assistant-changes.mjs';
 const id={type:'string',minLength:1,maxLength:128};
 const params={type:'object',required:['roomId'],properties:{roomId:id}};
 const body={type:'object',required:['action','requestId'],additionalProperties:false,properties:{
@@ -31,7 +32,23 @@ export async function roomAssistantRoute(ctx) {
   const assistant=new RoomAssistant(ctx.store);
   // publish posts the run's answer as the coordinator; thread the caller's
   // own credential so the fenced post authenticates as the reserved host.
-  const value=write ? assistant.apply(roomId,input,authorize,selected.token) : assistant.list(roomId,authorize);
+  if(write) return ctx.json(ctx.res,200,assistant.apply(roomId,input,authorize,selected.token),false);
+  // Reads carry a cursor; ?since=<cursor> answers none, delta or full (see
+  // server/room-assistant-changes.mjs). The change state is read before the
+  // projection, so a concurrent write is delivered again, never lost.
+  const since=parseAssistantCursor(ctx.url.searchParams.get('since'));
+  if(since?.invalid) ctx.reject(422,'invalid_assistant_cursor','Pass since exactly as the cursor from a previous read');
+  const current=assistantChangeState(ctx.store.db,roomId);
+  const kind=assistantChangeKind(since,current);
+  let value;
+  const quiet={contractVersion:1,roomId,cursor:current.cursor,changes:'none',runs:[],fullReadHintMs:FULL_READ_HINT_MS};
+  if(kind==='none') value=quiet;
+  else {
+    const full=assistant.list(roomId,authorize);
+    if(kind==='plain') value={...full,cursor:current.cursor};
+    else if(kind==='full') value={...full,cursor:current.cursor,changes:'full',fullReadHintMs:FULL_READ_HINT_MS};
+    else { const runs=changedRuns(full.runs,since); value=runs.length ? {...full,runs,cursor:current.cursor,changes:'delta',fullReadHintMs:FULL_READ_HINT_MS} : quiet; }
+  }
   return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
 }
 export const ROOM_ASSISTANT_ROUTES=Object.freeze(['GET','HEAD','POST'].map(method=>Object.freeze({id:`room-assistant-${method.toLowerCase()}`,method,path:'/api/rooms/{roomId}/assistant',auth:'room',capability:null,scope:'room',handler:roomAssistantRoute,schema:{params,...(method==='POST'?{body}:{}),response:{type:'object'}},events:[]})));
