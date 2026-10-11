@@ -177,3 +177,12 @@ An isolated prototype with React19.3.0 and assistant-ui0.15.27 passed against a 
 This initial harness uses polling and fixture HTTP credentials solely to qualify rendering/state compatibility. Production integration must use Room's existing scoped event stream and session controller. Streaming, Stop, edit/reactions, private-content boundaries, history, accessibility, native WebKit and comparative performance remain unqualified in the prototype. The screenshot is an engineering fixture, not the proposed final design.
 
 Current connected-workspace acceptance independently passes browser ask → automatic supervisor pickup → one result → exact-attempt Stop → restart without duplicate execution. The provider subprocess is deterministic test code; this does not establish a real authenticated model turn. 228 affected checks and repository lint passed; full-suite results are tracked separately.
+
+
+### Combined checkpoint qualification
+
+After integrating the status CLI and native host, the browser acceptance still passes. Its deterministic provider explicitly requires no external authentication; a missing real account remains blocked. Fixture state is atomically replaced to avoid partial JSON reads.
+
+Native Swift → actual host CLI → real fixture Room server → owned status → actual Stop passed6 integration checks; native process lifecycle passed18 checks. No real model turn or installed-app qualification is implied.
+
+Full npm test completed with9,368 pass /28 fail /10 skip. An independent isolated checkout of unchanged baseline83746c5b reproduced all28 failures in the same9 files. These include Linux-only configured-host sandbox checks on Mac, canonical temporary-path fixture assumptions, a compressed-image golden and a same-millisecond timestamp assertion. Keep Linux sandbox enforcement; improve the relevant portability/fixture checks separately. This establishes that these28 failures are not introduced here, not that the whole release is qualified.

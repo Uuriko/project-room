@@ -22,16 +22,16 @@ test('browser asks are picked up automatically, Stop reaches the runtime, restar
   writeFileSync(audit, JSON.stringify({ threads: {}, starts: 0, interrupts: 0 }));
   writeFileSync(executable, `#!${process.execPath}
 import readline from 'node:readline';
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 const file=${JSON.stringify(audit)}, send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
-const load=()=>JSON.parse(readFileSync(file)), save=v=>writeFileSync(file,JSON.stringify(v));
+const load=()=>JSON.parse(readFileSync(file)), save=v=>{writeFileSync(file+'.tmp',JSON.stringify(v));renameSync(file+'.tmp',file);};
 readline.createInterface({input:process.stdin}).on('line',line=>{
   const m=JSON.parse(line); if(m.method==='initialized')return;
   if(m.id==null)throw Error('Unexpected notification');
   const d=load(), p=m.params??{};let result;
   switch(m.method){
     case 'initialize':result={};break;
-    case 'account/read':result={account:null,requiresOpenaiAuth:true};break;
+    case 'account/read':result={account:null,requiresOpenaiAuth:false};break;
     case 'thread/start':{const id='thread-'+Object.keys(d.threads).length;d.threads[id]={id,turns:[]};result={thread:d.threads[id]};break;}
     case 'thread/name/set':result={};break;
     case 'thread/read':case 'thread/resume':if(!d.threads[p.threadId])throw Error('Unknown thread');result={thread:d.threads[p.threadId]};break;
