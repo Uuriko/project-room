@@ -1012,7 +1012,10 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   if (db) {
     for (const memberId of squadMentionTargets(db, roomId, body, senderMemberId, members, data?.toMemberId)) {
       if (members[memberId]?.kind !== "agent") continue;
-      if (!targets.has(memberId)) targets.set(memberId, "squad-mention");
+      // WAVE-500 g5: the wake queue only knows mention|dm (WAKE_KINDS + the
+      // DB CHECK) — a squad mention wakes as a plain mention. Emitting the
+      // raw "squad-mention" kind made enqueueWake 422 the whole message post.
+      if (!targets.has(memberId)) targets.set(memberId, "mention");
     }
   }
   const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
