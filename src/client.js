@@ -558,7 +558,7 @@ export class RoomClient {
     const held = this.held;
     return held && held.generation === this.generation && held.session === this.session && Array.isArray(held.messages) ? held : null;
   }
-  async send(command) {
+  async send(command, { waitForRefresh = true } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
     const generation = this.generation;
     try {
@@ -567,7 +567,13 @@ export class RoomClient {
       if (generation === this.generation && this.session) {
         if (!this.ownsAccountSession()) this.endAccess();
         else {
-          try { await this.refresh(receipt); } catch (error) { if (generation === this.generation) this.handleFailure(error); }
+          // Ordinary chat can release the composer as soon as its write commits.
+          // Keep reconciliation coalesced with SSE, and always consume failures:
+          // a failed read cannot turn a committed write into a failed send.
+          const refreshed = this.refresh(receipt).catch(error => {
+            if (generation === this.generation) this.handleFailure(error);
+          });
+          if (waitForRefresh) await refreshed;
         }
       }
       return receipt;
