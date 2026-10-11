@@ -637,6 +637,7 @@ export async function handleWorkClaims(options) {
         ? options.githubToken
         : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
       pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
+        store: options.store,
         fetchImpl: options.fetchPullRequest ?? fetch,
         token: credential || null,
         nowMs
@@ -854,7 +855,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     let checked = 0;
     const rateLimited = pullBatch.skipped || pullBatch.rateLimitedUntil != null;
     for (const result of pullBatch.results) {
-      if (result.kind === "rateLimited") continue;
       const current = registry.get(roomId, result.claimId);
       checked += 1;
       if (commitPullRequestLookup(store, registry, roomId, current, result, nowMs)) updated += 1;

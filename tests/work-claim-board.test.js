@@ -19,11 +19,11 @@ const stripTrust = value => JSON.parse(JSON.stringify(value, (key, entry) => (ke
 const SHA = "a".repeat(40);
 const MAIN = "b".repeat(40);
 
-function githubResponse(body, { status = 200, etag = null } = {}) {
+function githubResponse(body, { status = 200, etag = null, headers = {} } = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: { get: name => (name.toLowerCase() === "etag" ? etag : null) },
+    headers: { get: name => (name.toLowerCase() === "etag" ? etag : headers[name.toLowerCase()] ?? null) },
     text: async () => JSON.stringify(body),
     json: async () => body
   };
@@ -31,31 +31,34 @@ function githubResponse(body, { status = 200, etag = null } = {}) {
 
 function fakeGitHub(phase) {
   return async url => {
-    const target = String(url);
+    const target = new URL(url).pathname;
+    phase.calls?.push(target);
     if (target.includes("/pulls/")) {
-      return githubResponse({ state: "open", merged: false, head: { sha: phase.headSha ?? SHA } }, { etag: "\"pull\"" });
+      return githubResponse({ state: "open", merged: false, head: { sha: phase.headSha ?? SHA }, base: { ref: "main" } }, { etag: "\"pull\"" });
     }
     if (target.endsWith("/status")) {
       const failure = phase.failure === true;
       return githubResponse({
         state: failure ? "failure" : "pending",
         total_count: 1,
-        statuses: [{ state: failure ? "failure" : "pending", target_url: "https://example.com/ci" }]
+        statuses: [{ id: 1, context: "required", state: failure ? "failure" : "pending", target_url: "https://example.com/ci" }]
       });
     }
     if (target.endsWith("/check-runs")) {
+      if (phase.limitChecks) { phase.limitChecks = false; return githubResponse({}, { status: 429, headers: { "retry-after": "120" } }); }
       return githubResponse({
-        check_runs: phase.failure === true
-          ? [{ conclusion: "failure" }]
-          : [{ status: "in_progress", conclusion: null }]
+        total_count: 1,
+        check_runs: [{ id: 2, name: "required", head_sha: phase.headSha ?? SHA, status: phase.failure ? "completed" : "in_progress", conclusion: phase.failure ? "failure" : null }]
       });
     }
+    if (target.endsWith("/rules/branches/main")) return githubResponse([]);
+    if (target.endsWith("/branches/main")) return githubResponse({ name: "main", protected: true, protection: { required_status_checks: { checks: [{ context: "required", app_id: null }] } } });
     if (target.endsWith("/commits/main")) return githubResponse({ sha: MAIN });
     throw new Error(`unexpected GitHub url ${target}`);
   };
 }
 
-async function fixture(t, { phase = { failure: false }, databasePath = ":memory:" } = {}) {
+async function fixture(t, { phase = { failure: false }, databasePath = ":memory:", githubToken = "test-token" } = {}) {
   const store = new RoomStore(databasePath);
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
@@ -72,7 +75,7 @@ async function fixture(t, { phase = { failure: false }, databasePath = ":memory:
   const server = createRoomServer({
     store,
     fetchPullRequest: fakeGitHub(phase),
-    githubToken: "test-token"
+    githubToken
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
@@ -231,6 +234,8 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   assert.equal(claimed.status, 200);
   const pending = await call(coordKey, "/work-claims/sweep", {});
   assert.equal(pending.status, 200);
+  assert.equal(store.workClaims.get("commons", "ci-1").ci, null, "budgeted evidence remains unknown until complete");
+  await call(coordKey, "/work-claims/sweep", {});
   const pendingItem = store.workClaims.get("commons", "ci-1");
   assert.equal(pendingItem.ci.state, "pending");
   assert.equal(pendingItem.ci.headSha, SHA);
@@ -246,6 +251,7 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   });
   const failed = await call(coordKey, "/work-claims/sweep", {});
   assert.equal(failed.status, 200);
+  await call(coordKey, "/work-claims/sweep", {});
   const failedItem = store.workClaims.get("commons", "ci-1");
   assert.equal(failedItem.ci.state, "failure");
   assert.equal(failedItem.ci.url, "https://example.com/ci");
@@ -253,6 +259,34 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   const wake = store.db.prepare("SELECT kind, message_id FROM agent_wake_signals WHERE agent_id=?").get("coord");
   assert.equal(wake.kind, "mention");
   assert.match(wake.message_id, /ci-1:ci:failure/);
+});
+
+// The HTTP sweep must use the same durable continuation and shared hold as
+// the cron; a route-only cursor previously discarded the legacy failure.
+test("anonymous manual sweeps retain partial failures through a rate-limit hold", async t => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const phase = { failure: true, limitChecks: true, calls: [] };
+  const f = await fixture(t, { phase, githubToken: null });
+  await f.call(f.coordKey, "/work-claims", { id: "manual-ci", pullRequest: "https://github.com/acme/demo/pull/7" });
+  await f.call(f.coordKey, "/work-claims/manual-ci/claim", {});
+  const sweep = async () => {
+    const before = phase.calls.length;
+    const result = await f.call(f.coordKey, "/work-claims/sweep", {});
+    assert.equal(result.status, 200);
+    assert.ok(phase.calls.length - before <= 1);
+    now += 60_000;
+    return result.value;
+  };
+  await sweep(); await sweep();
+  assert.equal((await sweep()).pullRequests.rateLimited, true);
+  assert.equal(f.store.workClaims.get("commons", "manual-ci").ci, null);
+  const count = phase.calls.length;
+  assert.equal((await sweep()).pullRequests.rateLimited, true);
+  assert.equal(phase.calls.length, count);
+  for (let n = 0; n < 8 && f.store.workClaims.get("commons", "manual-ci").ci == null; n++) await sweep();
+  assert.equal(f.store.workClaims.get("commons", "manual-ci").ci.state, "failure");
+  assert.equal(phase.calls.filter(path => path.endsWith("/status")).length, 1, "the pre-limit status survives the hold");
 });
 
 test("review records refuse the owner and a chat agent, and a changes request wakes the owner", async t => {
@@ -411,6 +445,7 @@ test("approval remains bound to the reviewed revision and observed pull-request 
       const id = `basis-${changed}`;
       const claim = await startReviewedClaim(f, id, "distinct_member", { revision: "revision-one", pullRequest: "https://github.com/acme/demo/pull/7" });
       assert.equal((await f.call(f.ownerKey, "/work-claims/sweep", {})).status, 200);
+      assert.equal((await f.call(f.ownerKey, "/work-claims/sweep", {})).status, 200);
       const body = { verdict: "approve", summary: "Reviewed revision one" };
       const review = await f.call(f.coordKey, `/work-claims/${id}/review`, body);
       assert.equal(review.status, 200);
@@ -428,6 +463,7 @@ test("approval remains bound to the reviewed revision and observed pull-request 
         phase.headSha = MAIN;
         f.store.workClaims.set("commons", { ...current, pullRequest: { ...current.pullRequest, nextPollAt: null, ciCursor: "done" } });
         assert.equal((await f.call(f.ownerKey, "/work-claims/sweep", {})).status, 200);
+      assert.equal((await f.call(f.ownerKey, "/work-claims/sweep", {})).status, 200);
         assert.equal(f.store.workClaims.get("commons", id).ci.headSha, MAIN);
       }
       await refusedCompletion(f, id, "coord");

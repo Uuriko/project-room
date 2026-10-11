@@ -71,7 +71,10 @@ async function readJson(response) {
       if (text.length > MAX_BODY_CHARS) return { error: true };
       return { body: JSON.parse(text) };
     }
-    if (typeof response.json === "function") return { body: await response.json() };
+    if (typeof response.json === "function") {
+      const body = await response.json();
+      return JSON.stringify(body).length <= MAX_BODY_CHARS ? { body } : { error: true };
+    }
   } catch { /* unreadable body */ }
   return { error: true };
 }
@@ -118,17 +121,17 @@ async function lookupPull(pullRequest, { fetchImpl, token, nowMs, deadline = Inf
   if (read.error) return { kind: "error", etag };
   const outcome = pullRequestOutcomeFromApi(read.body);
   const headSha = typeof read.body?.head?.sha === "string" && /^[0-9a-f]{40}$/.test(read.body.head.sha) ? read.body.head.sha : null;
+  const baseRef = typeof read.body?.base?.ref === "string" && read.body.base.ref.length <= 255 ? read.body.base.ref : null;
   const mergedSha = read.body?.merged === true && typeof read.body?.merge_commit_sha === "string" && /^[0-9a-f]{40}$/.test(read.body.merge_commit_sha)
     ? read.body.merge_commit_sha : null;
   return outcome === "open"
-    ? { kind: "open", etag, headSha }
-    : { kind: outcome, etag, headSha, mergedSha };
+    ? { kind: "open", etag, headSha, baseRef }
+    : { kind: outcome, etag, headSha, baseRef, mergedSha };
 }
 
 const SHA = /^[0-9a-f]{40}$/;
 
-function rateLimitResult(response, token, nowMs) {
-  const message = "";
+function rateLimitResult(response, token, nowMs, message = "") {
   const remaining = responseHeader(response, "x-ratelimit-remaining");
   const until = rateLimitUntil({
     status: response.status,
@@ -153,41 +156,178 @@ async function fetchCommitDocument(url, { fetchImpl, token, nowMs, deadline = In
     if (Date.now() > deadline) return { kind: "budget" };
     return { kind: "error" };
   }
-  if (response.status === 403 || response.status === 429) return rateLimitResult(response, token, nowMs);
+  if (response.status === 403 || response.status === 429) {
+    const read = response.status === 403 && responseHeader(response, "x-ratelimit-remaining") !== "0" ? await readJson(response) : null;
+    return rateLimitResult(response, token, nowMs, typeof read?.body?.message === "string" ? read.body.message : "");
+  }
   if (!response.ok) return { kind: "error" };
   const read = await readJson(response);
   if (read.error) return { kind: "error" };
-  return { kind: "ok", body: read.body };
+  return { kind: "ok", body: read.body, more: /rel="next"/.test(responseHeader(response, "link") ?? "") };
 }
 
-// Combined commit status, then check runs, inside the calls still left in
-// this tick. A missing call leaves the cursor where the next tick continues.
-async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, budget, deadline = Infinity }) {
+// CI is an observation of configured status checks, not permission to merge:
+// approvals, conflicts, deployments and other branch rules remain separate.
+// A bounded, short-lived journal survives Worker eviction without extending
+// the public claim schema. Every endpoint, including final head validation,
+// uses the same one/four-call budget. Incomplete evidence is never a verdict.
+const CI_CACHE_PREFIX = "_claim-pr-ci:";
+const CI_TTL_MS = 30 * 60_000;
+const CI_MAX_ROWS = 300;
+const CI_MAX_REQUESTS = 64;
+const CI_MAX_BYTES = 131_072;
+// Workflow payloads include full repository metadata (~13 KiB per row).
+const CI_PAGE = 10;
+const WORKFLOW_PAGE = 3;
+
+function readCiCache(store, url, nowMs) {
+  if (!store?.db) return null;
+  try {
+    const row = store.db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?").get(CI_CACHE_PREFIX + url);
+    if (!row || row.config_json.length > CI_MAX_BYTES) return null;
+    const saved = JSON.parse(row.config_json);
+    return saved.version === 1 && ["status", "checks", "workflows", "branch", "rules", "verify", "done"].includes(saved.stage)
+      && [saved.checkRuns, saved.workflowRuns, saved.requiredChecks].every(rows => Array.isArray(rows) && rows.length <= CI_MAX_ROWS)
+      && Number.isSafeInteger(saved.page) && saved.page >= 1 && saved.page <= CI_MAX_ROWS / WORKFLOW_PAGE + 1
+      && saved.url === url && Number.isFinite(saved.startedAt) && saved.startedAt <= nowMs
+      && SHA.test(saved.headSha ?? "") ? { ...saved, expired: saved.startedAt <= nowMs - CI_TTL_MS } : null;
+  } catch { return null; }
+}
+
+function writeCiCache(store, url, value, nowMs) {
+  if (!store?.db) return;
+  const text = JSON.stringify(value);
+  store.db.prepare("DELETE FROM work_claim_config WHERE room_id GLOB ? AND updated_at < ?").run(`${CI_CACHE_PREFIX}*`, nowMs - CI_TTL_MS);
+  if (!value || text.length > CI_MAX_BYTES) {
+    store.db.prepare("DELETE FROM work_claim_config WHERE room_id=?").run(CI_CACHE_PREFIX + url);
+    return;
+  }
+  store.db.prepare(`INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)
+    ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
+    .run(CI_CACHE_PREFIX + url, text, nowMs);
+  store.db.prepare("DELETE FROM work_claim_config WHERE room_id IN (SELECT room_id FROM work_claim_config WHERE room_id GLOB ? ORDER BY updated_at DESC, room_id LIMIT -1 OFFSET 128)").run(`${CI_CACHE_PREFIX}*`);
+}
+
+function newCiRead(pull, looked, nowMs, previous = null) {
+  return { version: 1, url: pull.url, startedAt: previous?.startedAt ?? nowMs, requests: previous?.requests ?? 0, headSha: looked.headSha, baseRef: looked.baseRef,
+    etag: looked.etag, stage: "status", page: 1, status: null, checkRuns: [], workflowRuns: [], requiredChecks: [] };
+}
+
+function requiredContexts(value, appKey = "app_id") {
+  if (!Array.isArray(value)) return null;
+  const rows = value.map(row => typeof row?.context === "string" && row.context.length > 0 && row.context.length <= 200
+    && (row[appKey] == null || Number.isSafeInteger(row[appKey])) ? { context: row.context, app_id: row[appKey] ?? null } : null);
+  return rows.length <= CI_MAX_ROWS && rows.every(Boolean) ? rows : null;
+}
+
+async function readCommitCi(pullRequest, saved, options) {
+  const { nowMs, budget, deadline = Infinity } = options;
+  const read = structuredClone(saved);
   const [owner, name] = pullRequest.repo.split("/");
-  const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits/${headSha}`;
-  let status = null;
-  let checkRuns = [];
-  let cursor = pullRequest.ciCursor === "checks" ? "checks" : "status";
-  if (cursor === "status") {
-    if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, budget: Date.now() > deadline };
+  const repo = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+  const base = `${repo}/commits/${read.headSha}`;
+  const partial = (extra = {}) => ({ ci: null, ciRead: read, cursor: read.stage === "status" ? "status" : "checks", ...extra });
+  const advance = stage => { read.stage = stage; read.page = 1; delete read.total; };
+  // A malformed/truncated page restarts after the normal backoff, rather than
+  // retaining earlier successes or spinning against an unavailable endpoint.
+  const failed = extra => ({ ...partial(extra), cursor: "done", ciRead: null });
+  while (read.stage !== "done") {
+    if (read.requests >= CI_MAX_REQUESTS) return failed();
+    if (budget.remaining <= 0 || Date.now() >= deadline) return partial({ budget: Date.now() >= deadline });
     budget.remaining -= 1;
-    const read = await fetchCommitDocument(`${base}/status`, { fetchImpl, token, nowMs, deadline });
-    if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
-    if (read.kind === "rateLimited" || read.kind === "unconfigured") return read;
-    if (read.kind === "ok") status = read.body;
-    cursor = "checks";
+    read.requests = (read.requests ?? 0) + 1;
+    if (read.stage === "verify") {
+      const looked = await lookupPull({ ...pullRequest, etag: read.etag }, options);
+      if ((looked.kind === "notModified" && usableEtag(read.etag)) || (looked.kind === "open" && looked.headSha === read.headSha && looked.baseRef === read.baseRef)) {
+        advance("done");
+        break;
+      }
+      if (looked.kind === "open" && SHA.test(looked.headSha ?? "")) return { ...partial(), ...looked, ciRead: newCiRead(pullRequest, looked, nowMs, read), cursor: "status" };
+      if (looked.kind === "merged" || looked.kind === "closed") return { ...looked, ciRead: null };
+      return looked.kind === "rateLimited" || looked.kind === "budget" ? partial(looked) : failed(looked);
+    }
+    const pageSize = read.stage === "workflows" ? WORKFLOW_PAGE : CI_PAGE;
+    let url;
+    if (read.stage === "status") url = `${base}/status?per_page=${CI_PAGE}&page=${read.page}`;
+    else if (read.stage === "checks") url = `${base}/check-runs?per_page=${CI_PAGE}&page=${read.page}&filter=latest`;
+    else if (read.stage === "workflows") url = `${repo}/actions/runs?head_sha=${read.headSha}&per_page=${pageSize}&page=${read.page}`;
+    else if (read.stage === "branch" && read.baseRef) url = `${repo}/branches/${encodeURIComponent(read.baseRef)}`;
+    else if (read.stage === "rules" && read.baseRef) url = `${repo}/rules/branches/${encodeURIComponent(read.baseRef)}?per_page=${CI_PAGE}&page=${read.page}`;
+    else return failed();
+    if (read.stage === "checks") read.checksReadAt ??= nowMs;
+    const response = await fetchCommitDocument(url, options);
+    if (response.kind === "rateLimited" || response.kind === "budget") return partial(response);
+    if (response.kind !== "ok") return failed(response);
+    const body = response.body;
+    if (read.stage === "branch") {
+      const policy = body?.protection?.required_status_checks;
+      if (body?.name !== read.baseRef || (policy?.contexts != null && (!Array.isArray(policy.contexts) || policy.contexts.some(context => typeof context !== "string" || !context || context.length > 200)))) return failed();
+      let checks = body?.protected === false ? [] : requiredContexts(policy?.checks);
+      if (checks === null && policy?.checks == null && Array.isArray(policy?.contexts)) checks = requiredContexts(policy.contexts.map(context => ({ context })));
+      if (checks === null) return failed();
+      for (const context of policy?.contexts ?? []) if (!checks.some(check => check.context === context)) checks.push({ context, app_id: null });
+      read.requiredChecks.push(...checks);
+      advance("rules");
+      continue;
+    }
+    if (read.stage === "rules") {
+      if (!Array.isArray(body) || body.length > CI_PAGE) return failed();
+      for (const rule of body) {
+        if (typeof rule?.type !== "string") return failed();
+        // Required workflows cannot be interpreted as named status contexts.
+        if (rule?.type === "workflows") return failed();
+        if (rule?.type !== "required_status_checks") continue;
+        const checks = requiredContexts(rule.parameters?.required_status_checks, "integration_id");
+        if (!checks) return failed();
+        read.requiredChecks.push(...checks);
+      }
+      if (read.requiredChecks.length > CI_MAX_ROWS || read.page * CI_PAGE > CI_MAX_ROWS) return failed();
+      if (response.more || body.length === CI_PAGE) read.page += 1;
+      else advance("verify");
+      continue;
+    }
+    const field = read.stage === "status" ? "statuses" : read.stage === "checks" ? "check_runs" : "workflow_runs";
+    const rows = body?.[field];
+    const total = body?.total_count;
+    if (!Array.isArray(rows) || !Number.isSafeInteger(total) || total < 0 || total > CI_MAX_ROWS || rows.length > pageSize
+      || (read.total != null && read.total !== total) || rows.some(row => !Number.isSafeInteger(row?.id) || row.id <= 0)) return failed();
+    read.total = total;
+    if (read.stage === "status") {
+      read.status ??= { state: body.state, total_count: total, statuses: [] };
+      read.status.statuses.push(...rows.map(row => ({ id: row.id, context: row.context, state: row.state, target_url: row.target_url })));
+    } else if (read.stage === "checks") {
+      if (rows.some(row => row.head_sha !== read.headSha || typeof row.name !== "string" || !row.name || row.name.length > 200)) return failed();
+      read.checkRuns.push(...rows.map(row => ({ id: row.id, name: row.name, status: row.status, conclusion: row.conclusion, started_at: row.started_at, app: row.app ? { id: row.app.id, slug: row.app.slug } : null, check_suite: row.check_suite ? { id: row.check_suite.id } : null })));
+    } else {
+      if (rows.some(row => row.head_sha !== read.headSha || !Number.isSafeInteger(row.workflow_id) || !Number.isSafeInteger(row.check_suite_id))) return failed();
+      read.workflowRuns.push(...rows.map(row => ({ id: row.id, check_suite_id: row.check_suite_id, workflow_id: row.workflow_id, event: row.event, status: row.status, run_attempt: row.run_attempt, run_started_at: row.run_started_at })));
+    }
+    const accumulated = read.stage === "status" ? read.status.statuses : read.stage === "checks" ? read.checkRuns : read.workflowRuns;
+    if (new Set(accumulated.map(row => row.id)).size !== accumulated.length || JSON.stringify(read).length > CI_MAX_BYTES) return failed();
+    if (accumulated.length < total) {
+      if (rows.length !== pageSize) return failed();
+      read.page += 1;
+      continue;
+    }
+    if (accumulated.length !== total || response.more) return failed();
+    if (read.stage === "status") advance("checks");
+    else if (read.stage === "checks") advance(read.checkRuns.some(run => run.app?.slug === "github-actions") ? "workflows" : "branch");
+    else {
+      // A retry may finish while checks and workflow metadata are being read
+      // on separate ticks. Recollect instead of interpreting pre-retry jobs.
+      // Freshly re-read successful jobs remain valid on failed-only retries.
+      if (read.workflowRuns.some(workflow => workflow.run_attempt > 1
+        && Date.parse(workflow.run_started_at) > read.checksReadAt
+        && read.checkRuns.some(run => run.check_suite?.id === workflow.check_suite_id))) {
+        return { ci: null, ciRead: newCiRead(pullRequest, read, nowMs, read), cursor: "status" };
+      }
+      advance("branch");
+    }
   }
-  if (cursor === "checks") {
-    if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, status, budget: Date.now() > deadline };
-    budget.remaining -= 1;
-    const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs, deadline });
-    if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
-    if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
-    if (read.kind === "ok") checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
-    cursor = "done";
-  }
-  const rollup = rollupClaimCi({ status, checkRuns, pullUrl: pullRequest.url });
-  return { cursor, ci: { state: rollup.state, url: rollup.url, headSha } };
+  if (read.checkRuns.some(run => run.app?.slug === "github-actions" && !read.workflowRuns.some(workflow => workflow.check_suite_id === run.check_suite?.id))) return failed();
+  const rollup = rollupClaimCi({ ...read, pullUrl: pullRequest.url });
+  read.diagnosticState = rollup.state;
+  return { cursor: "done", ciRead: read, ci: rollup.requiredState === null ? null : { state: rollup.requiredState, url: rollup.url, headSha: read.headSha } };
 }
 
 function delayFor(item, kind, token) {
@@ -199,9 +339,11 @@ function delayFor(item, kind, token) {
 // budget (one call without a token, four with one). A claim whose status
 // read is unfinished stays due so the next tick spends the budget there.
 // Stops on a rate limit, a rejected token, or the cron deadline. Does not write.
-export async function collectPullRequestLookups(items, { fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null, deadline = Infinity, yieldBetween = null } = {}) {
+export async function collectPullRequestLookups(items, { store = null, fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null, deadline = Infinity, yieldBetween = null } = {}) {
   const budget = { remaining: limit ?? (token ? LOOKUP_LIMIT : LOOKUP_LIMIT_NO_TOKEN) };
-  const due = (items ?? []).filter(item => pullRequestDue(item, nowMs) || ciReadDue(item, nowMs));
+  const continuingCursor = item => ["status", "checks"].includes(item.pullRequest?.ciCursor);
+  const due = (items ?? []).filter(item => pullRequestDue(item, nowMs) || ciReadDue(item, nowMs))
+    .sort((a, b) => Number(continuingCursor(b)) - Number(continuingCursor(a)));
   const results = [];
   const seen = new Map();
   let rateLimitedUntil = null;
@@ -211,49 +353,43 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     const prior = seen.get(url);
     if (prior) {
       // Room-scoped: the result is re-attributed to this item's room.
-      results.push({ ...prior, claimId: item.id, roomId: item.roomId });
+      results.push({ ...prior, claimId: item.id, roomId: item.roomId, observedPollAt: item.pullRequest.syncedAt ?? null, observedClaimedAt: item.claimedAt ?? null });
       continue;
     }
     if (budget.remaining <= 0 || rateLimitedUntil) break;
     if (Date.now() > deadline) { budgetExceeded = true; break; }
-    const continuing = (item.pullRequest.ciCursor === "status" || item.pullRequest.ciCursor === "checks") && SHA.test(item.ci?.headSha ?? "");
+    const cached = readCiCache(store, url, nowMs);
+    const saved = cached?.expired && cached.stage === "done" ? null : cached;
+    const continuing = saved && saved.stage !== "done" && SHA.test(saved.headSha ?? "");
     let looked;
-    if (continuing) {
-      looked = { kind: "open", etag: item.pullRequest.etag, headSha: item.ci.headSha, continued: true };
-    } else {
+    // Give a bounded continuation priority, but a moving head or repeated
+    // retries cannot renew that priority forever: yield at its original TTL.
+    if (continuing && saved.expired) looked = { kind: "error", ci: null, ciRead: null, ciCursor: "done", etag: saved.etag };
+    else if (continuing) looked = { kind: "open", etag: saved.etag, headSha: saved.headSha, baseRef: saved.baseRef };
+    else {
       budget.remaining -= 1;
-      looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs, deadline });
+      looked = await lookupPull({ ...item.pullRequest, etag: !saved && item.pullRequest.ciCursor ? null : item.pullRequest.etag }, { fetchImpl, token, nowMs, deadline });
       if (looked.kind === "budget") { budgetExceeded = true; break; }
+      // PR ETags say nothing about check changes. Reuse only the known head,
+      // then collect new CI evidence even when the pull metadata is unchanged.
+      if (looked.kind === "notModified" && saved) looked = { ...looked, kind: "open", headSha: saved.headSha, baseRef: saved.baseRef };
+      else if (looked.kind === "notModified" && item.pullRequest.ciCursor) looked = { ...looked, kind: "error", etag: null };
     }
-    if (looked.kind === "open" && SHA.test(looked.headSha ?? "") && looked.kind !== "rateLimited") {
-      const signals = await readCommitCi(
-        { ...item.pullRequest, ciCursor: continuing ? item.pullRequest.ciCursor : "status" },
-        looked.headSha,
-        { fetchImpl, token, nowMs, budget, deadline }
-      );
-      if (signals.budget) budgetExceeded = true;
-      if (signals.kind === "rateLimited") {
-        looked = { ...looked, kind: "rateLimited", rateLimitedUntil: signals.rateLimitedUntil, ciCursor: signals.cursor };
-      } else if (signals.kind === "unconfigured") {
-        looked = { ...looked, kind: "unconfigured" };
-      } else if (signals.ci) {
-        looked = { ...looked, ci: signals.ci, ciCursor: signals.cursor };
-      } else if (signals.cursor) {
-        looked = { ...looked, ciCursor: signals.cursor };
-      }
-      if (signals.budget) {
-        const result = {
-          claimId: item.id, roomId: item.roomId, url,
-          delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
-          ...looked
-        };
-        seen.set(url, result);
-        results.push(result);
-        break;
-      }
+    if (looked.kind === "open" && SHA.test(looked.headSha ?? "")) {
+      const signals = await readCommitCi(item.pullRequest, continuing ? saved : newCiRead(item.pullRequest, looked, nowMs), { fetchImpl, token, nowMs, budget, deadline });
+      looked = { ...looked, ...signals, ciCursor: signals.cursor };
+      delete looked.cursor;
+      if (signals.budget || signals.kind === "budget") budgetExceeded = true;
+      // Keep the open outcome when the deadline alone interrupted evidence.
+      if (looked.kind === "budget") looked.kind = "open";
+    }
+    if (["error", "missing", "unconfigured"].includes(looked.kind) || (looked.kind === "open" && !SHA.test(looked.headSha ?? ""))) {
+      looked = { ...looked, ci: null, ciRead: null, ciCursor: looked.kind === "open" && !item.pullRequest.ciCursor ? null : "done" };
     }
     const result = {
       claimId: item.id,
+      observedPollAt: item.pullRequest.syncedAt ?? null,
+      observedClaimedAt: item.claimedAt ?? null,
       roomId: item.roomId,
       url,
       delayMs: looked.ciCursor && looked.ciCursor !== "done" ? 0 : delayFor(item, looked.kind, token),
@@ -266,7 +402,7 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       rateLimitedUntil = looked.rateLimitedUntil;
       break;
     }
-    if (looked.kind === "unconfigured") break;
+    if (looked.kind === "unconfigured" || budgetExceeded) break;
   }
   return { results, rateLimitedUntil, budgetExceeded };
 }
@@ -281,8 +417,8 @@ function ciReadDue(item, nowMs) {
 }
 
 // Write one lookup onto the current claim row. Returns true when the claim
-// was settled (completed or released). A rate limit is not written here;
-// the caller holds every due claim until the reset.
+// was settled (completed or released) or its CI changed. Partial evidence
+// survives a rate limit; the caller holds every due claim until the reset.
 //
 // Retry-safety: the lookup is committed against the freshest registered row,
 // not the item the caller read. A caller retrying after a lost response may
@@ -294,8 +430,12 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
   const current = registry?.get?.(roomId, item?.id) ?? item;
   const linked = pullLinks(current).find(pull => pull.url === result.url && !pull.outcome);
   if (!linked) return false;
+  if (Object.hasOwn(result, "observedClaimedAt") && (current.claimedAt ?? null) !== result.observedClaimedAt) return false;
   const fresh = current.pullRequest?.url !== result.url ? { ...current, pullRequest: linked } : current;
+  if (Object.hasOwn(result, "observedPollAt") && (fresh.pullRequest.syncedAt ?? null) !== result.observedPollAt) return false;
+  if (Object.hasOwn(result, "ciRead")) writeCiCache(store, result.url, result.ciRead, nowMs);
   if (result.kind === "merged" || result.kind === "closed") {
+    writeCiCache(store, result.url, null, nowMs);
     const recorded = recordPullOutcome(fresh, result.url, result.kind, nowMs);
     if (!pullsReadyToSettle(recorded)) {
       registry.set(roomId, recorded);
@@ -321,10 +461,13 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     });
     return true;
   }
-  if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured") {
+  if (result.kind === "open" || result.kind === "notModified" || result.kind === "missing" || result.kind === "error" || result.kind === "unconfigured" || result.kind === "rateLimited") {
     let next = fresh;
     let changed = false;
-    if (result.ci) {
+    if (Object.hasOwn(result, "ci") && result.ci === null) {
+      changed = next.ci != null;
+      next = { ...next, ci: null };
+    } else if (result.ci) {
       const recorded = recordCi(next, { ...result.ci, checkedAt: new Date(nowMs).toISOString() }, nowMs);
       next = recorded.item;
       changed = recorded.changed;
@@ -341,15 +484,15 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       emitWorkClaimEvent(store, roomId, {
         actorId: fresh.owner ?? "system",
         item: stored,
-        action: "ci_changed",
+        action: result.ci ? "ci_changed" : "state_changed",
         atMs: nowMs,
         reason: "ci_changed",
-        ciState: result.ci.state
+        ciState: result.ci?.state
       });
-      if (result.ci.state === "success" || result.ci.state === "failure") {
+      if (result.ci?.state === "success" || result.ci?.state === "failure") {
         enqueueClaimWake(store, roomId, fresh.owner, `work-claim:${fresh.id}:ci:${result.ci.state}:${result.ci.headSha ?? "none"}`);
       }
-      wakeNamedReviewers(store, roomId, stored);
+      if (result.ci) wakeNamedReviewers(store, roomId, stored);
     }
     return changed;
   }
@@ -410,11 +553,13 @@ function loadDueClaims(store, nowMs) {
         AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
              OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
       )
-      ORDER BY COALESCE(
+      ORDER BY CASE WHEN COALESCE(json_extract(item_json, '$.data.pullRequest.ciCursor'),
+        json_extract(item_json, '$.pullRequest.ciCursor')) IN ('status', 'checks') THEN 0 ELSE 1 END,
+      COALESCE(
         json_extract(item_json, '$.data.pullRequest.nextPollAt'),
         json_extract(item_json, '$.pullRequest.nextPollAt'),
         0
-      ) ASC
+      ) ASC, rowid ASC
       LIMIT ?
     `).all(nowMs, nowMs, nowMs, nowMs, PULL_CANDIDATE_CAP);
   } catch (error) {
@@ -633,7 +778,7 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   // link, so the result is silently dropped and the claim starves).
   const roomKey = (roomId, claimId) => `${roomId}:${claimId}`;
   const batch = await collectPullRequestLookups(due.map(entry => ({ ...entry.item, roomId: entry.roomId })), {
-    fetchImpl, token: access, nowMs, deadline, yieldBetween
+    store, fetchImpl, token: access, nowMs, deadline, yieldBetween
   });
   const roomOf = new Map(due.map(entry => [roomKey(entry.roomId, entry.item.id), entry.roomId]));
   let checked = 0;
@@ -641,7 +786,6 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   const rateLimited = batch.rateLimitedUntil != null;
   store.workClaims.transaction(() => {
     for (const result of batch.results) {
-      if (result.kind === "rateLimited") continue;
       const roomId = roomOf.get(roomKey(result.roomId, result.claimId));
       const current = store.workClaims.get(roomId, result.claimId);
       checked += 1;
