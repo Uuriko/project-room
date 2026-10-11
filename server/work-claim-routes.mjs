@@ -65,6 +65,12 @@ import { isRoomArchived } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
+// Receipt ids are `rc_` + the claim id (claim ids run to 128 chars, so a
+// receipt id runs to 131) — longer than claimIdOf's cap, so they validate
+// against their own shape. Shared with server/http.mjs's receipt path
+// decoder so the route and the handler agree on what resolves.
+export const RECEIPT_ID_PATTERN = /^rc_[A-Za-z0-9_-]{1,128}$/;
+
 // Per-room registry: roomId -> { items: Map(id -> work item), config: { defaultLeaseHours?, reviewPolicy? } }.
 export function createWorkClaimRegistry() {
   const rooms = new Map();
@@ -890,10 +896,14 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (!member || member.active === false) {
       reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
     }
-    const receiptId = claimIdOf(reject, workClaimId);
-    const prefix = "rc_";
-    const workId = receiptId.startsWith(prefix) ? receiptId.slice(prefix.length) : null;
-    const item = workId ? registry.get(roomId, workId) : null;
+    const receiptId = typeof workClaimId === "string" && RECEIPT_ID_PATTERN.test(workClaimId)
+      ? workClaimId : null;
+    if (!receiptId) reject(404, "not_found", "Not found");
+    // A receipt id is exactly `rc_` + a legal claim id; the prefix strip
+    // recovers the work id (receiptPathId in server/http.mjs already
+    // enforced the shape, this re-checks it for direct callers).
+    const workId = receiptId.slice("rc_".length);
+    const item = registry.get(roomId, workId);
     const settled = item ? settledStampOf(item) : null;
     if (!item || !settled) reject(404, "receipt_not_found", `No settled run receipt "${receiptId}" in room "${roomId}"`);
     return json(res, 200, stampReceipts({ receipts: [receiptOf(item)] }, caller).receipts[0]);

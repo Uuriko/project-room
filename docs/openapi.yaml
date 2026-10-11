@@ -6760,14 +6760,18 @@ paths:
                 $ref: '#/components/schemas/Receipt'
         '401': { description: unauthenticated }
         '403': { description: not_member }
-        '404': { description: receipt_not_found }
+        '404':
+          description: >-
+            not_found — the receiptId is malformed (it must match
+            rc_[A-Za-z0-9_-]{1,128}, up to 131 chars for max-length claim
+            ids); receipt_not_found — well-formed but no settled run with
+            that id.
         '405':
           description: >-
             method_not_allowed: this route only serves GET. A wrong-method
             response may carry an RFC 9110 Allow header naming the route's
             allowed methods — resend with a named method instead of
             retrying the same one.
-        '422': { description: "invalid_claim_input — the receiptId must match rc_[A-Za-z0-9_-]{1,128}" }
   /api/rooms/{roomId}/work-claims/{claimId}/renew:
     post:
       summary: Renew a work claim's lease

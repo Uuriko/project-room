@@ -159,3 +159,39 @@ test("room receipt card carries the receiptId", async t => {
   assert.ok(card, "receipt card posted for the done claim");
   assert.equal(card.receiptId, "rc_rr-card-1", "card links to the receipt");
 });
+
+test("GET receipts/{receiptId} resolves max-length (128-char) claim ids", async t => {
+  // Receipt ids are `rc_` + claim id = up to 131 chars; the route must
+  // accept the full id or the receipt link 404s on long claim ids.
+  const { origin, ownerKey, store } = await serve(t);
+  const id = "L".repeat(128);
+  await settleDone(origin, ownerKey, { id, title: "long id run" });
+  // The room card must exist too: the event envelope's generic *Id check
+  // used to reject 131-char receipt ids, silently dropping the card.
+  const card = store.room("commons").state.messages.find(
+    message => message.kind === "receipt_card" && message.claimId === id);
+  assert.ok(card, "receipt card posted for the max-length claim");
+  assert.equal(card.receiptId, `rc_${id}`, "card carries the resolvable receiptId");
+  const res = await get(origin, `/api/rooms/commons/receipts/${card.receiptId}`, ownerKey);
+  const body = await expectStatus(res, 200, "receipt detail for 128-char claim id");
+  const receipt = body.receipt ?? body;
+  assert.equal(receipt.receiptId, `rc_${id}`);
+  assert.equal(receipt.workItemId, id);
+});
+
+test("GET receipts/{receiptId} resolves 126-char claim ids (past the old 128 route cap)", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const id = "M".repeat(126);
+  await settleDone(origin, ownerKey, { id, title: "edge id run" });
+  const res = await get(origin, `/api/rooms/commons/receipts/rc_${id}`, ownerKey);
+  const body = await expectStatus(res, 200, "receipt detail for 126-char claim id");
+  assert.equal((body.receipt ?? body).workItemId, id);
+});
+
+test("GET receipts/{receiptId} 404s (never 500) on hostile id shapes", async t => {
+  const { origin, ownerKey } = await serve(t);
+  for (const seg of ["rc_%2F..", "rc_%zz", "rc_%252F", "rc_%E2%9C%93", "rc_%20", "rc_"]) {
+    const res = await get(origin, `/api/rooms/commons/receipts/${seg}`, ownerKey);
+    assert.equal(res.status, 404, `${seg} is 404`);
+  }
+});

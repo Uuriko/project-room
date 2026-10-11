@@ -23,7 +23,7 @@ import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox c
 import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
-import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
+import { handleWorkClaims, RECEIPT_ID_PATTERN } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
 import { handleAgentConnect } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
@@ -237,6 +237,16 @@ const pathId = encoded => {
   let id;
   try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
   if (!validId(id)) reject(404, "not_found", "Not found");
+  return id;
+};
+// Receipt ids are `rc_` + the work-claim id (claim ids run to 128 chars, so
+// a receipt id runs to 131) — past validId's 128-char cap. Decode against
+// the receipt shape here so max-length claim ids stay resolvable; malformed
+// ids 404 exactly like every other path id.
+const receiptPathId = encoded => {
+  let id;
+  try { id = decodeURIComponent(encoded); } catch { reject(404, "not_found", "Not found"); }
+  if (!RECEIPT_ID_PATTERN.test(id)) reject(404, "not_found", "Not found");
   return id;
 };
 const accountView = auth => ({
@@ -3540,7 +3550,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const workClaimReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/release$/.exec(url.pathname);
       const workClaimReassignMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/reassign$/.exec(url.pathname);
       const workClaimReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts$/.exec(url.pathname);
-      const workClaimReceiptMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts\/([^/]{1,128})$/.exec(url.pathname);
+      // The receipt capture admits the full receipt id: `rc_` + a claim id
+      // of up to 128 chars = up to 131 chars (receiptPathId validates the
+      // shape below; overlong ids 404 like any unmatched path).
+      const workClaimReceiptMatch = /^\/api\/rooms\/([^/]{1,384})\/receipts\/([^/]{1,131})$/.exec(url.pathname);
       const workClaimRenewMatch = /^\/api\/rooms\/([^/]{1,384})\/work-claims\/([^/]{1,128})\/renew$/.exec(url.pathname);
       // Provenance walk + premise-invalid rollback (orch-provenance-rollback).
       // Literal segments are matched before the {id} template so they are
@@ -3848,10 +3861,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : "reassign";
         const workClaimIdMatch = workClaimItemMatch ?? workClaimClaimMatch ?? workClaimUpdateMatch
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
-          ?? workClaimReceiptMatch
          ;
+        // The receipt route carries `rc_<claimId>` (up to 131 chars), not a
+        // bare claim id — it decodes against the receipt shape via
+        // receiptPathId instead of pathId.
+        const workClaimId = workClaimReceiptMatch ? receiptPathId(workClaimReceiptMatch[2])
+          : workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
-          workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
+          workClaimId, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
           ...(githubToken !== undefined ? { githubToken } : {}),
           reauthorize: () => {

@@ -627,7 +627,13 @@ function validateEnvelope(incoming) {
   if (!incoming.data || Array.isArray(incoming.data) || typeof incoming.data !== "object") throw new Error("Event data must be an object");
   for (const [key, value] of Object.entries(incoming.data)) {
     if (value === null) continue;
-    if (key.endsWith("Id") && !validId(value)) throw new Error(`Invalid ${key}`);
+    // Run-receipt ids are `rc_` + the work-claim id (claim ids run to 128
+    // chars, so a receipt id runs to 131) — past validId's 128-char cap.
+    // Validate the receipt shape, not the generic id shape; anything else
+    // keeps the generic check. Shape mirrors RECEIPT_ID_PATTERN in
+    // server/work-claim-routes.mjs (src/ cannot import server/).
+    if (key.endsWith("Id") && !validId(value)
+      && !(key === "receiptId" && /^rc_[A-Za-z0-9_-]{1,128}$/.test(value))) throw new Error(`Invalid ${key}`);
     if (typeof value === "string") {
       const messageBody = key === "body" && (incoming.type === EVENT_TYPES.MESSAGE_POSTED || incoming.type === EVENT_TYPES.MESSAGE_EDITED);
       const limit = messageBody ? MAX_MESSAGE_BODY_CHARS : 4096;
