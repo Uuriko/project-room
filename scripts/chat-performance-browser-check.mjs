@@ -194,10 +194,7 @@ test('snapshot labels update duplicates while preserving focus and selection, an
 // the fix lands. Workload retains 2,000 total history records and about 1.7 MB
 // of body text, including ten patch-dump-sized messages.
 test('large room history completes initial render with a bounded live message DOM', {
-  timeout: 90000,
-  skip: process.env.ROOM_ENABLE_RENDER_WINDOW_REGRESSION !== '1'
-    ? 'TODO(QA-2026-10-07): enable when renderMessages windowing lands; finding: unbounded full-room DOM render.'
-    : false
+  timeout: 90000
 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-render-window-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));

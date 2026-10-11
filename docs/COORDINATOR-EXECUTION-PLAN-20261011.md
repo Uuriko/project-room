@@ -243,3 +243,25 @@ user friction and real work outcomes. A plan entry is never completion evidence.
 ## Consolidation verification receipt
 
 Existing PR2612 source was integrated as632544c9,8022a79f,4401de0b after retiring the duplicate watcher in81b5f753. Atomic admission remains present. Admission, supervisor, runtime, shared-assistant and stdio suites:59 passed. Lint:zero errors,127 warnings. This is local qualification, not an authenticated provider run or a deployment.
+
+## Human speed pass: measured priorities (2026-10-11)
+
+Human flow is the performance contract: open the app, find the conversation, type without interruption, see the message immediately, receive truthful admission, and then see actual host progress in the same conversation. Keep advanced controls out of this path.
+
+### This checkpoint
+
+- Integrated existing PR2673 cache work as c8d09f48/879aff04. Unrelated cursor/side-table commits retain parsed projections. Actual projection/body changes invalidate; rollbacks discard uncommitted state. Authorization is still read fresh. Tests cover Node and the durable-storage adapter emulator; these are not deployed workerd load measurements.
+- Assistant rendering now indexes messages once per paint, replacing repeated full-history scans for run sources, context inputs, results, and the current card. No history scan when there are no runs. This changes lookup complexity, not UI content or controls.
+- Cold signed-out page profile: production 83746c5b, 390px, cold cache, 4x CPU throttle, 150ms/1.6Mbps network. One sample: LCP 3904ms, 853061 transferred bytes, 71 requests, one failed request, 1609 DOM nodes. Local uncompressed page: LCP 10772ms, 2562375 bytes, 70 requests. Neither sample is a production percentile; local and production byte counts are not directly comparable.
+- Authenticated production read probes (two samples each, same laptop): assistant 864/844ms, 151 decoded bytes; recent room snapshot 1238/668ms, 198207 decoded bytes. These include network and body consumption, not isolated server CPU. No content or credentials are stored here.
+
+### Order of work
+
+1. **Cold entry:** inspect the failed request and the critical asset waterfall; separate the small login boot path from authenticated workspace code only after preserving native auth callbacks, invitation intent, and session recovery. App.js is currently an eager module with workspace dependencies; index.html eagerly includes workspace markup and five stylesheets. Target mobile LCP under 2.5s on the same profile, with multiple runs and a production-compressed build. No extra landing-page copy.
+2. **Room reads and updates:** measure server timing separately from network, response compression, and decode/render. Retain bounded recent reads; audit which remaining snapshot fields account for the ~198KB response before splitting endpoints. Reuse existing change-feed work before introducing another polling protocol. Avoid full snapshots for typing or unchanged state. Target unchanged UI producing no DOM mutations and no unnecessary reads.
+3. **Composer and navigation:** preserve <100ms local echo under delayed receipts, exact retries, focus/selection, independent channel/thread drafts, and responsive navigation during requests. Add atomic account/room-switch qualification. Keep the same shared behavior in the desktop webview.
+4. **Real agent feedback:** connect and qualify a live coordinator. Measure send-to-admission and admission-to-host-pickup separately. A fast UI must never invent agent activity. Prefer existing event/change feeds and supervisor wakeup paths over shortening every polling interval.
+5. **Backend under load:** benchmark growing history, concurrent viewers and agent updates, event-loop stalls, query counts, response bytes, rollback and authorization revocation. Preserve shared-runtime ownership fencing and idempotency while optimizing. Only introduce indexes, caches or batching after measuring the responsible query/path; no infrastructure rewrite justified by these samples alone.
+6. **Release qualification:** run the coherent human-speed/admission/cache stack through exact-head CI and native smoke checks, then deploy through the shared lane and repeat the same measurements. All changes above remain local until that happens.
+
+Checkpoint validation: 1,698 affected tests passed; 13 focused backend/cache/admission tests passed; 24 browser checks passed with the then-disabled large-history case skipped. Re-enabled that existing case after confirming windowing exists: it separately passed with 2,000 stored messages and 100 live DOM message nodes. Lint passed with 0 errors/128 warnings. The sentinel render timing is post-login and must not be described as end-to-end startup latency.
