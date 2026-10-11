@@ -2263,16 +2263,35 @@ $("#chat-suggestions")?.addEventListener("click", e => {
 function renderTyping(typists) {
   const el = $("#typing-indicator");
   if (!el) return;
-  const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
-  const extra = (typists ?? []).length - names.length;
-  if (!names.length) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
+  const people = (typists ?? []).filter(t => t.memberId && t.memberId !== session?.member?.id);
+  const visible = people.slice(0, 3);
+  const signature = JSON.stringify(visible.map(t => [t.memberId, t.displayName, t.avatarUrl]).concat(people.length));
+  if (el.dataset.typists === signature) return; // Preserve dot animation across heartbeats.
+  el.dataset.typists = signature;
+  el.replaceChildren();
+  el.hidden = !visible.length;
+  for (const person of visible) {
+    const label = person.displayName || person.memberId;
+    const bubble = document.createElement("span");
+    bubble.className = "typing-bubble"; bubble.title = `${label} is typing`;
+    const avatar = document.createElement("span");
+    avatar.className = "typing-avatar"; avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = label.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || "").join("").toUpperCase();
+    let imageUrl;
+    try { const url = new URL(person.avatarUrl); if (url.protocol === "https:" && !url.username && !url.password) imageUrl = url.href; } catch { /* Initials cover missing profile photos. */ }
+    if (imageUrl) {
+      const image = document.createElement("img"); image.src = imageUrl; image.alt = ""; image.referrerPolicy = "no-referrer";
+      image.addEventListener("error", () => image.remove(), { once: true }); avatar.append(image);
+    }
+    const dots = document.createElement("span"); dots.className = "typing-dots"; dots.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < 3; i++) dots.append(document.createElement("i"));
+    const accessible = document.createElement("span"); accessible.className = "sr-only"; accessible.textContent = `${label} is typing`;
+    bubble.append(avatar, dots, accessible); el.append(bubble);
   }
-  const who = extra > 0 ? `${names.join(", ")} and ${extra} other${extra === 1 ? "" : "s"}` : names.join(" and ");
-  el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
-  el.hidden = false;
+  if (people.length > visible.length) {
+    const extra = document.createElement("span"); extra.className = "typing-extra";
+    extra.textContent = `+${people.length - visible.length}`; extra.setAttribute("aria-label", people.slice(visible.length).map(person => person.displayName || person.memberId).join(", ")); el.append(extra);
+  }
 }
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
