@@ -41,13 +41,13 @@ export async function roomAssistantRoute(ctx) {
   const current=assistantChangeState(ctx.store.db,roomId);
   const kind=assistantChangeKind(since,current);
   let value;
-  const quiet={contractVersion:1,roomId,cursor:current.cursor,changes:'none',runs:[],fullReadHintMs:FULL_READ_HINT_MS};
+  const quiet={contractVersion:1,roomId,cursor:current.cursor,changes:'none',runs:[],fullReadHintMs: FULL_READ_HINT_MS};
   if(kind==='none') value=quiet;
   else {
     const full=assistant.list(roomId,authorize);
     if(kind==='plain') value={...full,cursor:current.cursor};
-    else if(kind==='full') value={...full,cursor:current.cursor,changes:'full',fullReadHintMs:FULL_READ_HINT_MS};
-    else { const runs=changedRuns(full.runs,since); value=runs.length ? {...full,runs,cursor:current.cursor,changes:'delta',fullReadHintMs:FULL_READ_HINT_MS} : quiet; }
+    else if(kind==='full') value={...full,cursor:current.cursor,changes:'full',fullReadHintMs: FULL_READ_HINT_MS};
+    else { const runs=changedRuns(full.runs,since); value=runs.length ? {...full,runs,cursor:current.cursor,changes:'delta',fullReadHintMs: FULL_READ_HINT_MS} : quiet; }
   }
   return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
 }

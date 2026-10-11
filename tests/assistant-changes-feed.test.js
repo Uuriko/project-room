@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createAcceptanceFixture } from '../scripts/acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { LOOKBACK_MS, assistantChangeKind, changedRuns, parseAssistantCursor } from '../server/room-assistant-changes.mjs';
 
 async function setup(t) {
   const f = createAcceptanceFixture({ dmConsent: true });
@@ -151,4 +152,20 @@ test('the delta never shows a run the full read hides, for every role', async t 
     for (const run of delta.body.runs) assert.ok(visible.has(run.id), `${actor} sees ${run.id} only if the full read shows it`);
     for (const run of delta.body.runs) assert.deepEqual(run, plain.body.runs.find(item => item.id === run.id));
   }
+});
+
+test('cursor parsing and change kinds, without a server', () => {
+  assert.equal(parseAssistantCursor(null), null);
+  for (const bad of ['', 'v2.1.0.0123456789abcdef', 'v1.01.0.0123456789abcdef', 'v1.1.0.0123456789ABCDEF', 'v1.99999999999999999.0.0123456789abcdef'])
+    assert.deepEqual(parseAssistantCursor(bad), { invalid: true }, bad);
+  const since = parseAssistantCursor('v1.20000.3.0123456789abcdef');
+  assert.deepEqual({ newest: since.newest, configRevision: since.configRevision, digest: since.digest }, { newest: 20000, configRevision: 3, digest: '0123456789abcdef' });
+  const same = { newest: 20000, configRevision: 3, digest: '0123456789abcdef' };
+  assert.equal(assistantChangeKind(null, same), 'plain');
+  assert.equal(assistantChangeKind(since, same), 'none');
+  assert.equal(assistantChangeKind(since, { ...same, digest: 'ffffffffffffffff' }), 'delta');
+  assert.equal(assistantChangeKind(since, { ...same, configRevision: 4 }), 'full');
+  assert.equal(assistantChangeKind(since, { ...same, newest: 10000, digest: 'ffffffffffffffff' }), 'full');
+  const runs = [{ id: 'old', updatedAt: 20000 - LOOKBACK_MS - 1 }, { id: 'edge', updatedAt: 20000 - LOOKBACK_MS }, { id: 'new', updatedAt: 25000 }, { id: 'none' }];
+  assert.deepEqual(changedRuns(runs, since).map(run => run.id), ['edge', 'new']);
 });
