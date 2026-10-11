@@ -2,6 +2,7 @@ import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
+import { handleDialogTabKey } from "./dialog-tab-trap.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
@@ -3614,14 +3615,15 @@ $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
 for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
-  const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
-    .filter(element => element.getClientRects().length > 0);
-  const first = controls[0], last = controls.at(-1), active = document.activeElement;
-  if (!first || !controls.includes(active) || (e.shiftKey ? active === first : active === last)) {
-    e.preventDefault();
-    (e.shiftKey ? last : first)?.focus();
-    if (!first) (id === "invitation-dialog" ? $("#invitation-title") : e.currentTarget).focus();
-  }
+  // The trap lives in src/dialog-tab-trap.mjs (unit-tested): Tab wraps at the
+  // dialog's edges, and from a keyboard-navigated landmark inside the dialog
+  // (e.g. a j/k-focused claim-card heading) it continues tab order from that
+  // landmark instead of jumping back to the dialog header.
+  handleDialogTabKey(e, {
+    dialog: e.currentTarget,
+    document,
+    emptyFallback: id === "invitation-dialog" ? $("#invitation-title") : e.currentTarget,
+  });
 });
 $("#invitation-dialog").addEventListener("cancel", e => {
   e.preventDefault();
