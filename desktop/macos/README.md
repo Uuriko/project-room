@@ -81,6 +81,9 @@ Build `swift build -c release --product NativeAuthAcceptance` in `desktop/macos`
 
 ### App-lifetime room agent
 
+This technical setup checkpoint requires an existing dedicated runtime and Room
+connection. It is not the final account/agent onboarding flow.
+
 My Mac → **Connect agent…** accepts one host manifest. **Start agent** launches
 one dedicated Room supervisor; **Stop agent** requests its existing durable stop
 control and waits for cleanup. Quitting Project Room uses the same cleanup path.
