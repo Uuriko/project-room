@@ -318,7 +318,10 @@ export class AgentHeartbeats {
   heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null, workWakes = undefined, workScopeRoomId = null }) {
     checkAgentId(agentId);
     checkHostId(hostId);
-    check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
+    // RC-2026-10-10: an explicit null reads as "absent", like every other
+    // optional heartbeat field (wakeUrl, cadenceSeconds, pushNotification).
+    check(workWakes === undefined || workWakes === null || typeof workWakes === "boolean",
+      422, "invalid_heartbeat", "workWakes must be a boolean");
     // RC-2026-09-28-3602: wakeable is the default; mode may be null when the
     // caller omits it. An explicitly invalid value still fails.
     const effectiveMode = mode === undefined || mode === null ? "wakeable" : mode;
@@ -365,7 +368,7 @@ export class AgentHeartbeats {
         WHERE agent_id=? AND host_id=?`)
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
-    if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
+    if (workWakes !== undefined && workWakes !== null) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
     const cadence = cadenceSeconds ?? null;
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
