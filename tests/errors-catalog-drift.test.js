@@ -32,11 +32,15 @@ function* walk(dir) {
 // Compact mirror of the extraction in resolve-final.mjs: every literal code
 // handed to fail()/reject()/ServiceError/AgentPluginError, plus typed-error
 // fail("code") sites. Variable-passed codes are resolved separately below.
+// ServiceError/AgentPluginError are also matched in the assign-then-throw
+// form (const error = new ServiceError(...); throw error) — e.g.
+// server/account-deletion.mjs refuseOwnershipTransfer and
+// server/land-queue.mjs GitHub rate-limit handling.
 function liveCodes() {
   const codes = new Set();
   const callRe = /(?:fail|reject)\(\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|(\d{3}))\s*(?:,\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|(\d{3})))?/g;
-  const svcRe = /throw new ServiceError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
-  const apRe = /new AgentPluginError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
+  const svcRe = /(?:throw\s+)?new ServiceError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
+  const apRe = /(?:throw\s+)?new AgentPluginError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
   const adhocRe = /error:\s*\{\s*code:\s*"([a-z][a-z0-9_]*)"/g;
   for (const f of walk(SERVER)) {
     const t = readFileSync(f, "utf8");
