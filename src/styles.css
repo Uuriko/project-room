@@ -1609,7 +1609,10 @@ summary { overflow-wrap: anywhere; }
 
 /* Agent sign-in self-serve creation + first-run orientation (2026-09-24) */
 .agent-secret-row { display: flex; gap: .5rem; align-items: center; }
-.agent-secret-row input { flex: 1; font-family: ui-monospace, monospace; font-size: .8rem; }
+/* min-width: 0 lets the flex item shrink below its intrinsic ~20ch width so
+   the one-time secret row cannot overflow the panel on narrow viewports or
+   under enlarged text (same overflow class .join-secret-row already guards). */
+.agent-secret-row input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: .8rem; }
 .agent-room-list { display: flex; flex-direction: column; gap: .5rem; margin: .5rem 0; }
 .agent-first-run {
   border: 1px solid var(--line);
