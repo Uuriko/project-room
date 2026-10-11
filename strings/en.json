@@ -370,5 +370,6 @@
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
   "human.assistantChange": "Change",
-  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
+  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
+  "sounds.setting.label": "Play sounds in this room. Only for your own asks, and off unless you turn it on."
 }
