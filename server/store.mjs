@@ -5140,8 +5140,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
       const link = linkOf.get(roomId, memberId);
       if (!link) continue;
+      // plan-squads: @squad/<name> fan-out resolves with kind "squad-mention",
+      // but agent_wake_signals.kind has a CHECK(kind IN ('mention','dm')) and
+      // enqueueWake() enforces the same set — a new kind value would 422 (or
+      // silently fail the INSERT) inside this very transaction, rolling the
+      // message post back. Squad mentions wake as plain "mention" signals;
+      // the push doorbell below already rides message.posted for any
+      // non-dm kind, so behavior is unchanged.
+      const wakeKind = kind === "squad-mention" ? "mention" : kind;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
-        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+        agentId: link.identityId, kind: wakeKind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
