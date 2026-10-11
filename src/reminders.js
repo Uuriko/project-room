@@ -1,10 +1,15 @@
 import { terminalWork } from "./workflow.js";
 import { reminderTime, formatReminderTime } from "./reminder-time.js";
+import { trackIncrease } from "./announce.js";
 
 export function installReminders({ client, getState, onSaved }) {
   const $ = id => document.getElementById(id), dialog = $("reminder-dialog");
   const pending = new Map(); // Unknown outcomes keep the exact request until retry or identity loss.
   let owner = null, serial = 0, rows = [], anchor = null, timer = null, signature = "", entry = null, flight = null, saving = false, loading = false, error = "";
+  // The badge updates silently; announce newly due reminders (and new
+  // unresolved saves) to assistive tech via the shared polite region.
+  const announceDueReminders = trackIncrease(delta => `${delta} reminder${delta === 1 ? "" : "s"} due`);
+  const announcePendingReminderSaves = trackIncrease(delta => `${delta} reminder save${delta === 1 ? "" : "s"} to confirm`);
   const owns = ticket => ticket && owner === ticket && client.generation === ticket.generation
     && client.session === ticket.session && client.ownsAccountSession();
   const now = () => anchor ? anchor.at + performance.now() - anchor.received : Date.now();
@@ -74,6 +79,8 @@ export function installReminders({ client, getState, onSaved }) {
     $("reminder-panel").hidden = !active.length && !unresolved.length && !error;
     $("reminder-count").hidden = !due.length && !unresolved.length;
     $("reminder-count").textContent = [due.length ? `${due.length} reminder${due.length === 1 ? "" : "s"}` : "", unresolved.length ? `${unresolved.length} save${unresolved.length === 1 ? "" : "s"} to confirm` : ""].filter(Boolean).join(" · ");
+    announceDueReminders(due.length);
+    announcePendingReminderSaves(unresolved.length);
     $("reminder-pending-heading").hidden = !unresolved.length;
     $("reminder-due-heading").hidden = !due.length; $("reminder-scheduled").hidden = !future.length;
     $("reminder-scheduled-heading").textContent = `Scheduled (${future.length})`;

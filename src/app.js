@@ -1,3 +1,4 @@
+import { trackIncrease } from "./announce.js";
 import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -6493,6 +6494,9 @@ function loadReturnBrief() { return briefView.refresh(); }
 // evaluated through, so items arriving later stay unread.
 let notificationOwner = null, notificationFeed = null, notificationSerial = 0, notificationBusy = false, notificationError = "", notificationTimer = null;
 let humanPushUi = null;
+// The badge updates silently; announce new arrivals to assistive tech via the
+// shared polite region (first sighting sets the baseline, only growth speaks).
+const announceNewNotifications = trackIncrease(delta => `${delta} new notification${delta === 1 ? "" : "s"} for you`);
 // Saved-but-not-refreshed, shown in the feed's own status line. Kept apart from
 // notificationError on purpose: it is not a failed save, and the feed reload
 // that follows a mark-read clears errors and must not clear this.
@@ -6540,6 +6544,7 @@ function renderNotifications() {
   const feed = owned ? notificationFeed : null, items = feed?.notifications ?? [], count = feed?.unread ?? 0;
   const badge = $("#notification-count");
   badge.textContent = count ? `${count}${feed?.nextBefore ? "+" : ""} for you` : ""; badge.hidden = !count;
+  announceNewNotifications(count);
   $("#notification-panel").hidden = !owned;
   const note = notificationError || notificationNote || (feed?.basis?.truncated ? "Older notifications may be available." : "");
   setText("#notification-status", note);
@@ -6647,6 +6652,8 @@ function scheduleNotifications(delay) {
 let savedMessageIds = new Set(), savedIdsBusy = false;
 let activityFilter = "", activityItems = [], activityBefore = null, activityHasMore = false, activityBusy = false, activitySerial = 0;
 let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
+// Same treatment as the notification badge: silent badge, polite announcement.
+const announceNewActivity = trackIncrease(delta => `${delta} new activit${delta === 1 ? "y item" : "y items"}`);
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
 const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in", reaction: "reacted to your message" };
@@ -6728,6 +6735,7 @@ async function syncAttentionBadges() {
     setText("#activity-count", unread ? String(unread) : "");
     $("#activity-count").hidden = !unread;
     $("#topbar-activity").setAttribute("aria-label", unread ? `Activity, ${unread} unread` : "Activity");
+    announceNewActivity(unread);
     const later = saved?.count ?? 0;
     setText("#later-count", later ? String(later) : "");
     $("#later-count").hidden = !later;
