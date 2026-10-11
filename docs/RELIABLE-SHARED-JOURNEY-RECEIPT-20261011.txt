@@ -32,22 +32,28 @@ Candidate packaging now includes supervisor/cursor dependencies and excludes the
 retired emoji catalog. Historical exact-commit packages can still include it.
 Generated skill error references were synchronized; i18n counts ratchet down.
 
-Provider qualification — incomplete
-The installed Codex executable passes isolated App Server protocol qualification:
-history/read/resume supported, modelTurnExecuted=false. The dedicated profile
-has no provider login; login status reports Not logged in. This is not an actual
-provider ask-to-result pass, and scripted acceptance is not presented as one.
-No desktop credentials or ambient operator profile were imported. The missing
-prerequisite is an authenticated dedicated profile path, requested from John.
-After it is available, run the existing host against a bounded disposable local
-Room/workspace and verify pickup, truthful progress, result and Stop. Do not use
-a production room for this qualification.
+Provider qualification — real local pass
+At 2026-10-11T20:57:46Z the installed Codex executed two real provider turns
+through the Room supervisor and App Server in a disposable local HTTP Room.
+The dedicated private profile authenticated through normal ChatGPT browser
+login using John's existing account. No ambient operator credentials were copied.
+The runtime used read-only sandbox, approvalPolicy=never, a disposable workspace,
+and bounded 90-second turns. History/read/resume protocol qualification passed.
+The first Room invocation entered running, streamed answer deltas, published
+exactly ROOM_REAL_PROVIDER_OK and settled done. The second invocation was stopped
+after actual turn/start acknowledgment: turn/interrupt acknowledged, the Room
+run settled cancelled, and it published no final result. Four answer deltas were
+observed across the two real turns. This is distinct from scripted acceptance.
+The private local receipt is excluded from source publication. The harness was
+rerun after correcting its absent-versus-null result-field assertion; the rerun
+passed all assertions. This establishes local provider execution, not production
+host setup, automatic startup or a production-room execution receipt.
 
 Release boundary
-No production deployment, Mac installation, login setting change, permission
+No production deployment, Mac installation, ambient login setting change, permission
 grant, signing/notarization or queued-CI override was performed. Hosted CI must
-be green at the proposed exact head before landing. Real provider authentication
-and real provider execution remain release qualification prerequisites.
+be green at the proposed exact head before landing. Dedicated authentication and
+bounded real provider execution are now qualified locally.
 
 Local validation logs live under .tmp/ and are excluded from source publication.
 The continuation screenshot is test-results/shared-continuation.png.
@@ -69,3 +75,13 @@ Validation checkpoint
   that failed before committing passed against the committed tree. The broad
   run was stopped after six minutes with backfill/recovery checks still running;
   this is not a complete full-suite pass. Hosted Linux CI remains required.
+
+Hosted CI repairs
+- Added direct cursor tests for store lifetime, authenticated round trips,
+  randomized tokens, tampering and malformed input.
+- Replaced obsolete reaction-control browser waits with a real message update;
+  preserved selection/focus and duplicate-name attribution coverage.
+- Recorded five passing solo test timings; retained the unmeasured-file limit.
+- Reviewed Linux-captured visual baselines from workflow38174127706. Updated
+  the signed-in Room and message-list images for current layout/catch-up state;
+  login/join images and visual diff thresholds remain unchanged.

@@ -821,7 +821,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.match(await page.locator('[data-member-record-id="duplicate-b"]').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-a-message"] .message-meta').textContent(), /Alex \(duplicate-a\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-b-message"] .message-meta').textContent(), /Alex \(duplicate-b\)/);
-  assert.match(await page.locator('[data-message-record-id="list"] [data-reaction="\u2764\uFE0F"]').getAttribute("title"), /Alex \(duplicate-a\).*Alex \(duplicate-b\)/);
+  assert.equal(await page.locator('[data-message-record-id="list"] [data-reaction]').count(), 0, 'historical reactions do not restore the removed reaction UI');
   assert.match(await page.locator('[data-event-record-id="event-duplicate-a-message"]').textContent(), /Alex \(duplicate-a\)/);
   await closeSettings(page);
   await openSearch(page);

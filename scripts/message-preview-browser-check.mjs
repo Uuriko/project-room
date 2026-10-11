@@ -43,8 +43,8 @@ for (const mobile of [false, true]) test(`long message preview ${mobile ? 'mobil
     globalThis.previewSelection = selection.toString();
     document.querySelector('[data-message-record-id="long-patch"] .message-expansion > summary').focus();
   });
-  f.store.command(f.keys.producer, 'commons', { id: 'reaction-update', type: 'message.reaction_set', data: { messageId: 'long-patch', reaction: 'like', active: true } });
-  await message.locator('.reaction.used').waitFor();
+  f.store.command(f.keys.producer, 'commons', { id: 'another-message', type: 'message.posted', data: { messageId: 'another-message', body: 'Another person is reviewing the patch.' } });
+  await page.locator('[data-message-record-id="another-message"]').waitFor();
   const retained = await page.evaluate(() => ({
     node: globalThis.previewStable === document.querySelector('[data-message-record-id="long-patch"] .message-full'),
     selection: getSelection().toString() === globalThis.previewSelection,
