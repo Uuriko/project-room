@@ -1,0 +1,57 @@
+# TST-01A: weekly sharded flaky-test detection. Detection only: this workflow
+# never gates a PR or a merge (docs/FLAKY-QUARANTINE.md). Each shard runs
+# scripts/flaky-weekly-shard.mjs, which runs scripts/flaky-detect.mjs --runs=5
+# logic on its share of the test files and uploads one JSON record per file.
+# TST-01B merges the shard artifacts into quarantine proposals.
+name: flaky-weekly
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs per test file (>= 2)
+        required: false
+        default: "5"
+  schedule:
+    - cron: "17 9 * * 0" # Sundays 09:17 UTC, off the hour to avoid the cron rush.
+
+permissions:
+  contents: read
+
+# One weekly run at a time; a manual run has its own group and never cancels
+# the scheduled one.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Detect flaky tests (shard ${{ matrix.shard }}/8)
+        env:
+          RUNS: ${{ github.event.inputs.runs || '5' }}
+          SHARD: ${{ matrix.shard }}
+        # The budget stops new files before the job timeout; unchecked files
+        # are listed under "skipped" in shard-summary.json.
+        run: scripts/test-env.sh node scripts/flaky-weekly-shard.mjs --shard="$SHARD/8" --runs="$RUNS" --timeout=180000 --budget-minutes=290 --out="flaky-report/shard-$SHARD"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: flaky-report-shard-${{ matrix.shard }}
+          path: flaky-report/shard-${{ matrix.shard }}
+          retention-days: 30
+          if-no-files-found: warn
