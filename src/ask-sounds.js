@@ -65,7 +65,13 @@ export function createRoomSounds({ enabled = () => false, doc = globalThis.docum
       pending = { name, preview };
       if (!unlocking) {
         unlocking = true;
-        Promise.resolve(ctx.resume()).then(() => {
+        // resume() is specified to return a promise, but a shimmed or
+        // hardened context can throw synchronously instead. Contain that
+        // here: a stuck `unlocking` flag would wedge the player forever and
+        // later play() calls would falsely report success.
+        let resumed;
+        try { resumed = ctx.resume(); } catch { unlocking = false; pending = null; return false; }
+        Promise.resolve(resumed).then(() => {
           unlocking = false; const job = pending; pending = null;
           if (ctx.state === 'running' && stillWanted(job)) schedule(job.name);
         }, () => { unlocking = false; pending = null; });
@@ -95,7 +101,13 @@ export function createCueLedger({ storage = defaultStorage(), locks = safe(() =>
     list.push(id);
     return write(list) && claiming;
   };
-  const exclusive = fn => (locks?.request ? Promise.resolve(locks.request('room-ask-sounds-cue', fn)).catch(() => false) : Promise.resolve(fn()));
+  const exclusive = fn => {
+    if (!locks?.request) return Promise.resolve(fn());
+    // A broken locks shim can throw synchronously instead of rejecting.
+    // claim()/mark() return promises; keep that contract and stay quiet.
+    try { return Promise.resolve(locks.request('room-ask-sounds-cue', fn)).catch(() => false); }
+    catch { return Promise.resolve(false); }
+  };
   return {
     // Record without sounding (first sighting of an old result), under the
     // same lock so it never overwrites another tab's claim.
