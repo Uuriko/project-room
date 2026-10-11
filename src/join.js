@@ -192,6 +192,13 @@ const PREVIEW_TIMEOUT_MS = 10_000;
 // blank a screen the retry already rendered.
 let bootSeq = 0;
 
+// A second submit while a join is in flight must not POST again: the disabled
+// button stops a native click, not a repeated submit (Enter in the name field
+// still submits). The server burns the invite exactly once, so the racing
+// duplicate gets 409 invite_already_used and can strand a freshly joined user
+// on the dead-end "Invite already used" screen.
+let joining = false;
+
 async function boot() {
   const seq = ++bootSeq;
   const code = parseJoinCode(globalThis.location?.pathname);
@@ -224,6 +231,7 @@ async function boot() {
   const form = $("join-form");
   form?.addEventListener("submit", async event => {
     event.preventDefault();
+    if (joining) return;
     const name = validateJoinName($("join-name")?.value);
     const statusEl = $("join-status");
     if (!name) {
@@ -231,6 +239,7 @@ async function boot() {
       $("join-name")?.focus();
       return;
     }
+    joining = true;
     const button = $("join-submit");
     if (button) button.disabled = true;
     if (statusEl) { statusEl.textContent = "Joining…"; statusEl.classList.add("visible"); }
@@ -238,6 +247,7 @@ async function boot() {
     // /room/api/* is rewritten to /api/* on the www door, so this works on both.
     const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code } });
     if (!joined.ok) {
+      joining = false;
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
       const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
@@ -249,6 +259,7 @@ async function boot() {
     const { roomId, displayName, sessionExpiresAt } = joined.body ?? {};
     const identitySecret = joined.body?.roomToken ?? joined.body?.identitySecret;
     if (typeof identitySecret !== "string" || typeof roomId !== "string") {
+      joining = false;
       if (button) button.disabled = false;
       if (statusEl) statusEl.textContent = "The room answered oddly. Try again.";
       return;
