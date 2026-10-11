@@ -2616,9 +2616,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["linkToken", "displayName", "redemptionId", "expectedSessionRevision"])) reject(422, "invalid_join", "Supply the invitation link and your name");
         rate(`link-join:${remoteAddress}`, 20);
         const oldRoomToken = cookie(req, roomCookieName);
-        const result = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
+        // QAS-702: the guest join rotated the slot — freshSlotToken travels
+        // alongside the result (never in the JSON body). The browser must
+        // carry the fresh token; the presented (possibly planted) token is
+        // dead, so it is replaced here like every other login path.
+        const { freshSlotToken, ...result } = store.shareLinks.join(token, data.linkToken, { ...data, expectedSessionBinding: binding,
           revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
           clientAddress: String(remoteAddress ?? ""), clientSession: token });
+        if (freshSlotToken) setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((result.session.expiresAt - store.now()) / 1000)));
         return json(res, result.duplicate ? 200 : 201, result);
       }
       if (url.pathname === "/api/invitations/preview" && req.method === "POST") {

@@ -183,10 +183,14 @@ test("#770 regression: lost-cookie retry of a membership-reuse join must not cre
     const s1 = store.createAccountSessionSlot();
     const j1 = store.shareLinks.join(s1.token, linkToken, { displayName: "Alice", redemptionId: randomUUID(), ...slotOf(s1.token) });
     assert.equal(j1.duplicate, false);
+    // QAS-702: the guest join rotated the slot — later calls ride the fresh
+    // token, never the dead pre-join one.
+    const t1 = j1.freshSlotToken;
+    assert.ok(t1, "guest join returns the rotated slot token");
     // 2. Alice (now a member) opens the link again with a fresh redemptionId
     //    -> membership-reuse path, duplicate:true.
     const reuseRedemption = randomUUID();
-    const j2 = store.shareLinks.join(s1.token, linkToken, { displayName: "Alice", redemptionId: reuseRedemption, ...slotOf(s1.token) });
+    const j2 = store.shareLinks.join(t1, linkToken, { displayName: "Alice", redemptionId: reuseRedemption, ...slotOf(t1) });
     assert.equal(j2.duplicate, true, "existing member reuses membership");
     // 3. Cookie lost -> fresh unauthenticated slot, SAME redemptionId, a
     //    different (available) name. Must be rejected as a replay, not joined.
@@ -211,21 +215,23 @@ test("50 concurrent identical share-link joins create exactly one guest (same sl
   assert.equal(winners.length, 1, `exactly one join must win, got ${winners.length}`);
   for (const f of failures) {
     assert.ok(f.status !== null && f.status !== undefined, `loser must carry a RoomError status, got ${JSON.stringify(f)}`);
-    assert.equal(f.status, 409, `loser must be a 409, got ${JSON.stringify(f)}`);
+    // QAS-702: the winner rotated the shared slot, so losers presenting the
+    // dead token get 401 — the same honest answer every other rotated login
+    // path gives a double-submitted credential.
+    assert.ok([401, 409].includes(f.status), `loser must be a clean 401/409, got ${JSON.stringify(f)}`);
   }
   assert.equal(countJoins(dbPath, linkId), 1, "exactly one share_link_joins row");
   assert.equal(membersNamed(dbPath, displayName).length, 1, "exactly one guest member");
-  // The 409 losers converge: a retry with a refreshed session revision sees
-  // the committed join and returns the idempotent duplicate result.
+  // The committed join receipt names the live rotated session, not the dead
+  // pre-race token: the winner's browser keeps working on its fresh cookie.
   const store = await openStore(dbPath);
   try {
-    const fresh = store.accountSessionSlot(slot.token);
-    const retry = store.shareLinks.join(slot.token, linkToken, {
-      displayName, redemptionId,
-      expectedSessionRevision: fresh.sessionRevision, expectedSessionBinding: fresh.sessionBinding,
-    });
-    assert.equal(retry.duplicate, true, "refreshed retry returns duplicate:true");
-    assert.equal(countJoins(dbPath, linkId), 1, "retry creates no second join row");
+    const joinRow = store.db.prepare("SELECT * FROM share_link_joins WHERE link_id=?").get(linkId);
+    const slotRow = store.db.prepare("SELECT * FROM account_session_slots WHERE hash=?").get(joinRow.slot_hash);
+    assert.ok(slotRow, "join receipt references a live slot row");
+    const member = membersNamed(dbPath, displayName)[0];
+    const acct = store.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(ROOM, member.id).account_id;
+    assert.equal(slotRow.account_id, acct, "the live slot carries the joined guest");
   } finally { store.close(); }
 });
 

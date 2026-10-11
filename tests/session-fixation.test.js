@@ -6,13 +6,18 @@
 // magic mailer is an injected memory mailer. No network, no real credentials.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
@@ -222,4 +227,65 @@ test("account-key login mints a fresh slot token and kills the planted one (QA-A
   assert.notEqual(fresh, planted.cookie, "the slot token rotates at account-key login");
   assert.throws(() => store.authenticateAccountSession(planted.cookie), { code: "unauthenticated" });
   assert.equal(store.authenticateAccountSession(fresh).account.id, "acct-key-fix");
+});
+
+test("share-link guest join rotates the slot token and kills the planted one (invite redemption)", async t => {
+  // WAVE-500 G1 fixation: the anonymous guest join is a login — it must mint
+  // a fresh account_session slot token like every other login path, so a
+  // token planted before the invite redemption can never authenticate after.
+  const dir = mkdtempSync(join(REPO, ".tmp", "session-fixation-sharejoin-"));
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); });
+  const store = new RoomStore(join(dir, "room.sqlite"));
+  store.initialize(initialRoom());
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const linkToken = randomBytes(32).toString("base64url");
+  store.shareLinks.create(ownerKey, "commons", {
+    requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000,
+    maxJoins: 5, expectedMemberRevision: 0,
+  }, null);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+
+  // Attacker plants slot token P in the victim's browser before the join.
+  const planted = await openSlot(origin);
+  const binding = store.accountSessionSlot(planted.cookie).sessionBinding;
+  const joined = await fetch(`${origin}/api/share-links/join`, {
+    method: "POST",
+    headers: {
+      Origin: origin,
+      Cookie: `account_session=${planted.cookie}`,
+      "X-CSRF-Token": planted.csrf,
+      "X-Session-Binding": binding,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      linkToken, displayName: "Fixation Guest", redemptionId: randomUUID(),
+      expectedSessionRevision: planted.revision,
+    }),
+  });
+  assert.equal(joined.status, 201);
+  const view = await joined.json();
+  assert.equal(view.duplicate, false, "first join is not a duplicate");
+
+  const fresh = accountCookie(joined);
+  assert.ok(fresh, "join sets the fresh slot cookie");
+  assert.notEqual(fresh, planted.cookie, "the slot token rotates at invite redemption");
+
+  // The planted token is dead: it authenticates nothing.
+  assert.throws(() => store.authenticateAccountSession(planted.cookie), { code: "unauthenticated" });
+  const plantedGet = await getSession(origin, planted.cookie);
+  assert.equal(plantedGet.status, 200);
+  assert.equal((await plantedGet.json()).authenticated, false);
+
+  // The fresh token carries the new guest's session.
+  const session = store.authenticateAccountSession(fresh);
+  assert.ok(session.account, "fresh token is authenticated");
+  assert.equal(session.account.id, view.session.account.id, "fresh token carries the joined guest");
+  assert.equal(view.session.account.id.startsWith("guest-"), true, "the join minted a guest account");
 });

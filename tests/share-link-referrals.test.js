@@ -20,10 +20,14 @@ test("share-link joins credit the link's issuer on the referral board, once per 
   store.shareLinks.create(ownerKey, "commons", { requestId: randomUUID(), linkToken, expiresAt: now + 3600000, maxJoins: 5, expectedMemberRevision: 0 }, null);
 
   const slot = store.createAccountSessionSlot(), redemptionId = randomUUID();
+  // QAS-702: the guest join rotates the slot — the retry rides the fresh token.
+  let token = slot.token;
   const accept = () => {
-    const current = store.accountSessionSlot(slot.token);
-    return store.shareLinks.join(slot.token, linkToken, { displayName: "Alice", redemptionId,
+    const current = store.accountSessionSlot(token);
+    const result = store.shareLinks.join(token, linkToken, { displayName: "Alice", redemptionId,
       expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding });
+    if (result.freshSlotToken) token = result.freshSlotToken;
+    return result;
   };
   const alice = accept();
   const agent = store.identities.create("Peer agent");

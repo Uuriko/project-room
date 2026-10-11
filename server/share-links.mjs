@@ -424,7 +424,7 @@ export class ShareLinks {
       const slot = this.store.accountSessionSlot(slotToken);
       if (slot.sessionRevision !== expectedSessionRevision || slot.sessionBinding !== expectedSessionBinding) fail(409, "session_binding_changed", "Your browser identity changed. Review the invitation again.");
       const row = this.find(linkToken), fingerprint = hash(displayName.trim());
-      let auth = null;
+      let auth = null, freshSlotToken = null;
       try { auth = this.store.authenticateAccountSession(slotToken); }
       catch (error) { if (error.status !== 401) throw error; }
       const prior = this.db.prepare("SELECT j.*,i.intended_account_id FROM share_link_joins j JOIN membership_invitations i ON i.id=j.invitation_id WHERE j.link_id=? AND j.slot_hash=? AND j.redemption_id=?")
@@ -491,7 +491,13 @@ export class ShareLinks {
         }
         const account = this.store.createAccount(`guest-${randomUUID()}`, "share-link-guest");
         const accessKey = this.store.insertAccountCredential(account.id, now + 8 * 3600000);
-        auth = this.store.loginAccountSession(slotToken, accessKey, expectedSessionRevision, { revokeRoomToken });
+        // QAS-702: the guest join is a login — rotate the slot atomically so a
+        // token planted before the invite redemption can never authenticate
+        // afterwards. The presented slot token dies here; the fresh token is
+        // handed to the route for the Set-Cookie below.
+        const rotated = this.store.loginAccountSession(slotToken, accessKey, expectedSessionRevision, { revokeRoomToken, rotateSlot: true });
+        auth = rotated.session;
+        freshSlotToken = rotated.token;
       }
       const invitationId = randomUUID(), memberId = `${access === "guest" ? "guest" : "member"}-${randomUUID()}`;
       const privateTokenHash = hash(randomBytes(32).toString("base64url"));
@@ -535,10 +541,18 @@ export class ShareLinks {
         VALUES(?,2,'accepted',?,?,?,?,1,?,?,NULL)`).run(invitationId, auth.account.id, memberId, auth.account.authEpoch, auth.sessionRevision, now, incoming.id);
       record = this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(invitationId);
       this.store.appendInvitationJournal(record, "accepted");
-      this.db.prepare("INSERT INTO share_link_joins VALUES(?,?,?,?,?,?)").run(row.id, invitationId, slot.credentialHash, redemptionId, auth.sessionRevision, fingerprint);
+      // The join receipt names the slot that actually holds the redeemed
+      // session: after a QAS-702 rotation that is the fresh slot, whose row
+      // outlives the dead pre-login one (FK to account_session_slots).
+      this.db.prepare("INSERT INTO share_link_joins VALUES(?,?,?,?,?,?)").run(row.id, invitationId, auth.credentialHash, redemptionId, auth.sessionRevision, fingerprint);
       this.verifyJoin({ link_id: row.id, invitation_id: invitationId, fingerprint });
       this.creditReferral(row, memberId, now, { address: clientAddress, session: clientSession ?? slotToken });
-      return this.result(slotToken, row.room_id, false);
+      // After rotation the presented slot token is dead; resolve the result
+      // against the fresh token. freshSlotToken travels alongside (never in
+      // the JSON body) so the route can set the browser's new cookie.
+      const done = this.result(freshSlotToken ?? slotToken, row.room_id, false);
+      if (freshSlotToken) done.freshSlotToken = freshSlotToken;
+      return done;
     });
   }
   // A share link is an invite link: a first join credits the link's issuer on

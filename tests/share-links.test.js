@@ -23,12 +23,17 @@ function fixture(t, ownerId = "owner") {
   const result = store.shareLinks.create(ownerKey, "commons", details, null);
   const guest = (name = "Guest") => {
     const slot = store.createAccountSessionSlot(), redemptionId = randomUUID();
+    // QAS-702: the guest join rotates the slot — later calls ride the fresh
+    // token, never the dead pre-join one.
+    let token = slot.token;
     const accept = (displayName = name) => {
-      const current = store.accountSessionSlot(slot.token);
-      return store.shareLinks.join(slot.token, linkToken, { displayName, redemptionId,
+      const current = store.accountSessionSlot(token);
+      const result = store.shareLinks.join(token, linkToken, { displayName, redemptionId,
         expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding });
+      if (result.freshSlotToken) token = result.freshSlotToken;
+      return result;
     };
-    return { slot, accept, redemptionId };
+    return { slot, accept, redemptionId, token: () => token };
   };
   return { store, filename, ownerKey, details, result, linkToken, guest, setNow: value => { now = value; } };
 }
@@ -45,10 +50,10 @@ test("one share link creates distinct named guest identities without sharing the
   assert.equal(f.store.verifyInvitationAudit().consistent, true);
   assert.doesNotThrow(() => f.store.shareLinks.verify());
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links[0].joins, 2);
-  const snapshot = f.store.snapshot(a.slot.token, "commons", first.session.sessionBinding);
+  const snapshot = f.store.snapshot(a.token(), "commons", first.session.sessionBinding);
   assert.equal(JSON.stringify(snapshot).includes(f.linkToken), false);
   assert.equal(JSON.stringify(snapshot).includes(first.session.account.id), true); // viewer ownership only
-  const posted = f.store.command(a.slot.token, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "Hello room" } }, first.session.sessionBinding);
+  const posted = f.store.command(a.token(), "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { body: "Hello room" } }, first.session.sessionBinding);
   assert.equal(posted.event.actorId, first.session.member.id);
 });
 
@@ -80,7 +85,7 @@ test("retries keep the same guest, do not consume another use, and require uncha
   assert.equal(again.duplicate, true); assert.equal(again.session.member.id, first.session.member.id);
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links[0].joins, 1);
   assert.throws(() => guest.accept("Changed name"), { code: "join_changed" });
-  f.store.logoutAccountSession(guest.slot.token, first.session.sessionRevision);
+  f.store.logoutAccountSession(guest.token(), first.session.sessionRevision);
   assert.throws(() => guest.accept(), { code: "join_changed" });
 });
 
@@ -100,10 +105,10 @@ test("join limits, expiry, cancellation and current inviter authority bound futu
 test("cancelling a link preserves existing membership and committed audit across restart", t => {
   const f = fixture(t), guest = f.guest(), accepted = guest.accept();
   f.store.shareLinks.cancel(f.ownerKey, "commons", f.result.link.id, null);
-  assert.equal(f.store.authenticateAccountSession(guest.slot.token, "commons").member.id, accepted.session.member.id);
+  assert.equal(f.store.authenticateAccountSession(guest.token(), "commons").member.id, accepted.session.member.id);
   const reopened = new RoomStore(f.filename);
   try {
-    assert.equal(reopened.authenticateAccountSession(guest.slot.token, "commons").member.id, accepted.session.member.id);
+    assert.equal(reopened.authenticateAccountSession(guest.token(), "commons").member.id, accepted.session.member.id);
     assert.equal(reopened.shareLinks.list(f.ownerKey, "commons", null).links[0].status, "cancelled");
     assert.doesNotThrow(() => reopened.shareLinks.verify());
   } finally { reopened.close(); }
@@ -124,8 +129,8 @@ test("storage failure rolls back guest identity, session switch, membership, inv
 
 test("existing account membership is reused and changed issuer authority invalidates a link", t => {
   const f = fixture(t), guest = f.guest(), accepted = guest.accept();
-  const current = f.store.accountSessionSlot(guest.slot.token);
-  const same = f.store.shareLinks.join(guest.slot.token, f.linkToken, { displayName: "Still me", redemptionId: randomUUID(), expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding });
+  const current = f.store.accountSessionSlot(guest.token());
+  const same = f.store.shareLinks.join(guest.token(), f.linkToken, { displayName: "Still me", redemptionId: randomUUID(), expectedSessionRevision: current.sessionRevision, expectedSessionBinding: current.sessionBinding });
   assert.equal(same.session.member.id, accepted.session.member.id);
   f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
     data: { memberId: "owner", expectedMemberRevision: 0, permissions: f.store.room("commons").state.members.owner.permissions, active: true } });
@@ -150,7 +155,10 @@ test("HTTP guest flow bootstraps a stable cookie, joins without a key, restores 
   const preview = await client.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken: f.linkToken } });
   assert.equal(preview.link.role, "guest");
   const joined = await client.joinShareLink({ linkToken: f.linkToken, displayName: "Browser guest", redemptionId: randomUUID() });
-  assert.equal(joined.session.member.displayName, "Browser guest"); assert.equal(cookie, originalCookie);
+  assert.equal(joined.session.member.displayName, "Browser guest");
+  // QAS-702: the guest join is a login — the pre-join (plantable) slot token
+  // is retired and the browser rides the fresh cookie from here on.
+  assert.notEqual(cookie, originalCookie, "the join rotates the account session cookie");
   assert.equal(client.session.authenticated, true);
   const room = await client.request("/api/session?room=commons", { session: client.session });
   assert.equal(room.member.id, joined.session.member.id);
@@ -180,8 +188,8 @@ test("link creation retries preserve scope and guests cannot administer invitati
   assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM share_link_codes").get().n, 0, "fresh issuance and exact retry mint no short-code alias");
   assert.throws(() => f.store.shareLinks.create(f.ownerKey, "commons", { ...f.details, maxJoins: 4 }, null), { code: "idempotency_conflict" });
   const guest = f.guest(), accepted = guest.accept();
-  assert.throws(() => f.store.shareLinks.list(guest.slot.token, "commons", accepted.session.sessionBinding), { code: "access_denied" });
-  assert.throws(() => f.store.shareLinks.cancel(guest.slot.token, "commons", f.result.link.id, accepted.session.sessionBinding), { code: "access_denied" });
+  assert.throws(() => f.store.shareLinks.list(guest.token(), "commons", accepted.session.sessionBinding), { code: "access_denied" });
+  assert.throws(() => f.store.shareLinks.cancel(guest.token(), "commons", f.result.link.id, accepted.session.sessionBinding), { code: "access_denied" });
 });
 
 test("#657: a lost join response is recoverable with the same redemption id after restoring the session", t => {
@@ -189,16 +197,17 @@ test("#657: a lost join response is recoverable with the same redemption id afte
   const stale = f.store.accountSessionSlot(guest.slot.token);
   const committed = guest.accept();
   assert.equal(committed.duplicate, false);
-  // The naive retry with the stale pre-join session cannot work: the committed
-  // join bumped the slot revision and binding.
+  // The naive retry with the stale pre-join token cannot work: the committed
+  // join rotated the slot (QAS-702), so the presented token is dead.
   assert.throws(() => f.store.shareLinks.join(guest.slot.token, f.linkToken, { displayName: "UX Probe", redemptionId: guest.redemptionId,
     expectedSessionRevision: stale.sessionRevision, expectedSessionBinding: stale.sessionBinding }),
-    { code: "session_binding_changed" });
-  // Restore first, then re-issue the same redemption id: the server resolves it
-  // idempotently and returns the credential instead of double-joining.
-  const restored = f.store.accountSessionSlot(guest.slot.token);
+    { code: "unauthenticated" });
+  // Restore first (adopt the rotated token), then re-issue the same
+  // redemption id: the server resolves it idempotently and returns the
+  // credential instead of double-joining.
+  const restored = f.store.accountSessionSlot(guest.token());
   assert.equal(restored.sessionRevision, stale.sessionRevision + 1);
-  const recovered = f.store.shareLinks.join(guest.slot.token, f.linkToken, { displayName: "UX Probe", redemptionId: guest.redemptionId,
+  const recovered = f.store.shareLinks.join(guest.token(), f.linkToken, { displayName: "UX Probe", redemptionId: guest.redemptionId,
     expectedSessionRevision: restored.sessionRevision, expectedSessionBinding: restored.sessionBinding });
   assert.equal(recovered.duplicate, true);
   assert.equal(recovered.roomId, "commons");
@@ -453,12 +462,12 @@ test("Google login rotates a previously invited session without deleting immutab
   const f = fixture(t), guest = f.guest();
   guest.accept();
   const before = f.store.db.prepare("SELECT * FROM share_link_joins").all();
-  const slot = f.store.accountSessionSlot(guest.slot.token);
+  const slot = f.store.accountSessionSlot(guest.token());
   f.store.createAccount("google:123456789", "google-oauth");
-  const loggedIn = f.store.loginAccountSessionWithMethod(guest.slot.token, "google:123456789", slot.sessionRevision,
+  const loggedIn = f.store.loginAccountSessionWithMethod(guest.token(), "google:123456789", slot.sessionRevision,
     { method: { kind: "oauth", ref: "google:123456789" }, rotateSlot: true });
   assert.equal(f.store.authenticateAccountSession(loggedIn.token).account.id, "google:123456789");
-  assert.throws(() => f.store.accountSessionSlot(guest.slot.token), { code: "unauthenticated" });
+  assert.throws(() => f.store.accountSessionSlot(guest.token()), { code: "unauthenticated" });
   assert.deepEqual(f.store.db.prepare("SELECT * FROM share_link_joins").all(), before);
   assert.doesNotThrow(() => f.store.createAccountSessionSlot());
   f.setNow(f.store.now() + 31 * 86400000);
@@ -553,8 +562,8 @@ test("same join retried with a lost cookie cannot mint a second guest or use the
 test("existing guest reopens a full invitation using a new request ID without another join", t => {
   const f = fixture(t), first = f.guest("Jill");
   const joined = first.accept(); f.guest("Other").accept();
-  const session = f.store.accountSessionSlot(first.slot.token);
-  const resumed = f.store.shareLinks.join(first.slot.token, f.linkToken, { displayName: "Jill", redemptionId: randomUUID(),
+  const session = f.store.accountSessionSlot(first.token());
+  const resumed = f.store.shareLinks.join(first.token(), f.linkToken, { displayName: "Jill", redemptionId: randomUUID(),
     expectedSessionRevision: session.sessionRevision, expectedSessionBinding: session.sessionBinding });
   assert.equal(resumed.duplicate, true);
   assert.equal(resumed.session.member.id, joined.session.member.id);
@@ -566,8 +575,8 @@ test("closed-link preview only admits a bound active member without creating or 
   f.guest('Other guest').accept();
   const binding = accepted.session.sessionBinding;
   const before = f.store.db.prepare('SELECT count(*) n FROM share_link_joins').get().n;
-  assert.equal(f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding).link.status, 'full');
-  for (const [token, fence] of [[null, null], [guest.slot.token, null], [guest.slot.token, 'wrong-binding']]) {
+  assert.equal(f.store.shareLinks.preview(f.linkToken, guest.token(), binding).link.status, 'full');
+  for (const [token, fence] of [[null, null], [guest.token(), null], [guest.token(), 'wrong-binding']]) {
     assert.throws(() => f.store.shareLinks.preview(f.linkToken, token, fence), { code: 'link_unavailable' });
   }
   const outsider = f.store.createAccount('Outsider', 'audit');
@@ -577,7 +586,7 @@ test("closed-link preview only admits a bound active member without creating or 
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM share_link_joins').get().n, before);
   f.store.command(f.ownerKey, 'commons', { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
     data: { memberId: accepted.session.member.id, expectedMemberRevision: accepted.session.member.revision, permissions: [], active: false } });
-  assert.throws(() => f.store.shareLinks.preview(f.linkToken, guest.slot.token, binding), { code: 'link_unavailable' });
+  assert.throws(() => f.store.shareLinks.preview(f.linkToken, guest.token(), binding), { code: 'link_unavailable' });
 });
 
 test("persisted links with inherited or missing issuers fail public preview without consuming access", async t => {
