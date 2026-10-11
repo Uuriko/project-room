@@ -25,7 +25,6 @@ const GRANDFATHERED = [
   // the gate and are covered via HTTP-boundary tests; recording them here
   // corrects the baseline so the now-precise check does not flag legacy
   // modules as new gaps. Still never add NEW modules.
-  "opportunities.mjs",
   "project-offers.mjs",
   "request-runs.mjs",
   "return-brief.mjs",
