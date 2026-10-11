@@ -1,0 +1,154 @@
+PROJECT ROOM — RESEARCH-DRIVEN EXECUTION PROMPT
+
+MISSION
+Make Project Room a fast, polished multiplayer Codex: humans work in one calm
+conversation with one helpful assistant, while agents and connected computers
+perform useful work underneath. Preserve Project Room's identity and green cube.
+Use Codex's conversational hierarchy, Slack/Discord's collaboration and responsive
+navigation, and Notion's durable content. This is an implementation assignment.
+
+WORKING METHOD
+Begin with current code, running product, open work, agent claims and deployed
+version. Distinguish intended, locally built, integrated, deployed and verified.
+Read existing coordinator and desktop/attention plans; preserve useful unfinished
+work. Do not rebuild existing capabilities or treat an old plan as present truth.
+
+Research starts with a decision, not a topic. State what is uncertain and which
+possible finding would change the implementation. Consult primary documentation,
+source and observed user behavior. Look for contrary evidence and constraints.
+Competitor behavior supplies hypotheses, not proof that our users need a feature.
+Separate observations from explanations and recommendations.
+
+For each material finding record:
+- Observation and evidence, with source/date or reproducible local steps.
+- User consequence and affected journey.
+- Hypothesis plus plausible alternative explanation.
+- Decision: retain, change, remove, or run a bounded experiment.
+- Smallest complete implementation and its acceptance check.
+- What result would reverse the decision; remaining uncertainty.
+
+Prefer fixing demonstrated failures over speculative features. Rank by user
+impact, frequency, evidence, dependencies and effort; do not invent precision.
+Stop researching a decision when additional sources no longer change the next
+experiment. Resume when code, tests or users contradict the assumption.
+Write short decision records, update the plan, then implement. Avoid research
+reports that do not change product behavior.
+
+PROMPT AND AGENT DISCIPLINE
+Give each worker one outcome, relevant context, exact scope, interfaces and
+acceptance criteria. Separate instructions from quoted/untrusted source material.
+Use examples for ambiguous expected behavior. Check for contradictory rules.
+Judge prompts by task outcomes, not length or persuasive wording. Version material
+changes and evaluate on representative cases, including failures and counterexamples.
+Delegate independent bounded work when useful. Review results and integrate them;
+continue independently if peers do not respond. More workers is not automatically
+better: compare quality, time, cost and coordination burden with a simpler approach.
+
+PRODUCT REQUIREMENTS
+1. Minimal, reliable entry: logo, working login/signup and one agent entry. Fix
+   desktop cancellation, Back, provider return and invitation continuity. Optional
+   computer setup happens after entry. Returning users reach their work directly.
+2. Chat is home: narrow sidebar, excellent composer, one primary transcript,
+   optional contextual results panel. Remove duplicate status cards, internal IDs,
+   routine coordination posts, needless copy/buttons and decorative emojis. Preserve
+   user-authored content. Match Codex interaction conventions while retaining brand.
+3. Complete response lifecycle: local echo, durable acceptance, coordinator pickup,
+   truthful activity, execution, useful result and continued conversation. Measure
+   these separately. No fake progress, duplicate sends, hidden stalls or lost drafts.
+4. Multiplayer: retain attribution and stable request identity. People can add
+   context, steer, stop the appropriate run or start separate work. Resolve conflicting
+   direction explicitly. Direct agent addressing is optional, not a prerequisite.
+5. Distinct representations: conversation for humans, execution details for workers,
+   durable artifacts/decisions for the project. Connect them by stable identities.
+   One outward assistant response can incorporate multiple workers. Show useful
+   summaries and tool evidence, not a fabricated private-reasoning transcript.
+6. Continuity: preserve drafts, scroll position and selected results across room
+   switches, refresh/restart and reconnect. Scope private state to the correct user
+   and room; clear it appropriately on sign-out or access changes. Never call an
+   offline queued action accepted by a remote agent.
+7. Agent speed: reuse consistent commands across HTTP/CLI/MCP/provider adapters.
+   Compact reads, bounded batches, incremental subscriptions, typed results,
+   capabilities, stable operation IDs and explicit retry/recovery. Prefer direct
+   APIs, file/process and structured browser tools over screenshot/click loops.
+8. Native power: extend the existing Mac broker with files/processes, app/window
+   discovery, Accessibility, browser operations and visual fallback. Offer broad
+   owner-authorized access and a guided deeply connected setup. Report actual macOS
+   permissions. Verify connections rather than equate copied config with readiness.
+9. Device connection: authenticated native enrollment lets authorized web/remote
+   agents use the Mac. Distinguish visible desktop, isolated browser and cloud.
+   Parallelize independent work; serialize conflicting GUI actions, check stale
+   observations, handle human takeover, global pause, cancellation and revocation.
+   Device access does not imply room-wide disclosure of private data. Complete
+   background availability, signed distribution and update qualification.
+10. Attention: reuse authoritative question/approval stores with a unified view.
+    Simple choices stay inline; related questions use Demigod-style one-at-a-time
+    forms with Back, keyboard controls, optional skip and preserved answers. Do not
+    import Webflow machinery. Do not silently submit recommended options. Closing
+    preserves pending input. Answers bind to intended respondent, request and
+    revision; handle expiry, cancellation, competing answers and resume correctly.
+    Deduplicate questions and notifications. Badges equal the lists they open.
+11. Automation: extend existing durable jobs for schedules/events/dependencies.
+    Define timezone, missed occurrences, concurrency, bounded retry, pause and
+    recovery. Recheck authority at execution. Reconcile uncertain side effects
+    before replay. Automate diagnostics, release evidence, restore drills and
+    cleanup. Quiet successful housekeeping should not flood conversations.
+12. Stack: measure startup, input responsiveness, reads, pickup and first useful
+    response. Reduce eager assets, fat snapshots, audit tails, repeated reads,
+    broad rerenders and duplicate CI. Investigate isolation/storage/auth-state
+    durability using evidence. Reuse existing tools before adopting infrastructure.
+    Remove obsolete code only after checking users, compatibility and history.
+
+RELEASE STRATEGY
+Select the highest-value broken journey and deliver complete vertical slices:
+UI, authoritative backend, runtime integration, failure recovery and tests.
+For every slice state the previous behavior, new behavior and evidence. Use
+existing contracts and lifecycle owners. Do not ship disconnected experimental UI.
+Keep one current plan and evidence ledger. Follow repo ownership and existing
+merge/deploy authorization and gates; no unverified shortcut to production.
+
+ACCEPTANCE
+Use isolated fixtures/accounts where appropriate. Verify actual records/files and
+visible outcomes, not agent claims. Build a small representative eval set now and
+grow it from failures. Include two humans, several workers, one connected Mac,
+a necessary question, interruption, reconnect and a useful delivered artifact.
+Test duplicate delivery, stale answers, revoked access, session expiry, sleeping
+hosts, provider failures, long history, narrow windows, keyboard/screen reader,
+reduced motion and both themes. Keep correctness, usefulness, latency, tool cost
+and recoverability separate. INP <=200ms at p75 is a frontend goal, not an agent
+response-time claim. Set other budgets from explicit device/network baselines.
+Do not claim synthetic tests prove human usability or signed desktop behavior.
+
+REPORTING
+Short progress updates: finding, decision and next verification. Final: what users
+can do now, what was removed/consolidated, measured evidence, exact commit/release
+status and remaining important blockers. Preserve broader work when taking a
+bounded checkpoint. Success is useful work that makes the user want to stay here.
+
+RESEARCH BASIS (2026-10-11)
+https://www.gov.uk/service-manual/user-research/analyse-a-research-session
+https://www.gov.uk/service-manual/user-research/sharing-user-research-findings
+https://developers.openai.com/api/docs/guides/prompt-engineering
+https://www.anthropic.com/engineering/building-effective-agents
+https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
+https://design-system.service.gov.uk/patterns/question-pages/
+https://learn.chatgpt.com/docs/app-server
+
+FIRST EXECUTED DECISION
+Observed in code: open-questions-ui loaded once, ignored later room changes,
+rendered no source navigation, and reset did not erase old DOM rows. Hypothesis:
+users cannot reliably act on this existing attention surface. Change the existing
+module rather than add a second question system. Refresh by room sequence, coalesce
+in-flight changes, clear stale results on failure/reset, and link questions to the
+existing message router. Keep server question detection unchanged; it is a heuristic
+for unanswered chat, not the structured decision protocol designed above.
+Acceptance: five new regressions written before implementation; use actual module
+and browser DOM plus existing server visibility tests. Broader priorities remain
+coordinator availability, draft continuity and native device/attention integration.
+
+Implemented checkpoint: menu bar and attention refresh
+- Native menu bar: green cube, Open Project Room, truthful local tool state/running-process count, Pause local tools, My Mac, Permissions, Quit. Reuses the existing local service; opening the menu never enables permissions. Remains available while the main window is closed.
+- Menu acceptance checks navigation callbacks, refreshed status and pause state; existing native acceptance checks process termination and revocation.
+- Local app updated in icon-preview-20261011 with a before-menubar backup; retained existing green Dock icon. This is a development build, not a distributed/notarized release.
+- Attention: question links open the existing conversation; event updates refresh the open panel, pending refreshes coalesce, failures clear stale rows, reset invalidates previous-session results. Real browser acceptance confirms navigation and answered-question removal.
+- Next menu enhancements: needs-attention count, jump to pending human input, active local task details, optional launch at login. Add only against an authoritative state source; never imply that local Pause stops every remote agent.
+- Packaging debt: build.sh still reads legacy icons/icon-512.png (PR tile); the local update explicitly preserved the installed green ICNS. Replace that packaging asset from canonical project-room-mark.svg before distributing a rebuild.

@@ -1,0 +1,81 @@
+PROJECT ROOM — PLAN AND EXECUTE THE RELIABLE SHARED JOURNEY
+Owner instruction, 11 October 2026
+
+Objective
+Finish useful existing work so a person can ask for work, see factual progress,
+receive a usable result, and let another person and agent continue it without
+starting over. Keep one primary conversation and a fast, minimal human experience.
+
+Execution prompt
+Act as the engineering owner of the existing Project Room. Inspect current
+GitHub main, both production version endpoints, dirty files, local instructions,
+and coordination records before editing. Use an isolated current-main worktree.
+Reuse existing request admission, shared runtime, journal, work handoff, artifact
+revisions, attention controls and procedures. Do not add another coordinator,
+queue, memory store or onboarding wizard.
+
+1. Reconcile the original integration with current main. Preserve subsequent
+message editing/deletion, phone menu positioning, onboarding and contributor
+fixes. Carry the original removal of emoji UI/catalog; retain historical event
+replay and ordinary Unicode text. Do not land the emoji-restoring PR2800 variant.
+Include every allowlisted runtime asset, including the verified local font.
+Resolve overlapping changes deliberately; never use a blanket ours/theirs merge.
+
+2. Finish supervisor recovery using the existing PR2662 work. Respect the full
+server Retry-After minimum, even beyond the local exponential-backoff cap.
+Permanent Room authentication/authorization refusals must end polling and expose
+one reconnect action. A lost claim race must not restart the model runtime.
+Keep unsettled owned attempts in their original journal across rejection; do not
+interpret missing access as permission to rerun uncertain side effects.
+Prove these behaviors with real loopback HTTP, including observed request timing,
+and retain paged discovery, oldest-run recovery and Stop regressions.
+
+3. Qualify one real-provider ask-to-result journey. Inspect supported runtime
+configuration and existing dedicated credentials without printing or copying
+secrets. Distinguish protocol compatibility, provider authentication, live host
+readiness, pickup, actual activity and completion. Use a bounded disposable local
+Room/workspace; do not modify a production room to test. Preserve Stop, retry,
+drafts, concurrent human input and exact publication fences. When provider login
+is absent, continue all independent implementation and acceptance work, document
+the precise missing prerequisite, and do not label scripted tests as provider
+qualification. Do not bypass the dedicated-profile isolation boundary.
+
+4. Connect the existing handoff/artifact path to a minimal human continuation
+action. A second person and agent must receive canonical objective, decisions,
+artifact revisions, failed attempts, pending work and evidence through authorized
+reads. Reauthorize at execution; reject stale revisions and revoked/private
+references. Test through real HTTP/storage and the browser action, including an
+interruption, correction and database reopen. No duplicated envelope format.
+
+5. Make entry and failure states understandable with minimal UI. Reuse the
+existing about guide and connect action. Show no fabricated acknowledgements or
+model progress. Use one compact actionable state when no usable assistant is
+connected. Keep technical diagnostics behind existing detail surfaces.
+
+Acceptance
+- One ask admits exactly one message/run; retries preserve the same operation.
+- Retry-After: 1 produces at least 1000ms between actual HTTP requests; long
+  server delays are never shortened to the local cap; cancellation remains prompt.
+- 401/403 produces one reconnect outcome and no second poll; unresolved journal
+  attempts persist. Lost ownership never authorizes a second model turn.
+- Cold allowlisted packages and Workers assets include the required font and
+  pass import closure, draft recovery, restart and scoped publication checks.
+- Two people and two agent identities continue one deliverable with attribution,
+  current artifacts and evidence, without a manual transcript briefing. Revoke
+  access and stale an artifact to prove the authorization/revision fences.
+- One real supported provider completes the bounded journey, or the record
+  explicitly separates passed integration fixtures from blocked provider login.
+- Meaningful focused and affected tests, lint, whitespace and normal hosted CI
+  qualify the exact candidate. Classify failures; do not refresh visual or schema
+  baselines merely to hide a regression.
+
+Release boundary
+Prepare a reviewable PR/checkpoint and record exact SHAs, observed failures,
+repairs, verification and remaining limitations. No earlier queued-CI override
+applies. Production deploy/publish requires John's authorization for this release.
+Public Mac signing/notarization remains deferred. Do not merge failed checks.
+
+Current baseline
+GitHub main932ddc32; both production doors6cceceac. PR2800 draftc905e5e9
+is not deployed. Work starts by merging the original local2775 head2d8f96e2
+into isolated current main; five conflicts require deliberate preservation.

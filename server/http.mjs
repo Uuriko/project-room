@@ -4026,6 +4026,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
         const snapshotView = params.has("view") ? "work" : "full";
+        const snapshotStarted = performance.now();
         const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1");
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
@@ -4048,6 +4049,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (recentMessages) snapshot.messagesWindow = { mode: "recent", limit: SNAPSHOT_RECENT_MESSAGES,
             omitted: visibleMessages.length - windowed.length, older: "conversation" };
         }
+        // Projection read and visibility filtering only; excludes network/JSON encoding.
+        res.setHeader("Server-Timing", `room-read;dur=${(performance.now() - snapshotStarted).toFixed(2)}`);
         return json(res, 200, snapshot);
       }
       if (route === "outside-agents") {

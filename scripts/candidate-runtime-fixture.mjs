@@ -10,6 +10,8 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
+  paths.add('server/opaque-read-cursor.mjs'); // Shared conversation/assistant cursor dependency.
+  paths.add('client/codex-supervisor.mjs'); // Shared-ask host entrypoint dependency.
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
   paths.add('client/work-preparation.mjs'); // Restored from #908 revert: MCP work-preparation helper (imported by client/mcp-stdio.mjs)
   paths.add('client/host-result.mjs'); paths.add('client/host-subprocess.mjs'); paths.add('client/host-verification.mjs');
@@ -165,7 +167,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/open-questions.mjs'); // F1: open-questions radar read (imported by server/http.mjs)
   paths.add('src/room-layout.js');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
-  paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
+  paths.add('src/emoji.js'); paths.add('src/legacy-reaction-aliases.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
   paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
@@ -192,6 +194,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by deploy/public-search.mjs)
   for (const path of publicAssetPaths) paths.add(path);
+  // Historical packages allow this retired asset; the current source removes it.
+  paths.delete('src/emoji-catalog.js');
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

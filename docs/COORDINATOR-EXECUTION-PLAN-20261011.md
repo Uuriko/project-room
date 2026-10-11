@@ -1,0 +1,291 @@
+# Coordinator implementation plan and execution receipt
+
+This plan turns the Notion/coordinator design into small reviewable changes. Preserve the current chat layout and existing run/attempt protocol. Do not add a second orchestration database or a compulsory Notion dependency.
+
+## Batch 1: reliable server admission and discovery
+
+### Atomic request admission
+
+Add an optional `message` to `invoke` on the existing assistant endpoint. The server writes the normal message command and the assistant run within the same transaction. Validate normal message permissions, channel, body and reply rules through the existing command implementation. Retain the existing source-message invocation form for clients already posting separately.
+
+Use stable request, run and source-message IDs. A successful retry returns the same receipt; changed input under the same operation ID is rejected. Derive the nested command ID from actor and request ID. No caller can supply another author or use this path for a private message. Rejection, including unavailable coordinator or run collision, must roll back message and run writes.
+
+Implemented: `server/room-assistant.mjs`, `server/routes/room-assistant.mjs`.
+
+### Persistent discovery
+
+The existing opt-in `--watch` command runs oldest queued unclaimed work serially through the established shared runtime. Add a bounded read deadline and preserve cancellation. Never infer working state from discovery alone. Never claim another host's attempt. Stop on uncertain execution failure; explicit same-journal recovery remains required.
+
+Superseded: the watcher from957cd667 was removed. Current local integration uses `client/codex-supervisor.mjs` and CLI wiring from PR2612. See the reconciliation correction below.
+
+### Acceptance
+
+Test exact retry, altered retry, unavailable coordinator rollback, run-collision rollback, invalid channel/private payload, agent impersonation rejection, idle cancellation, stalled read, and atomic admission through actual discovery and fenced threaded publication. Existing shared runtime tests continue to own model-session, late-input, stop and publication recovery behavior.
+
+Retained tests: `tests/assistant-admission.test.js` and existing `tests/codex-supervisor.test.js`. The redundant watcher test file was removed with its implementation. These use real Room HTTP/server/storage paths where relevant. The lifecycle test substitutes the model execution and therefore does not prove provider authentication or real model quality.
+
+## Batch 2: use atomic admission in the composer
+
+Implemented locally for plain public asks: the shared composer now uses advertised atomic admission, carries the exact operation in persisted drafts, applies the receipt before background refresh, and preserves legacy behavior when the server does not advertise support. Attachments and channel-broadcast replies retain the existing ordered path. Not deployed.
+
+Validation: 1,792 affected tests passed; 37 conversation/browser checks passed; the strengthened two-human test separately passed and compares exact request payloads across lost receipt, reload, and retry, asserting one source message and one run. Account/room switches during atomic admission and attachment-specific admission remain explicit follow-ups. Live recheck still returns coordinatorMemberId=null and availability=not_connected.
+
+1. Carry Ask Room intent with the exact persisted pending draft so reload and retries cannot downgrade an ask into ordinary chat.
+2. Use the combined operation for plain public asks; preserve attachment ordering until their transaction boundary is explicitly handled.
+3. Keep local echo keyed to the same source message ID. Distinguish stored/admitted from host pickup; no synthetic acceptance message.
+4. Clear only the originating draft after an authoritative receipt. Preserve another room/thread's draft during navigation.
+5. On a lost response retry the same operation. Do not fall back to separate message creation after an ambiguous result.
+6. Integrate with PR2683's receipt-first UX rather than overwrite it. Qualify mixed-version deployment: API support must precede a client that depends on it, or the client must discover supported features safely.
+7. Browser tests: lost response then reload/retry; double Enter; rejection; account/room switch during send; old server compatibility; attachments; visible exact-once message and run; no idle setup noise.
+
+## Batch 3: make a live host genuinely available
+
+1. Check current room coordinator, qualified host and ownership through live API. The latest successful check returned coordinatorMemberId=null, revision0. Recheck before activation; delivered owner request is not proof of a configured host.
+2. Use one dedicated Room identity with the existing owner-controlled configuration endpoint; do not borrow another agent's credentials or silently change the user's account.
+3. Qualify the dedicated runtime's provider authentication with a bounded real task, then run the watcher under a documented supervisor.
+4. Add idle readiness independent of in-flight runs: scoped host session, heartbeat expiry, provider readiness and capacity.
+5. Test a real human request, two-human contribution, streamed result and Stop before calling it connected.
+6. On host loss show the request's retained state and useful recovery. Automatic restart must reconcile existing attempts and external outcomes before new execution.
+
+## Batch 4: responsive multiplayer scheduling
+
+Preserve one Room identity but separate conversation execution contexts. Build on current work claims for conflicting resources. Add a bounded pool and fair scheduling only after host capacity is explicit. A long build must not block another person's status question. Replies normally contribute to the current request; unrelated asks create separate requests; conflicts require an explicit resolution. Preserve requester attribution and visibility throughout.
+
+Inspect open changes-feed PR2633 before adding another poll/feed design. Use cursor/reconnect semantics to reduce full projection reads. Record receipt, admission, pickup, first useful response and completion times separately.
+
+## Batch 5: useful delegation and maintained memory
+
+Delegate with objective, scope, context references, budget and evidence expectations. Route child results to the parent run, propagate cancellation and deduplicate late results. Validate required outputs before completion; a worker's success claim is not evidence by itself.
+
+Extend existing room/work context and charter before building a new memory service. Borrow Lore's scope, expiry and supersession patterns; keep access enforcement in Room. Separate operational receipts from durable knowledge, citation frequency from confidence, and sourced decisions from inferred summaries. Evaluate outcomes against no-memory, stale-memory and conflicting-memory conditions.
+
+## Release gates and scope
+
+Run focused tests, affected tests, lint and the required full suite before push. Exact-head hosted CI and the merge/deploy lane still govern release. Keep API/backend support backward compatible and qualify the frontend separately. No live credentials, owner configuration, startup service or production deployment is changed by Batch 1.
+
+Batch 1 is the current implemented scope. Batches 2–5 are explicit unfinished work, not claims of shipped functionality. Detailed design rationale and primary sources are in `NOTION-COORDINATOR-20261011.md`.
+
+## Batch 1 verification receipt
+
+- Focused admission, discovery, assistant contracts and shared runtime: 64 passed.
+- Broader affected suite: 1,309 passed across 238 files.
+- Lint: zero errors, 127 existing warnings; design-token, reachability and i18n checks passed.
+- No production activation, frontend adoption, full-suite green claim, merge or deployment.
+
+## Reconciliation correction
+
+PR2612 (`147c1027`) already implements persistent shared pickup, exclusive ownership,
+owned-attempt recovery, persisted backoff and bounded reads. The local simpler watcher
+was redundant and is retired. Integrate PR2612 rather than ship two supervisors.
+Keep atomic admission and its independent tests. The earlier watcher test counts above
+are historical evidence for the retired implementation, not qualification of the
+replacement. Rerun the existing supervisor/runtime suites after integration.
+
+# Consolidated product backlog
+
+This extends the coordinator plan rather than replacing it. Coordinator delivery stays
+first. The open implementation inventory is [OPEN-PR-RECONCILIATION-20261011.md](OPEN-PR-RECONCILIATION-20261011.md): 449 open PRs observed on October 11. It captures all PRs returned by that query, not every uncommitted branch or every historical promise. Existing plans reviewed include HUMAN-EXPERIENCE-PLAN-20261006.txt, MAC-POWER-PLAN-20261006.txt, PRODUCT-CONSOLIDATION-PLAN-2026-09-30.md, and FINISH-BACKLOG.md at 3b20363a. Historical proposals must be reconciled with code before becoming new tasks.
+
+## Status vocabulary and ownership
+
+- **Local:** source/checkpoint exists; not a shipping claim.
+- **Open PR:** reviewable source exists; exact head and current CI must be checked.
+- **Integration:** combining existing implementations; qualify their interaction.
+- **Unverified:** present or previously attempted, but intended end-to-end behavior lacks proof.
+- **Proposed:** evaluate/build only after checking existing code and value.
+- **Live verified:** observed against a named deployed/installed revision with a reproducible receipt.
+
+Root owns integration and this priority order. Agent lanes are claimed per concrete file/task;
+PR authorship is not a current work assignment. Do not wait indefinitely for a peer response:
+continue independent work and preserve the unanswered dependency. Do not create duplicate
+implementations because an existing one is unmerged.
+
+## P0 — finish the human request loop
+
+| ID | Work and current state | Completion evidence |
+| --- | --- | --- |
+| C01 | Atomic admission, local95bdbde7; preserve backward-compatible optional message payload | One message + one run or neither; exact retry and authorization tests |
+| C02 | Atomic plain-text admission wired locally into shared composer; remaining navigation/attachment qualification | Reload/lost receipt/double Enter/account switch preserve intent and produce one run |
+| C03 | Adopt existing PR2612 supervisor; local integration replaces redundant watcher | Owned recovery before new work; exclusive host; stop/restart/backoff tests |
+| C04 | Configure and qualify a real muse-room coordinator; unverified | Actual authenticated model run replying to a human in the original conversation |
+| C05 | Immediate message display and admission receipt feedback; PR2683 plus local837a83c9 | Slow-network browser proof, usable composer, no fabricated working/typing |
+| C06 | Idle host readiness, provider readiness and capacity; incomplete | Expiring health independent of active requests; disconnect visible without false availability |
+| C07 | Integrate useful pieces of changes-feed PR2633 and resume context PR2631 | Cursor replay/reconnect and scoped reads; no competing feed implementations |
+| C08 | Late input, edits, conflicting direction, pause/resume/Stop; existing mechanisms need integrated qualification | Two humans steer one real run; cancelled or replaced attempt cannot publish |
+| C09 | Failure feedback and recovery; incomplete | No silent stranded ask, no duplicate external action after lost response |
+| C10 | Parallel independent conversations and fair queueing; proposed | Long build does not monopolize simple unrelated requests; resource conflicts remain serialized |
+
+Gate to leave P0: a human can ask, see acknowledgment, get actual pickup, add a correction,
+receive one useful result and stop execution on both website and installed desktop. Report
+partial readiness until this is observed. Historical owner DM `coordinator-pickup-owner-1011`
+was committed at sequence11938; it is a delivered request, not proof of owner action.
+
+## P0 — account access and release correctness
+
+| ID | Work and current state | Completion evidence |
+| --- | --- | --- |
+| A01 | Native Google return/cancel/back recovery, PR2651; real completion unverified | Real desktop sign-in succeeds; cancellation and timeout restore usable login without restart |
+| A02 | Email/password signup/login/reset; run current journeys before changing design | New human reaches usable room, credentials errors preserve input, recovery works |
+| A03 | Invite destination across signup/OAuth and app launch | Correct room/identity after redirect, retry and desktop deep link |
+| A04 | GitHub sign-in, PR2652; deployment configuration previously missing | Only show configured provider; real callback works on web and desktop |
+| A05 | Minimal sign-in screen and green cube identity | Logo/wordmark and essential auth controls only; correct Dock/app icon in installed artifact |
+| A06 | Optional passkey setup after account entry; verify existing implementation first | Enrollment/login/recovery work without adding an onboarding gate |
+| A07 | Requested human admin access; owner-dependent/unverified | Read back intended permissions for exact human member, never infer from display name |
+| R01 | Reconcile source, CI, deployed version and installed native version | One release manifest identifies each exact artifact and qualification result |
+| R02 | Resolve full-suite failures before green release claims | Failures classified, reproduced and fixed or explicitly justified; exact-head hosted CI green |
+| R03 | Merge/deploy serialization and rollback | One lane owner, tested rollback, post-deploy web/native/account/agent smoke |
+| R04 | Signed/notarized desktop distribution/update path | Reproducible install/update/rollback, preserved sessions, documented signing limitations |
+
+## P1 — fast, calm everyday collaboration
+
+| ID | Work | Completion evidence |
+| --- | --- | --- |
+| H01 | Ship local echo/typing and warm cache work from2674/2673/2683 coherently | Measured receipt/pickup latency; no duplicate messages, stale permissions or full-history reload storms |
+| H02 | Unify assistant output into conversation, keep worker detail optional | One stable result, expandable useful activity, no default swarm console |
+| H03 | Drafts across threads, rooms, reload, navigation and failures | Exact scoped recovery; another destination's draft never cleared by late response |
+| H04 | Thread behavior and message menus | Replies stay scoped; menus/focus survive updates; no unrelated claim noise |
+| H05 | Saved message behavior observed ambiguous during desktop QA | Save/unsave changes state and persists; saved view opens exact source |
+| H06 | Attachments and resulting artifacts | Upload/retry/cancel/download/preview work; no orphaned or inaccessible shared result |
+| H07 | Search and navigation | Useful results, paging, source jump, back behavior and access filtering |
+| H08 | Unread/catch-up/notifications | Same cursor and visibility across badge/panel; read, delivered and answered stay distinct |
+| H09 | Invite, member identity, mentions and optional direct agent interaction | Reliable links; exact recipient identity; no accidental broad audience |
+| H10 | Everyday Slack/Discord affordances | Verify edit/delete/reply/reaction/copy-link/keyboard navigation before adding substitutes |
+| H11 | Accessible, responsive conversation | Keyboard-only flow, visible focus, screen reader feedback, contrast, reduced motion and small-screen input |
+| H12 | Remove redundant panels, labels and empty states | No idle disconnected/project panel; advanced tools remain reachable when relevant |
+| H13 | Returning to ongoing work | Resume last room/scroll/draft; compact relevant progress with source links |
+
+Consolidate existing UI before a framework migration. A React/chat-component rewrite is
+an evaluated implementation choice, not automatically a feature. Require a concrete
+benefit, parity tests and removal of the superseded renderer before expanding it.
+
+## P1 — agents that can reliably get work done
+
+| ID | Work | Completion evidence |
+| --- | --- | --- |
+| G01 | One agent connection/setup/resume path | Existing identity retained; host receives and answers a real request |
+| G02 | Typed machine actions, discovery, compact context and batching | Common work uses direct tools/API rather than human-speed clicking |
+| G03 | Clear action/result/error contracts across MCP/CLI/HTTP | Same authority and idempotency behavior; errors identify a usable next step |
+| G04 | Scoped delegation and parent/child result routing | No overlapping accidental edits; one public synthesized result with provenance |
+| G05 | Budgets and deadlines | Actual usage associated with work; useful partial result on exhaustion |
+| G06 | Advisory agent work-fit, PR1995 candidate | Attributed outcomes, uncertainty and task types; no unsupported universal agent rankings |
+| G07 | Readiness and acknowledgment telemetry | Delivery/pickup/response measured separately; no claim that an unread post was acted on |
+| G08 | Portable tools/skills and instructions | Versioned usable packages; small accurate entry docs; no duplicate setup instructions |
+| G09 | Stop controls and uncertain native/remote actions | Propagation and effect reconciliation tested; no global exactly-once promise |
+
+## P1 — desktop integration and computer access
+
+| ID | Work | Completion evidence |
+| --- | --- | --- |
+| D01 | Isolated-home desktop tool connection, PR2611 | Copied configuration reaches correct saved room without ambient credential lookup |
+| D02 | Accessibility/window capture tools, PR2614 | Real selected-app round trip; correct permissions, private artifacts and bounded retention |
+| D03 | File/process tools and working directories | Scope is explicit, results return to originating run, cancellation is observed |
+| D04 | Native observation plus action loop | Real app interaction succeeds; target window identity remains correct after focus changes |
+| D05 | Deep computer setup | Explain actual OS grants/connectors; no checkbox falsely claiming unrestricted access |
+| D06 | Background host lifecycle and wake/sleep | Optional startup, visible status, recoverable disconnection, stop/uninstall behavior |
+| D07 | Web versus desktop capability presentation | Browser does not promise local tools without a connected host; same shared conversation |
+| D08 | Email/calendar/app connectors | Add only complete authorized workflows; verify existing connections before building duplicates |
+| D09 | Linux/other platform stance | Document supported tested capabilities; avoid presenting an unfinished package as parity |
+
+## P2 — durable knowledge, work and results
+
+- M01: Keep room/work context canonical; compact summaries reference original evidence.
+- M02: Adopt sourced decisions, procedures, scope, expiry and supersession from Lore's useful patterns.
+- M03: Keep operational receipts temporary; separate personal preferences from shared room instructions.
+- M04: Detect contradictions and stale memory; edits/deletion/revocation affect derived context.
+- M05: Evaluate retrieval and downstream task success/harm independently.
+- M06: Optional Lore/Notion connector for existing customers; no mandatory external memory backend.
+- W01: One chat-to-work-to-result lifecycle, with dashboards as views of the same records.
+- W02: Put review and corrections beside the exact result version.
+- W03: Shared editable artifacts only after a demonstrated need; use established collaboration primitives.
+- W04: Preserve evidence, dependencies, handoffs and partial outcomes without exposing machine bookkeeping by default.
+- W05: Reliable export, backup and restore; verify integrity and privacy after recovery.
+
+## P2 — engineering simplification and operations
+
+- E01: Reconcile the entire open-PR inventory: retained carrier, superseded carrier, already present, obsolete, or needs proof. Record why; do not mass-close based only on title.
+- E02: Audit unpushed local checkpoints and worker handoffs against the same inventory.
+- E03: Collapse duplicate watchers, connection flows, status calculations and projections only after behavioral comparison.
+- E04: Remove dead code and stale documentation with coverage of remaining entry points.
+- E05: Profile hot paths with realistic room size; separate frontend render, network, auth, storage and model costs.
+- E06: Bound history/context/attachment reads and caches; preserve fresh authorization.
+- E07: Add actionable diagnostics with request/run IDs and redaction; avoid noisy chat logs.
+- E08: Keep public docs, API/MCP schemas, packaged runtime and deployed features in agreement.
+- E09: Add versioned migration/rollback qualification for shared SQLite/Cloudflare/native boundaries.
+- E10: Maintain a compact acceptance suite around complete user journeys; remove redundant tests only with evidence of overlap.
+
+## P3 — growth and revenue after the core loop works
+
+- B01: Define and observe first useful result, invited collaborator activation and repeat project use.
+- B02: Evaluate hosted runtime/convenience plans with transparent budgets; no surprise agent spend.
+- B03: Skill/app marketplace discovery, versioning, compatibility and publisher trust before payments.
+- B04: Complete purchase/install/use/update/remove as one workflow before marketplace expansion.
+- B05: Keep open-source setup usable; document what is self-hosted versus hosted convenience.
+- B06: Test specific templates/use cases with real work rather than a large onboarding template grid.
+- B07: Avoid adding billing, rewards, rankings or dashboards to the default conversation unless they solve a demonstrated need.
+
+These are product directions, not authorization to charge money, contact outside users,
+or provision new paid services.
+
+## Execution order after coordinator delivery
+
+1. Qualify current login/invite + two-human/one-Room real work on web and installed desktop.
+2. Integrate the smallest coherent speed/auth/coordinator release; fix release blockers and record rollback.
+3. Complete everyday chat reliability and the proven native tool round trip.
+4. Improve parallel scheduling, delegation, context quality and agent machine ergonomics.
+5. Consolidate UI/code and retire superseded implementations with parity evidence.
+6. Evaluate retention/usefulness, then expand hosting/skills monetization with complete flows.
+
+Every retained item needs a source/checkpoint, current owner/claim, smallest useful
+implementation, dependencies, acceptance proof and release state. Do not turn the list
+into a standing requirement to add all proposed features. Reprioritize using observed
+user friction and real work outcomes. A plan entry is never completion evidence.
+
+## Consolidation verification receipt
+
+Existing PR2612 source was integrated as632544c9,8022a79f,4401de0b after retiring the duplicate watcher in81b5f753. Atomic admission remains present. Admission, supervisor, runtime, shared-assistant and stdio suites:59 passed. Lint:zero errors,127 warnings. This is local qualification, not an authenticated provider run or a deployment.
+
+## Human speed pass: measured priorities (2026-10-11)
+
+Human flow is the performance contract: open the app, find the conversation, type without interruption, see the message immediately, receive truthful admission, and then see actual host progress in the same conversation. Keep advanced controls out of this path.
+
+### This checkpoint
+
+- Integrated existing PR2673 cache work as c8d09f48/879aff04. Unrelated cursor/side-table commits retain parsed projections. Actual projection/body changes invalidate; rollbacks discard uncommitted state. Authorization is still read fresh. Tests cover Node and the durable-storage adapter emulator; these are not deployed workerd load measurements.
+- Assistant rendering now indexes messages once per paint, replacing repeated full-history scans for run sources, context inputs, results, and the current card. No history scan when there are no runs. This changes lookup complexity, not UI content or controls.
+- Cold signed-out page profile: production 83746c5b, 390px, cold cache, 4x CPU throttle, 150ms/1.6Mbps network. One sample: LCP 3904ms, 853061 transferred bytes, 71 requests, one failed request, 1609 DOM nodes. Local uncompressed page: LCP 10772ms, 2562375 bytes, 70 requests. Neither sample is a production percentile; local and production byte counts are not directly comparable.
+- Authenticated production read probes (two samples each, same laptop): assistant 864/844ms, 151 decoded bytes; recent room snapshot 1238/668ms, 198207 decoded bytes. These include network and body consumption, not isolated server CPU. No content or credentials are stored here.
+
+### Order of work
+
+1. **Cold entry:** inspect the failed request and the critical asset waterfall; separate the small login boot path from authenticated workspace code only after preserving native auth callbacks, invitation intent, and session recovery. App.js is currently an eager module with workspace dependencies; index.html eagerly includes workspace markup and five stylesheets. Target mobile LCP under 2.5s on the same profile, with multiple runs and a production-compressed build. No extra landing-page copy.
+2. **Room reads and updates:** measure server timing separately from network, response compression, and decode/render. Retain bounded recent reads; audit which remaining snapshot fields account for the ~198KB response before splitting endpoints. Reuse existing change-feed work before introducing another polling protocol. Avoid full snapshots for typing or unchanged state. Target unchanged UI producing no DOM mutations and no unnecessary reads.
+3. **Composer and navigation:** preserve <100ms local echo under delayed receipts, exact retries, focus/selection, independent channel/thread drafts, and responsive navigation during requests. Add atomic account/room-switch qualification. Keep the same shared behavior in the desktop webview.
+4. **Real agent feedback:** connect and qualify a live coordinator. Measure send-to-admission and admission-to-host-pickup separately. A fast UI must never invent agent activity. Prefer existing event/change feeds and supervisor wakeup paths over shortening every polling interval.
+5. **Backend under load:** benchmark growing history, concurrent viewers and agent updates, event-loop stalls, query counts, response bytes, rollback and authorization revocation. Preserve shared-runtime ownership fencing and idempotency while optimizing. Only introduce indexes, caches or batching after measuring the responsible query/path; no infrastructure rewrite justified by these samples alone.
+6. **Release qualification:** run the coherent human-speed/admission/cache stack through exact-head CI and native smoke checks, then deploy through the shared lane and repeat the same measurements. All changes above remain local until that happens.
+
+Checkpoint validation: 1,698 affected tests passed; 13 focused backend/cache/admission tests passed; 24 browser checks passed with the then-disabled large-history case skipped. Re-enabled that existing case after confirming windowing exists: it separately passed with 2,000 stored messages and 100 live DOM message nodes. Lint passed with 0 errors/128 warnings. The sentinel render timing is post-login and must not be described as end-to-end startup latency.
+
+### Follow-up: entrance font and snapshot composition
+
+The production waterfall identified Inter-Regular.ttf as ~200KB transferred/411640 bytes decoded, solely for the fixed PROJECT ROOM title. The login now uses a 6512-byte subset of the same licensed font; the original remains available for Open Graph generation. Browser canvas comparison at 38px confirmed identical pixels and advance width (302.181640625px), and the mobile login was visually inspected. Both public asset allowlists include the new font; Miniflare verifies edge delivery, font MIME type, bytes and HEAD behavior without entering the Durable Object. Reproduction command and fonttools version are in THIRD_PARTY.md.
+
+Local throttled mobile retest transferred 2157245 bytes versus 2562375 before. LCP was 10748ms versus 10772ms: no meaningful startup latency improvement established by this single comparison. The eager module graph remains the larger startup problem. The production failed request was the Cloudflare analytics beacon, not a missing product asset.
+
+One authenticated recent-snapshot composition sample: eventLog 78508 bytes/100 entries; messages 73082 bytes/100 entries; members 19961; replyRequests 10946; workItems 9350. Roughly 40% of the ~198KB decoded response is the audit tail. Next investigate an explicitly negotiated lightweight chat snapshot with on-demand audit loading, preserving existing event-dependent UI and legacy clients. Do not simply delete eventLog: hidden record UI and other selectors still consume it. Prioritize this over shrinking already-small channels or pins.
+
+Font checkpoint validation: 1698 affected tests and 2 edge tests passed; full lint passed (0 errors,128 warnings). Rebuilding the subset with the documented command produced byte-identical output. This is local source; no production speedup claimed.
+
+## Emoji retirement and next infrastructure work
+
+User direction: remove emoji product features. Removed reaction picker/chips/notification reaction shortcuts, colon autocomplete, shortcode-to-glyph display conversion and custom long-press/right-click handling. Existing Unicode message text remains literal. Removed the 197656-byte search catalog and its descriptions/categories/tags. Retained a 46379-byte identity-only compatibility table because persisted reaction events and poll votes use these identifiers; replay and existing machine protocol remain compatible. This is not a deletion or rewrite of historical data. Removed the decorative agent welcome glyph too.
+
+The highest-value infrastructure work is now:
+
+1. **Request-path measurements (started here).** Successful snapshot responses expose `Server-Timing: room-read;dur=...`, measured across projection retrieval and visibility/redaction work. This excludes authentication before the read, JSON encoding and network transport. No IDs/content in the metric. Use this with browser timing to distinguish server work from transfer/render costs. Next add bounded histograms by route/view, queue-to-pickup and first-response timings, and reproducible large-room/concurrent-reader workloads. Avoid per-message content logging and unbounded metric labels.
+2. **Lightweight chat delivery.** Negotiate audit-free recent snapshots explicitly; preserve default legacy behavior, authorize every read, and load the Record view on demand. Audit all selectors before separating eventLog. Measure bytes and CPU, then prove reconnect, deletion, membership revocation, pins, and event-dependent UI still work. This targets the measured ~40% audit-tail payload.
+3. **Small authentication entrypoint.** Split eager workspace imports from the login boot path; preserve OAuth callback/back/cancel, invitation context and account recovery. Load the workspace after confirmed entry. One shared boot path for website/native webview, not two auth implementations. Measure compressed assets and repeated mobile cold starts.
+4. **One durable coordinator host.** Finish qualification and activation of the integrated PR2612 supervisor; integrate useful changes-feed PR2633 work rather than create a new queue. Prove restart recovery, exact admission, ownership fencing, cancellation and stale-host takeover before claiming instant agent availability.
+5. **Release/performance regression infrastructure.** Keep large-history browser qualification enabled, add explicit budgets for asset transfer and snapshot bytes, and retain timing samples at the exact deployed revision. Use existing runtime packaging, edge tests and deploy rollback lane. No new database/cache vendor or orchestration service is justified by current evidence.
+
+Validation for this checkpoint: 1931 affected tests passed after updating obsolete feature assertions and historical runtime packaging; 8 human/composer browser tests, 2 release-polish browser tests, 21 focused text/replay tests, 3 snapshot HTTP tests and 2 edge tests passed. Lint passed with 0 errors/128 warnings. Removed-file i18n scope and reduced design-token baselines were regenerated to reflect actual deletions. No production deploy.

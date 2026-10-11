@@ -1,0 +1,53 @@
+PROJECT ROOM — RELIABLE SHARED JOURNEY EXECUTION RECEIPT
+11 October 2026
+
+Scope and provenance
+Executed RELIABLE-SHARED-JOURNEY-20261011.txt in an isolated branch based on
+main932ddc32, integrating original2775 head2d8f96e2. Five merge conflicts were
+resolved deliberately. Current message editing/deletion, phone menu placement,
+@Room admission and onboarding remain covered by browser checks. The original
+emoji UI removal is preserved; historical reaction replay remains supported.
+PR2800's reaction-restoring variant was not adopted.
+
+Repairs
+Supervisor honors full Retry-After values for polling and claim-side errors,
+including values exceeding Node's timer limit. Cancellation interrupts waits.
+Room401/403 refusals terminate with one reconnect_agent action and preserve
+uncertain execution records. Known claim races reuse the provider process.
+Claim operation IDs distinguish host attempts. A freshly created reservation
+that provably lost its claim is retired without erasing its receipt; uncertain
+or previously executed attempts are not retired by that rule.
+
+Existing continuation now selects progress/handoff when the person explicitly
+chooses that action. No new packet format, queue, coordinator or store was added.
+The acceptance journey uses two people and two scripted agents over real HTTP:
+failed processing, persisted handoff, server/database restart, guest continuation,
+human correction, second-agent draft, fenced publication, independent exact-hash
+verification and owner acceptance. It checks stale-return rejection, unrelated
+message exclusion, attribution and revoked-key rejection.
+
+Packaging includes the previously missing wordmark font (6512 bytes, SHA256
+9e3f1f48d398683927dfe8b323000be3f13d602ee841d9de82e7f4abebc76fb5).
+Candidate packaging now includes supervisor/cursor dependencies and excludes the
+retired emoji catalog. Historical exact-commit packages can still include it.
+Generated skill error references were synchronized; i18n counts ratchet down.
+
+Provider qualification — incomplete
+The installed Codex executable passes isolated App Server protocol qualification:
+history/read/resume supported, modelTurnExecuted=false. The dedicated profile
+has no provider login; login status reports Not logged in. This is not an actual
+provider ask-to-result pass, and scripted acceptance is not presented as one.
+No desktop credentials or ambient operator profile were imported. The missing
+prerequisite is an authenticated dedicated profile path, requested from John.
+After it is available, run the existing host against a bounded disposable local
+Room/workspace and verify pickup, truthful progress, result and Stop. Do not use
+a production room for this qualification.
+
+Release boundary
+No production deployment, Mac installation, login setting change, permission
+grant, signing/notarization or queued-CI override was performed. Hosted CI must
+be green at the proposed exact head before landing. Real provider authentication
+and real provider execution remain release qualification prerequisites.
+
+Local validation logs live under .tmp/ and are excluded from source publication.
+The continuation screenshot is test-results/shared-continuation.png.

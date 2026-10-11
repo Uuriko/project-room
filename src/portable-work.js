@@ -96,6 +96,9 @@ export function installPortableWork({ client, getState, onSaved }) {
     $("portable-work-title").textContent = state.workItems[workId].title;
     const item = state.workItems[workId];
     $("portable-progress-label").hidden = !(item.handoff || item.receipt || item.blocker || item.claim || item.attempt_count);
+    // The explicit continuation action selects the existing progress packet.
+    // Ordinary "Use my AI" exports remain opt-in.
+    $("portable-progress").checked = button.dataset.portableProgress === "true";
     $("portable-source-label").hidden = !state.workItems[workId].sourceMessageId;
     controls(); if (!entry.native) preview(); dialog.showModal(); mode(entry.native || button.dataset.portableMode === "result");
   });
