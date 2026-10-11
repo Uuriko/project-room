@@ -5403,13 +5403,13 @@ $("#message-edit-form").addEventListener("submit", e => {
   if (!target || !state || target.generation !== client.generation) return;
   const current = ownEditableMessage(target.id);
   if (!current) { $("#message-edit-dialog").close(); messageEditTarget = null; return; }
-  if (!body.trim()) { setFormStatus($("#message-edit-status"), "A message can't be empty.", true); return; }
+  if (!body.trim()) { setFormStatus($("#message-edit-status"), uiText("message.edit_empty"), true); return; }
   if (body === current.body) { $("#message-edit-dialog").close(); messageEditTarget = null; return; }
   submit($("#message-edit-form"), async () => {
     await client.send(draftCommand(null, T.MESSAGE_EDITED, { messageId: target.id, body, expectedMessageRevision: target.revision }).command);
     if (!state) return;
     $("#message-edit-dialog").close(); messageEditTarget = null;
-  }, { failureHint: "Your edit was kept; try again, or close and reopen the message." });
+  }, { failureHint: uiText("message.edit_failed_hint") });
 });
 function openDeleteMessage(messageId) {
   if (busy) return;
@@ -5431,7 +5431,7 @@ $("#message-delete-form").addEventListener("submit", e => {
     await client.send(draftCommand(null, T.MESSAGE_DELETED, { messageId: target.id, expectedMessageRevision: target.revision }).command);
     if (!state) return;
     $("#message-delete-dialog").close(); messageDeleteTarget = null;
-  }, { failureHint: "Nothing was deleted; try again." });
+  }, { failureHint: uiText("message.delete_failed_hint") });
 });
 $("#close-report").addEventListener("click", () => { if (!busy) $("#report-dialog").close(); });
 $("#report-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) $("#report-dialog").close(); });
