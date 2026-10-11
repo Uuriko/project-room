@@ -489,7 +489,11 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
 // Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
 // purely additive, created lazily on first lease use.
 const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES]);
+// Approval-inbox tables (unified approval inbox, guild 10 slice 1 — the
+// creating slice's tables are registered here before its PR lands):
+// purely additive, created lazily on first inbox write.
+const APPROVAL_INBOX_ADDITIVE_TABLES = Object.freeze(["approval_inbox_cards", "approval_inbox_decisions"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...APPROVAL_INBOX_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
