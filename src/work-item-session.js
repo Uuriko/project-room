@@ -341,7 +341,13 @@ export function workItemSessionContract() {
 
 export function sessionCommandType(item, action, nextStatus) {
   const session = sessionRecord(item);
-  if (action === "request_stop") return SESSION_EVENT_TYPES.STOP_REQUESTED;
+  if (action === "request_stop") {
+    // A stop is a signal to a live run. A session that never started has no
+    // run to stop: accepting the signal wedges the item (STARTED refuses a
+    // queued session with stop_requested_at set, so it could never run).
+    if (session.status === SESSION_STATUSES.QUEUED) throw new Error("Invalid session transition from queued: no run to stop");
+    return SESSION_EVENT_TYPES.STOP_REQUESTED;
+  }
   if (action !== "set_status") throw new Error("Choose set_status or request_stop");
   if (!isSessionStatus(nextStatus)) throw new Error("Choose a session status");
   // A finished (done/failed) session may be started again: that is a retry, so
@@ -349,7 +355,14 @@ export function sessionCommandType(item, action, nextStatus) {
   if ((session.status === SESSION_STATUSES.QUEUED || TERMINAL.has(session.status)) && nextStatus === SESSION_STATUSES.PROCESSING) {
     return SESSION_EVENT_TYPES.STARTED;
   }
-  if (TERMINAL.has(nextStatus)) return SESSION_EVENT_TYPES.STOPPED;
+  if (TERMINAL.has(nextStatus)) {
+    // A terminal stop closes the attempt the start recorded (G1). A session
+    // that never started has no attempt to close, so refusing keeps the
+    // ledger's one-owning-attempt-per-item invariant instead of recording a
+    // performer-less outcome.
+    if (session.status === SESSION_STATUSES.QUEUED) throw new Error("Invalid session transition from queued: no attempt to close");
+    return SESSION_EVENT_TYPES.STOPPED;
+  }
   return SESSION_EVENT_TYPES.STATUS_CHANGED;
 }
 

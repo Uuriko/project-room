@@ -101,6 +101,32 @@ test("legacy work items read as queued; started/status/stop/stopped are exact tr
     b: { id: "b", title: "B", state: "superseded", revision: 1, accountableMemberId: "x", status: "active" } }, "active").map(card => card.workItemId), ["a"]);
 });
 
+test("stop commands on a never-started session are refused instead of wedging it", async t => {
+  // A stop is a signal to a live run. Refusing at command time keeps the
+  // session startable; accepting it wedged the item: STARTED then throws
+  // "Invalid session transition from queued" forever, and a set_status done
+  // records a terminal outcome with zero attempts (no owning attempt).
+  assert.throws(() => sessionCommandType({ status: "queued" }, "request_stop"), /Invalid session transition from queued/);
+  assert.throws(() => sessionCommandType({ status: "queued" }, "set_status", "done"), /Invalid session transition from queued/);
+  assert.throws(() => sessionCommandType({ status: "queued" }, "set_status", "failed"), /Invalid session transition from queued/);
+  // Unchanged: a live run can be stopped, a queued session can start.
+  assert.equal(sessionCommandType({ status: "active" }, "request_stop"), SESSION_EVENT_TYPES.STOP_REQUESTED);
+  assert.equal(sessionCommandType({ status: "queued" }, "set_status", "processing"), SESSION_EVENT_TYPES.STARTED);
+  assert.equal(sessionCommandType({ status: "active" }, "set_status", "done"), SESSION_EVENT_TYPES.STOPPED);
+
+  const { request, ownerKey } = await serve(t);
+  const stop = await request("/api/rooms/commons/work-sessions", {
+    method: "POST", token: ownerKey, data: sessionBody({ action: "request_stop" })
+  });
+  assert.equal(stop.status, 422);
+  assert.equal((await stop.json()).error.code, "invalid_session_action");
+  const done = await request("/api/rooms/commons/work-sessions", {
+    method: "POST", token: ownerKey, data: sessionBody({ action: "set_status", status: "done" })
+  });
+  assert.equal(done.status, 422);
+  assert.equal((await done.json()).error.code, "invalid_session_action");
+});
+
 test("seed work keeps assignment state; session defaults do not rewrite history", () => {
   const state = replay(seedEvents);
   const review = state.workItems["work-spec-review"];
@@ -186,17 +212,19 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "guest", displayName: "Test guest", kind: "human", permissions: [] } });
   const guestKey = store.issueAccessKey("commons", "guest");
+
+  const body = sessionBody({ action: "set_status", status: "processing" });
+  const first = await request("/api/rooms/commons/work-sessions", { method: "POST", token: agentKey, data: body });
+  assert.equal(first.status, 201);
+  // A stranger's stop on the live run is still rejected at the permission gate.
   const denied = await request("/api/rooms/commons/work-sessions", {
-    method: "POST", token: guestKey, data: sessionBody({ action: "request_stop" })
+    method: "POST", token: guestKey, data: sessionBody({ action: "request_stop", expectedRevision: 1 })
   });
   assert.equal(denied.status, 422);
   const deniedBody = await denied.json();
   assert.equal(deniedBody.error.code, "command_rejected");
   assert.ok(validAgentNext(deniedBody.next));
 
-  const body = sessionBody({ action: "set_status", status: "processing" });
-  const first = await request("/api/rooms/commons/work-sessions", { method: "POST", token: agentKey, data: body });
-  assert.equal(first.status, 201);
   const retry = await request("/api/rooms/commons/work-sessions", { method: "POST", token: agentKey, data: body });
   assert.equal(retry.status, 200);
   assert.equal((await retry.json()).duplicate, true);
