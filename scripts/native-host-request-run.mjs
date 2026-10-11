@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
 import { resolveHostBinary } from "./native-host-binary.mjs";
+import { summarizeCodexEvidence } from "./codex-evidence-summary.mjs";
 const [host, metadataPath, phase, outputPath] = process.argv.slice(2);
 if (process.argv.length !== 6 || !["codex", "claude"].includes(host) || !["clarify", "produce", "review"].includes(phase)) throw new Error("Choose host, fixture metadata, phase and a new evidence file");
 const fixture = JSON.parse(readFileSync(metadataPath, "utf8"));
@@ -72,8 +73,12 @@ child.stdout.on("data", chunk => {
     const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
     try {
       const e = JSON.parse(line), item = e.item;
-      if (item?.type === "mcp_tool_call") console.log(JSON.stringify({ host, phase, event: e.type, tool: item.tool, status: item.status }));
-      if (e.type === "assistant") for (const block of e.message?.content ?? []) if (block.type === "tool_use") console.log(JSON.stringify({ host, phase, event: "tool_use", tool: block.name }));
+      if (host === "codex" && ["item.started", "item.updated", "item.completed"].includes(e.type)
+        && item?.type === "mcp_tool_call" && names.includes(item.tool) && ["in_progress", "completed", "failed"].includes(item.status))
+        console.log(JSON.stringify({ host, phase, event: e.type, tool: item.tool, status: item.status }));
+      if (host === "claude" && e.type === "assistant" && Array.isArray(e.message?.content)) for (const block of e.message.content)
+        if (block?.type === "tool_use" && names.some(name => block.name === "mcp__room__" + name))
+          console.log(JSON.stringify({ host, phase, event: "tool_use", tool: block.name }));
     } catch { /* Raw host output remains in private evidence, not user-facing logs. */ }
   }
 });
@@ -85,8 +90,14 @@ if (host === "codex") child.stdin.end(prompt); else child.stdin.end();
 child.once("error", error => { stderr += "\n" + error.message; });
 const exit = await new Promise(resolve => child.once("close", (code, signal) => resolve({ code, signal })));
 clearTimeout(timer); clearTimeout(killTimer);
-writeFileSync(output, JSON.stringify({ host, phase, memberId, startedAt, finishedAt: new Date().toISOString(), ...exit, timedOut, outputLimited,
-  prompt, stdout, stderr, boundary: "Actual native host with synthetic local Room only. No claim of sandboxed MCP execution, human testing or hosted deployment." }, null, 2), { flag: "wx", mode: 0o600 });
+const evidence = JSON.stringify({ host, phase, memberId, startedAt, finishedAt: new Date().toISOString(), ...exit, timedOut, outputLimited,
+  prompt, stdout, stderr, boundary: "Actual native host with synthetic local Room only. No claim of sandboxed MCP execution, human testing or hosted deployment." }, null, 2);
+writeFileSync(output, evidence, { flag: "wx", mode: 0o600 });
 closeSync(output);
-console.log(JSON.stringify({ host, phase, ...exit, timedOut, evidence: resolve(outputPath) }));
-process.exitCode = exit.code === 0 && !timedOut && !outputLimited ? 0 : 1;
+// Save the original capture before interpreting it. A clean process exit alone
+// does not establish Codex turn completion, and completion never verifies work.
+const codexEvidence = host === "codex" ? summarizeCodexEvidence(evidence) : null;
+console.log(JSON.stringify({ host, phase, ...exit, timedOut, evidence: resolve(outputPath), ...(codexEvidence ? { codexEvidence } : {}) }));
+const terminalComplete = !codexEvidence || (codexEvidence.input.accepted && codexEvidence.input.complete
+  && codexEvidence.process.disposition === "exited_zero" && codexEvidence.turn.disposition === "completed");
+process.exitCode = exit.code === 0 && !timedOut && !outputLimited && terminalComplete ? 0 : 1;
