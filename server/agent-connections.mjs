@@ -118,6 +118,16 @@ export class AgentConnections {
   }
   revokeAccount(accountId) {
     this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash IN (SELECT credential_hash FROM agent_connections WHERE sponsor_account_id=?)").run(accountId);
+    // Same rule as the disconnect path in validate(): the identity-secret
+    // and scoped-API-key auth branches resolve identity_links directly and
+    // never consult credentials.revoked, so a revoked credential alone does
+    // not cut them off. Deletion and deactivation both route through
+    // revokeAccount instead of the full disconnect, so the unlink must
+    // happen here too — otherwise a sponsored agent keeps room access
+    // after its sponsor's account is deleted or deactivated.
+    for (const { room_id, member_id } of this.db.prepare("SELECT room_id, member_id FROM agent_connections WHERE sponsor_account_id=?").all(accountId)) {
+      this.db.prepare("DELETE FROM identity_links WHERE room_id=? AND member_id=?").run(room_id, member_id);
+    }
   }
   list(token, roomId, binding) {
     return this.store.readTransaction(() => {
