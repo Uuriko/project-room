@@ -896,6 +896,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
         return json(res, 200, { agentId: auth.identityId, pendingWakes: immediate.pendingWakes,
+          more: immediate.more === true,
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -916,6 +917,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, pendingWakes: fresh.pendingWakes,
+        more: fresh.more === true,
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();

@@ -666,6 +666,7 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
+    more: result.more === true,
     next, pushConfigured: result.pushConfigured, reachability: result.reachability
   };
 }

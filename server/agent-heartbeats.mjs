@@ -11,8 +11,9 @@
 // mention or DM, whatever the host's mode or presence. The same message
 // coalesces to one signal (agent plus message). POST /api/agent-heartbeats
 // returns that host's unacknowledged signals in pendingWakes, oldest
-// first, at most 50, with more:true when the page is truncated. The poll
-// does not acknowledge. The host acknowledges with ackWakes.
+// first, at most 50, with more:true when the page is truncated; GET
+// /api/agent-wakes/poll returns the same capped page with the same more
+// flag. The poll does not acknowledge. The host acknowledges with ackWakes.
 //
 // Push is a separate doorbell. An offline wakeable host with a usable
 // push subscription receives a pointer-only POST. Push does not decide
@@ -599,7 +600,10 @@ export class AgentHeartbeats {
   // Registration is established by heartbeat(), so notePoll refuses
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
-  // acknowledges: signals leave the queue only through ackWakes().
+  // acknowledges: signals leave the queue only through ackWakes(). The
+  // page is capped at MAX_PENDING_WAKES with `more` when truncated, the
+  // same truncation contract as heartbeat() — the host acks the page to
+  // advance to the rest of the queue.
   notePoll({ agentId, roomId = null }) {
     checkAgentId(agentId);
     let known = null;
@@ -617,8 +621,9 @@ export class AgentHeartbeats {
     // recordPollActivity stays loud for its write-path caller heartbeat():
     // a missing stamp table there is a real problem, not a legacy DB.
     try { this.recordPollActivity(agentId); } catch (error) { if (!isMissingTable(error)) throw error; /* no stamp table yet */ }
+    const page = this.pendingWakePage(agentId, { roomId });
     return Object.freeze({
-      agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
+      agentId, registered: true, pendingWakes: page.signals, more: page.more,
     });
   }
 
