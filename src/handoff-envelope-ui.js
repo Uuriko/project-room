@@ -48,6 +48,28 @@ const safeHref = value => {
   try { const url = new URL(String(value)); return url.protocol === "https:" ? esc(url.href) : "#"; }
   catch { return "#"; }
 };
+
+// Credential-bearing URLs in handoff inputs: server/work-handoff.mjs rejects
+// them at creation, but envelopes minted before the hardening (or on a base
+// whose check still allows them) stay in the journal and render here. A
+// clickable credentialed link would send the secret to the host when the
+// human clicks it, and leave it in the href and browser history. Render it
+// as inert text with the userinfo redacted, and say why the link is off.
+// (R-27 honest states: a disabled link that still looks live is worse than
+// no link at all, so this is a span, not a dead anchor.)
+const hasCredentials = url => Boolean(url.username || url.password);
+const redactUserinfo = url =>
+  `https://[credentials-removed]@${url.host}${url.pathname}${url.search}${url.hash}`;
+const BLOCKED_LINK_TITLE = "This link is off because the URL carries login credentials. Ask the sending agent to resend it without them.";
+const urlInputHtml = input => {
+  const ref = String(input?.ref ?? "");
+  try {
+    const url = new URL(ref);
+    if (url.protocol === "https:" && hasCredentials(url))
+      return `<span class="source-link source-link-blocked" title="${BLOCKED_LINK_TITLE}">${esc(input?.label ?? redactUserinfo(url))}</span>`;
+  } catch { /* unparseable: fall through to the scheme gate */ }
+  return `<a class="source-link" href="${safeHref(ref)}" target="_blank" rel="noopener noreferrer">${esc(input?.label ?? ref)}</a>`;
+};
 const section = (title, body) => body
   ? `<div class="handoff-section"><h5>${esc(title)}</h5>${body}</div>` : "";
 const kvRow = (term, value) => value == null || value === ""
@@ -57,9 +79,7 @@ function inputsHtml(inputs) {
   if (!Array.isArray(inputs) || !inputs.length) return "";
   return `<ul class="handoff-inputs">${inputs.map(input => {
     const kind = INPUT_KIND_LABELS[input?.kind] ?? esc(input?.kind ?? "input");
-    const ref = input?.kind === "url"
-      ? `<a class="source-link" href="${safeHref(input.ref)}" target="_blank" rel="noopener noreferrer">${esc(input.label ?? input.ref)}</a>`
-      : esc(input.label ?? input.ref);
+    const ref = input?.kind === "url" ? urlInputHtml(input) : esc(input.label ?? input.ref);
     const sha = input?.sha ? ` · <code>sha ${esc(input.sha.slice(0, 12))}</code>` : "";
     const detail = input?.detail ? `<p class="handoff-note">${esc(input.detail)}</p>` : "";
     return `<li><span class="handoff-chip">${kind}</span> ${ref}${sha}${detail}</li>`;
