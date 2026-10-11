@@ -88,10 +88,17 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   const snapshotGate = deferredResultResponse(); t.after(() => snapshotGate.resolve());
   const holdSnapshot = async route => { await snapshotGate.promise; await route.continue(); };
   await owner.route(/\/api\/rooms\/commons(?:\?.*)?$/, holdSnapshot);
+  await owner.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() === 'GET') await snapshotGate.promise;
+    await route.continue();
+  });
   const invoked = owner.waitForResponse(response => response.url().endsWith('/assistant') && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'invoke');
   await owner.locator('#ask-room').click(); await send(owner,'Compare our launch ideas.');
   assert.equal((await invoked).ok(), true);
   assert.equal((await api('owner')).runs.length, 1, 'durable assistant request exists while snapshot is blocked');
+  await owner.waitForFunction(() => document.querySelector('#assistant-face .assistant-face-status').dataset.faceStatus === 'asked');
+  assert.equal(await owner.locator('#assistant-face').isVisible(), true, 'admission is visible before either follow-up read');
+  await owner.waitForFunction(() => !document.querySelector('#message-input').disabled);
   snapshotGate.resolve();
   await owner.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));

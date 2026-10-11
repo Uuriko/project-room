@@ -169,7 +169,16 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   async function invoke() {
     if (!operation || !getState()) return;
     const owned = operation, stamp = key();
-    try { await client.request(path(), { method: 'POST', data: owned }); if (stamp !== key() || operation !== owned) return; operation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; await refresh(); }
+    try {
+      const receipt = await client.request(path(), { method: 'POST', data: owned });
+      if (stamp !== key() || operation !== owned) return;
+      // A committed operation already contains the authoritative run. Show
+      // admission/pickup now instead of waiting for another projection read.
+      if (projection && receipt?.result?.id === owned.runId) {
+        projection = { ...projection, runs: [receipt.result, ...projection.runs.filter(run => run.id !== owned.runId)] };
+      }
+      operation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; paint(); void refresh();
+    }
     catch (failure) { if (stamp === key()) {
       const rejected = failure.status >= 400 && failure.status < 500;
       error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');

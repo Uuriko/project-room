@@ -106,3 +106,22 @@ test('confirmed preview survives refresh failure, stays in its channel and clear
   await p.locator('#main').waitFor({ state: 'hidden' });
   assert.equal(await p.locator('[data-local-message-id]').count(), 0);
 });
+
+test('Ask Room has immediate local echo before message receipt', { timeout: 30000 }, async t => {
+  const p = await setup(t), input = p.locator('#message-input');
+  let release;
+  const gate = new Promise(resolve => release = resolve);
+  t.after(() => release());
+  await p.route('**/api/rooms/*/commands', async route => { await gate; await route.continue(); });
+  await p.locator('#ask-room').click();
+  await input.fill('Room, please review this');
+  await input.press('Enter');
+  const echo = p.locator('[data-local-message-id]');
+  await echo.waitFor();
+  assert.equal(await echo.count(), 1);
+  assert.match(await echo.textContent(), /Room, please review this/);
+  assert.equal(await echo.getAttribute('aria-busy'), 'true');
+  release();
+  await p.waitForFunction(() => !document.querySelector('#message-input').disabled);
+  assert.match(await p.locator('#assistant-error').textContent(), /rejected|not confirmed/i, 'unconfigured host is not presented as working');
+});

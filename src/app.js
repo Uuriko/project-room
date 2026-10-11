@@ -4056,7 +4056,7 @@ $("#message-form").addEventListener("submit", e => {
   saveComposer();
   const generation = client.generation, draftKey = composerKey(), command = pendingMessage.command;
   const echoId = data.messageId || command.id;
-  const fastText = session.member.kind === "human" && !askRoom && !assistantDraft && !composerFiles.length && localMessageEchoes.size < 50;
+  const fastText = session.member.kind === "human" && !assistantDraft && !composerFiles.length && localMessageEchoes.size < 50;
   if (fastText) {
     const node = document.createElement("li");
     node.className = "message"; node.dataset.key = `local:${echoId}`;
@@ -4088,6 +4088,7 @@ $("#message-form").addEventListener("submit", e => {
         $("#also-send-to-channel").checked = false;
       }
       persistDrafts();
+      await humanExperience.posted(data.messageId, askRoom);
       maybeShowGuestUpgradeHint();
       return;
     }
