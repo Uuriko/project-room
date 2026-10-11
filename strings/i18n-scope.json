@@ -16,6 +16,7 @@
   "src/agent-first-run.js",
   "src/agent-invite-ui.js",
   "src/agent-signin-ui.js",
+  "src/anti-loop.js",
   "src/app.js",
   "src/audit-receipts.mjs",
   "src/auth-signin-ui.js",
