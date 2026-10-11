@@ -116,3 +116,74 @@ test("installOpenQuestionsPanel fetches the open-questions endpoint and renders 
     if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
   }
 });
+
+function panelFixture(t, request) {
+  const previous = globalThis.document;
+  const listeners = {};
+  const panel = { open: true, addEventListener: (name, handler) => { listeners[name] = handler; } };
+  const host = { innerHTML: "" }, chip = { textContent: "" }, status = { textContent: "" };
+  const nodes = { "#open-questions-panel": panel, "#open-questions-list-host": host,
+    "#open-questions-count": chip, "#open-questions-status": status };
+  globalThis.document = { querySelector: selector => nodes[selector] ?? null };
+  t.after(() => { if (previous === undefined) delete globalThis.document; else globalThis.document = previous; });
+  const session = { roomId: "room1", member: { id: "m9" } };
+  const client = { session, sequence: 1, path: suffix => `/api/rooms/room1${suffix}`, request };
+  const ui = installOpenQuestionsPanel({ client, getSession: () => client.session,
+    getState: () => ({ members: { a1: { displayName: "Alice" } } }) });
+  return { ui, client, panel, host, chip, status, listeners };
+}
+
+test("questions refresh after a room update and unchanged renders do not refetch", async t => {
+  let calls = 0;
+  const f = panelFixture(t, async () => ++calls === 1 ? MOCK_RESPONSE : { openQuestions: [] });
+  await f.ui.sync(); await f.ui.sync();
+  assert.equal(calls, 1);
+  f.client.sequence++;
+  await f.ui.sync();
+  assert.equal(calls, 2);
+  assert.equal(f.chip.textContent, "0");
+  assert.ok(f.host.innerHTML.includes("No open questions"));
+});
+
+test("updates arriving during a read coalesce into one follow-up", async t => {
+  let resolve, calls = 0;
+  const f = panelFixture(t, () => ++calls === 1 ? new Promise(r => { resolve = r; }) : Promise.resolve({ openQuestions: [] }));
+  const flight = f.ui.sync();
+  f.client.sequence++; f.ui.sync();
+  f.client.sequence++; f.ui.sync();
+  resolve(MOCK_RESPONSE); await flight;
+  assert.equal(calls, 2);
+  assert.equal(f.chip.textContent, "0");
+});
+
+test("failed refresh removes stale questions; reopening retries", async t => {
+  let calls = 0;
+  const f = panelFixture(t, async () => {
+    calls++;
+    if (calls === 2) throw new Error("offline");
+    return MOCK_RESPONSE;
+  });
+  await f.ui.sync(); f.client.sequence++; await f.ui.sync();
+  assert.equal(f.chip.textContent, "");
+  assert.equal(f.host.innerHTML, "");
+  assert.match(f.status.textContent, /retry/i);
+  await f.listeners.toggle();
+  assert.equal(calls, 3);
+  assert.equal(f.chip.textContent, "2");
+});
+
+test("reset clears private rows and rejects a late response", async t => {
+  let resolve;
+  const f = panelFixture(t, () => new Promise(r => { resolve = r; }));
+  const flight = f.ui.sync(); f.ui.reset(); resolve(MOCK_RESPONSE); await flight;
+  assert.equal(f.host.innerHTML, "");
+  assert.equal(f.chip.textContent, "");
+});
+
+test("question excerpts link to their source without exposing machine author IDs", () => {
+  const html = openQuestionsHtml(openQuestionsModel(MOCK_RESPONSE));
+  assert.ok(html.includes('href="#pr-record/message/m1"'));
+  assert.ok(!html.includes(' a1'));
+  const unsafe = openQuestionsHtml(openQuestionsModel({ openQuestions: [{ messageId: '\"><script>', excerpt: '<img>' }] }));
+  assert.ok(!unsafe.includes('<script>')); assert.ok(!unsafe.includes('<img>'));
+});
