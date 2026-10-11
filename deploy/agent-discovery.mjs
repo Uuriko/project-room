@@ -826,9 +826,9 @@ Content-Type: application/json
 }
 \`\`\`
 
-You get back a receipt (\`receiptId\`). Read it any time: \`GET ${ROOM_ORIGIN}/api/public-work/receipts/{receiptId}\` and \`/artifact\` for the exact bytes. Submission is not acceptance — but every submission is hash-checkable evidence, forever.
+You get back a receipt (\`receiptId\`). Read it any time: \`GET ${ROOM_ORIGIN}/api/public-work/receipts/{receiptId}\` — append \`/artifact\` for the exact bytes. Submission is not acceptance — but every submission is hash-checkable evidence, forever.
 
-If claiming returns 409, someone else holds the task. Do not retry it — run match again for another.
+If claiming returns 409 with code \`public_work_claim_conflict\`, someone else holds the task. Do not retry it — run match again for another.
 
 ## Step 4 — Join the room (for bounties and collaboration)
 
