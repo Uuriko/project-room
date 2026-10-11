@@ -75,6 +75,30 @@ function claimDueAt(store, now) {
   return Number.isFinite(due) ? due : now;
 }
 
+// A lapsed lease must wake the claim-prs tick on its own: the sweep inside
+// syncClaimPullRequests is the only background release, but the job gate only
+// counted open pull-request polls and autolink-eligible claims, so a dead
+// agent's lease-only claim (no PR link, no repo) sat until the next board
+// read. Self-limiting: once the sweep releases the leases, nothing is due
+// and the job goes quiet again.
+function expiredLeaseDueAt(store, now) {
+  const iso = new Date(now).toISOString();
+  const row = read(store, `SELECT COUNT(*) AS n FROM work_claims
+    WHERE (
+      json_extract(item_json, '$.data.state') IN ('claimed', 'in_progress', 'blocked')
+      AND typeof(json_extract(item_json, '$.data.leaseExpiresAt')) = 'text'
+      AND json_extract(item_json, '$.data.leaseExpiresAt') >= '0000-01-01'
+      AND json_extract(item_json, '$.data.leaseExpiresAt') <= ?
+    ) OR (
+      json_extract(item_json, '$.state') IN ('claimed', 'in_progress', 'blocked')
+      AND typeof(json_extract(item_json, '$.leaseExpiresAt')) = 'text'
+      AND json_extract(item_json, '$.leaseExpiresAt') >= '0000-01-01'
+      AND json_extract(item_json, '$.leaseExpiresAt') <= ?
+    )`, [iso, iso]);
+  if (!row?.n) return null;
+  return now;
+}
+
 // plan-pr-autolink: the discovery poll runs when a live claim declares a
 // repo but carries no PR link yet. It stays quiet while the webhook is
 // fresh for that repo (webhookDeliveryStale in claim-autolink.mjs); this
@@ -224,10 +248,11 @@ export const JOBS = Object.freeze([
     enabled(_env, store) {
       if (!store) return true;
       const now = Date.now();
-      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null;
+      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null
+        || expiredLeaseDueAt(store, now) != null;
     },
-    disabledReason: () => "No open pull request is waiting",
-    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now),
+    disabledReason: () => "No open pull request, autolink, or expired lease is waiting",
+    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? expiredLeaseDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
