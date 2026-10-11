@@ -159,3 +159,12 @@ Zulip snapshot `d7c57ed15b82b0bc8aefe2007f5ee2abeebd0ea2` separates unread bookk
 8. Promote when functional parity and measured experience improve. Remove the old conversation renderer and duplicate event listeners as part of promotion. A staged migration is a route to replacement, not an excuse to keep two systems indefinitely.
 
 The first qualification task is a working Room-backed conversation pilot, not a static component gallery. If assistant-ui's single-assistant assumptions require more adapter code than they save, keep React for the conversation and replace only the unsuitable primitives; record that decision with evidence.
+
+
+### Independent multiplayer adapter review
+
+The runtime source's `cancelRun()` calls `onCancel` without awaiting the server result; when `setMessages` is provided it can also remove a trailing user message and restore its text into the composer. Room must therefore retain a custom exact-run Stop control and must not expose a generic array-replacing `setMessages` callback. A server rejection must leave the canonical transcript intact. This was independently checked against the installed package, not inferred from screenshots.
+
+Refined migration seam: mount the React transcript at the existing `renderMessages()` boundary using the already-scoped Room projection. Keep the existing composer controller first: its submit path includes operation IDs, Ask Room/contribution scope, upload gates, generation checks and failure recovery. Extract that controller before replacing its view. Do not introduce another SSE stream, history database or execution engine. Key runtime lifetime to session generation plus room/channel/thread, and discard late completions after scope changes. Visibility is determined by Room authorization and projection, never just user/assistant role.
+
+Stop recovery regression discovered during qualification: queued UI can lag a newly claimed provider attempt. Exact-attempt rejection is correct, but explicit Review previously refreshed revision without refreshing the reviewed attempt, making retries fail repeatedly. A failing regression and surgical patch have been prepared; the shared source lane is currently held by another agent, who received the patch for coordination. Do not count that production fix as landed until its carrier passes.
