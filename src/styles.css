@@ -50,6 +50,17 @@
 :root[data-theme="light"] .mention-option.active,
 :root[data-theme="light"] .search-results a:hover,
 :root[data-theme="light"] .rb-event-link:hover { background: var(--panel-hover); }
+/* Light theme: handoff status badges keep hardcoded dark pill backgrounds while
+   their text follows the theme accent tokens — measured 1.57–2.32:1 in light
+   theme. Light pills restore 5.33–8.22:1 (muted 5.41:1 via --muted).
+   Dark theme rendering is untouched. */
+:root[data-theme="light"] .handoff-badge,
+:root[data-theme="light"] .handoff-badge-warn,
+:root[data-theme="light"] .handoff-badge-info,
+:root[data-theme="light"] .handoff-badge-done,
+:root[data-theme="light"] .handoff-badge-alert,
+:root[data-theme="light"] .handoff-badge-muted { background: var(--panel-raised); }
+:root[data-theme="light"] .handoff-badge-muted { color: var(--muted); }
 
 * { box-sizing: border-box; }
 html { background: var(--bg); scroll-behavior: smooth; }

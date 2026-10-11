@@ -110,5 +110,10 @@ export const CONTRAST_PAIRS = Object.freeze([
   ["light muted on raised panel", LIGHT["--muted"], LIGHT["--panel-raised"], 4.5],
   ["light link on background", LIGHT["--blue"], LIGHT["--bg"], 4.5],
   ["light accent label", LIGHT["--on-accent"], LIGHT["--blue-strong"], 4.5],
-  ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5]
+  ["light accent label on hover", LIGHT["--on-accent"], LIGHT["--blue-strong-hover"], 4.5],
+  ["light badge on raised panel", LIGHT["--blue"], LIGHT["--panel-raised"], 4.5],
+  ["light badge warn on raised panel", LIGHT["--amber"], LIGHT["--panel-raised"], 4.5],
+  ["light badge done on raised panel", LIGHT["--green"], LIGHT["--panel-raised"], 4.5],
+  ["light badge alert on raised panel", LIGHT["--red"], LIGHT["--panel-raised"], 4.5],
+  ["light badge muted on raised panel", LIGHT["--muted"], LIGHT["--panel-raised"], 4.5]
 ]);
