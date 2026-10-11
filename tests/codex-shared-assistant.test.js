@@ -129,7 +129,10 @@ test("completed continuation recovers without rerunning either turn", async t =>
     if (context.turnNumber === 1) { await appendLate(context, "late-recovery"); context.finish("completed"); }
     else complete = context.finish;
   });
-  await assert.rejects(f.run({ timeoutMs: 60 }), /uncertain/);
+  // Allow the first turn's real HTTP contribution to settle under parallel CI
+  // before the deliberately held second turn reaches its deadline.
+  await assert.rejects(f.run({ timeoutMs: 2000 }), /uncertain/);
+  assert.equal(typeof complete, "function", "the continuation started before timing out");
   complete("completed");
   const result = await f.run(); assert.equal(result.result.status, "done");
   assert.equal(f.calls.filter(x => x.method === "turn/start").length, 2);
