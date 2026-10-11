@@ -1,6 +1,7 @@
 import { installGmailWorkspace } from './gmail-ui.js';
 import { installAccountSetup } from './account-setup-ui.js';
 import { InboxClient, inboxTextVersion } from "./inbox-client.js";
+import { suggestConnectionId } from "./connection-id-suggest.js";
 import { installInboxSend, installInboxReplyReview, syncInboxReviewRegion } from "./inbox-send-ui.js";
 import { installQuarantineReview } from "./inbox-quarantine-ui.js";
 import { validId } from "./events.js";
@@ -500,7 +501,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   $("#inbox-connection-channel").addEventListener("change", () => {
     const channel = $("#inbox-connection-channel").value;
     for (const field of document.querySelectorAll("#inbox-connection-form [data-channel]")) { field.hidden = field.dataset.channel !== channel; for (const input of field.querySelectorAll("input")) input.required = !field.hidden; }
-    $("#inbox-connection-id").value = channel === "telegram" ? "telegram-bot" : channel === "whatsapp" ? "whatsapp" : "mailbox";
+    // r35-4: prefill an id that isn't taken yet, so a second mailbox (or bot)
+    // doesn't fail with "That id already belongs to a different bot or mailbox."
+    const base = channel === "telegram" ? "telegram-bot" : channel === "whatsapp" ? "whatsapp" : "mailbox";
+    $("#inbox-connection-id").value = suggestConnectionId(base, connectionRecords.keys());
   });
   $("#inbox-connection-form").addEventListener("submit", async event => {
     event.preventDefault();
@@ -515,6 +519,10 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     try {
       const result = await api.applyConnection(request); if (!owns()) return;
       const c = result.connection;
+      // r35-4: the id prefill reads connectionRecords, which loadConnections()
+      // only refreshes after the form resets — seed the new record now so the
+      // next prefill suggests mailbox-2 (not the just-taken id).
+      connectionRecords.set(c.id, { connection: c, live: result.live ?? null });
       connectionNotes.set(c.id, c.channel === "telegram" ? (result.live?.state === "configured" ? "Added · press Reconnect to register the webhook secret" : "Added · set the Telegram bindings, then Reconnect")
         : c.channel === "whatsapp" ? "Added · pairing required, not yet routed"
         : "Added · fixture mailbox, not yet routed");
