@@ -126,6 +126,16 @@ test('chat arrivals in a room with board claim lines move no message rows', { ti
   assert.deepEqual([after('claim-row-history-10'), after('claim-row-history-22'), after('claim-row-history-33')], ['claim:claim-row-0', 'claim:claim-row-1', 'claim:claim-row-2']);
   assert.equal(order.filter(entry => entry.startsWith('claim:')).length, 3, 'each claim line is painted once');
   assert.deepEqual(order.slice(-2), ['claim-row-arrival-1', 'claim-row-arrival-2']);
+  await page.locator('[data-message-record-id="claim-row-arrival-2"] [data-message-action="reply"]').click();
+  await page.locator('#thread-bar').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#message-list > [data-claim-update]').count(), 0, 'a focused conversation excludes unrelated room claims');
+  const threadMenu = page.locator('[data-message-record-id="claim-row-arrival-2"] details.message-more');
+  await threadMenu.locator('summary').click();
+  store.command(ownerKey, 'commons', { id: 'thread-check-reply', type: 'message.posted', data: { messageId: 'thread-check-reply', body: 'Focused reply', replyToId: 'claim-row-arrival-2' } });
+  await page.locator('[data-message-record-id="thread-check-reply"]').waitFor();
+  assert.equal(await page.locator('#message-list > [data-claim-update]').count(), 0, 'live refresh must keep the thread quiet');
+  assert.equal(await threadMenu.evaluate(node => node.open), true, 'reply-count refresh preserves an open action menu');
+
   assert.deepEqual(errors, []);
 });
 
@@ -184,10 +194,7 @@ test('snapshot labels update duplicates while preserving focus and selection, an
 // the fix lands. Workload retains 2,000 total history records and about 1.7 MB
 // of body text, including ten patch-dump-sized messages.
 test('large room history completes initial render with a bounded live message DOM', {
-  timeout: 90000,
-  skip: process.env.ROOM_ENABLE_RENDER_WINDOW_REGRESSION !== '1'
-    ? 'TODO(QA-2026-10-07): enable when renderMessages windowing lands; finding: unbounded full-room DOM render.'
-    : false
+  timeout: 90000
 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-render-window-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));
