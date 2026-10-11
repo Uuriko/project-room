@@ -309,6 +309,9 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             tell(failure.code == "mac_tools_already_running" ? "Another Project Room instance owns this Mac connection. Use its My Mac window, or quit it and try again." : "Local tools could not open. Check that Project Room can write its Application Support folder, then try again.")
         } catch { tell("Local tools could not open. Try again after restarting Project Room.") }
     }
+    public var localToolStatus: [String: Any] { localTools?.toolStatus ?? ["enabled": false, "runningProcesses": 0] }
+    public func pauseLocalTools() { localTools?.pause() }
+    public func showMacPermissions() { showMyMac(); localTools?.showPermissions() }
     public func stopLocalTools() { localTools?.stop() }
     private func tell(_ message: String) {
         status.stringValue = message

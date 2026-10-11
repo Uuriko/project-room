@@ -3,10 +3,16 @@ import ProjectRoomKit
 
 @MainActor final class Application: NSObject, NSApplicationDelegate {
     var room: RoomWindow?
+    var menuBar: RoomMenuBar?
     let initialURL: URL
     init(url: URL) { initialURL = url }
     func applicationDidFinishLaunching(_ notification: Notification) {
         room = RoomWindow(url: initialURL)
+        menuBar = RoomMenuBar(status: { [weak self] in self?.room?.localToolStatus ?? [:] },
+            openRoom: { [weak self] in self?.room?.show() },
+            openMac: { [weak self] in self?.room?.showMyMac() },
+            permissions: { [weak self] in self?.room?.showMacPermissions() },
+            pause: { [weak self] in self?.room?.pauseLocalTools() })
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
         let appMenu = NSMenu(title: "Project Room"); appItem.submenu = appMenu

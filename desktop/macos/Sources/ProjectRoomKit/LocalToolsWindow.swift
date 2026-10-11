@@ -32,6 +32,13 @@ import CoreGraphics
         timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in self?.refresh() } }
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
+    public var toolStatus: [String: Any] { service.status() }
+    public func pause() {
+        service.setEnabled(false)
+        do { try connection.publish() } catch { /* Revocation already applies in the service. */ }
+        refresh()
+    }
+    public func showPermissions() { show(); openPermissions() }
     public func stop() { timer?.invalidate(); connection.stop() }
     @objc private func changeEnabled() {
         let enabled = service.status()["enabled"] as? Bool == true
