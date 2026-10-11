@@ -149,7 +149,7 @@ test("a permanent rejection is journaled failed without retries", async () => {
 });
 
 test("a throwing transport never blocks the decision path", async () => {
-  const { inbox, journal, calls } = registered({
+  const { inbox, journal } = registered({
     deliver: () => { throw new Error("socket hangup"); },
   });
   // notify() returns synchronously — the decision path does not await delivery.
