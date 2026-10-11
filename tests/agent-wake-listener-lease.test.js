@@ -237,3 +237,33 @@ test("the claim is fenced against the live lease inside the claiming statement",
   assert.equal(batch.signals.length, 0, "a lapsed lease claims nothing");
   assert.equal(hb.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signal_claims").get().n, 0, "and records no claim row");
 });
+
+test("a lease taken between the check and the write is not overwritten by the loser", t => {
+  const { hb } = unit(t);
+  hb.heartbeat(wakeable());
+  // Another process takes the free lease right before this call writes its own.
+  const prepare = hb.db.prepare.bind(hb.db);
+  hb.db.prepare = sql => {
+    if (/^\s*INSERT INTO agent_wake_listener_leases/.test(sql)) {
+      hb.db.exec(`INSERT INTO agent_wake_listener_leases (agent_id, room_key, listener_id, fencing_token, lease_expires_at, updated_at)
+        VALUES ('ai_lease', '${ROOM}', 'listener-b', 'token-b', ${T0 + 60000}, ${T0})`);
+    }
+    return prepare(sql);
+  };
+  const a = hb.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-a", ttlMs: 60000 });
+  assert.equal(a.acquired, false, "only one of the two racers wins");
+  assert.equal(a.activeListenerId, "listener-b", "the loser is told who holds it");
+  const row = hb.db.prepare("SELECT listener_id AS listenerId, fencing_token AS fencingToken FROM agent_wake_listener_leases").get();
+  assert.deepEqual({ ...row }, { listenerId: "listener-b", fencingToken: "token-b" }, "the winner's fencing token survives");
+});
+
+test("renewal is one statement conditioned on the same listener's live lease", t => {
+  const { hb, advance } = leased(t);
+  const first = hb.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-a", ttlMs: 60000 });
+  assert.equal(first.renewed, true);
+  advance(60001);
+  const again = hb.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-a", ttlMs: 60000 });
+  assert.equal(again.acquired, true);
+  assert.equal(again.renewed, false, "an expired lease is re-issued, not renewed");
+  assert.notEqual(again.fencingToken, first.fencingToken, "with a new fencing token");
+});
