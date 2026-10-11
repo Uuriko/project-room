@@ -117,6 +117,7 @@
     "scripts/result-diff-browser-check.mjs": 9782,
     "scripts/room-actions-browser-check.mjs": 10182,
     "scripts/room-door-browser-check.mjs": 1573,
+    "scripts/room-sounds-browser-check.mjs": 8600,
     "scripts/room-export-browser-check.mjs": 3404,
     "scripts/room-instructions-browser-check.mjs": 10010,
     "scripts/room-lifecycle-browser-check.mjs": 4669,
