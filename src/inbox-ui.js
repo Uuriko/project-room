@@ -5,6 +5,22 @@ import { installInboxSend, installInboxReplyReview, syncInboxReviewRegion } from
 import { installQuarantineReview } from "./inbox-quarantine-ui.js";
 import { validId } from "./events.js";
 
+// Empty-state honesty: the "inbox is empty" note may only be visible after a
+// successful list read that returned zero rows. While the read is in flight
+// or when it failed we do not know whether the inbox is empty, so the note
+// stays hidden (the status line carries "Loading…" or the error instead).
+// Before this fix the note shipped visible in the static HTML and stayed up
+// through both states, lying about the inbox being empty.
+export function inboxEmptyVisible({ readOk = false, rowCount = 0 } = {}) {
+  return readOk === true && rowCount === 0;
+}
+
+// A failed message search must blame the search, not the inbox load: the
+// inbox itself read fine, so "Couldn't load inbox" would mislead.
+export function inboxSearchErrorText() {
+  return "Couldn’t search messages. Try again.";
+}
+
 export function installInbox({ account, room, getRoom, onShared, onOpenWork, onAccountEnded = () => room.endAccess(), onRooms = () => {}, onNavigate = () => {} }) {
   const $ = selector => document.querySelector(selector);
   const api = new InboxClient(account, { onAccessEnded: onAccountEnded });
@@ -294,7 +310,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       renderFilters(); renderList();
       const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
       text("#inbox-status", result.total ? `${result.total} result${result.total === 1 ? "" : "s"} for “${result.query}”.` : `No results for “${result.query}”.`);
-    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { searchQuery = null; text("#inbox-status", errorText(error)); } }
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { searchQuery = null; text("#inbox-status", inboxSearchErrorText()); } }
     finally { if (searching === turn) searching = false; }
   }
   function clearSearch() {
@@ -546,6 +562,8 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
   async function load(push = false) {
     sync(); if (!owns()) return;
     show("inbox", true, push); text("#inbox-status", "Loading…");
+    // Don't claim "empty" before the read completes: emptiness is unknown.
+    $("#inbox-empty").hidden = !inboxEmptyVisible({});
     const turn = ++epoch, navigation = navigationEpoch;
     loadConnections();
     loadGmail();
@@ -555,7 +573,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
       const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
       renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
-      $("#inbox-empty").hidden = rows.length > 0;
+      $("#inbox-empty").hidden = !inboxEmptyVisible({ readOk: true, rowCount: rows.length });
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       // Refreshing imported copies must preserve the user's All messages view.
       if (selected && rows.some(row => row.id === selected && row.connection?.provider === 'gmail-api')) return;
@@ -563,7 +581,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
       if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
-    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) text("#inbox-status", errorText(error)); }
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { text("#inbox-status", errorText(error)); $("#inbox-empty").hidden = true; /* failed read: emptiness unknown */ } }
   }
   async function open(sourceId) {
     if (!owns()) return;
