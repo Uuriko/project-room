@@ -6767,7 +6767,7 @@ paths:
             response may carry an RFC 9110 Allow header naming the route's
             allowed methods — resend with a named method instead of
             retrying the same one.
-        '422': { description: invalid_claim_input — the receiptId must match rc_[A-Za-z0-9_-]{1,128} }
+        '422': { description: "invalid_claim_input — the receiptId must match rc_[A-Za-z0-9_-]{1,128}" }
   /api/rooms/{roomId}/work-claims/{claimId}/renew:
     post:
       summary: Renew a work claim's lease
