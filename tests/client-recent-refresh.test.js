@@ -270,3 +270,21 @@ test("an aborted first window read reports the interruption, then the retry is w
   await client.refresh();
   assert.deepEqual(reads, [RECENT, RECENT], "a client holding nothing asks for the window again");
 });
+
+
+test("status and lease activity refresh non-message state without downloading older chat", async t => {
+  for (const type of ["member.status_updated", "capabilities.advertised", "claim.acquired", "claim.released", "claim.renewed"]) {
+    await t.test(type, async t => {
+      const updated = recent(10, history.slice(-3), 2);
+      updated.state.members = { human: { statusMessage: "Reviewing chat speed" } };
+      updated.state.workItems = { job: { revision: 2, claim: { status: "released" } } };
+      const f = fixture(t, url => url === FULL ? full(9, history) : updated);
+      await f.warm(); f.connect(); await f.settle();
+      f.notify(hint(10, type)); await f.settle();
+      assert.deepEqual(f.reads, [RECENT]);
+      assert.deepEqual(f.seen.at(-1).state.messages, history);
+      assert.deepEqual(f.seen.at(-1).state.members, updated.state.members);
+      assert.deepEqual(f.seen.at(-1).state.workItems, updated.state.workItems);
+    });
+  }
+});
