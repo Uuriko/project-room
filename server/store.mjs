@@ -2592,8 +2592,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
+  // Discard parsed projections on rollback so uncommitted bytes cannot survive.
+  // Successful projection mutations are invalidated by the SQL watcher below.
   _dropProjectionCache() { this._projectionCache?.clear(); }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
