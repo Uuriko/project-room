@@ -106,6 +106,61 @@ test("linkOAuthMethod keys on provider subject, rejects cross-account collisions
   assert.throws(() => logins.linkOAuthMethod("acct-1", { provider: "gitlab", subject: "1" }), /Unknown OAuth provider/);
 });
 
+test("linkOAuthMethod revives a disabled same-account oauth method instead of duplicating it", () => {
+  // Disconnecting GitHub in settings disables the oauth row; a later GitHub
+  // sign-in (or the settings "connect" flow) re-links the same subject.
+  // Before the fix this inserted a second row, and re-enabling the old one
+  // left two active methods for one subject.
+  const { store, logins } = makeStore();
+  store.createAccount("acct-1", "test");
+  const method = logins.linkOAuthMethod("acct-1", { provider: "github", subject: "12345", email: "ada@example.com" });
+  logins.linkMagicMethod("acct-1", { email: "ada@example.com" });
+  logins.setMethodDisabled("acct-1", method.id, true);
+  assert.equal(logins.findAccountByOAuth("github", "12345"), null);
+  const revived = logins.linkOAuthMethod("acct-1", { provider: "github", subject: "12345", email: "ada@example.com" });
+  assert.equal(revived.id, method.id, "the original row is revived, not duplicated");
+  assert.equal(revived.disabled, false);
+  assert.equal(logins.listMethods("acct-1").filter(m => m.type === "oauth").length, 1);
+  assert.equal(logins.findAccountByOAuth("github", "12345"), "acct-1");
+});
+
+test("linkOAuthMethod revive refreshes the attested email but never drops a verified one", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-1", "test");
+  const method = logins.linkOAuthMethod("acct-1", { provider: "github", subject: "12345", email: "ada@example.com" });
+  logins.linkMagicMethod("acct-1", { email: "ada@example.com" });
+  logins.setMethodDisabled("acct-1", method.id, true);
+  // Provider now attests a different verified address: the row follows it.
+  const moved = logins.linkOAuthMethod("acct-1", { provider: "github", subject: "12345", email: "new@example.com" });
+  assert.equal(moved.id, method.id);
+  assert.equal(moved.email, "new@example.com");
+  assert.ok(moved.verifiedAt !== null);
+  logins.setMethodDisabled("acct-1", moved.id, true);
+  // Provider attests no address this time: the previously verified email is kept.
+  const kept = logins.linkOAuthMethod("acct-1", { provider: "github", subject: "12345" });
+  assert.equal(kept.id, method.id);
+  assert.equal(kept.email, "new@example.com");
+  assert.ok(kept.verifiedAt !== null);
+});
+
+test("setMethodDisabled refuses to enable an oauth method whose subject is actively linked", () => {
+  // Enabling a dormant row while the same provider subject is actively
+  // linked (same account or another) would fork the subject across two
+  // active methods, and sign-ins would resolve to either account arbitrarily.
+  const { store, logins } = makeStore();
+  store.createAccount("acct-1", "test");
+  store.createAccount("acct-2", "test");
+  const dormant = logins.linkOAuthMethod("acct-1", { provider: "github", subject: "12345" });
+  logins.linkMagicMethod("acct-1", { email: "a@example.com" });
+  logins.setMethodDisabled("acct-1", dormant.id, true);
+  // The same GitHub identity links to acct-2 while acct-1's row stays dormant.
+  logins.linkOAuthMethod("acct-2", { provider: "github", subject: "12345" });
+  assert.throws(() => logins.setMethodDisabled("acct-1", dormant.id, false), /already linked elsewhere/);
+  assert.equal(logins.findAccountByOAuth("github", "12345"), "acct-2");
+  // The dormant row can still be removed cleanly.
+  assert.equal(logins.removeMethod("acct-1", dormant.id).removed, true);
+});
+
 test("setMethodDisabled and removeMethod refuse to strand an account", () => {
   const { store, logins } = makeStore();
   store.createAccount("acct-1", "test");

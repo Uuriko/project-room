@@ -372,6 +372,22 @@ export class AccountLoginMethods {
       if (existing) fail(409, "login_method_exists", "This provider account is already linked");
       const normalizedEmail = email === null ? null : normalizeEmail(email);
       if (email !== null && normalizedEmail === null) fail(422, "invalid_email", "A valid email address is required");
+      // A disabled row for the same provider subject on this account is a
+      // re-link (sign-in after disconnecting in settings, or the settings
+      // "connect" flow): revive it instead of inserting a duplicate row.
+      // Duplicates would let a later re-enable fork the subject across two
+      // active methods, with sign-ins resolving to either account arbitrarily.
+      const dormant = this.db.prepare("SELECT id, email, verified_at AS verifiedAt FROM account_login_methods WHERE account_id=? AND type='oauth' AND provider=? AND external_subject=? AND disabled=1")
+        .get(accountId, provider, subject);
+      if (dormant) {
+        // A fresh provider attestation refreshes the email; without one the
+        // previously verified address is kept rather than dropped.
+        const keepEmail = normalizedEmail ?? dormant.email;
+        this.db.prepare("UPDATE account_login_methods SET disabled=0, email=?, email_hash=?, verified_at=? WHERE id=?")
+          .run(keepEmail, keepEmail ? emailLookupHash(keepEmail) : null,
+            normalizedEmail ? this.#now() : dormant.verifiedAt, dormant.id);
+        return this.getMethod(accountId, dormant.id);
+      }
       return this.#insertMethod({
         accountId, type: "oauth", provider, label: label ?? `Continue with ${provider[0].toUpperCase()}${provider.slice(1)}`,
         email: normalizedEmail, externalSubject: subject, verifiedAt: normalizedEmail ? this.#now() : null
@@ -404,6 +420,18 @@ export class AccountLoginMethods {
       if (want === 1) {
         const active = this.db.prepare("SELECT count(*) AS n FROM account_login_methods WHERE account_id=? AND disabled=0").get(accountId).n;
         if (active <= 1) fail(409, "last_login_method", "Keep at least one active sign-in method");
+      }
+      // Enabling an oauth method whose subject is actively linked — on this
+      // account or another — would fork the subject across two active
+      // methods, and later sign-ins would resolve to either account
+      // arbitrarily. Remove the stale dormant row instead of enabling it.
+      if (want === 0 && row.type === "oauth") {
+        const clash = this.db.prepare(`SELECT account_id AS accountId FROM account_login_methods
+          WHERE type='oauth' AND provider=? AND external_subject=? AND disabled=0 AND id != ? LIMIT 1`)
+          .get(row.provider, row.external_subject, row.id);
+        if (clash) fail(409, "login_method_exists", clash.accountId === accountId
+          ? "This provider account is already linked"
+          : "This provider account is already linked elsewhere");
       }
       this.db.prepare("UPDATE account_login_methods SET disabled=? WHERE id=?").run(want, row.id);
       return { ...methodDescriptor(row), disabled: want === 1 };
