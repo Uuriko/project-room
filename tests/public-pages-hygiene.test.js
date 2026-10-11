@@ -40,6 +40,18 @@ test("GET /join.html redirects to the substituted join page", async t => {
   assert.equal(icon.status, 200);
 });
 
+test("GET /join publishes share metadata", async t => {
+  const origin = await serve(t);
+  const page = await fetch(`${origin}/join`);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.match(html, /rel="canonical" href="https:\/\/room\.trydemigod\.com\/join"/);
+  assert.match(html, /property="og:title" content="[^"]+"/);
+  assert.match(html, /property="og:description" content="[^"]+"/);
+  assert.match(html, /property="og:image" content="https:\/\/room\.trydemigod\.com\/og\/[^"]+"/);
+  assert.match(html, /name="twitter:card" content="summary_large_image"/);
+});
+
 test("GET /receipts publishes canonical metadata", async t => {
   const origin = await serve(t);
   const response = await fetch(`${origin}/receipts`);
