@@ -32,6 +32,7 @@
     "scripts/auth-return-browser-check.mjs": 2897,
     "scripts/board-browser-check.mjs": 25827,
     "scripts/browser-check.mjs": 18286,
+    "scripts/catchup-plain-browser-check.mjs": 4200,
     "scripts/calm-return-browser-check.mjs": 6318,
     "scripts/channels-browser-check.mjs": 3693,
     "scripts/chat-performance-browser-check.mjs": 12986,

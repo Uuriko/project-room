@@ -214,7 +214,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   const attention = await page.locator("#rb-attention-list").textContent();
   assert.match(attention, /Maya-only return item/);
   assert.doesNotMatch(attention, /Owner-only return item/, "late owner response cannot overwrite Maya's brief");
-  assert.match(await page.locator("#rb-history-list").textContent(), /work completed reporter Room owner.*producer unknown — not reported/i, "return history separates reporter from unknown producer");
+  assert.match(await page.locator("#rb-history-list").textContent(), /reporter Room owner finished.*producer unknown — not reported/i, "return history separates reporter from unknown producer");
 });
 
 async function seriousAxe(page, include) {

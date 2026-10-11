@@ -751,7 +751,6 @@ button:disabled { cursor: wait; opacity: .6; }
 .rb-event-link { display: block; padding: .16rem; border-radius: .2rem; color: inherit; text-decoration: none; }
 .rb-event-link:hover { background: #1a2940; }
 .activity-item.unread .rb-event-link { border-left: 2px solid var(--accent, #7c6cf0); padding-left: .5rem; }
-.rb-seq { color: var(--muted); font-variant-numeric: tabular-nums; }
 .rb-type { color: var(--muted); }
 .rb-actor { font-weight: 600; }
 .rb-detail { color: var(--muted); }

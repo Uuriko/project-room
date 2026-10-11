@@ -9,3 +9,9 @@ export function uiText(key, parameters = {}) {
     return String(parameters[name] ?? '');
   });
 }
+
+// True when the catalog has this key. For optional per-kind labels that fall
+// back to a generic rendering when no plain wording exists yet.
+export function hasUiText(key) {
+  return Object.hasOwn(catalog, key);
+}

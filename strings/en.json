@@ -371,5 +371,16 @@
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
   "human.assistantChange": "Change",
-  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
+  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
+  "catchup.event.room.created": "created the room",
+  "catchup.event.member.added": "was added",
+  "catchup.event.member.joined_via_invitation": "joined",
+  "catchup.event.referral.completed": "had an invite used",
+  "catchup.event.message.posted": "posted",
+  "catchup.event.work.proposed": "asked for",
+  "catchup.event.work.accepted": "took on",
+  "catchup.event.work.completed": "finished",
+  "catchup.event.verification.recorded": "checked",
+  "catchup.event.owner.decision_recorded": "decided",
+  "catchup.event.member.access_changed": "changed access"
 }

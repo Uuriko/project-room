@@ -1,4 +1,4 @@
-import { uiText } from "./strings.js";
+import { uiText, hasUiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
@@ -7271,9 +7271,12 @@ function briefEventTarget(event) {
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
   return { kind: "event", id: event.id };
 }
-function describeBriefEvent({ sequence, event }) {
-  const actor = esc(memberLabel(event.actorId));
-  const type = esc(humanize(event.type));
+function describeBriefEvent({ event }) {
+  // Plain words for people: display name (the raw id appears only when two
+  // members share a name), a verb for common events, no event numbers.
+  const actor = esc(name(event.actorId));
+  const verbKey = `catchup.event.${event.type}`;
+  const type = esc(hasUiText(verbKey) ? uiText(verbKey) : humanize(event.type));
   const actorRole = event.type === T.WORK_COMPLETED ? `reporter ${actor}` : actor;
   let detail = "";
   if (event.type === T.MESSAGE_POSTED) detail = esc((event.data.body || "").slice(0, 80));
@@ -7281,7 +7284,7 @@ function describeBriefEvent({ sequence, event }) {
   else if (event.type === T.OWNER_DECISION_RECORDED) detail = esc(humanize(event.data.decision));
   else if (event.type === T.WORK_COMPLETED) {
     const title = state.workItems[event.data.workItemId]?.title ?? event.data.workItemId ?? "";
-    const producer = event.data.producerId ? memberLabel(event.data.producerId)
+    const producer = event.data.producerId ? name(event.data.producerId)
       : event.data.externalProducer ? `${event.data.externalProducer} · outside room, reported` : "unknown — not reported";
     detail = esc(`${title} · producer ${producer}`);
   }
@@ -7291,7 +7294,7 @@ function describeBriefEvent({ sequence, event }) {
   const href = esc(recordHref(target.kind, target.id));
   const attribute = target.kind === "room" ? `data-open-room="${esc(target.id)}"`
     : `data-open-${target.kind}="${esc(target.id)}"`;
-  return `<li class="rb-event"><a class="rb-event-link" href="${href}" ${attribute} data-brief-key="history:${esc(event.id)}"><span class="rb-seq">#${sequence}</span> <span class="rb-type">${type}</span> <span class="rb-actor">${actorRole}</span>${detail ? ` <span class="rb-detail">${detail}</span>` : ""}</a></li>`;
+  return `<li class="rb-event"><a class="rb-event-link" href="${href}" ${attribute} data-brief-key="history:${esc(event.id)}"><span class="rb-actor">${actorRole}</span> <span class="rb-type">${type}</span>${detail ? ` <span class="rb-detail">${detail}</span>` : ""}</a></li>`;
 }
 function renderBriefList(selector, html) {
   const list = $(selector);
