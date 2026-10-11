@@ -12,9 +12,9 @@ import { EVENT_TYPES as T } from "../src/events.js";
 // not keep serving the previous parse.
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
-function fixture(t) {
+function fixture(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-projection-cache-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
+  const store = new RoomStore(join(directory, "room.sqlite"), options);
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -89,4 +89,70 @@ test("evicting cached rooms still returns each room's own projection", t => {
   for (let i = 0; i < 40; i++) assert.equal(store.room(`cache-room-${i}`).state.room.id, `cache-room-${i}`);
   for (let i = 0; i < 40; i++) assert.equal(store.room(`cache-room-${i}`).state.room.id, `cache-room-${i}`);
   assert.equal(store.room("commons").state.room.id, "commons");
+});
+
+for (const platform of ['node', 'durable']) test(`${platform}: cursor commits retain projection cache without retaining revoked authorization`, async t => {
+  let store, owner;
+  if (platform === 'node') ({ store, owner } = fixture(t));
+  else {
+    const { DurableDatabase, durableStorage } = await import('../cloudflare/storage.mjs');
+    const { createDoContext } = await import('./helpers/do-storage-emulator.mjs');
+    const ctx = createDoContext();
+    store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage });
+    store.initialize(initialRoom()); owner = store.issueAccessKey('commons', 'owner');
+    t.after(() => { store.close(); ctx.storage.close(); });
+  }
+  const warm = store.room('commons');
+  let projectionReads = 0;
+  const statement = store._roomProjectionStmt, get = statement.get.bind(statement);
+  statement.get = (...args) => { projectionReads++; return get(...args); };
+  for (let i = 0; i < 5; i++) {
+    store.markCaughtUp(owner, 'commons', warm.sequence);
+    assert.equal(store.snapshot(owner, 'commons').state.messages, warm.state.messages);
+  }
+  assert.equal(projectionReads, 0, 'side-table commits must not reload the entire projection');
+  const replacement = store.issueAccessKey('commons', 'owner');
+  store.revokeStaleRoomKeys('commons', 'owner', replacement);
+  assert.throws(() => store.snapshot(owner, 'commons'), /access|key|Unauthorized|credential/i);
+  assert.equal(store.snapshot(replacement, 'commons').sequence, warm.sequence);
+});
+
+test('prepared and quoted room writes invalidate before a read, including RETURNING and rollback', t => {
+  const { store } = fixture(t);
+  const prepared = store.db.prepare('UPDATE OR REPLACE main."rooms" SET projection=? WHERE id=? RETURNING sequence');
+  const warm = store.room('commons'), next = structuredClone(warm.state);
+  next.room.title = 'Committed rewrite';
+  store.transaction(() => {
+    prepared.get(JSON.stringify(next), 'commons');
+    assert.equal(store.room('commons').state.room.title, next.room.title);
+  });
+  assert.equal(store.room('commons').state.room.title, next.room.title);
+  assert.throws(() => store.transaction(() => {
+    const reverted = structuredClone(next); reverted.room.title = 'Uncommitted rewrite';
+    prepared.all(JSON.stringify(reverted), 'commons');
+    assert.equal(store.room('commons').state.room.title, reverted.room.title);
+    throw new Error('rollback fixture');
+  }), /rollback fixture/);
+  assert.equal(store.room('commons').state.room.title, next.room.title);
+  store.transaction(() => {
+    assert.throws(() => store.transaction(() => {
+      store.db.exec(`UPDATE rooms SET projection=json_set(projection,'$.room.title','Isolated rewrite') WHERE id='commons'`);
+      assert.equal(store.room('commons').state.room.title, 'Isolated rewrite');
+      throw new Error('isolated rollback');
+    }, { isolated: true }), /isolated rollback/);
+    assert.equal(store.room('commons').state.room.title, next.room.title);
+  });
+});
+
+
+test("body-at-rest mutations invalidate hydration and recover current text from the ledger", t => {
+  const { store, owner } = fixture(t, { bodiesAtRest: true });
+  const body = "recoverable text ".repeat(500);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "body-dependency", body }));
+  const warm = store.room("commons");
+  assert.ok(store.db.prepare("SELECT count(*) AS n FROM projection_bodies").get().n > 0);
+  store.transaction(() => store.db.prepare("DELETE FROM main.\"projection_bodies\" WHERE room_id=?").run("commons"));
+  const recovered = store.room("commons");
+  assert.notEqual(recovered, warm);
+  assert.equal(recovered.state.messages.find(message => message.id === "body-dependency").body, body);
 });
