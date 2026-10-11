@@ -139,3 +139,59 @@ test("lease inputs are validated", t => {
   ];
   for (const fn of bad) assert.throws(fn, err => err instanceof HeartbeatError && err.status === 422);
 });
+
+// --- WAVE-500 guild 9 slice A4: fail-first REPRO for #2536 blocker (4) ---
+// Lease validation and the later claim/ack mutation are separate statements.
+// If listener-a's lease expires and listener-b reacquires between the
+// validation SELECT and the mutation, the stale fencing token's mutation
+// still lands: validate-then-mutate is not atomic. These tests simulate that
+// interleaving deterministically — listener-a validates while live, then
+// listener-b takes over (past listener-a's expiry) at the seam between the
+// validation and the mutation statement — and assert the stale token mutates
+// nothing. They FAIL until the mutation is fenced atomically. No fix here.
+function raceReacquireBetweenValidationAndMutation(t, hb, advance, mutationSqlFragment) {
+  const realPrepare = hb.db.prepare.bind(hb.db);
+  let bLease = null;
+  let fired = false;
+  hb.db.prepare = sql => {
+    const stmt = realPrepare(sql);
+    if (!fired && typeof sql === "string" && sql.includes(mutationSqlFragment)) {
+      fired = true;
+      advance(60001); // listener-a's lease lapses...
+      bLease = hb.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-b", ttlMs: 60000 });
+    }
+    return stmt;
+  };
+  t.after(() => { hb.db.prepare = realPrepare; });
+  return () => {
+    assert.ok(fired, "the mutation statement was reached");
+    assert.ok(bLease && bLease.acquired, "listener-b reacquired the lease mid-call");
+    return bLease;
+  };
+}
+
+test("[remedy-a4] claimWakeBatch: a stale token must not claim after expiry + reacquisition", t => {
+  const { hb, advance, lease } = leased(t);
+  enqueue(hb, "ai_lease", 1);
+  const reacquired = raceReacquireBetweenValidationAndMutation(t, hb, advance, "INSERT INTO agent_wake_signal_claims");
+  const batch = claim(hb, lease.fencingToken); // validates while listener-a is live; mutates after listener-b's takeover
+  const bLease = reacquired();
+  assert.equal(batch.signals.length, 0,
+    "stale fencing token claimed a signal after the lease was reacquired — validate-then-mutate is not atomic");
+  assert.equal(claim(hb, bLease.fencingToken).signals.length, 1,
+    "the signal stays claimable by the rightful lease holder");
+});
+
+test("[remedy-a4] ackWakes: a stale token must not ack after expiry + reacquisition", t => {
+  const { hb, advance, lease } = leased(t);
+  enqueue(hb, "ai_lease", 1);
+  const ids = claim(hb, lease.fencingToken).signals.map(s => s.signalId);
+  assert.equal(ids.length, 1);
+  const reacquired = raceReacquireBetweenValidationAndMutation(t, hb, advance, "UPDATE agent_wake_signals SET delivered_at");
+  const res = hb.ackWakes({ agentId: "ai_lease", signalIds: ids, roomId: ROOM, fencingToken: lease.fencingToken });
+  reacquired();
+  assert.equal(res.acknowledged.length, 0,
+    "stale fencing token acked signals after the lease was reacquired — validate-then-mutate is not atomic");
+  assert.equal(hb.pendingWakes("ai_lease", { roomId: ROOM }).length, 1,
+    "the signal is still pending for the rightful lease holder");
+});
