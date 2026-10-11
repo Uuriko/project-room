@@ -26,6 +26,17 @@ const SPEND_HEADROOM_WARN_FRACTION = 0.2;
 // The card is a triage surface, not a full queue.
 const MAX_ITEMS = 25;
 
+// Whole days since the oldest pending approval was proposed; 0 when every
+// proposal's creation time is unparseable, so the row never lies.
+function oldestPendingDayAge(pending, nowMs) {
+  let oldest = Infinity;
+  for (const proposal of pending) {
+    const createdMs = Date.parse(proposal?.createdAt);
+    if (Number.isFinite(createdMs)) oldest = Math.min(oldest, createdMs);
+  }
+  return Number.isFinite(oldest) ? Math.max(0, Math.floor((nowMs - oldest) / 86400000)) : 0;
+}
+
 // A full card keeps decisions ahead of informational leases. Under the cap,
 // insertion order stays so an owner still sees requests before later notes.
 function orderedAttention(items) {
@@ -133,6 +144,26 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
         path: `/api/rooms/${roomId}/spend-allowance`,
         hint: "Send { allowanceCents, periodDays? } to raise the allowance" })]),
     }));
+  }
+
+  // 5. Inbox approvals pending a human verdict. Feature-detected: when the
+  // collab inbox module is absent there is no row at all — no placeholder,
+  // no crash.
+  const collab = store.collab;
+  if (collab && typeof collab.listApprovals === "function") {
+    const pending = collab.listApprovals(roomId, { status: "pending" }) ?? [];
+    if (pending.length > 0) {
+      items.push(Object.freeze({
+        kind: "approval",
+        id: "inbox-approvals-pending",
+        severity: "action",
+        title: `Approvals pending: ${pending.length} (oldest ${oldestPendingDayAge(pending, nowMs)}d)`,
+        detail: "Agent-drafted outbound is waiting for a human verdict",
+        actions: Object.freeze([Object.freeze({ action: "review", method: "GET",
+          path: `/api/rooms/${roomId}/collab/approvals?status=pending`,
+          hint: "List the pending approval cards" })]),
+      }));
+    }
   }
 
   // Shadow measurements never require an owner action. Keep them available

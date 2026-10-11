@@ -12,6 +12,7 @@ const KIND_LABEL = {
   spend: "Spend",
   claim_lease: "Claim lease",
   jev_escalation: "Shadow diagnostic",
+  approval: "Approval",
 };
 
 export function createNeedsAttentionCard(options) {
@@ -102,6 +103,11 @@ export function createNeedsAttentionCard(options) {
 
   function actionControls(item) {
     const controls = item.actions.map((action, index) => {
+      if (action.method === "GET" && item.kind === "approval") {
+        // Traceability: the pending-approvals row links straight to the
+        // approvals card list instead of a work record.
+        return `<a class="button ghost" href="${esc(action.path)}">Review approvals</a>`;
+      }
       if (action.method === "GET" && item.kind !== "spend") {
         const workId = item.kind === "jev_escalation" ? item.workItemId : item.id;
         return workId ? `<a class="button ghost" href="#pr-record/work/${esc(encodeURIComponent(workId))}" data-open-work="${esc(workId)}">Review</a>`

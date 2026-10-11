@@ -290,3 +290,56 @@ test("exactly at the cap keeps insertion order; past the cap actions move first"
   assert.equal(report.itemCount, 26);
   assert.equal(report.items[0].kind, "spend", "past the cap, actions come first");
 });
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// WAVE-500 guild-10 slice 46/50: the pulse wires the approval inbox's pending
+// count into the attention rollup.
+function proposeApproval(f, threadId, byAgent = { kind: "agent", id: "agent" }) {
+  f.store.collab.execSchema();
+  return f.store.collab.proposeDraft("commons", threadId,
+    { draft: { body: "outbound draft" }, byAgent, channel: "test" });
+}
+
+function approvalItem(report) {
+  return report.items.find(item => item.kind === "approval");
+}
+
+test("pulse wires pending approval count with a link to the approvals list", t => {
+  const f = setup(t);
+  proposeApproval(f, "thread-one");
+  const item = approvalItem(f.report());
+  assert.ok(item, "the approvals row appears in the pulse");
+  assert.equal(item.severity, "action");
+  assert.equal(item.title, "Approvals pending: 1 (oldest 0d)");
+  assert.equal(item.detail, "Agent-drafted outbound is waiting for a human verdict");
+  assert.equal(item.actions.length, 1);
+  assert.equal(item.actions[0].method, "GET");
+  assert.equal(item.actions[0].path, "/api/rooms/commons/collab/approvals?status=pending");
+});
+
+test("pulse shows the oldest pending age in whole days", t => {
+  const f = setup(t);
+  proposeApproval(f, "thread-old");
+  f.clock.now += 3 * DAY_MS;
+  proposeApproval(f, "thread-new");
+  const item = approvalItem(f.report());
+  assert.equal(item.title, "Approvals pending: 2 (oldest 3d)");
+});
+
+test("a decided approval leaves the pulse", t => {
+  const f = setup(t);
+  const proposal = proposeApproval(f, "thread-decide");
+  f.store.collab.decideApproval("commons", proposal.proposalId,
+    { decision: "approve", by: { kind: "human", id: "owner" }, note: null });
+  assert.equal(approvalItem(f.report()), undefined);
+});
+
+test("pulse renders nothing for approvals when the inbox module is absent", t => {
+  const f = setup(t);
+  const storeWithoutInbox = Object.create(f.store, { collab: { value: undefined } });
+  const report = attentionReport({ store: storeWithoutInbox, accessRequests: f.accessRequests },
+    f.keys.owner, "commons", null, f.clock.now);
+  assert.equal(report.itemCount, 0, "no approval row, no placeholder, no crash");
+  assert.deepEqual(report.items, []);
+});
