@@ -69,3 +69,12 @@ Batch 1 is the current implemented scope. Batches 2–5 are explicit unfinished 
 - Broader affected suite: 1,309 passed across 238 files.
 - Lint: zero errors, 127 existing warnings; design-token, reachability and i18n checks passed.
 - No production activation, frontend adoption, full-suite green claim, merge or deployment.
+
+## Reconciliation correction
+
+PR2612 (`147c1027`) already implements persistent shared pickup, exclusive ownership,
+owned-attempt recovery, persisted backoff and bounded reads. The local simpler watcher
+was redundant and is retired. Integrate PR2612 rather than ship two supervisors.
+Keep atomic admission and its independent tests. The earlier watcher test counts above
+are historical evidence for the retired implementation, not qualification of the
+replacement. Rerun the existing supervisor/runtime suites after integration.

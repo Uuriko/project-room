@@ -7,7 +7,6 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { openRequestJournal } from "../client/request-runner.mjs";
 import { openCodexStdio, validateCodexRuntimeConfig, checkCodexProtocol } from "../client/codex-stdio.mjs";
 import { runCodexSharedAssistant } from "../client/codex-shared-assistant.mjs";
-import { watchSharedAssistant } from "../client/shared-assistant-watch.mjs";
 
 export async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "--help") {
@@ -15,12 +14,11 @@ export async function main(argv = process.argv.slice(2)) {
   ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs --list
   node scripts/run-codex-room.mjs --check /absolute/runtime.json
   ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
-  ROOM_AGENT_CONFIG="/path/room.json" node scripts/run-codex-room.mjs --watch /absolute/journal.sqlite /absolute/runtime.json
 
 Runtime JSON requires command (absolute Codex executable), cwd (real workspace), codexHome (dedicated private directory outside workspace and operator Codex home), policy {approvalPolicy:"never",sandbox:"read-only"|"workspace-write"}; optional model, requestTimeoutMs, turnTimeoutMs.
 Authenticate the dedicated Codex home explicitly using Codex login with CODEX_HOME set to that directory and cli_auth_credentials_store="file". No operator credentials or sessions are imported.
 --check starts the isolated-home App Server protocol only; it performs no model turn and does not prove provider authentication.
-Normal invocation executes one already-created public Room assistant run assigned to this member. --watch discovers queued, unclaimed runs for the configured coordinator and executes them serially. It does not configure the room, create requests from chat, or recover existing attempts automatically. Errors stop the watcher; reconcile an interrupted run with its RUN_ID and the same journal before restarting. Keep the private journal and Codex home for exact retries and reconciliation. Interactive approvals/questions are denied with an attention notice. No unsandboxed fallback is used.`);
+Normal invocation executes one already-created public Room assistant run assigned to this member. Keep the private journal and Codex home for exact retries and reconciliation. Interactive approvals/questions are denied with an attention notice. No unsandboxed fallback is used.`);
     return;
   }
   if (argv.length === 1 && argv[0] === "--list") {
@@ -52,15 +50,10 @@ Normal invocation executes one already-created public Room assistant run assigne
     if (check) {
       console.log(JSON.stringify(qualified));
     } else {
-      const execute = async selectedRunId => {
-        const result = await runCodexSharedAssistant({ connection, db, rpc, cwd: settings.cwd, policy: settings.policy,
-          runId: selectedRunId, signal: controller.signal, timeoutMs: settings.turnTimeoutMs,
-          emit: event => console.log(JSON.stringify(event)) });
-        console.log(JSON.stringify({ status: result.result.status, runId: selectedRunId, resultMessageId: result.result.resultMessageId ?? null }));
-      };
-      if (runId === "--watch") await watchSharedAssistant({ client: new RoomAgentClient(connection), memberId: connection.memberId,
-        execute, signal: controller.signal, emit: event => console.log(JSON.stringify(event)) });
-      else await execute(runId);
+      const result = await runCodexSharedAssistant({ connection, db, rpc, cwd: settings.cwd, policy: settings.policy,
+        runId, signal: controller.signal, timeoutMs: settings.turnTimeoutMs,
+        emit: event => console.log(JSON.stringify(event)) });
+      console.log(JSON.stringify({ status: result.result.status, runId, resultMessageId: result.result.resultMessageId ?? null }));
     }
   } finally { await rpc?.close(); db?.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
 }
