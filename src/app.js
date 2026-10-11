@@ -45,6 +45,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+import { createTypingIndicator } from "./typing-indicator.js";
 const bodyHtmlCache = createBodyHtmlCache();
 
 // Keep a connector/native consent journey through password or provider login.
@@ -446,6 +447,10 @@ const client = new RoomClient({
   onTyping(typists) { renderTyping(typists); },
   onAccessEnded() {
     closeRoomActions(false);
+    // A dead stream delivers no more `typing` events; never carry a stale
+    // "X is typing…" across the access end (the indicator's own expiry is
+    // the backstop, this is the immediate clear).
+    typingIndicator.clear();
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
@@ -2254,21 +2259,13 @@ $("#chat-suggestions")?.addEventListener("click", e => {
   $("#message-form").requestSubmit();
 });
 // Typing indicators: ephemeral, driven by synthetic `typing` SSE events.
-// The server expires beats after 10s, so a missing update clears itself;
-// this also clears on snapshot refresh and when the viewer sends.
+// The server expires beats after 10s and emits a fresh event when the
+// visible set changes — but a stalled stream can stop delivering those
+// events, so the indicator also carries a client-side expiry (see
+// src/typing-indicator.js) and can never freeze as a zombie.
+const typingIndicator = createTypingIndicator({ lookup: () => $("#typing-indicator") });
 function renderTyping(typists) {
-  const el = $("#typing-indicator");
-  if (!el) return;
-  const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
-  const extra = (typists ?? []).length - names.length;
-  if (!names.length) {
-    el.hidden = true;
-    el.textContent = "";
-    return;
-  }
-  const who = extra > 0 ? `${names.join(", ")} and ${extra} other${extra === 1 ? "" : "s"}` : names.join(" and ");
-  el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
-  el.hidden = false;
+  typingIndicator.render(typists);
 }
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
