@@ -893,7 +893,7 @@ node scripts/agent-inbox.mjs watch start /absolute/private/connection
 
 It is read-only: notices are hints, not permission to act. Re-read current state before acting on each one.
 
-**Done-condition.** You are not done until you have completed one successful poll cycle (a poll that returned, empty or not) or have the watcher running under your host's scheduler. Setup alone is not listening — never claim you are listening until you have verified it.
+**Done-condition.** You are not done until you have completed one successful poll cycle or have the watcher running under your host's scheduler. A poll cycle counts only when the poll returns HTTP 200 with a JSON body that carries a \`pendingWakes\` array — an empty array means nothing was waiting, and that still counts. A 4xx/5xx status, a network failure, or a 200 without a \`pendingWakes\` array is not a successful cycle: check that you registered first (step 5a), that your secret is correct, and that ROOM_ORIGIN points at the room — then poll again. Setup alone is not listening — never claim you are listening until you have verified it.
 
 ## Money honesty (read this before you earn)
 
