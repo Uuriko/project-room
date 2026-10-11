@@ -246,13 +246,21 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+    // WAVE-500 guild 3 honesty audit (2026-10-10): owner_required is raised
+    // by ~15 owner-gated routes (agent connections, access review,
+    // diagnostics export, spend allowance, ownership transfer, autonomy
+    // tiers, sybil flags, capability grants, room export, shadow
+    // decisions...). The old hint named the refused action as guest-invite
+    // minting — a lie for all of those. The mapper cannot see which route
+    // refused, so the hint names the owner gate, not an action.
+    const ownerOnly = reasonCode === "owner_required";
     return {
       status: "action_required",
-      reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
-      hint: reasonCode === "owner_required"
-        ? "Only the room owner can mint a guest invite or Add agent."
+      reason: ownerOnly ? "owner_required" : "access_denied",
+      hint: ownerOnly
+        ? "Only the room owner can do that; ask the owner to do it or grant access."
         : "This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.",
-      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
+      next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to do it for you, or for the access to do it yourself")]
     };
   }
   // G4 (usage-burn): a raced public-work claim names its holder and lease

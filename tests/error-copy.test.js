@@ -95,3 +95,24 @@ test("RoomClient throw sites resolve human copy instead of generics", async () =
   const err = await coded.request("/api/session").catch(e => e);
   assert.equal(err.code, "room_archived");
 });
+
+// WAVE-500 guild 3 honesty audit (2026-10-10): humanErrorMessage's own
+// contract says it never returns "Unknown error" or "Request failed", but
+// the passthrough only excluded the exact string "Request failed" — a
+// server message of "Unknown error" sailed through to the human.
+test("server text of 'Unknown error' never passes through to the human", () => {
+  for (const message of ["Unknown error", "unknown error", "Unknown Error"]) {
+    const text = humanErrorMessage({ status: 409, code: "some_future_code", message });
+    assert.doesNotMatch(text, GENERIC, `passthrough leaked: ${message}`);
+    assert.equal(text, "That conflicts with the current state. Refresh and try again.");
+  }
+});
+
+// WAVE-500 guild 3 honesty audit (2026-10-10): inbox_attachment_not_found was
+// the only attachment-family copy with no recovery action — a dead end for
+// the human. Every error sentence must say what happened AND what to do.
+test("inbox attachment copy names a recovery action", () => {
+  const text = humanErrorMessage({ status: 404, code: "inbox_attachment_not_found" });
+  assert.doesNotMatch(text, GENERIC);
+  assert.match(text, /ask the sender|upload it again|try again/i, "no recovery action");
+});

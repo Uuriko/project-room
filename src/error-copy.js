@@ -207,12 +207,16 @@ export function humanErrorMessage({ status, code, message } = {}) {
     if (text) return text;
   }
   const serverText = typeof message === "string" ? message.trim() : "";
+  // The passthrough must never hand a generic server sentence to a human —
+  // "Unknown error" and "Request failed" both fail this test (the exact
+  // "Request failed" check alone let "Unknown error" through).
+  const genericServerText = /^(unknown error|request failed)$/i.test(serverText);
   // qa1-r1 (2026-10-09, prod a82c8d43): the chat flood guard answers a fast
   // sender with agent protocol text ("on 429, wait Retry-After and retry").
   // A person should get the plain 429 sentence; specific 429 reasons (guest
   // seat limit, mint limit) still pass through.
   const agentProtocolText = Number(status) === 429 && /\bRetry-After\b/i.test(serverText);
-  if (serverText && serverText !== "Request failed" && !agentProtocolText) return serverText;
+  if (serverText && !genericServerText && !agentProtocolText) return serverText;
   const statusText = catalogText(STATUS_KEYS[Number(status)]);
   if (statusText) return statusText;
   return catalogText("error.unknown") || "Something went wrong. Please try again.";

@@ -157,6 +157,29 @@ test("challenge ch-2031: 405 hint does not promise an Allow header that usually 
   assert.doesNotMatch(JSON.stringify(ax.next), /carries an Allow header/);
 });
 
+// WAVE-500 guild 3 honesty audit (2026-10-10): the 403 owner_required hint
+// named the refused action as guest-invite minting — but owner_required is
+// raised by ~15 owner-gated routes (agent connections, access review,
+// diagnostics export, spend allowance, ownership transfer, autonomy tiers,
+// sybil flags, capability grants, room export, shadow decisions...). Naming
+// one specific action lies about the cause for all the others and sends the
+// agent down an invite path for an unrelated refusal.
+test("owner_required hint never names a specific refused action", () => {
+  for (const message of [
+    "Only the signed-in room owner can manage agent connections",
+    "Only the room owner can export diagnostics",
+    "Only the Room owner may transfer ownership",
+    "Only the room owner can mint a guest invite. Use Add agent for a durable key.",
+  ]) {
+    const denied = agentErrorAx({ httpStatus: 403, code: "owner_required", message });
+    assertAx(denied, { reason: "owner_required" });
+    assert.doesNotMatch(denied.hint, /guest invite|Add agent/i,
+      `hint named the wrong action for: ${message}`);
+    assert.match(denied.hint, /room owner/i, "hint must name the owner gate");
+    assert.doesNotMatch(JSON.stringify(denied.next), /guest invite|Add agent/i);
+  }
+});
+
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {
   // G4: a raced claim's 409 names who holds the claim and when the lease ends.
   const conflict = agentErrorAx({ httpStatus: 409, code: "public_work_claim_conflict",
