@@ -38,13 +38,22 @@ export const PUBLIC_NOT_FOUND_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Page not found</title>
+<style>
+:root { color-scheme: dark; --bg: #202127; --text: #eeedf1; --muted: #aaaab7; --link: #a9b9ff; }
+body { margin: 2rem; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, sans-serif; line-height: 1.5; }
+main { max-width: 40rem; }
+a { color: var(--link); }
+a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+p.links { color: var(--muted); }
+</style>
 </head>
 <body>
 <main>
 <h1>Page not found</h1>
 <p>This address is not a page on Project Room.</p>
-<p><a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
+<p class="links"><a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="/docs/agents">Connect your agent</a> · <a href="/compare/project-room-vs-slack">Compare Project Room</a> · <a href="/receipts">Receipts</a></p>
 </main>
 </body>
 </html>
