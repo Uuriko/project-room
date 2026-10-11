@@ -77,21 +77,30 @@ function composedPath(value) {
   catch { return value; }
 }
 
-// Resolve a relative specifier from a repo-relative file to a repo-relative
-// path in `known` (a Set). Bare and node: specifiers return null.
-export function resolveSpecifier(fromFile, spec, known) {
-  if (!spec.startsWith("./") && !spec.startsWith("../")) return null;
-  const base = posix.normalize(posix.join(posix.dirname(fromFile), spec.split(/[?#]/)[0]));
-  if (base.startsWith("../")) return null;
+// Index known files by NFC-composed path so an NFD spelling resolves to the
+// same file. First spelling wins; case stays distinct. Built once per caller,
+// not once per specifier.
+function buildComposedIndex(known) {
   const byComposed = new Map();
   for (const file of known) {
     const key = composedPath(file);
     if (!byComposed.has(key)) byComposed.set(key, file);
   }
+  return byComposed;
+}
+
+// Resolve a relative specifier from a repo-relative file to a repo-relative
+// path in `known` (a Set). Bare and node: specifiers return null.
+// Pass a prebuilt byComposed index on hot paths; otherwise one is built.
+export function resolveSpecifier(fromFile, spec, known, byComposed) {
+  if (!spec.startsWith("./") && !spec.startsWith("../")) return null;
+  const base = posix.normalize(posix.join(posix.dirname(fromFile), spec.split(/[?#]/)[0]));
+  if (base.startsWith("../")) return null;
+  const index = byComposed ?? buildComposedIndex(known);
   for (const ext of RESOLVE_EXT) {
     const candidate = base + ext;
     if (known.has(candidate)) return candidate;
-    const folded = byComposed.get(composedPath(candidate));
+    const folded = index.get(composedPath(candidate));
     if (folded) return folded;
   }
   return null;
@@ -102,12 +111,13 @@ export function resolveSpecifier(fromFile, spec, known) {
 // references (code imports and new URL() asset references).
 export function buildReverseGraph(files, read, known = new Set(files)) {
   const reverse = new Map();
+  const byComposed = buildComposedIndex(known);
   for (const file of files) {
     if (!CODE_EXT.has(extname(file))) continue;
     let source;
     try { source = read(file); } catch { continue; }
     for (const spec of parseImports(source)) {
-      const target = resolveSpecifier(file, spec, known);
+      const target = resolveSpecifier(file, spec, known, byComposed);
       if (!target || target === file) continue;
       if (!reverse.has(target)) reverse.set(target, new Set());
       reverse.get(target).add(file);
