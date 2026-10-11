@@ -112,6 +112,40 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     const target = candidates.find(element => !element.closest("[hidden]") && element.getClientRects().length > 0);
     target?.focus();
   }
+  // Re-rendering replaces the panel HTML, which destroys the focused control
+  // and drops keyboard users onto <body>. Remember which control had focus
+  // and put it back when the same control still exists after the rebuild —
+  // the same contract the agent sign-in UI already keeps.
+  const FOCUS_ATTRS = ["data-password-visibility", "data-magic-manual-code", "data-magic-restart", "data-signin-back", "data-email-method", "data-password-mode", "data-recovery-option", "data-magic-switch", "data-passkey-signin"];
+  const tagOf = element => String(element.tagName ?? element.tag ?? "").toLowerCase();
+  // document is absent under node:test; focus tracking simply stays idle there.
+  const activeDocumentElement = () => typeof document === "undefined" ? null : document.activeElement;
+  const documentBody = () => typeof document === "undefined" ? null : document.body;
+  function focusSignature(element, node) {
+    if (!element || typeof element.getAttribute !== "function") return null;
+    const name = element.getAttribute("name");
+    if (name) return { name };
+    for (const attr of FOCUS_ATTRS) if (element.hasAttribute?.(attr)) return { attr };
+    // Unnamed controls (e.g. the submit button): identify by tag + type and
+    // position among same-kind controls, which is stable across re-renders of
+    // the same view.
+    const controls = node ? [...node.querySelectorAll("input, button")] : [];
+    const kind = controls.filter(control => tagOf(control) === tagOf(element) && (control.getAttribute?.("type") ?? "") === (element.getAttribute?.("type") ?? ""));
+    const index = kind.indexOf(element);
+    return index >= 0 ? { tag: tagOf(element), type: element.getAttribute?.("type") ?? "", index } : null;
+  }
+  function restoreFocus(signature) {
+    const node = surface();
+    if (!signature || !node) return;
+    const controls = [...node.querySelectorAll("input, button")].filter(control => !control.disabled);
+    const target = controls.find(control => {
+      if (signature.name) return control.getAttribute?.("name") === signature.name;
+      if (signature.attr) return control.hasAttribute?.(signature.attr);
+      const kind = controls.filter(other => tagOf(other) === signature.tag && (other.getAttribute?.("type") ?? "") === signature.type);
+      return tagOf(control) === signature.tag && (control.getAttribute?.("type") ?? "") === signature.type && kind.indexOf(control) === signature.index;
+    });
+    target?.focus?.();
+  }
   function back() { if (busy) return false; resetCode = ""; return showView("password-login"); }
   const failureText = error => error?.message || uiText("signin.copy.003");
   function panelHtml() {
@@ -139,12 +173,17 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     const node = surface();
     const view = currentView();
     const hideBack = view === "welcome" || view === "terms" || view.startsWith("password-");
+    const hadFocus = node?.contains(activeDocumentElement()) ? focusSignature(activeDocumentElement(), node) : null;
     if (node) node.innerHTML = ["", hideBack ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`, "<div data-signin-panel>", panelHtml(), "</div><p class=\"status form-status\" role=\"alert\" data-signin-status></p>"].join('');
     if (node) {
       node.setAttribute("aria-busy", String(busy));
       for (const control of node.querySelectorAll("input, button")) control.disabled = busy;
     }
     setStatus(statusText, statusError);
+    // The rebuild above destroyed the focused control; keep keyboard users
+    // where they were instead of stranding them on <body>. Skipped while busy
+    // (controls are disabled then) — withBusy restores from its own stash.
+    if (hadFocus && !busy && !node?.contains(activeDocumentElement())) restoreFocus(hadFocus);
     onViewChange?.(currentView());
   }
   const paintBusySurface = render;
@@ -164,10 +203,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
 
   async function withBusy(fn) {
     if (busy) return;
+    const preBusyFocus = surface()?.contains(activeDocumentElement()) ? focusSignature(activeDocumentElement(), surface()) : null;
     busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
     try { await fn(); }
     catch (error) { setStatus(failureText(error), true); }
-    finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
+    finally {
+      busy = false; onBusyChange?.(false); paintBusySurface();
+      // Both busy renders replaced the panel HTML; put focus back where the
+      // keyboard user was — unless they deliberately moved it elsewhere.
+      if (preBusyFocus && activeDocumentElement() === documentBody()) restoreFocus(preBusyFocus);
+    }
   }
 
   async function redeem(email, code) {
@@ -260,7 +305,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       return;
     }
     if (event.target?.closest?.("[data-magic-manual-code]")) {
-      magicManualCode = !magicManualCode; render(); return;
+      magicManualCode = !magicManualCode; render();
+      // Focus follows the newly revealed field; hiding it returns focus to
+      // the toggle via render()'s focus restoration.
+      if (magicManualCode) surface()?.querySelector('[name="code"]')?.focus();
+      return;
     }
     if (!event.target?.closest?.("[data-magic-restart]")) return;
     magicPhase = "request"; magicManualCode = false; pendingLink = null; setStatus("");
