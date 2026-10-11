@@ -78,3 +78,50 @@ same production broker code without an XCTest dependency and is excluded from th
 ### Native browser authentication acceptance
 
 Build `swift build -c release --product NativeAuthAcceptance` in `desktop/macos`, then run `node desktop/macos/auth-lifecycle-acceptance.mjs` from the repository root on macOS with Playwright Chromium installed. This isolated loopback owner activates the actual WK Google sign-in link, races a menu action, checks cancellation/startup failure/stale callbacks, and drives real Room Google callback/consent/PKCE redemption through to an authenticated WK account-session readback with an HttpOnly cookie. Only the external provider and ASWebAuthenticationSession UI are synthetic; no personal browser cookies or provider account are used. The acceptance executable is excluded from the app bundle; an injected authentication factory is permitted only in isolated loopback instances. Actual Google account/browser integration and Developer ID/notarization remain separate release qualifications.
+
+### App-lifetime room agent
+
+This technical setup checkpoint requires an existing dedicated runtime and Room
+connection. It is not the final account/agent onboarding flow.
+
+My Mac → **Connect agent…** accepts one host manifest. **Start agent** launches
+one dedicated Room supervisor; **Stop agent** requests its existing durable stop
+control and waits for cleanup. Quitting Project Room uses the same cleanup path.
+Keep the app open while the agent works. This is not a login item or background
+service, and restoring a saved configuration does not start execution.
+
+Example manifest (absolute paths; replace all example values):
+
+```json
+{
+  "version": 1,
+  "node": "/absolute/path/to/node",
+  "script": "/absolute/path/to/project-room/scripts/run-codex-room.mjs",
+  "runtimeConfig": "/absolute/path/to/dedicated-runtime.json",
+  "roomConnection": "/absolute/path/to/private-room-connection-directory"
+}
+```
+
+Use the current supervisor CLI with `--watch`, `--stop-watch`, and the version 1
+`JOURNAL.watch/status.json` contract. The connection directory contains the
+existing private `connection.json`; the runtime configuration uses a dedicated
+Codex profile. The desktop does not import your current Codex account or grant
+macOS permissions. The selected manifest and managed journal live privately in
+`~/Library/Application Support/Project Room/Room Host/`.
+
+Status is accepted only for the app's own child PID, room/member, new session,
+and recent heartbeat. “Listening” means protocol and account checks passed;
+model execution remains unverified until actual work. Startup failure, stale
+status, and missing login never show ready. A second desktop host is refused;
+the existing WatchJournal additionally owns CLI execution arbitration.
+
+Shutdown first requests the supervisor's durable stop, then escalates to its
+owned process group if needed. Only a matching terminal receipt plus child exit
+shows “Agent stopped.” Forced cleanup instead says execution needs reconciliation:
+a detached runtime or remote operation cannot be declared stopped merely because
+its local supervisor ended. No shell command is constructed from manifest values.
+
+Run native host acceptance without accounts or model calls:
+`swift run --package-path desktop/macos LocalRoomHostAcceptance`.
+It exercises real fixture processes, stale/wrong-owner status, duplicate hosts,
+private saved setup, graceful stop, and a termination-resistant descendant.
