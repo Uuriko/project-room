@@ -2,6 +2,9 @@
 // batch claims, and redelivery flags on the wake-signal queue.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
@@ -128,6 +131,46 @@ test("leases are room-scoped", t => {
   const b = hb.acquireListenerLease({ agentId: "ai_lease", roomId: "room-two", listenerId: "listener-b", ttlMs: 60000 });
   assert.equal(a.acquired && b.acquired, true, "a different room gets its own lease");
   assert.notEqual(a.fencingToken, b.fencingToken);
+});
+
+// Blocker (3) repro: acquireListenerLease is check-then-act — SELECT for a
+// live lease, then INSERT ... ON CONFLICT DO UPDATE. Two racers can both
+// observe "no live lease" and both INSERT, so BOTH report acquired:true;
+// the loser's upsert silently overwrites the winner's fencing token.
+// Deterministic model of two racing connections ("processes") on one shared
+// DB file: B's whole acquire is injected between A's lease check (SELECT)
+// and A's write (INSERT) by wrapping A's db.prepare — the exact interleaving
+// a preemptive scheduler (or a second server process) can produce.
+// node:sqlite's DatabaseSync is synchronous, so true thread-level
+// concurrency is not available in-process; this interleaving is the faithful
+// deterministic equivalent.
+test("two racing acquires for the same (agent, room): exactly one reports success", t => {
+  const dbPath = join(tmpdir(), `wake-lease-race-${process.pid}-${Date.now()}.sqlite`);
+  const dbA = new DatabaseSync(dbPath);
+  const dbB = new DatabaseSync(dbPath);
+  t.after(() => { dbA.close(); dbB.close(); rmSync(dbPath, { force: true }); });
+  const hbA = new AgentHeartbeats({ db: dbA, now: () => T0 }, {});
+  const hbB = new AgentHeartbeats({ db: dbB, now: () => T0 }, {});
+
+  let bResult = null;
+  const prepareA = dbA.prepare.bind(dbA);
+  dbA.prepare = sql => {
+    const stmt = prepareA(sql);
+    if (bResult === null && /INSERT INTO agent_wake_listener_leases/.test(sql)) {
+      // A checked: no live lease. Before A writes, B runs its full acquire.
+      bResult = hbB.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-b", ttlMs: 60000 });
+    }
+    return stmt;
+  };
+  const aResult = hbA.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-a", ttlMs: 60000 });
+  assert.ok(bResult, "the racing acquire ran inside A's check-then-act window");
+
+  const winners = [aResult, bResult].filter(r => r.acquired);
+  assert.equal(winners.length, 1, "exactly one racer may report success");
+  const loser = aResult.acquired ? bResult : aResult;
+  assert.equal(loser.acquired, false, "the loser is refused");
+  assert.equal(loser.activeListenerId, winners[0].listenerId,
+    "the refusal names the running listener");
 });
 
 test("lease inputs are validated", t => {
