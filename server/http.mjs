@@ -1297,6 +1297,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // multi-method login model, and upgrades the slot. The callback
       // returns the upgraded session as JSON (a same-origin landing page
       // is out of scope for this slice). Error responses never carry tokens.
+      if (url.pathname === "/api/auth/providers") {
+        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        let configured = false;
+        try { configured = github() !== null; } catch { /* Invalid provider setup stays unavailable. */ }
+        res.setHeader("Cache-Control", "no-store");
+        return json(res, 200, { providers: { github: { configured } } });
+      }
       if (url.pathname === GITHUB_START_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const oauth = github();
