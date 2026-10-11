@@ -331,6 +331,11 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .composer-row:focus-within { border-color: var(--blue); }
 .composer-row textarea { grid-column: 2; min-height: 3rem; max-height: 25dvh; border: 0; border-radius: .35rem; background: transparent; padding: .45rem .25rem; }
 .composer-row textarea:focus { outline: 0; }
+/* Keyboard focus on the borderless composer textarea: outline:0 above is
+   intentional for the design, but keyboard users need a visible ring. Draw a
+   2px ring on the row when its textarea is keyboard-focused (the 1px
+   :focus-within border shift stays for mouse users — backward compatible). */
+.composer-row:has(> textarea:focus-visible) { outline: 2px solid var(--blue); outline-offset: 2px; }
 .composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 32px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; }
 .composer-attach { grid-column: 3; grid-row: 1 / span 2; align-self: end; }
 .composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; }
