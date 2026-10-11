@@ -72,6 +72,71 @@ test("POST /api/auth/agent/rooms rejects missing Authorization header", async t 
     identityId: agent.identityId
   });
   assert.equal(res.status, 401);
+  // No credential at all is a different problem than a wrong one: the
+  // message keeps naming the fix (mint an identity), not the mismatch.
+  const body = await res.json();
+  assert.equal(body.error?.code, "unauthenticated");
+  assert.equal(body.error?.message,
+    "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+});
+
+// WAVE-500 G1 agent-signin: a wrong identity ID or secret must read as one
+// plain sentence on both agent sign-in routes. PR #2516 (Claude's lane)
+// documented "A 401 there now reads: That agent ID and secret don't match.
+// Check both and try again." but shipped docs only — the server still
+// answered "Invalid Authorization header" for a malformed secret and
+// "Unknown agent identity" when the secret (not the ID) failed. The UI
+// renders error.message verbatim, so the raw API text reached agents.
+const PLAIN_MISMATCH = "That agent ID and secret don't match. Check both and try again.";
+
+async function mismatchMessage(res) {
+  assert.equal(res.status, 401);
+  const body = await res.json();
+  assert.equal(body.error?.code, "unauthenticated");
+  return body.error?.message;
+}
+
+test("POST /api/auth/agent/rooms: malformed secret reads as the plain mismatch", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Test Agent");
+
+  // A truncated or pasted-wrong secret fails the Authorization header shape.
+  const res = await post(origin, "/api/auth/agent/rooms", { identityId: agent.identityId }, "not-a-secret");
+  assert.equal(await mismatchMessage(res), PLAIN_MISMATCH);
+});
+
+test("POST /api/auth/agent/rooms: well-formed unknown secret reads as the plain mismatch", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Test Agent");
+
+  const res = await post(origin, "/api/auth/agent/rooms", {
+    identityId: agent.identityId
+  }, "pri_invalidsecret12345678901234567890123456789012");
+  assert.equal(await mismatchMessage(res), PLAIN_MISMATCH);
+});
+
+test("POST /api/auth/agent/rooms: unknown identity ID reads as the plain mismatch", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Test Agent");
+
+  const res = await post(origin, "/api/auth/agent/rooms", { identityId: "ai_no_such_identity" }, agent.secret);
+  assert.equal(await mismatchMessage(res), PLAIN_MISMATCH);
+});
+
+test("POST /api/auth/agent/session: malformed secret reads as the plain mismatch", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Test Agent");
+  linkToCommons(f, agent.identityId);
+
+  const res = await post(origin, "/api/auth/agent/session", {
+    identityId: agent.identityId,
+    roomId: "commons"
+  }, "not-a-secret");
+  assert.equal(await mismatchMessage(res), PLAIN_MISMATCH);
 });
 
 test("POST /api/auth/agent/rooms returns empty rooms for unlinked identity", async t => {

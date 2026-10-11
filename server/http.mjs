@@ -751,6 +751,33 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (!match) reject(401, "unauthenticated", "Invalid Authorization header");
     return match[1];
   }
+  // Agent browser sign-in credentials (WAVE-500 G1; extends Claude's lane PR
+  // #2516, whose commit message documented this copy but shipped docs only):
+  // a wrong identity ID or secret reads as one plain sentence. The raw
+  // "Invalid Authorization header" (malformed secret) and "Unknown agent
+  // identity" (the secret failed its shape check for a known ID) both
+  // misdirected agents about which half of the pair was wrong, and the
+  // sign-in UI renders error.message verbatim. Status stays 401 and the
+  // code stays "unauthenticated"; only the human message is normalized, so
+  // nothing can learn which half failed. The no-credential case keeps its
+  // mint pointer — that is a different problem than a wrong credential.
+  const AGENT_SIGNIN_CREDENTIAL_MISMATCH = "That agent ID and secret don't match. Check both and try again.";
+  function agentSigninCredentials(req, identityId) {
+    let secret = null;
+    try {
+      secret = bearer(req);
+    } catch (error) {
+      if (!(error instanceof ServiceError) || error.status !== 401) throw error;
+      reject(401, "unauthenticated", AGENT_SIGNIN_CREDENTIAL_MISMATCH);
+    }
+    if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+    try {
+      return store.identities.authenticateIdentitySecret(identityId, secret);
+    } catch (error) {
+      if (!(error instanceof ServiceError) || error.status !== 401) throw error;
+      reject(401, "unauthenticated", AGENT_SIGNIN_CREDENTIAL_MISMATCH);
+    }
+  }
   // Owner delegates (server/owner-delegates.mjs) need no parallel auth path:
   // store.authenticate stamps the delegate flag on the member copy whenever
   // the identity holds an active per-room grant, so route handlers keep
@@ -2658,9 +2685,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["identityId"]) || typeof data.identityId !== "string") {
           reject(422, "invalid_login", "An agent identity ID is required");
         }
-        const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
-        const identity = store.identities.authenticateIdentitySecret(data.identityId, secret);
+        const identity = agentSigninCredentials(req, data.identityId);
         const rooms = store.identities.roomsForIdentity(data.identityId);
         return json(res, 200, { identityId: identity.identityId, displayName: identity.displayName, rooms });
       }
@@ -2671,10 +2696,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["identityId", "roomId"]) || typeof data.identityId !== "string" || typeof data.roomId !== "string") {
           reject(422, "invalid_login", "An agent identity ID and room are required");
         }
-        const secret = bearer(req);
-        if (!secret) reject(401, "unauthenticated", "Agent identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
         // Verify the secret before creating the session
-        store.identities.authenticateIdentitySecret(data.identityId, secret);
+        agentSigninCredentials(req, data.identityId);
         const { token, session } = store.createAgentSession(data.identityId, data.roomId);
         setCookie(res, roomCookieName, token, Math.max(0, Math.floor((session.expiresAt - store.now()) / 1000)));
         return json(res, 201, sessionView(session));
