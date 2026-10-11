@@ -5,7 +5,8 @@ import { pathToFileURL } from "node:url";
 import { agentConnectionFromEnvironment } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { openRequestJournal } from "../client/request-runner.mjs";
-import { openCodexStdio, validateCodexRuntimeConfig, checkCodexProtocol } from "../client/codex-stdio.mjs";
+import { openCodexStdio, validateCodexRuntimeConfig, checkCodexProtocol, checkCodexCredentials } from "../client/codex-stdio.mjs";
+import { createCodexStatusWriter, readCodexHostStatus, stopCodexHost } from "../client/codex-host-status.mjs";
 import { superviseCodexRoom, scopedCodexThreads } from "../client/codex-supervisor.mjs";
 import { runCodexSharedAssistant } from "../client/codex-shared-assistant.mjs";
 
@@ -14,6 +15,9 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`Usage:
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --list
   node scripts/run-codex-room.mjs --check /absolute/runtime.json
+  node scripts/run-codex-room.mjs --preflight /absolute/runtime.json
+  node scripts/run-codex-room.mjs --status-watch /absolute/journal.sqlite
+  node scripts/run-codex-room.mjs --stop-watch /absolute/journal.sqlite
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch /absolute/journal.sqlite /absolute/runtime.json
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
 
@@ -29,7 +33,13 @@ Normal invocation executes one already-created public Room assistant run assigne
     console.log(JSON.stringify(runs.filter(run => run.coordinatorMemberId === connection.memberId).map(run => ({ runId: run.id, status: run.status, sourceMessageId: run.sourceMessageId }))));
     return;
   }
-  const check = argv[0] === "--check", watch = argv[0] === "--watch";
+  if (["--status-watch", "--stop-watch"].includes(argv[0])) {
+    if (argv.length !== 2 || !isAbsolute(argv[1])) throw new Error("Absolute journal path required");
+    console.log(JSON.stringify(argv[0] === "--stop-watch" ? stopCodexHost(argv[1]) : readCodexHostStatus(argv[1])));
+    return;
+  }
+  const preflight = argv[0] === "--preflight";
+  const check = argv[0] === "--check" || preflight, watch = argv[0] === "--watch";
   const [runId, journal, configPath] = check ? [null, null, argv[1]] : argv;
   if (argv.length !== (check ? 2 : 3) || !isAbsolute(configPath ?? "") || !check && (!runId || !isAbsolute(journal ?? "")))
     throw new Error("Invalid arguments; use --help");
@@ -37,16 +47,26 @@ Normal invocation executes one already-created public Room assistant run assigne
   const connection = check ? null : agentConnectionFromEnvironment();
   const db = check ? null : openRequestJournal(journal);
   const threads = db ? scopedCodexThreads(db, connection) : [];
-  let rpc;
+  let rpc, statusWriter;
   const controller = new AbortController(), stop = () => controller.abort();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   try {
     if (watch) {
+      const emit = event => {
+        statusWriter ??= createCodexStatusWriter(realpathSync(`${journal}.watch`), connection, { onError: () => controller.abort() });
+        statusWriter.event(event); console.log(JSON.stringify(event));
+      };
       await superviseCodexRoom({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy,
-        signal: controller.signal, timeoutMs: settings.turnTimeoutMs, emit: event => console.log(JSON.stringify(event)),
+        signal: controller.signal, timeoutMs: settings.turnTimeoutMs, connectOnStart: true, emit,
         connect: async allowedThreadIds => {
           const transport = openCodexStdio(settings, { allowedThreadIds, onAttention: event => console.error(JSON.stringify(event)) });
-          try { await checkCodexProtocol(transport, settings, { threadId: allowedThreadIds[0] }); return transport; }
+          try {
+            await checkCodexProtocol(transport, settings, { threadId: allowedThreadIds[0] });
+            const readiness = await checkCodexCredentials(transport);
+            emit({ type: "host_readiness", ...readiness });
+            if (readiness.credentials === "login_required") throw Object.assign(new Error("Dedicated Codex login required"), { code: "login_required" });
+            return transport;
+          }
           catch (error) { await transport.close(); throw error; }
         } });
       return;
@@ -56,14 +76,17 @@ Normal invocation executes one already-created public Room assistant run assigne
     } });
     const qualified = await checkCodexProtocol(rpc, settings, { threadId: threads[0] });
     if (check) {
-      console.log(JSON.stringify(qualified));
+      console.log(JSON.stringify(preflight ? { ...qualified, protocol: "qualified", ...await checkCodexCredentials(rpc) } : qualified));
     } else {
       const result = await runCodexSharedAssistant({ connection, db, rpc, cwd: settings.cwd, policy: settings.policy,
         runId, signal: controller.signal, timeoutMs: settings.turnTimeoutMs,
         emit: event => console.log(JSON.stringify(event)) });
       console.log(JSON.stringify({ status: result.result.status, runId, resultMessageId: result.result.resultMessageId ?? null }));
     }
-  } finally { await rpc?.close(); db?.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
+  } finally {
+    statusWriter?.close();
+    try { await rpc?.close(); } finally { db?.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
+  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main().catch(error => {
   console.error(error.message); process.exitCode = 1;

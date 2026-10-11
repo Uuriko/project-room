@@ -20,9 +20,9 @@ async function fixture(t, mode = "complete") {
   const data = join(root, "runtime.json"), command = join(root, "fake-codex");
   writeFileSync(data, JSON.stringify({ threads: {}, starts: 0, interrupted: 0 }));
   writeFileSync(command, `#!${process.execPath}
-import readline from 'node:readline'; import {readFileSync,writeFileSync} from 'node:fs';
+import readline from 'node:readline'; import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 const path=${JSON.stringify(data)}, mode=${JSON.stringify(mode)};
-const load=()=>JSON.parse(readFileSync(path)),save=v=>writeFileSync(path,JSON.stringify(v)),send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
+const load=()=>JSON.parse(readFileSync(path)),save=v=>{const temp=path+'.'+process.pid+'.tmp';writeFileSync(temp,JSON.stringify(v));renameSync(temp,path);},send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(!m.id)return;const d=load(),p=m.params||{};let result;
 switch(m.method){
 case 'initialize':result={};break;
