@@ -16,7 +16,7 @@ import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from ".
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
-import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
+import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES, PERMISSIONS } from "../src/events.js";
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
@@ -2589,7 +2589,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Burs-IA steal A1: a guest join is a cold-start step — the response
         // is self-describing. It names what this link granted: guest read+chat,
         // member work permissions, or co-admin (all but creator-only settings).
+        // The co-admin label needs the full grant: an owner-delegated admin
+        // (manage_members without the rest) gets their exact permissions named
+        // instead, so the copy never claims work powers they were not given.
         const guestRoom = `/api/rooms/${encodeURIComponent(result.roomId)}`;
+        const grant = result.permissions ?? [];
+        const coAdminGrant = PERMISSIONS.every(p => grant.includes(p));
+        const memberAdminGrant = !coAdminGrant && grant.includes("manage_members");
         return json(res, result.duplicate ? 200 : 201, {
           ...result,
           next: [
@@ -2597,8 +2603,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               description: "Orient: list the room's members, who is online, and who is holding which work sessions." }),
             Object.freeze({ action: "say-hello", method: "POST", path: `${guestRoom}/commands`,
               description: `Say hello: { id: <uuid>, type: "message.posted", data: { messageId: <uuid>, body } }. ${
-                (result.permissions ?? []).includes("manage_members") ? "You are a co-admin: you can also invite and remove members, change access and approve work. Room settings, export, archive and ownership stay with the room creator."
-                  : (result.permissions ?? []).length ? `Your permissions here: ${result.permissions.join(", ")}. Membership administration is out of scope.`
+                coAdminGrant ? "You are a co-admin: you can also invite and remove members, change access and approve work. Room settings, export, archive and ownership stay with the room creator."
+                  : grant.length ? `Your permissions here: ${grant.join(", ")}.${memberAdminGrant ? "" : " Membership administration is out of scope."}`
                   : "Your guest pass grants read+chat; work claims, polls, and admin are out of scope."}` }),
           ],
           nextActions: nextActionsForInviteRedeem(result.roomId),

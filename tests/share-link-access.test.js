@@ -104,3 +104,30 @@ test("join-agent tells the agent what its link granted", async t => {
   assert.match(await say("member"), /accept_work, complete_work, verify/);
   assert.match(await say("co_admin"), /co-admin.*stay with the room creator/);
 });
+
+test("join-agent does not label a delegated admin a co-admin", async t => {
+  const { createRoomServer } = await import("../server/http.mjs");
+  const f = fixture(t);
+  // An agent joins as a guest; the owner then delegates membership
+  // administration (manage_members + decide) without the full co-admin grant.
+  const { linkToken } = f.mint();
+  const admin = f.store.identities.create("Delegated admin");
+  f.store.shareLinks.joinAgent(admin.secret, linkToken, "Delegated admin");
+  f.store.command(f.ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+    data: { memberId: admin.identityId, expectedMemberRevision: 0, permissions: ["manage_members", "decide"], active: true } });
+  assert.deepEqual([...f.member(admin.identityId).permissions].sort(), ["decide", "manage_members"]);
+  const server = createRoomServer({ store: f.store, streamInterval: 15 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeStreams(); server.closeAllConnections(); server.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const r = await fetch(`${origin}/api/share-links/join-agent`, { method: "POST",
+    headers: { Authorization: `Bearer ${admin.secret}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ linkToken, displayName: "Delegated admin" }) });
+  const body = await r.json();
+  assert.equal(body.duplicate, true);
+  const say = body.next.find(step => step.action === "say-hello").description;
+  assert.doesNotMatch(say, /co-admin/i);
+  assert.doesNotMatch(say, /approve work/i);
+  assert.match(say, /manage_members, decide/);
+  assert.doesNotMatch(say, /Membership administration is out of scope/);
+});
