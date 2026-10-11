@@ -52,6 +52,7 @@ for (const mobile of [false, true]) test(`message echo before receipt; composer 
   await p.waitForFunction(() => !document.querySelector('#message-input').disabled);
   assert.equal(await input.inputValue(), ''); assert.equal(await echo.count(), 1);
   assert.equal(await echo.getAttribute('aria-busy'), 'false');
+  assert.equal(await echo.evaluate(node => getComputedStyle(node).opacity), '1', 'receipt removes pending appearance before snapshot');
   await input.fill('Next draft stays');
   releaseSnapshot();
   await p.locator(`[data-message-record-id="${command.data.messageId}"]`).waitFor();

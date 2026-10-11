@@ -4071,7 +4071,7 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || command.id);
     try {
-      await client.send(command, { waitForRefresh: !fastText });
+      await client.send(command, { waitForRefresh: !(fastText || askRoom && !composerFiles.length && !assistantDraft) });
     } catch (error) {
       if (generation !== client.generation || !state) return;
       localMessageEchoes.delete(echoId);
@@ -4079,7 +4079,8 @@ $("#message-form").addEventListener("submit", e => {
     }
     if (generation !== client.generation || !state) return;
     if (fastText) {
-      localMessageEchoes.get(echoId)?.node.setAttribute("aria-busy", "false");
+      const confirmedEcho = localMessageEchoes.get(echoId)?.node;
+      if (confirmedEcho) { confirmedEcho.setAttribute("aria-busy", "false"); confirmedEcho.style.removeProperty("opacity"); }
       // Navigation may have restored another destination's draft while the receipt was pending.
       if (drafts.get(draftKey)?.pending?.command?.id === command.id) drafts.clear(draftKey);
       if (composerKey() === draftKey && pendingMessage?.command?.id === command.id) {

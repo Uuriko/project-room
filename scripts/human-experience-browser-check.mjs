@@ -84,7 +84,15 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send(peer,'Hey friends, good to see you!'); assert.equal((await api('owner')).runs.length,0);
+  // Assistant dispatch must not wait behind a slow chat-history refresh.
+  const snapshotGate = deferredResultResponse(); t.after(() => snapshotGate.resolve());
+  const holdSnapshot = async route => { await snapshotGate.promise; await route.continue(); };
+  await owner.route(/\/api\/rooms\/commons(?:\?.*)?$/, holdSnapshot);
+  const invoked = owner.waitForResponse(response => response.url().endsWith('/assistant') && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'invoke');
   await owner.locator('#ask-room').click(); await send(owner,'Compare our launch ideas.');
+  assert.equal((await invoked).ok(), true);
+  assert.equal((await api('owner')).runs.length, 1, 'durable assistant request exists while snapshot is blocked');
+  snapshotGate.resolve();
   await owner.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   let run=(await api('producer')).runs[0]; assert.equal(run.status,'queued');
