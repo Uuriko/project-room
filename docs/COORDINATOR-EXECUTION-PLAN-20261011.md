@@ -26,7 +26,9 @@ Retained tests: `tests/assistant-admission.test.js` and existing `tests/codex-su
 
 ## Batch 2: use atomic admission in the composer
 
-This remains required; the server change alone does not fix the browser's existing two-operation path.
+Implemented locally for plain public asks: the shared composer now uses advertised atomic admission, carries the exact operation in persisted drafts, applies the receipt before background refresh, and preserves legacy behavior when the server does not advertise support. Attachments and channel-broadcast replies retain the existing ordered path. Not deployed.
+
+Validation: 1,792 affected tests passed; 37 conversation/browser checks passed; the strengthened two-human test separately passed and compares exact request payloads across lost receipt, reload, and retry, asserting one source message and one run. Account/room switches during atomic admission and attachment-specific admission remain explicit follow-ups. Live recheck still returns coordinatorMemberId=null and availability=not_connected.
 
 1. Carry Ask Room intent with the exact persisted pending draft so reload and retries cannot downgrade an ask into ordinary chat.
 2. Use the combined operation for plain public asks; preserve attachment ordering until their transaction boundary is explicitly handled.
@@ -103,7 +105,7 @@ implementations because an existing one is unmerged.
 | ID | Work and current state | Completion evidence |
 | --- | --- | --- |
 | C01 | Atomic admission, local95bdbde7; preserve backward-compatible optional message payload | One message + one run or neither; exact retry and authorization tests |
-| C02 | Wire atomic admission into web/shared desktop composer; unfinished | Reload/lost receipt/double Enter/account switch preserve intent and produce one run |
+| C02 | Atomic plain-text admission wired locally into shared composer; remaining navigation/attachment qualification | Reload/lost receipt/double Enter/account switch preserve intent and produce one run |
 | C03 | Adopt existing PR2612 supervisor; local integration replaces redundant watcher | Owned recovery before new work; exclusive host; stop/restart/backoff tests |
 | C04 | Configure and qualify a real muse-room coordinator; unverified | Actual authenticated model run replying to a human in the original conversation |
 | C05 | Immediate message display and admission receipt feedback; PR2683 plus local837a83c9 | Slow-network browser proof, usable composer, no fabricated working/typing |

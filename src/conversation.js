@@ -481,7 +481,8 @@ export class DraftRecovery {
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
-          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
+          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents,
+            ...(d.pending.assistant ? { assistant: d.pending.assistant } : {}) } : null }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -561,6 +562,13 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
+        if (d.pending?.assistant) {
+          const expected = { action: 'invoke', requestId: `ask-${messageId}`, runId: `run-${messageId}`, sourceMessageId: messageId,
+            message: { body: data.body, replyToId: data.replyToId, channelId: data.channelId ?? 'general' } };
+          // Corrupt/edited recovery cannot silently turn an ask into ordinary chat.
+          if (!pending || !messageId || data.toMemberId || JSON.stringify(d.pending.assistant) !== JSON.stringify(expected)) continue;
+          pending.assistant = expected;
+        }
         drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }

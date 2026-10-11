@@ -186,20 +186,29 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.ok(f.store.room('commons').state.workItems['human-result-task'].receipt.nativeText);
   // An invocation committed on the server but its response was lost. Reload + exact retry
   // must recover one run, while keeping the already-posted prompt in the transcript.
+  const admissionAttempts = [];
   await owner.route('**/api/rooms/commons/assistant', async route => {
     const payload = route.request().postDataJSON();
     if (route.request().method() === 'POST' && payload?.action === 'invoke') {
-      await route.fetch(); await route.abort(); await owner.unroute('**/api/rooms/commons/assistant');
+      admissionAttempts.push(payload);
+      if (admissionAttempts.length === 1) { await route.fetch(); await route.abort(); }
+      else await route.continue();
     } else await route.continue();
   });
-  await owner.locator('#ask-room').click(); await send(owner,'Recover this request exactly once.');
-  await owner.locator('#assistant-retry').waitFor({state:'visible'});
+  await owner.locator('#ask-room').click();
+  await owner.locator('#message-input').fill('Recover this request exactly once.');
+  await owner.locator('#message-input').press('Enter');
+  await owner.waitForFunction(()=>!document.querySelector('#message-input').disabled && document.querySelector('#message-input').value==='Recover this request exactly once.');
   const beforeRetry = (await api('owner')).runs;
   assert.equal(beforeRetry.length,2);
   await owner.reload(); await owner.locator('#main').waitFor({state:'visible'});
-  await owner.locator('#assistant-retry').waitFor({state:'visible'}); await owner.locator('#assistant-retry').click();
-  await owner.locator('#assistant-retry').waitFor({state:'hidden'});
+  assert.equal(await owner.locator('#message-input').inputValue(),'Recover this request exactly once.');
+  await send(owner,'Recover this request exactly once.');
   assert.equal((await api('owner')).runs.length,2);
+  assert.equal(admissionAttempts.length,2);
+  assert.deepEqual(admissionAttempts[1],admissionAttempts[0]);
+  await owner.unroute('**/api/rooms/commons/assistant');
+  assert.equal(f.store.room('commons').state.messages.filter(m=>m.body==='Recover this request exactly once.').length,1);
   // Select context at revision N; the host claims N+1 before the human sends.
   // A rejected stale write needs review and a new explicit confirmation, not an endless retry.
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Recover this request exactly once.'));

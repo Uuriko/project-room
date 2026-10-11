@@ -4052,9 +4052,16 @@ $("#message-form").addEventListener("submit", e => {
   const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId && Boolean(previous.alsoSendToChannel) === Boolean(content.alsoSendToChannel);
   // Preserve the exact legacy payload, including an omitted default channel.
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
+  const savedAdmission = unchanged ? pendingMessage?.assistant : null;
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+  if (savedAdmission) pendingMessage.assistant = savedAdmission;
+  else if (askRoom?.action === 'invoke' && !composerFiles.length && !data.alsoSendToChannel && humanExperience.supportsAtomicAdmission()) {
+    pendingMessage.assistant = { action: 'invoke', requestId: `ask-${data.messageId}`, runId: `run-${data.messageId}`,
+      sourceMessageId: data.messageId, message: { body: data.body, replyToId: data.replyToId, channelId: data.channelId ?? DEFAULT_CHANNEL_ID } };
+  }
   saveComposer();
   const generation = client.generation, draftKey = composerKey(), command = pendingMessage.command;
+  const admission = pendingMessage.assistant;
   const echoId = data.messageId || command.id;
   const fastText = session.member.kind === "human" && !assistantDraft && !composerFiles.length && localMessageEchoes.size < 50;
   if (fastText) {
@@ -4071,7 +4078,10 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || command.id);
     try {
-      await client.send(command, { waitForRefresh: !(fastText || askRoom && !composerFiles.length && !assistantDraft) });
+      if (admission) {
+        await humanExperience.admit(admission);
+        if (generation === client.generation) void client.refresh().catch(() => {});
+      } else await client.send(command, { waitForRefresh: !(fastText || askRoom && !composerFiles.length && !assistantDraft) });
     } catch (error) {
       if (generation !== client.generation || !state) return;
       localMessageEchoes.delete(echoId);
@@ -4088,7 +4098,7 @@ $("#message-form").addEventListener("submit", e => {
         $("#also-send-to-channel").checked = false;
       }
       persistDrafts();
-      await humanExperience.posted(data.messageId, askRoom);
+      if (!admission) await humanExperience.posted(data.messageId, askRoom);
       maybeShowGuestUpgradeHint();
       return;
     }
@@ -4102,7 +4112,7 @@ $("#message-form").addEventListener("submit", e => {
       assistantDraft = null; restoreComposer(drafts.get(composerKey()));
       updateReply(); syncRequestComposer(); persistDrafts();
     }
-    await humanExperience.posted(data.messageId, askRoom);
+    if (!admission) await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });

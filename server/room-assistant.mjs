@@ -95,7 +95,7 @@ export class RoomAssistant {
       const auth = authorize();
       // Fresh installations have no configuration; reads must not mutate storage.
       if (!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get())
-        return { contractVersion: 1, roomId, assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
+        return { contractVersion: 1, roomId, capabilities: { atomicAdmission: true }, assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
       const state = this.store.room(roomId).state;
       const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
@@ -106,7 +106,7 @@ export class RoomAssistant {
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
-      return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
+      return { contractVersion: 1, roomId, capabilities: { atomicAdmission: true }, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
   }
   // postToken is the host's own credential, threaded from the route or MCP

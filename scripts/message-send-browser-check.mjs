@@ -107,8 +107,16 @@ test('confirmed preview survives refresh failure, stays in its channel and clear
   assert.equal(await p.locator('[data-local-message-id]').count(), 0);
 });
 
-test('Ask Room has immediate local echo before message receipt', { timeout: 30000 }, async t => {
+test('legacy Ask Room has immediate local echo before message receipt', { timeout: 30000 }, async t => {
   const p = await setup(t), input = p.locator('#message-input');
+  // Model an older deployment without atomic-admission capability.
+  await p.route('**/api/rooms/*/assistant', async route => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch(), body = await response.json();
+    delete body.capabilities;
+    await route.fulfill({response, json:body});
+  });
+  await p.reload(); await p.locator('#main').waitFor({state:'visible'});
   let release;
   const gate = new Promise(resolve => release = resolve);
   t.after(() => release());

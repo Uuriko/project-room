@@ -261,6 +261,17 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   };
   setInterval(() => { void refresh(); }, 500);
   return {
+    supportsAtomicAdmission() { return projection?.capabilities?.atomicAdmission === true; },
+    async admit(input) {
+      const stamp = key();
+      const receipt = await client.request(path(), { method: 'POST', data: input });
+      if (receipt?.action !== 'invoke' || receipt.result?.id !== input.runId || receipt.result?.sourceMessageId !== input.sourceMessageId)
+        throw new Error(uiText('human.admissionReceiptUnknown'));
+      if (stamp !== key()) return;
+      if (projection) projection = { ...projection, runs: [receipt.result, ...projection.runs.filter(run => run.id !== input.runId)] };
+      selected = false; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; paint();
+      void refresh();
+    },
     assistantName(id) { return human() && !document.body.classList.contains('human-advanced') && projection?.assistant.coordinatorMemberId === id ? projection.assistant.name : null; },
     sync() {
       const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
