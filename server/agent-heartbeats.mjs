@@ -108,7 +108,7 @@ export const wakeListenerLeaseSchema = `
   CREATE TABLE IF NOT EXISTS agent_wake_signal_claims (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
     claimed_by TEXT NOT NULL, claimed_at INTEGER NOT NULL,
-    redelivered INTEGER NOT NULL DEFAULT 0
+    redelivered INTEGER NOT NULL DEFAULT 0, room_key TEXT NOT NULL DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS agent_wake_signal_claims_agent ON agent_wake_signal_claims(agent_id, claimed_at);
 `;
@@ -552,6 +552,17 @@ export class AgentHeartbeats {
   // idempotent). While a listener lease is live for the agent's room, acks
   // must carry that lease's fencing token or they get 409 listener_fenced;
   // with no lease the call behaves exactly as before (backward compatible).
+  // On top of the scope fence, acks are fenced by the signal's actual
+  // owner: a signal with a claim row gets 409 wake_signal_fenced unless
+  // the ack carries the claiming lease's fencing token — even when the
+  // ack carries a valid token for its own scope, and even when the
+  // claiming lease has since lapsed (an abandoned batch must be
+  // re-claimed before it can be acked, so redelivery flags are honored
+  // and no listener deletes work it never handled). Signals with no
+  // claim row keep the old behavior. Both fences are re-checked as
+  // predicates of the UPDATE itself, so a lease or claim landing between
+  // the checks and the write cannot slip an ack through (atomic
+  // validation, no check-then-act).
   ackWakes({ agentId, signalIds, roomId = null, fencingToken = null }) {
     checkAgentId(agentId);
     check(Array.isArray(signalIds) && signalIds.length > 0
@@ -567,11 +578,28 @@ export class AgentHeartbeats {
       fail(409, "listener_fenced",
         "a live listener lease holds this agent's wake queue — ack with its fencing token");
     }
+    const foreignOwned = this.db.prepare(`SELECT c.signal_id AS signalId
+      FROM agent_wake_signal_claims c
+      WHERE c.agent_id=? AND c.signal_id IN (${signalIds.map(() => "?").join(",")})
+        AND NOT (? IS NOT NULL AND c.claimed_by = ?)`)
+      .all(agentId, ...signalIds, fencingToken, fencingToken);
+    if (foreignOwned.length > 0) {
+      fail(409, "wake_signal_fenced",
+        `${foreignOwned.length} signal(s) are claimed by another listener — ack with the claiming lease's fencing token`);
+    }
     const acknowledged = [];
     const stmt = this.db.prepare(
-      "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)");
+      `UPDATE agent_wake_signals SET delivered_at=?
+       WHERE agent_id=? AND signal_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
+         AND NOT EXISTS (SELECT 1 FROM agent_wake_listener_leases l
+           WHERE l.agent_id=? AND l.room_key=? AND l.lease_expires_at > ? AND l.fencing_token != ?)
+         AND NOT EXISTS (SELECT 1 FROM agent_wake_signal_claims c
+           WHERE c.signal_id=agent_wake_signals.signal_id AND c.agent_id=agent_wake_signals.agent_id
+             AND NOT (? IS NOT NULL AND c.claimed_by = ?))`);
     for (const signalId of signalIds) {
-      if (stmt.run(at, agentId, signalId, roomId, roomId).changes > 0) acknowledged.push(signalId);
+      const tokenOrEmpty = fencingToken ?? "";
+      if (stmt.run(at, agentId, signalId, roomId, roomId,
+        agentId, roomId ?? "", at, tokenOrEmpty, fencingToken, fencingToken).changes > 0) acknowledged.push(signalId);
     }
     acknowledged.push(...(this.store.workWakes?.ack(agentId, signalIds, roomId) ?? []));
     return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
@@ -580,6 +608,12 @@ export class AgentHeartbeats {
   // Idempotent DDL for the lease tables (no-op on warm databases).
   ensureListenerSchema() {
     this.db.exec(wakeListenerLeaseSchema);
+    // #2536 shipped agent_wake_signal_claims without room_key; backfill the
+    // owner-binding column on databases created by that version.
+    const cols = this.db.prepare("PRAGMA table_info(agent_wake_signal_claims)").all();
+    if (!cols.some(col => col.name === "room_key")) {
+      this.db.exec("ALTER TABLE agent_wake_signal_claims ADD COLUMN room_key TEXT NOT NULL DEFAULT ''");
+    }
     return this;
   }
 
@@ -625,11 +659,17 @@ export class AgentHeartbeats {
 
   // Claim the oldest unacked wake signals as one atomic batch for the
   // fencing-token holder. A single INSERT...SELECT is implicitly atomic, so
-  // no explicit transaction is needed. Signals already claimed by this same
-  // token are skipped; signals whose token no longer holds a live lease are
-  // reclaimed with redelivered=true. Requires a live lease for the token —
-  // otherwise 409 stale_listener. Claimed signals leave the queue only
-  // through ackWakes().
+  // no explicit transaction is needed. The claim row binds the signal to
+  // the claiming lease (fencing token + room scope, recorded at claim time).
+  // Signals already claimed by this same token are skipped; signals claimed
+  // by a token that still holds a live lease are owned and skipped, so a
+  // second overlapping scope never replays them; signals whose token no
+  // longer holds a live lease are reclaimed with redelivered=true. The
+  // lease-liveness check is a predicate of the mutation statement itself
+  // (atomic with it — no check-then-act race); the upfront SELECT only
+  // produces the precise 409 stale_listener error. Requires a live lease
+  // for the token — otherwise 409 stale_listener. Claimed signals leave
+  // the queue only through ackWakes().
   claimWakeBatch({ agentId, roomId = null, fencingToken, limit = MAX_PENDING_WAKES }) {
     checkAgentId(agentId);
     const roomKey = this.roomKeyOf(roomId);
@@ -644,17 +684,23 @@ export class AgentHeartbeats {
     if (!lease || lease.leaseExpiresAt <= at || lease.fencingToken !== fencingToken)
       fail(409, "stale_listener", "no live listener lease for this fencing token — acquire a lease first");
     const claimed = this.db.prepare(`INSERT INTO agent_wake_signal_claims
-        (signal_id, agent_id, claimed_by, claimed_at, redelivered)
-        SELECT s.signal_id, ?, ?, ?, CASE WHEN c.signal_id IS NULL THEN 0 ELSE 1 END
+        (signal_id, agent_id, room_key, claimed_by, claimed_at, redelivered)
+        SELECT s.signal_id, ?, ?, ?, ?, CASE WHEN c.signal_id IS NULL THEN 0 ELSE 1 END
         FROM agent_wake_signals s
         LEFT JOIN agent_wake_signal_claims c ON c.signal_id = s.signal_id
         WHERE s.agent_id=? AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id=?)
-          AND (c.signal_id IS NULL OR c.claimed_by != ?)
+          AND (c.signal_id IS NULL OR (c.claimed_by != ? AND NOT EXISTS (
+            SELECT 1 FROM agent_wake_listener_leases l
+            WHERE l.agent_id=s.agent_id AND l.fencing_token=c.claimed_by AND l.lease_expires_at > ?)))
+          AND EXISTS (SELECT 1 FROM agent_wake_listener_leases l2
+            WHERE l2.agent_id=? AND l2.room_key=? AND l2.fencing_token=? AND l2.lease_expires_at > ?)
         ORDER BY s.created_at ASC LIMIT ?
-        ON CONFLICT(signal_id) DO UPDATE SET claimed_by=excluded.claimed_by,
-          claimed_at=excluded.claimed_at, redelivered=excluded.redelivered
+        ON CONFLICT(signal_id) DO UPDATE SET room_key=excluded.room_key,
+          claimed_by=excluded.claimed_by, claimed_at=excluded.claimed_at,
+          redelivered=excluded.redelivered
         RETURNING signal_id, redelivered`)
-      .all(agentId, fencingToken, at, agentId, roomId, roomId, fencingToken, limit);
+      .all(agentId, roomKey, fencingToken, at, agentId, roomId, roomId, fencingToken, at,
+        agentId, roomKey, fencingToken, at, limit);
     const views = this.db.prepare("SELECT * FROM agent_wake_signals WHERE signal_id=?");
     const signals = claimed.map(({ signal_id, redelivered }) =>
       Object.freeze({ ...signalView(views.get(signal_id)), redelivered: redelivered === 1 }));
