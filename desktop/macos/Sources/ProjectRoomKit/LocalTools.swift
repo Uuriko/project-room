@@ -16,9 +16,13 @@ public final class LocalTools {
     private var stopReasons: [String: String] = [:]
     private var reserved = Set<String>()
     private let fixtureRoot: URL?
-    public init(directory: URL? = nil, fixtureRoot: URL? = nil) throws {
+    private let observations: LocalComputerObserving
+    private let syntheticObservations: Bool
+    public init(directory: URL? = nil, fixtureRoot: URL? = nil, observations: LocalComputerObserving? = nil) throws {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Project Room/Local Tools")
         self.fixtureRoot = fixtureRoot
+        self.observations = observations ?? LocalComputerObservation()
+        self.syntheticObservations = observations != nil
         try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: self.directory.path)
     }
@@ -71,9 +75,37 @@ public final class LocalTools {
         if name == "mac_status" { lock.unlock(); guard arguments.isEmpty else { throw LocalToolFailure("invalid_tool_arguments") }; return status() }
         do { try authorize(grantRevision) } catch { lock.unlock(); throw error }
         let allowed: [String: Set<String>] = [
+            "mac_app_state": ["processId"], "mac_screenshot": ["windowId"],
             "mac_files_read": ["path"], "mac_files_write": ["requestId","path","text","expectedSHA256","expectedAbsent"],
             "mac_process_run": ["requestId","executable","arguments","cwd","timeoutMs"], "mac_process_cancel": ["requestId","targetRequestId"]]
         guard let keys = allowed[name], Set(arguments.keys).isSubset(of: keys) else { lock.unlock(); throw LocalToolFailure("invalid_tool_arguments") }
+        if name == "mac_app_state" || name == "mac_screenshot" {
+            lock.unlock()
+            if name == "mac_app_state" {
+                let processID: Int32?
+                if let raw = arguments["processId"] {
+                    guard let value = raw as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.rounded() == value.doubleValue,
+                        value.int64Value > 0, value.int64Value <= Int32.max else { throw LocalToolFailure("invalid_tool_arguments") }
+                    processID = value.int32Value
+                } else { processID = nil }
+                if fixtureRoot != nil && !syntheticObservations && processID != getpid() { throw LocalToolFailure("outside_acceptance_fixture") }
+                let value = try observations.appState(processID: processID)
+                lock.lock(); defer { lock.unlock() }; try authorize(grantRevision)
+                return value
+            }
+            guard let raw = arguments["windowId"] as? NSNumber, CFGetTypeID(raw) != CFBooleanGetTypeID(), raw.doubleValue.rounded() == raw.doubleValue,
+                raw.int64Value > 0, raw.int64Value <= UInt32.max else { throw LocalToolFailure("invalid_tool_arguments") }
+            if fixtureRoot != nil && !syntheticObservations { throw LocalToolFailure("outside_acceptance_fixture") }
+            let shot = try observations.screenshot(windowID: raw.uint32Value)
+            guard shot.width > 0, shot.height > 0, shot.width <= 2048, shot.height <= 2048, shot.png.count <= 16777216,
+                shot.windowID == raw.uint32Value, shot.png.starts(with: [137,80,78,71,13,10,26,10]) else { throw LocalToolFailure("invalid_screenshot_result") }
+            lock.lock(); defer { lock.unlock() }; try authorize(grantRevision)
+            let target = directory.appendingPathComponent("capture-\(UUID().uuidString).png")
+            try shot.png.write(to: target, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            return ["path": target.path, "mimeType": "image/png", "width": shot.width, "height": shot.height, "windowId": shot.windowID,
+                "sha256": digest(shot.png), "bytes": shot.png.count, "capturedAt": ISO8601DateFormatter().string(from: Date()), "uploaded": false]
+        }
         if name == "mac_files_read" {
             defer { lock.unlock() }
             let url = try path(arguments["path"]), data = try read(url)
