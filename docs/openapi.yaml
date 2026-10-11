@@ -6668,17 +6668,21 @@ paths:
                   decisions: { type: integer }
   /api/rooms/{roomId}/receipts:
     get:
-      summary: Search completed-work receipts
+      summary: Search settled-run receipts
       description: |
-        The "what has this room already solved" surface: done work-claim
-        items projected as receipts, most recently completed first. Each
-        receipt carries a stable `receiptId` (`"rc_" + workItemId`), the
-        work item id, free-form `tags` recorded on the done transition,
-        a 240-char `summary` (the completion note, falling back to the
-        title), the completing member (`createdBy`), the completion time
-        as a ms epoch (`createdAt`), and `blobs` (sha256 evidence
-        pointers, empty when none). Summaries + blob pointers only — full
-        bodies stay on the work-claim read route. Member-only (403
+        The "what has this room already settled" surface: settled
+        work-claim items (done or released) projected as receipts, most
+        recently settled first. Each receipt carries a stable `receiptId`
+        (`"rc_" + workItemId`), the work item id, `outcome` (done or
+        released), free-form `tags` recorded on the done transition,
+        a 240-char `summary` (the settlement note, falling back to the
+        title), the settling member (`settledBy`), the settlement time
+        as a ms epoch (`createdAt`), and the run audit fields `ran`
+        (deliveryMode, pullRequestUrl), `read` (evidenceRefs), `changed`
+        (files, tags, blobs), and `signedOff` (reviewedBy, attestations).
+        Summaries + blob pointers only — full bodies stay on the
+        work-claim read route. A single receipt resolves at
+        GET /api/rooms/{roomId}/receipts/{receiptId}. Member-only (403
         `not_member`); API keys need `rooms:read`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -6728,6 +6732,42 @@ paths:
             allowed methods — resend with a named method instead of
             retrying the same one.
         '422': { description: invalid_receipt_query }
+  /api/rooms/{roomId}/receipts/{receiptId}:
+    get:
+      summary: Read one settled-run receipt
+      description: |
+        Resolve a single run receipt by its stable `receiptId`
+        (`"rc_" + workItemId`) — the same id carried on the room's
+        `receipt_card` events. Returns the full Receipt: `outcome`,
+        `title`, the run audit fields (`ran`, `read`, `changed`,
+        `signedOff`), run bounds (`startedAt`, `createdAt`), and the
+        search-surface fields. Unknown or unsettled ids get 404
+        `receipt_not_found`. Member-only (403 `not_member`); API keys
+        need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: receiptId
+          in: path
+          required: true
+          schema: { type: string, pattern: 'rc_[A-Za-z0-9_-]{1,128}' }
+          description: The receipt id, e.g. rc_my-claim-1010
+      responses:
+        '200':
+          description: The receipt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Receipt'
+        '401': { description: unauthenticated }
+        '403': { description: not_member }
+        '404': { description: receipt_not_found }
+        '405':
+          description: >-
+            method_not_allowed: this route only serves GET. A wrong-method
+            response may carry an RFC 9110 Allow header naming the route's
+            allowed methods — resend with a named method instead of
+            retrying the same one.
+        '422': { description: invalid_claim_input — the receiptId must match rc_[A-Za-z0-9_-]{1,128} }
   /api/rooms/{roomId}/work-claims/{claimId}/renew:
     post:
       summary: Renew a work claim's lease
@@ -17658,25 +17698,48 @@ components:
         comment_id: { type: integer, minimum: 1 }
     Receipt:
       description: |
-        A done work-claim item projected for search (GET
-        /api/rooms/{roomId}/receipts). `receiptId` is the stable projection
-        `"rc_" + workItemId`. `summary` is the first 240 characters of the
-        completion note, falling back to the title. `createdAt` is the
-        completion time as a ms epoch. Summaries + blob pointers only —
-        full bodies stay on the work-claim read route.
+        A settled work-claim item projected as a run receipt (GET
+        /api/rooms/{roomId}/receipts, single read at
+        /api/rooms/{roomId}/receipts/{receiptId}). `receiptId` is `"rc_" +
+        workItemId`. `summary` is the first 240 chars of the settlement
+        note (fallback: title). `outcome` is "done" or "released". `ran`
+        (what ran), `read` (what it read), `changed` (what changed), and
+        `signedOff` (who signed off) carry the run's audit fields.
+        Summaries + blob pointers only — full bodies stay on the
+        work-claim read route.
       type: object
       properties:
         receiptId: { type: string, description: '"rc_" + workItemId' }
         workItemId: { type: string }
-        tags:
-          type: array
-          items: { type: string }
+        outcome: { type: string, enum: [done, released] }
+        title: { type: string }
+        tags: { type: array, items: { type: string } }
         summary: { type: string }
+        ran:
+          type: object
+          properties:
+            deliveryMode: { type: [string, 'null'] }
+            pullRequestUrl: { type: [string, 'null'] }
+        read:
+          type: object
+          properties:
+            evidenceRefs: { type: array, items: { type: string } }
+        changed:
+          type: object
+          properties:
+            files: { type: array, items: { type: string } }
+            tags: { type: array, items: { type: string } }
+            blobs: { type: array, items: { type: string } }
+        signedOff:
+          type: object
+          properties:
+            reviewedBy: { type: [string, 'null'] }
+            attestations: { type: array, items: { type: string }, description: "Attesting member ids" }
         createdBy: { type: [string, 'null'] }
-        createdAt: { type: integer, description: "Completion time, ms epoch" }
-        blobs:
-          type: array
-          items: { type: string }
+        settledBy: { type: [string, 'null'] }
+        startedAt: { type: [integer, 'null'], description: "Claim time, ms epoch" }
+        createdAt: { type: integer, description: "Settlement time, ms epoch" }
+        blobs: { type: array, items: { type: string } }
     SpendAllowanceReport:
       allOf:
         - type: object

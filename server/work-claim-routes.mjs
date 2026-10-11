@@ -419,36 +419,75 @@ const runPure = (reject, fn) => {
   }
 };
 
-// Receipts (RC-2026-09-24-205): the "what has this room already solved"
-// surface. Done work items projected as receipts — `receiptId` is the
-// stable projection `"rc_" + workItemId` — searchable by exact tag (AND)
-// and case-insensitive substring over title + history notes. Summaries +
-// blob pointers only; full bodies stay on the existing work-item read
-// route. Sorted most-recently-completed first, offset-paginated with an
-// opaque base64url cursor.
+// Receipts (RC-2026-09-24-205): the "what has this room already settled"
+// surface. Settled work items (done or released) project as receipts —
+// `receiptId` is the stable projection `"rc_" + workItemId` — searchable by
+// exact tag (AND) and case-insensitive substring over title + history
+// notes. Summaries + blob pointers only; full bodies stay on the existing
+// work-item read route. Sorted most-recently-settled first,
+// offset-paginated with an opaque base64url cursor. A single receipt
+// resolves at GET /api/rooms/{roomId}/receipts/{receiptId}.
 const RECEIPT_QUERY_PARAMS = ["q", "tag", "limit", "cursor"];
 const RECEIPTS_DEFAULT_LIMIT = 20;
 const RECEIPTS_MAX_LIMIT = 50;
 const RECEIPT_SUMMARY_CHARS = 240;
 const RECEIPT_MAX_Q = 500;
 
-// The done transition stamps action "state:done" (see withHistory in
-// server/work-claims.mjs); its `at` is the completion timestamp and its
-// `note` is the completion note. Done is immutable, so there is exactly one.
-const doneStampOf = item => [...item.history].reverse().find(entry => entry.action === "state:done") ?? null;
-const doneAtMsOf = item => { const stamp = doneStampOf(item); return stamp ? Date.parse(stamp.at) : 0; };
+// Bolter-teardown run receipts: a receipt answers what ran / what it read /
+// what changed / who signed off. The done transition stamps action
+// "state:done" (see withHistory in server/work-claims.mjs); its `at` is the
+// completion timestamp and its `note` is the completion note. Done is
+// immutable, so there is exactly one. A released claim stamps
+// "state:unclaimed" on the release transition — the run still settled, so it
+// still gets a receipt with outcome "released". Work that was never claimed
+// has no settlement stamp and projects no receipt.
+const settledStampOf = item => {
+  const history = [...item.history].reverse();
+  const done = history.find(entry => entry.action === "state:done");
+  if (done) return { outcome: "done", stamp: done };
+  const released = history.find(entry => entry.action === "state:unclaimed");
+  if (released && item.state === "unclaimed") return { outcome: "released", stamp: released };
+  return null;
+};
+const settledAtMsOf = item => { const settled = settledStampOf(item); return settled ? Date.parse(settled.stamp.at) : 0; };
 
 const receiptOf = item => {
-  const stamp = doneStampOf(item);
+  const settled = settledStampOf(item);
+  const stamp = settled?.stamp ?? null;
   const note = stamp?.note;
   const text = typeof note === "string" && note.trim().length > 0 ? note : (item.title ?? item.id);
+  const pull = item.pullRequest?.url;
   return Object.freeze({
     receiptId: `rc_${item.id}`,
     workItemId: item.id,
-    tags: Object.freeze([...(item.tags ?? [])]),
+    outcome: settled?.outcome ?? null,
+    title: typeof item.title === "string" && item.title.trim().length > 0 ? item.title : item.id,
     summary: text.slice(0, RECEIPT_SUMMARY_CHARS),
+    // What ran.
+    ran: Object.freeze({
+      deliveryMode: item.deliveryMode ?? null,
+      pullRequestUrl: typeof pull === "string" && pull.trim().length > 0 ? pull : null,
+    }),
+    // What it read.
+    read: Object.freeze({
+      evidenceRefs: Object.freeze([...(item.evidenceRefs ?? [])]),
+    }),
+    // What changed.
+    changed: Object.freeze({
+      files: Object.freeze([...(item.files ?? [])]),
+      tags: Object.freeze([...(item.tags ?? [])]),
+      blobs: Object.freeze([...(item.blobs ?? [])]),
+    }),
+    // Who signed off.
+    signedOff: Object.freeze({
+      reviewedBy: item.reviewedBy ?? null,
+      attestations: Object.freeze([...(item.attestations ?? []).map(entry => entry?.memberId ?? entry)]),
+    }),
     createdBy: item.owner,
-    createdAt: doneAtMsOf(item),
+    settledBy: stamp?.agentId ?? item.owner ?? null,
+    startedAt: item.claimedAt ? Date.parse(item.claimedAt) : null,
+    createdAt: settledAtMsOf(item),
+    tags: Object.freeze([...(item.tags ?? [])]),
     blobs: Object.freeze([...(item.blobs ?? [])]),
   });
 };
@@ -832,15 +871,32 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       return true;
     };
     const ranked = registry.list(roomId)
-      .filter(item => item.state === "done")
+      .filter(item => settledStampOf(item) !== null)
       .filter(matches)
-      .sort((a, b) => doneAtMsOf(b) - doneAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      .sort((a, b) => settledAtMsOf(b) - settledAtMsOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     const page = ranked.slice(offset, offset + limit);
     const nextOffset = offset + limit;
     return json(res, 200, stampReceipts({
       receipts: page.map(receiptOf),
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
     }, caller));
+  }
+  if (workClaimRoute === "receipt" && req.method === "GET") {
+    // Run-receipt detail: one receipt id resolves to one readable receipt.
+    // Same member contract as the search — authenticated non-members get
+    // 403 not_member. Reads stay open to guest agents, like the search.
+    const members = store.roomAuthority(roomId).members ?? {};
+    const member = members[caller];
+    if (!member || member.active === false) {
+      reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
+    }
+    const receiptId = claimIdOf(reject, workClaimId);
+    const prefix = "rc_";
+    const workId = receiptId.startsWith(prefix) ? receiptId.slice(prefix.length) : null;
+    const item = workId ? registry.get(roomId, workId) : null;
+    const settled = item ? settledStampOf(item) : null;
+    if (!item || !settled) reject(404, "receipt_not_found", `No settled run receipt "${receiptId}" in room "${roomId}"`);
+    return json(res, 200, stampReceipts({ receipts: [receiptOf(item)] }, caller).receipts[0]);
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
@@ -1435,7 +1491,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   // RFC 9110: a 405 names the resource's valid methods. The route table above
   // is the source of truth; an unknown route has no meaningful Allow value.
   const WORK_CLAIM_METHODS = {
-    list: "GET", receipts: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
+    list: "GET", receipts: "GET", receipt: "GET", sweep: "POST", duplicates: "GET", status: "GET", config: "GET, POST", create: "POST",
     read: "GET", claim: "POST", update: "POST", review: "POST", release: "POST",
     reassign: "POST", renew: "POST", provenance: "GET", "premise-invalid": "POST",
   };

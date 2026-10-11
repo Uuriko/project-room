@@ -1195,6 +1195,8 @@ function postMessage(state, incoming) {
     ...(incoming.data.kind === "receipt_card" ? {
       kind: "receipt_card",
       claimId: incoming.data.claimId,
+      // Run-receipt link: resolves at GET /api/rooms/{roomId}/receipts/{receiptId}.
+      ...(incoming.data.receiptId ? { receiptId: incoming.data.receiptId } : {}),
       title: incoming.data.title,
       closedBy: incoming.data.closedBy,
       deliveryMode: incoming.data.deliveryMode,

@@ -79,6 +79,8 @@ export function postReceiptCard(store, roomId, item, atMs) {
       body: `${title} closed as ${item.deliveryMode}.`,
       kind: "receipt_card",
       claimId,
+      // Run-receipt link: the card resolves at GET /api/rooms/{roomId}/receipts/{receiptId}.
+      receiptId: `rc_${claimId}`,
       title,
       closedBy,
       deliveryMode: item.deliveryMode,
