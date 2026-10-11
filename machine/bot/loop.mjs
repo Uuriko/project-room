@@ -31,6 +31,15 @@ function summarize(result) {
   return { ok: true };
 }
 
+// A claim close that fails with a definitive client error (review policy
+// rejection, lost ownership, gone or terminal claim) can never succeed on
+// retry — unlike a dropped connection, a 429, or a 5xx. Retrying those
+// forever would wedge the machine on one item and hold its finished result
+// hostage, so delivery skips the close and leaves the claim for its reviewer.
+function isPermanentCloseFailure(status) {
+  return status !== 0 && status !== 408 && status !== 429 && status < 500;
+}
+
 export class MachineBot {
   constructor({ home, env = process.env, fetchImpl = globalThis.fetch, provider = null, clock = null, waitMs = 25000, dispatch = dispatchTool, daemon = null } = {}) {
     this.home = home ?? configHome(env);
@@ -664,12 +673,22 @@ export class MachineBot {
     }
     const receipt = completion.receipt, note = completion.text.slice(0, 400);
     for (const field of ['leaseId', 'workId']) {
-      if (completion[field]) continue;
+      if (completion[field] || completion.unclosable?.[field]) continue;
       if (held()) return { halted: true, deliveryPending: true };
       const closed = await closeClaim(this.config.roomOrigin, active.roomId, this.secret, active[field], {
         blobs: receipt.blobs, tags: receipt.tags, note, requestId: `${completion.messageId}-${field}`, isStopped: held,
       });
-      if (!closed.ok) return { deliveryPending: true, stage: field, status: closed.status };
+      if (!closed.ok) {
+        if (isPermanentCloseFailure(closed.status)) {
+          // The close can never succeed (review policy, ownership, gone or
+          // terminal claim): publish the finished result anyway and leave the
+          // claim open for its reviewer instead of retrying forever.
+          completion.unclosable = { ...(completion.unclosable ?? {}), [field]: closed.status };
+          await this.saveState();
+          continue;
+        }
+        return { deliveryPending: true, stage: field, status: closed.status };
+      }
       completion[field] = true;
       await this.saveState();
     }
@@ -690,7 +709,8 @@ export class MachineBot {
     this.clearSlot(active);
     this.active = null;
     await this.saveState();
-    return { done: true, closed: true, blobs: receipt.blobs, workId: active.workId, leaseId: active.leaseId };
+    const closed = ['leaseId', 'workId'].every(field => completion[field] === true);
+    return { done: true, closed, blobs: receipt.blobs, workId: active.workId, leaseId: active.leaseId };
   }
 }
 
