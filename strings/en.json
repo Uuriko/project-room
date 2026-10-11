@@ -19,7 +19,7 @@
   "human.copy.006": "<p>No tasks yet. Start with a conversation.</p>",
   "human.copy.007": "<form><div class=\"dialog-head\"><h2 id=\"assistant-setup-title\">Connect Room</h2></div><p>Choose an agent to coordinate this room. Shared prompts and activity are visible to everyone here. This does not start an outside agent.</p><label>Coordinator<select name=\"coordinatorMemberId\" required></select></label><button type=\"button\" id=\"assistant-enroll\" class=\"button ghost\">Add an agent</button><p id=\"assistant-setup-error\" role=\"alert\"></p><div class=\"form-actions\"><button type=\"button\" data-close-setup class=\"button ghost\">Cancel</button><button type=\"submit\" class=\"button primary\">Connect</button></div></form>",
   "human.copy.008": "<option value=\"\">Choose an agent</option>",
-  "human.copy.009": "Waiting for connection",
+  "human.copy.009": "Waiting for assistant",
   "human.copy.010": "Waiting for assistant",
   "human.copy.011": "Resuming · waiting for confirmation",
   "human.copy.012": "Pausing · waiting for confirmation",
@@ -371,5 +371,7 @@
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
   "human.assistantChange": "Change",
+  "human.assistantConnected": "Assistant connected",
+  "human.assistantDisconnected": "No assistant connected",
   "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
 }
