@@ -249,9 +249,15 @@ export function renderWorkActions(item, member, { now = Date.now(), busy = false
 // small chip distinct from the state badge, rendered on work cards and on
 // message links that reference finished work. HTML-escaped by construction
 // (no item fields interpolated).
-export function doneChip(item) {
+// Motion-loop audit (WAVE-500 g3): the pop is a one-shot celebration of the
+// terminal transition. The people rail rebuilds on every 30s presence poll and
+// work cards rebuild on each workflow refresh, so a chip the client already
+// rendered gets the done-chip-seen marker (seen: true) and CSS skips the pop.
+export function doneChip(item, { seen = false } = {}) {
   if (!item || item.state === "superseded" || item.supersededBy) return "";
-  return terminalWork(item) ? `<span class="done-chip" title="Finished and verified">✓ Done</span>` : "";
+  return terminalWork(item)
+    ? `<span class="done-chip${seen ? " done-chip-seen" : ""}" title="Finished and verified">✓ Done</span>`
+    : "";
 }
 
 // F3: derived per-item change list from the item's own revision events.

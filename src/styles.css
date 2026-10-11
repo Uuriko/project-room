@@ -451,14 +451,18 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-links .done-chip { margin-left: .4rem; }
 /* Muse-lane motion (transitions.dev badge steal, tip #11): Done receipt chip
    spring. Transform/opacity only. Instant under prefers-reduced-motion.
-   No People-rail unread indicator exists; this language is chip-only. */
+   No People-rail unread indicator exists; this language is chip-only.
+   Motion-loop audit (WAVE-500 g3): one-shot only — chips the client already
+   rendered carry .done-chip-seen (the people rail rebuilds every 30s presence
+   poll; work cards rebuild on workflow refresh), and :not() keeps the pop
+   from replaying on those re-renders. */
 @keyframes done-chip-pop {
   0% { opacity: 0; transform: translate(-0.22em, 0.16em) scale(0.84) rotate(-8deg); }
   58% { opacity: 1; transform: translate(0.03em, -0.05em) scale(1.06) rotate(1.5deg); }
   100% { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  .done-chip { animation: done-chip-pop .42s cubic-bezier(.22, 1.35, .36, 1) both; }
+  .done-chip:not(.done-chip-seen) { animation: done-chip-pop .42s cubic-bezier(.22, 1.35, .36, 1) both; }
 }
 .member-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin: .1rem 0 .15rem; }
 .member-actions .text-button { min-height: 24px; font-size: .75rem; }
