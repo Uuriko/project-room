@@ -6,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { TIMELINE_WINDOW, windowTimeline, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { TIMELINE_WINDOW, windowTimeline, windowToInclude, horizonAnchorFor, windowLimitForHorizonAnchor, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -2285,7 +2285,14 @@ function renderMessages() {
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
   const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
-  const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
+  let shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
+  // Keep the "New messages" divider on screen: a horizon older than the
+  // window leaves the anchor windowed out and the marker never renders, so
+  // widen the window to include it (same mechanism as jump-to-message).
+  if (!currentThreadId && horizonAnchorId) {
+    const widened = windowLimitForHorizonAnchor(allMessages, horizonAnchorId, shownLimit);
+    if (widened > shownLimit) { timelineWindow.set(view, widened); shownLimit = widened; timelineRevealing = true; }
+  }
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
@@ -6696,12 +6703,6 @@ function resetAttention() {
   const preview = $("#activity-preview"); if (preview) { $("#activity-preview-list")?.replaceChildren(); preview.hidden = true; }
   for (const dialog of ["#activity-dialog", "#later-dialog"]) { const node = $(dialog); if (node?.open) node.close(); }
 }
-function horizonAnchorFor(messages, lastRead) {
-  if (lastRead === null || lastRead === undefined) return messages[0]?.id ?? null;
-  const index = messages.findIndex(m => m.id === lastRead);
-  if (index < 0) return null; // the horizon message is not in this view
-  return messages[index + 1]?.id ?? null;
-}
 async function refreshSavedIds() {
   if (!state || !session || savedIdsBusy) return;
   const generation = client.generation, roomId = session.roomId;
@@ -6788,8 +6789,12 @@ async function applyHorizonAnchor() {
   // open and after mark-unread; the thread view anchors on its own horizon.
   if (!state || !session) return;
   const threadKey = currentThreadId ?? "";
+  const viewKey = conversationViewKey(), generation = client.generation, roomId = session.roomId;
   try {
     const horizon = await client.readHorizon(threadKey);
+    // E-H3: drop stale flights — a horizon fetched for a previous view must
+    // never anchor the divider (or the cache) in the current one.
+    if (!state || !session || generation !== client.generation || session.roomId !== roomId || conversationViewKey() !== viewKey) return;
     const lastRead = horizon?.lastReadMessageId ?? null;
     horizonCache.set(threadKey, lastRead);
     const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
@@ -6799,12 +6804,16 @@ async function applyHorizonAnchor() {
 }
 async function markMessageUnread(messageId) {
   if (!state || !session || !conversation.byId.has(messageId)) return;
+  const viewKey = conversationViewKey();
   const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
   const index = messages.findIndex(m => m.id === messageId);
   if (index < 0) { notice("That message isn't in this view.", true); return; }
   const previous = index > 0 ? messages[index - 1].id : null;
   try {
     await client.setReadHorizon(currentThreadId ?? "", previous);
+    // The view may have changed while the write was in flight; the anchor
+    // and cache belong to the view the marker was set in.
+    if (!state || !session || conversationViewKey() !== viewKey) return;
     horizonCache.set(currentThreadId ?? "", previous);
     horizonAnchorId = messageId;
     renderMessages();

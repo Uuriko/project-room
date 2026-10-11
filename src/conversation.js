@@ -589,3 +589,18 @@ export function windowToInclude(messages, id, current = TIMELINE_WINDOW, page = 
   const needed = messages.length - index;
   return needed > current ? Math.ceil(needed / page) * page : current;
 }
+// Read-horizon unread marker ("New messages" divider). The anchor is the
+// first message after the persisted read horizon; the divider rides on it.
+export function horizonAnchorFor(messages, lastRead) {
+  if (lastRead === null || lastRead === undefined) return messages[0]?.id ?? null;
+  const index = messages.findIndex(m => m.id === lastRead);
+  if (index < 0) return null; // the horizon message is not in this view
+  return messages[index + 1]?.id ?? null;
+}
+// The window size that keeps the unread anchor rendered, never smaller than
+// `current`. Without this, a horizon older than the window leaves the anchor
+// windowed out and the "New messages" divider never renders (marker lost).
+export function windowLimitForHorizonAnchor(messages, anchorId, current = TIMELINE_WINDOW) {
+  if (!anchorId) return current;
+  return windowToInclude(messages, anchorId, current);
+}
