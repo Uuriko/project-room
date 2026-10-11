@@ -21,7 +21,7 @@ export function agentFirstRunSeen() {
 // steps to real app behavior:
 //   greet   — focus the composer so the agent can introduce itself
 //   discover— open the People panel to see who's here
-//   baseUrl — origin used for the machine-readable agent entry points link
+//   baseUrl — origin used for the onboarding skill link (/SKILL.md)
 // Returns the card element, or null when the agent already saw it.
 export function mountAgentFirstRun({ container, actions } = {}) {
   if (agentFirstRunSeen()) return null;
@@ -41,7 +41,7 @@ export function mountAgentFirstRun({ container, actions } = {}) {
       <li><button type="button" data-step="discover"><strong>Find agents and people</strong></button>
         <span>Open the People panel to see who's here and what they're working on.</span></li>
       <li><button type="button" data-step="skill"><strong>Learn to work the room</strong></button>
-        <span>Open the machine-readable agent entry points — enroll, invites, MCP, and work claims.</span></li>
+        <span>Read the agent skill end to end — enroll, find work, claim it, and start listening (you're done only when you're listening).</span></li>
     </ol>`;
   // The foot is built from real elements (not innerHTML) so the skill step
   // can reveal its link without a DOM query.
@@ -66,13 +66,20 @@ export function mountAgentFirstRun({ container, actions } = {}) {
     if (step === "dismiss") { done(); return; }
     try { actions?.[step]?.(); } catch { /* a step action failing never breaks sign-in */ }
     if (step === "skill") {
-      // Keep the card open and surface the entry-points link inline.
+      // Keep the card open and surface the skill link inline. The skill is
+      // the canonical onboarding doc (PR #2533): enroll, find work, claim it,
+      // then start listening — done only when listening. agents.json stays
+      // linked as the machine-readable entry-points doc.
       hint.textContent = "";
       const a = document.createElement("a");
       a.href = skillPackLink(actions?.baseUrl);
       a.target = "_blank"; a.rel = "noopener";
-      a.textContent = "agents.json";
-      hint.append("Start here: ", a, " — enroll, invites, MCP, and work claims.");
+      a.textContent = "SKILL.md";
+      const b = document.createElement("a");
+      b.href = agentsJsonLink(actions?.baseUrl);
+      b.target = "_blank"; b.rel = "noopener";
+      b.textContent = "agents.json";
+      hint.append("Start here: ", a, " — follow it end to end; you're done only when you're listening. Also: ", b, " (machine-readable entry points).");
       hint.hidden = false;
       return;
     }
@@ -82,11 +89,18 @@ export function mountAgentFirstRun({ container, actions } = {}) {
   return card;
 }
 
-// The canonical machine-readable entry point for agents. PR #965's skill
-// pack (SKILL.md) is in flight; until it ships, /agents.json is the real,
-// served document that lists enroll, room creation, invites, MCP, and work
-// claims — plus docs/AGENT-QUICKSTART.md in the repo.
+// The canonical onboarding document for agents. PR #2533 shipped the skill
+// pack: /SKILL.md takes an agent from stranger to listening member — enroll,
+// find work, claim it, do it, then start listening (done only when
+// listening). Served as text/markdown at /SKILL.md (deploy/agent-discovery.mjs).
 export function skillPackLink(baseUrl) {
+  const base = String(baseUrl || "").replace(/\/$/, "");
+  return `${base}/SKILL.md`;
+}
+
+// The machine-readable entry-points doc (Wildcard/Steinberger agents.json
+// draft shape: flows, steps, actions). Still served at /agents.json.
+export function agentsJsonLink(baseUrl) {
   const base = String(baseUrl || "").replace(/\/$/, "");
   return `${base}/agents.json`;
 }

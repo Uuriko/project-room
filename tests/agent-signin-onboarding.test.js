@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { mountAgentFirstRun, agentFirstRunSeen, skillPackLink, FIRST_RUN_SEEN_KEY } from "../src/agent-first-run.js";
+import { mountAgentFirstRun, agentFirstRunSeen, skillPackLink, agentsJsonLink, FIRST_RUN_SEEN_KEY } from "../src/agent-first-run.js";
 
 // ---- default-open DM enforcement -------------------------------------------
 
@@ -122,7 +122,7 @@ test("first-run: card mounts once, is dismissible, and never shows again", (t) =
   assert.ok(elements.length > 0);
 });
 
-test("first-run: discover step fires and dismisses; skill step reveals the entry-points link", (t) => {
+test("first-run: discover step fires and dismisses; skill step reveals the SKILL.md + agents.json links", (t) => {
   installDom(t);
   const calls = [];
   const card = mountAgentFirstRun({ container: globalThis.document.body, actions: {
@@ -140,9 +140,14 @@ test("first-run: discover step fires and dismisses; skill step reveals the entry
   const foot = card2.children.find((c) => c.className === "agent-first-run-foot");
   const hint = foot.children.find((c) => c.className === "agent-first-run-hint");
   assert.equal(hint.hidden, false);
-  const link = hint.children.find((c) => c.tagName === "A");
-  assert.equal(link.href, "https://room.example/agents.json");
-  assert.equal(link.target, "_blank");
+  const links = hint.children.filter((c) => c.tagName === "A");
+  assert.equal(links[0].textContent, "SKILL.md");
+  assert.equal(links[0].href, "https://room.example/SKILL.md");
+  assert.equal(links[0].target, "_blank");
+  assert.equal(links[1].textContent, "agents.json");
+  assert.equal(links[1].href, "https://room.example/agents.json");
+  // The hint carries the skill's done-condition: listening, not joining.
+  assert.match(hint.texts.join(" "), /done only when you're listening/);
   // Dismiss still works from the skill view.
   card2.fireClick("dismiss");
   assert.equal(card2.removed, true);
@@ -158,7 +163,9 @@ test("first-run: a failing step action never breaks the card", (t) => {
   assert.equal(card.removed, true);
 });
 
-test("skillPackLink points at the served machine-readable entry points", () => {
-  assert.equal(skillPackLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/agents.json");
-  assert.equal(skillPackLink(""), "/agents.json");
+test("skillPackLink points at the served onboarding skill; agentsJsonLink at the entry points", () => {
+  assert.equal(skillPackLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/SKILL.md");
+  assert.equal(skillPackLink(""), "/SKILL.md");
+  assert.equal(agentsJsonLink("https://room.trydemigod.com/"), "https://room.trydemigod.com/agents.json");
+  assert.equal(agentsJsonLink(""), "/agents.json");
 });
