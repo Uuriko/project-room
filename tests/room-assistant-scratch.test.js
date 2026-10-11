@@ -258,3 +258,15 @@ test("Stop while the host reads its brief prevents executor launch", async t => 
   assert.equal(result.outcomes[0].state, "cancelled");
   assert.equal((await owner.recent()).filter(message => message.authorId === "producer").length, 0);
 });
+
+test("extracted scratch client forwards cancellation to an outstanding control read", async () => {
+  const controller = new AbortController(); let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const client = createRoomClient({ origin: "http://room", roomId: "test", token: "test", fetchImpl: async (_url, { signal }) => {
+    assert.ok(signal instanceof AbortSignal); started();
+    return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  } });
+  const reading = client.assistant({ signal: controller.signal });
+  await ready; controller.abort(new Error("watcher settled"));
+  await assert.rejects(reading, /watcher settled/);
+});

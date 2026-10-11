@@ -1,6 +1,6 @@
 # Scratch-room Room assistant host (HS-0)
 
-Until now, both shared rooms reported the Room assistant as `not_connected` with zero runs, so no person had seen a shared request go from asked to answered. `scripts/room-assistant-scratch.mjs` is the smallest real host for `/api/rooms/{roomId}/assistant`. It gives HS-1 to HS-5 something to render and test against.
+`scripts/room-assistant-scratch.mjs` is a reference host for `/api/rooms/{roomId}/assistant` and local contract tests. For the durable Codex App Server integration, use [the Codex Room host](CODEX-ROOM-HOST.md). The scratch script is not included in the shipping runtime package.
 
 ## What it does
 
@@ -17,8 +17,7 @@ For every run whose coordinator is this host's member, it does the following:
 9. It acknowledges `pause_requested`, `cancel_requested` and `resume_requested`. An executor failure reports `failed`, never `done`.
 
 **SV-1 (safety value 1): a stopped run never publishes its answer.** The `publish` action
-closes this race in code for hosts that use it; it is opt-in, and the legacy
-path below is not fenced. The assistant route has a `publish`
+closes this race for this host. The assistant route has a `publish`
 action: the host submits the answer `body` (plus `summary` and
 `appliedInputMessageIds`), and the server posts it as the coordinator in the
 same transaction that marks the run `done`. The fence checks the reserved
@@ -32,7 +31,7 @@ Stop; report progress at least every two minutes. Hosts should publish instead o
 `done`; the old post-then-report path still works but cannot close the race.
 This reference host uses the fenced action.
 
-Claims, reports and posts use stable ids, so repeating a pass never double-claims or double-posts.
+Claims and publications use stable ids. This script has no durable execution journal or exclusive host lock: do not run multiple copies for one coordinator. Restarting it or revising the inputs can repeat executor work, including external effects. Use the Codex host for durable exact-turn recovery.
 
 ## What it is not
 
