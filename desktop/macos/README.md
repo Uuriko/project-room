@@ -78,3 +78,22 @@ same production broker code without an XCTest dependency and is excluded from th
 ### Native browser authentication acceptance
 
 Build `swift build -c release --product NativeAuthAcceptance` in `desktop/macos`, then run `node desktop/macos/auth-lifecycle-acceptance.mjs` from the repository root on macOS with Playwright Chromium installed. This isolated loopback owner activates the actual WK Google sign-in link, races a menu action, checks cancellation/startup failure/stale callbacks, and drives real Room Google callback/consent/PKCE redemption through to an authenticated WK account-session readback with an HttpOnly cookie. Only the external provider and ASWebAuthenticationSession UI are synthetic; no personal browser cookies or provider account are used. The acceptance executable is excluded from the app bundle; an injected authentication factory is permitted only in isolated loopback instances. Actual Google account/browser integration and Developer ID/notarization remain separate release qualifications.
+
+### Browser sign-in recovery
+
+If macOS accepts an authentication session but its browser never presents it,
+the native toolbar offers **Open browser…** after eight seconds. This is an
+explicit recovery action, not an automatic second login. It cancels the old
+attempt and creates fresh state, PKCE, and account-slot ownership before opening
+the default browser directly. The app verifies that macOS routes `projectroom:`
+back to this exact app copy; a missing or different handler restores the page
+with an explanation instead of launching a flow that cannot return.
+
+Both transports use the same strict callback validation and one-use redemption.
+Unsolicited, malformed, duplicate, and stale external callbacks do not consume a
+current attempt. Back, Cancel, and timeout restore the page; account interactions
+stay fenced while sign-in or its cookie commit is pending. Recovery does not
+change browser settings, register a different app handler, or read provider
+cookies. Native acceptance covers the external callback route with a local
+provider fixture; actual default-browser presentation and a real provider account
+remain release qualification checks.
