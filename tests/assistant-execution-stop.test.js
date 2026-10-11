@@ -70,7 +70,11 @@ for (const action of ['cancel', 'pause', 'contribute', 'replace', 'delete']) tes
 test('executor timeout kills an uncooperative descendant before rejecting', { skip: process.platform === 'win32' }, async t => {
   const { f } = await setup(t);
   const child = await slowCommand(t, f.directory);
-  const result = commandExecutor(child.command, { timeoutMs: 1000 })({ inputs: [] });
+  // The descendant must start and report its pid before the timeout fires, so
+  // the timeout window has to cover the spawn chain (shell + node executor +
+  // grandchild) with headroom; a tight window makes the test race the timeout
+  // instead of testing it.
+  const result = commandExecutor(child.command, { timeoutMs: 8000 })({ inputs: [] });
   const rejection = assert.rejects(result, /timed out/);
   const pid = await child.ready();
   await rejection;
