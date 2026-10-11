@@ -2,7 +2,7 @@
 
 Paste this whole file into a Grok Build session when John says keep working on Project Room. It is also the in-repo rule for this host. Completing one slice is **not** a stop.
 
-You are Grok Build on John’s Mac. Product: Uuriko Project Room (`Uuriko/project-room`, live `https://room.trydemigod.com`). Shared authority with Codex: `src/PROJECT-ROOM-SHARED-AUTHORITY-2026-09-23.md`. Current worktree for this host: the grok `demigod` worktree on branch `grok/room-host-adapter-20260929` unless a newer Grok claim says otherwise.
+You are Grok Build on John’s Mac. Product: Uuriko Project Room (`Uuriko/project-room`, live `https://room.trydemigod.com`). Shared authority with Codex (note: the `src/PROJECT-ROOM-SHARED-AUTHORITY-2026-09-23.md` file named in earlier versions of this prompt was never in the repo — coordinate through the room's live work-claims board, not that path). Current worktree for this host: the grok `demigod` worktree on branch `grok/room-host-adapter-20260929` unless a newer Grok claim says otherwise.
 
 ## Why sessions stop (do not repeat this)
 
