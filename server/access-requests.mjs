@@ -38,10 +38,9 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // an owner notification. These imports follow the agent-invites.mjs
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
-import { event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
+import { applyEvent, event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -360,13 +359,14 @@ export class AccessRequests {
       },
     });
     let state;
-    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    try { state = compactState(applyEvent(room.state, incoming)); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    this.store.queueGrowth(incoming, state);
   }
 
   // The durable row distinguishes upgrades from legacy admission requests,
@@ -455,8 +455,8 @@ export class AccessRequests {
   // the request row and its access.requested event are recorded.
   //
   // The grant path is internal by design (agent-invites.mjs redeem
-  // precedent): it builds the member.added event directly and persists it
-  // through applyEventWithGrowth, instead of calling AgentIdentities.link(),
+  // precedent): it persists member.added directly and queues its growth
+  // envelope for commit, instead of calling AgentIdentities.link(),
   // which requires the requester's credential — an auto-approve has no
   // business holding that. The rule's author (updated_by) is the auditable
   // actor on the event and is named in the decision note; the request row
@@ -546,7 +546,7 @@ export class AccessRequests {
       },
     });
     let state;
-    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    try { state = compactState(applyEvent(room.state, incoming)); }
     catch (error) {
       return { approved: false, pendingNote: `Auto-approve was rejected (${error.message}); the request waits for an owner decision.` };
     }
@@ -557,6 +557,7 @@ export class AccessRequests {
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+    this.store.queueGrowth(incoming, state);
     this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
       .run(row.room_id, row.identity_id, row.identity_id, now);
     if (referrerMemberId && referrerMemberId !== row.identity_id) {

@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { EVENT_TYPES as T, event, validId } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, EVENT_TYPES as T, event, validId } from "../src/events.js";
 import { assessMemberDisplayName } from "./display-name-guard.mjs";
 // Read at call time (store.mjs imports this module): one source for capacity.
 import { PILOT_LIMITS } from "./store.mjs";
@@ -232,12 +231,13 @@ export class GuestAgentLinks {
           delegatedSweepGrantedBy: grantedBy },
       });
       try {
-        state = { ...applyEventWithGrowth(state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+        state = { ...applyEvent(state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       } catch (error) {
         fail(422, "command_rejected", error.message);
       }
       sequence += 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+      this.store.queueGrowth(incoming, state);
       this.store.agentConnections.revokeMember(roomId, member.id);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
       this.store.reminders.retireMember(roomId, member.id);

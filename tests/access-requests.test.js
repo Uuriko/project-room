@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs";
+import { growthCollector } from "../src/growth-emit.js";
+import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
@@ -572,4 +573,22 @@ test("pending guidance fires alongside a pendingNote when a rule is configured b
   assert.ok(filed.pendingNote, "pendingNote explains why the rule did not fire");
   assert.equal(filed.next[0].action, "poll-status");
   assert.equal(filed.next[1].action, "cancel-request");
+});
+
+test("auto-approve soft capacity refusal persists the pending request without joined growth", t => {
+  const { store, requests, ownerToken, identity } = setup(t);
+  requests.setAutoApprove(ownerToken, "commons", { permissions: ["accept_work"] });
+  const recorded = growthCollector.stats().recorded;
+  const serialize = store.storedProjection.bind(store);
+  store.storedProjection = (roomId, state) => state.members[identity.identityId]
+    ? JSON.stringify({ ...state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes) })
+    : serialize(roomId, state);
+  const pending = requests.request("commons", { identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_growth_capacity" });
+  store.storedProjection = serialize;
+  assert.equal(pending.status, "pending");
+  assert.match(pending.pendingNote, /projection limit/);
+  assert.equal(store.room("commons").state.members[identity.identityId], undefined);
+  assert.equal(store.db.prepare("SELECT status FROM access_requests WHERE request_id=?").get("ar_growth_capacity").status, "pending");
+  assert.equal(growthCollector.stats().recorded, recorded);
 });

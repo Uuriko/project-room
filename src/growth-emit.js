@@ -197,46 +197,51 @@ export function buildGrowthEvent(roomEvent, state = null) {
 // envelope could not be built, or the collector refused/failed it.
 export function applyEventWithGrowth(current, incoming, collector) {
   const state = applyEvent(current, incoming);
+  return { state, ...emitPreparedGrowth(prepareGrowthEmission(incoming, state), collector) };
+}
+
+// Capture only immutable privacy-shaped envelopes, never mutable command data
+// or a room projection. Preparation has no observable collector/fan-out effect.
+export function prepareGrowthEmission(incoming, state) {
+  try {
+    const envelope = buildGrowthEvent(incoming, state);
+    if (!envelope) return { envelope: null };
+    let mentions = [], mentionFailed = false;
+    if (incoming.type === EVENT_TYPES.MESSAGE_POSTED) {
+      try { mentions = detectMentions(incoming, { members: state.members, actor: envelope.actor }); }
+      catch { mentionFailed = true; }
+    }
+    return { envelope, mentions, mentionFailed };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// Storage owners emit the prepared envelope only after their outer commit.
+// Failures cannot change the result of an already-durable command.
+export function emitPreparedGrowth(prepared, collector) {
   try {
     if (!collector || typeof collector.record !== "function") {
       throw new TypeError("collector must expose record()");
     }
-    const envelope = buildGrowthEvent(incoming, state);
-    if (!envelope) return { state, growthOk: false, growthReason: "unmapped room event type" };
-    const result = collector.record(envelope);
+    if (prepared.error) throw new Error(prepared.error);
+    if (!prepared.envelope) return { growthOk: false, growthReason: "unmapped room event type" };
+    const result = collector.record(prepared.envelope);
     if (!result.ok) {
       emissionFailures += 1;
-      return { state, growthOk: false, growthReason: `collector refused event: ${result.reason}` };
+      return { growthOk: false, growthReason: `collector refused event: ${result.reason}` };
     }
-    // C6: fan the recorded envelope out to subscribers. Failure-isolated:
-    // notify errors never change the primary result or the room path.
-    notifyFanout(envelope);
-    // C4: project @-mentions of agent members from posted messages. Mention
-    // emission is best-effort and fully isolated from the primary event: a
-    // detection or record failure is counted but never changes the primary
-    // result, the returned state, or the room path.
-    if (incoming.type === EVENT_TYPES.MESSAGE_POSTED) {
+    notifyFanout(prepared.envelope);
+    if (prepared.mentionFailed) emissionFailures += 1;
+    for (const mention of prepared.mentions) {
       try {
-        const mentions = detectMentions(incoming, { members: state.members, actor: envelope.actor });
-        for (const mention of mentions) {
-          try {
-            if (!collector.record(mention).ok) emissionFailures += 1;
-            else notifyFanout(mention);
-          } catch {
-            emissionFailures += 1;
-          }
-        }
-      } catch {
-        emissionFailures += 1;
-      }
+        if (!collector.record(mention).ok) emissionFailures += 1;
+        else notifyFanout(mention);
+      } catch { emissionFailures += 1; }
     }
-    return { state, growthOk: true, growthReason: null };
-  } catch (err) {
+    return { growthOk: true, growthReason: null };
+  } catch (error) {
     emissionFailures += 1;
-    return {
-      state,
-      growthOk: false,
-      growthReason: err instanceof Error ? err.message : String(err)
-    };
+    return { growthOk: false, growthReason: error instanceof Error ? error.message : String(error) };
   }
 }

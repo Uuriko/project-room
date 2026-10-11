@@ -20,8 +20,7 @@
 // G11: read at call time; store.mjs imports this module, so no module-level copy.
 import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID } from "node:crypto";
-import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { ensureActivationColumn, ensurePayoutColumns, inviteMessage, memberReward, settleActivations, stampIssuer } from "./growth-loop.mjs";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
@@ -94,13 +93,14 @@ export class Referrals {
       data: { referrerMemberId, refereeMemberId, via, completedAt: at },
     });
     let state;
-    try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+    try { state = compactState(applyEvent(room.state, incoming)); }
     catch (error) { fail(409, "referral_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    this.store.queueGrowth(incoming, state);
   }
 
   // Match free text against member display names (case-insensitive, trimmed).

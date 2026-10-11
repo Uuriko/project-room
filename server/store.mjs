@@ -31,7 +31,7 @@ import {
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { prepareGrowthEmission, emitPreparedGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
 import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
@@ -634,6 +634,7 @@ const nodeStorage = {
   setVersion: (db, version) => db.exec(`PRAGMA user_version=${version}`),
   hasSchema: db => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()),
   changes: db => db.prepare("SELECT total_changes() AS n").get().n,
+  dataVersion: db => db.prepare("PRAGMA data_version").get().data_version,
   configure(db, readOnly) {
     // busy_timeout goes first: journal_mode changes and WAL recovery take
     // locks, and with the timeout still at zero a contended concurrent open
@@ -1126,11 +1127,11 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;
 
-// MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
-// room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Rollback drops any parse of uncommitted bytes;
-// unrelated successful side-table commits keep the frozen projection. Callers receive
-// a frozen snapshot; a rewrite clones it first.
+// MSG-0: parsed projection cache. A hit reads sequence and, on Node, the
+// connection data version, so even a same-sequence external history replacement
+// drops the entry without parsing a multi-megabyte room on every read.
+// Rollback drops uncommitted bytes; unrelated successful side-table commits
+// keep the frozen projection. A rewrite clones the snapshot first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 // Conservative dependency detection also admits quoted/schema-qualified SQL,
@@ -2629,14 +2630,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+    // Growth is a process-local side effect. Nested commands wait for this
+    // store's outer commit; an isolated rollback discards only its own tail.
+    const growth = outermost ? (this._pendingGrowth = []) : (this._pendingGrowth ??= []);
+    const growthStart = growth.length;
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      if (outermost || isolated) {
+        this._dropProjectionCache();
+        growth.length = growthStart;
+      }
+      if (outermost) this._pendingGrowth = null;
       throw this.storageFailure(error, outermost);
     }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
+    if (outermost) {
+      // Detach before fan-out: a subscriber may start a new transaction.
+      this._pendingGrowth = null;
+      for (const prepared of growth) emitPreparedGrowth(prepared, growthCollector);
+    }
     return result;
+  }
+  // Call after the event's writes succeed, never on a speculative projection:
+  // some admission paths return a soft refusal instead of throwing.
+  queueGrowth(incoming, state) {
+    const prepared = prepareGrowthEmission(incoming, state);
+    if (!prepared.envelope && !prepared.error) return;
+    if (!this.db.isTransaction || !this._pendingGrowth) throw new Error("Growth requires a RoomStore transaction");
+    this._pendingGrowth.push(prepared);
   }
   readTransaction(fn) {
     const outermost = !this.db.isTransaction;
@@ -2665,11 +2687,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
   room(roomId) {
-    // MSG-0 projection cache. The hit path reads sequence only.
+    // Pin a Node read snapshot before comparing the sequence/data version.
+    // A commit between an earlier read and BEGIN IMMEDIATE must be observed
+    // inside the acquired transaction, not certified by a pre-lock check.
+    if (this.storagePlatform.dataVersion && !this.db.isTransaction) return this.readTransaction(() => this.room(roomId));
     this._armProjectionWatch();
     const cache = this._projectionCache ??= new ProjectionCache();
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
+    // The sequence read establishes the SQLite snapshot. data_version is
+    // connection-local and changes on other connections' commits, including
+    // imports/rebuilds that preserve both the sequence and event IDs.
+    const dataVersion = this.storagePlatform.dataVersion?.(this.db);
+    if (dataVersion !== this._projectionDataVersion) {
+      cache.clear();
+      this._projectionDataVersion = dataVersion;
+    }
     const hit = cache.lookup(roomId, meta.sequence);
     if (hit) return hit;
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
@@ -3475,7 +3508,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       refuseArchivedWrite(room.state);
       const incoming = invitationJoinedEvent({ ...row, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       let state;
-      try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+      try { state = compact(applyEvent(room.state, incoming)); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
@@ -3493,6 +3526,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ) VALUES(?,2,'accepted',?,?,?,?,1,?,?,NULL)`).run(row.id, accountSession.account.id, row.intended_member_id, accountSession.account.authEpoch, accountSession.sessionRevision, now, incoming.id);
       this.appendInvitationJournal(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), "accepted");
       const authorized = this.authenticateAccountSession(accountSessionToken, row.room_id, expectedSessionBinding);
+      this.queueGrowth(incoming, state);
       return {
         invitation: invitationView(this.db.prepare("SELECT * FROM membership_invitations WHERE id=?").get(row.id), now, { includeScope: true }),
         sequence, event: incoming, session: this.sessionOwnership(authorized), duplicate: false
@@ -4859,7 +4893,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const basis = this.db.prepare("SELECT id,body FROM events WHERE room_id=? AND sequence=?").get(roomId, command.data.contextSequence);
           if (basis?.id !== command.data.contextEventId || JSON.parse(basis.body).type !== T.MESSAGE_POSTED) throw new Error("Stale reply request context sequence");
         }
-        state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state);
+        state = compact(applyEvent(room.state, incoming));
         if (incoming.type === T.WORK_COMPLETED && incoming.data.evidenceKind === "room_text") verifyTextCompletion(this.db, room.state, room.state.workItems[incoming.data.workItemId], incoming.data);
       }
       catch (error) {
@@ -5051,6 +5085,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
+      this.queueGrowth(incoming, state);
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });

@@ -19,9 +19,8 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, validId } from "../src/events.js";
+import { applyEvent, event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
@@ -372,13 +371,14 @@ export class AgentInvites {
       });
       let state;
       refuseArchivedWrite(room.state);
-      try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
+      try { state = compactState(applyEvent(room.state, incoming)); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = this.store.storedProjection(row.room_id, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+      this.store.queueGrowth(incoming, state);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, memberId, now);
       // Compare-and-swap burn: exactly one redemption wins under concurrency.

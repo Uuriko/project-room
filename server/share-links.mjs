@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, canInviteMembers, historyVisibility } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, canInviteMembers, historyVisibility } from "../src/events.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
@@ -260,11 +259,12 @@ export class ShareLinks {
           // under the room's default history setting, like a human link guest.
           ...(this.accessOf(row) === "guest" ? { historyGuest: true } : {}),
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
-      const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      const state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + 1;
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+      this.store.queueGrowth(incoming, state);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(row.room_id, identity.identityId, identity.identityId, now);
       this.creditReferral(row, identity.identityId, now, trace);
@@ -518,19 +518,21 @@ export class ShareLinks {
       this.store.appendInvitationJournal(record, "issued");
       const incoming = invitationJoinedEvent({ ...record, joined_event_id: randomUUID(), accepted_at: now, redemption_id: redemptionId });
       refuseArchivedWrite(room.state);
-      let state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      let state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       // Co-admin: the room creator, who minted the link, raises the new
       // member from moderator to every permission in the same transaction.
       const grant = access === "co_admin" ? event({ id: `la_${invitationId.replaceAll("-", "")}`, idempotencyKey: `link-access:${invitationId}`,
         roomId: row.room_id, actorId: row.issuer_member_id, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
         data: { memberId, expectedMemberRevision: state.members[memberId].revision, permissions: linkPermissions("co_admin"), active: true,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } }) : null;
-      if (grant) state = { ...applyEventWithGrowth(state, grant, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      if (grant) state = { ...applyEvent(state, grant), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + (grant ? 2 : 1);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, room.sequence + 1, incoming.id, JSON.stringify(incoming));
       if (grant) this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, grant.id, JSON.stringify(grant));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
+      this.store.queueGrowth(incoming, state);
+      if (grant) this.store.queueGrowth(grant, state);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)").run(row.room_id, memberId, auth.account.id, `invitation:${invitationId}`);
       this.store.markAccountHadRoom(auth.account.id);
       this.db.prepare("UPDATE membership_invitations SET revision=1,status='accepted',accepted_at=?,accepted_by_account_id=?,redemption_id=?,joined_event_id=? WHERE id=?").run(now, auth.account.id, redemptionId, incoming.id, invitationId);

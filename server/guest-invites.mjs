@@ -13,8 +13,7 @@
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
-import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { applyEvent, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
 import { verifyCardSignature, isValidPublicKey } from "./agent-card-signing.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import {
@@ -324,7 +323,7 @@ export class GuestInvites {
     });
     let state;
     try {
-      state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
@@ -334,6 +333,7 @@ export class GuestInvites {
     const projection = this.store.storedProjection(roomId, state);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    this.store.queueGrowth(incoming, state);
     return { sequence, state };
   }
 
@@ -416,12 +416,13 @@ export class GuestInvites {
     });
     let state;
     try {
-      state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    this.store.queueGrowth(incoming, state);
     // Rebind the seat to the redeeming invite; the tier is owner-set and
     // never escalated by redemption.
     this.db.prepare("UPDATE guest_members SET invite_id=?, created_at=? WHERE member_id=?").run(inviteId, now, member.id);
@@ -605,12 +606,13 @@ export class GuestInvites {
         });
         let state;
         try {
-          state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+          state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
         const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
         if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+        this.store.queueGrowth(incoming, state);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
           .run(memberId, roomId, identity.identityId, row.tier, row.id, now);
       }
@@ -791,12 +793,13 @@ export class GuestInvites {
         });
         let state;
         try {
-          state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+          state = { ...applyEvent(room.state, incoming), eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
         const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
         if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+        this.store.queueGrowth(incoming, state);
         isNewMember = true;
       }
       // A NEW requestId always mints a fresh pass (renewals included): revoke

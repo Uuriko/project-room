@@ -18,7 +18,7 @@ function fixture(t, options = {}) {
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, owner };
+  return { store, owner, filename: join(directory, "room.sqlite") };
 }
 
 function median(samples) {
@@ -155,4 +155,63 @@ test("body-at-rest mutations invalidate hydration and recover current text from 
   const recovered = store.room("commons");
   assert.notEqual(recovered, warm);
   assert.equal(recovered.state.messages.find(message => message.id === "body-dependency").body, body);
+});
+
+// History replacement preserves sequence and event IDs. A second connection's
+// commit must invalidate the parse before either a read or a subsequent write.
+for (const bodiesAtRest of [false, true]) test(`external same-head import stays current (bodiesAtRest=${bodiesAtRest})`, t => {
+  const { store, owner, filename } = fixture(t, { bodiesAtRest });
+  const oldBody = "old committed text ".repeat(50), newBody = "replacement text ".repeat(50);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "replaced", body: oldBody }));
+  const writer = new RoomStore(filename, { bodiesAtRest });
+  t.after(() => writer.close());
+  const warm = store.room("commons"), rows = [...writer.exportEvents(owner, "commons")];
+  rows.find(row => row.event.data.messageId === "replaced").event.data.body = newBody;
+  writer.importEvents(owner, "commons", rows);
+  const next = store.room("commons");
+  assert.equal(next.sequence, warm.sequence);
+  assert.equal(next.state.messages[0].body, newBody);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "after-import", body: "after import" }));
+  assert.equal(writer.room("commons").state.messages[0].body, newBody);
+  assert.equal(store.rebuildProjection("commons").state.messages[0].body, newBody);
+  assert.deepEqual(store.room("commons").state, store.rebuildProjection("commons").state);
+});
+
+for (const operation of ["read", "write"]) test(`external import at ${operation} transaction acquisition invalidates the warm parse`, t => {
+  const { store, owner, filename } = fixture(t);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "race", body: "before" }));
+  const writer = new RoomStore(filename);
+  t.after(() => writer.close());
+  store.room("commons");
+  const rows = [...writer.exportEvents(owner, "commons")];
+  rows.find(row => row.event.data.messageId === "race").event.data.body = "imported before lock";
+  const exec = store.db.exec.bind(store.db);
+  let imported = false;
+  store.db.exec = sql => {
+    if (!imported && /^BEGIN\b/.test(sql)) {
+      imported = true;
+      writer.importEvents(owner, "commons", rows);
+    }
+    return exec(sql);
+  };
+  if (operation === "write") store.command(owner, "commons", command(T.MESSAGE_POSTED, { body: "later" }));
+  else store.readTransaction(() => store.room("commons"));
+  assert.equal(imported, true);
+  assert.equal(store.room("commons").state.messages[0].body, "imported before lock");
+  assert.equal(store.rebuildProjection("commons").state.messages[0].body, "imported before lock");
+});
+
+test("an external import during a read snapshot becomes visible after that snapshot ends", t => {
+  const { store, owner, filename } = fixture(t);
+  store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: "snapshot", body: "before" }));
+  const writer = new RoomStore(filename);
+  t.after(() => writer.close());
+  const rows = [...writer.exportEvents(owner, "commons")];
+  rows.find(row => row.event.data.messageId === "snapshot").event.data.body = "after";
+  store.readTransaction(() => {
+    assert.equal(store.room("commons").state.messages[0].body, "before");
+    writer.importEvents(owner, "commons", rows);
+    assert.equal(store.room("commons").state.messages[0].body, "before");
+  });
+  assert.equal(store.room("commons").state.messages[0].body, "after");
 });

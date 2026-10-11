@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { growthCollector, growthFanout } from "../src/growth-emit.js";
 import { RoomStore } from "../server/store.mjs";
 import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -111,15 +112,22 @@ test("cancelling a link preserves existing membership and committed audit across
 
 test("storage failure rolls back guest identity, session switch, membership, invitation audit and usage together", t => {
   const f = fixture(t), guest = f.guest(), before = f.store.room("commons").sequence;
+  const recorded = growthCollector.stats().recorded;
   const original = f.store.appendInvitationJournal;
-  f.store.appendInvitationJournal = () => { throw new Error("Simulated unavailable storage"); };
+  f.store.appendInvitationJournal = function (record, ...args) {
+    if (record.status === "accepted") throw new Error("Simulated unavailable storage");
+    return original.call(this, record, ...args);
+  };
   try { assert.throws(() => guest.accept(), /unavailable storage/); }
   finally { f.store.appendInvitationJournal = original; }
   assert.equal(f.store.accountSessionSlot(guest.slot.token).sessionRevision, 0);
   assert.equal(f.store.room("commons").sequence, before);
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM accounts WHERE origin='share-link-guest'").get().n, 0);
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons", null).links[0].joins, 0);
+  assert.equal(growthCollector.stats().recorded, recorded);
   assert.equal(guest.accept().duplicate, false);
+  assert.equal(guest.accept().duplicate, true);
+  assert.equal(growthCollector.stats().recorded, recorded + 1);
 });
 
 test("existing account membership is reused and changed issuer authority invalidates a link", t => {
@@ -511,12 +519,18 @@ for (const reason of ["expired", "cancelled", "authority", "archived", "verified
 
 test("shared agent admission requires a live identity and rolls back failed membership writes", t => {
   const f = fixture(t), identity = f.store.identities.create("Agent"), sequence = f.store.room("commons").sequence;
+  const recorded = growthCollector.stats().recorded;
   assert.throws(() => f.store.shareLinks.joinAgent(null, f.linkToken, "Agent"), { status: 401 });
   assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, 'a'.repeat(43), "Agent"), { code: "link_unavailable" });
   f.store.db.exec("CREATE TRIGGER fail_shared_agent BEFORE INSERT ON identity_links BEGIN SELECT RAISE(ABORT,'fixture failure'); END");
   assert.throws(() => f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent"), /fixture failure/);
   assert.equal(f.store.room("commons").sequence, sequence);
   assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 0);
+  assert.equal(growthCollector.stats().recorded, recorded);
+  f.store.db.exec("DROP TRIGGER fail_shared_agent");
+  assert.equal(f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent").duplicate, false);
+  assert.equal(f.store.shareLinks.joinAgent(identity.secret, f.linkToken, "Agent").duplicate, true);
+  assert.equal(growthCollector.stats().recorded, recorded + 1);
 });
 
 
@@ -661,4 +675,26 @@ test("an actual enrolled toString issuer retains shared invitation authority", t
   assert.equal(joined.session.member.active, true);
   assert.deepEqual(joined.session.member.permissions, []);
   assert.equal(f.store.shareLinks.preview(f.linkToken).link.remainingJoins, 1);
+});
+
+test("share-link growth waits for the outer commit and discards an isolated failed join", t => {
+  const f = fixture(t), first = f.guest("Discarded"), second = f.guest("Committed");
+  const recorded = growthCollector.stats().recorded, notices = [];
+  const subscription = growthFanout.subscribe({ types: ["member.joined"] }, envelope => {
+    notices.push({ memberId: envelope.fields.memberId, inTransaction: f.store.db.isTransaction });
+  });
+  t.after(() => growthFanout.unsubscribe(subscription));
+  let committed;
+  f.store.transaction(() => {
+    assert.throws(() => f.store.transaction(() => {
+      first.accept();
+      throw new Error("isolated join rollback");
+    }, { isolated: true }), /isolated join rollback/);
+    committed = second.accept();
+    assert.equal(growthCollector.stats().recorded, recorded);
+    assert.deepEqual(notices, []);
+  });
+  assert.deepEqual(notices, [{ memberId: committed.session.member.id, inTransaction: false }]);
+  assert.equal(f.store.shareLinks.list(f.ownerKey, "commons").links[0].joins, 1);
+  assert.equal(growthCollector.stats().recorded, recorded + 1);
 });

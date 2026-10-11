@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { RoomStore, PILOT_LIMITS } from "../server/store.mjs";
+import { growthCollector, growthFanout } from "../src/growth-emit.js";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
 
@@ -125,12 +126,14 @@ test("a pending invitation grants its account no Room read authority", t => {
 
 test("invitation acceptance at the projection cap fails cleanly without creating membership", t => {
   const f = fixture(t), issued = invitation(f), room = f.store.room.bind(f.store);
+  const recorded = growthCollector.stats().recorded;
   // Isolate the capacity policy without constructing thousands of unrelated events.
   f.store.room = id => { const result = room(id); return { sequence: result.sequence, state: { ...result.state, capacityFixture: "x".repeat(PILOT_LIMITS.projectionBytes) } }; };
   assert.throws(() => f.store.acceptInvitation(f.target.token, issued.rawToken, {
     redemptionId: redemption(), expectedRevision: 0, expectedSessionBinding: f.target.session.sessionBinding
   }), { code: "pilot_limit", status: 409 });
   f.store.room = room;
+  assert.equal(growthCollector.stats().recorded, recorded, "capacity rejection must not record joined activity");
   assert.equal(f.store.previewInvitation(issued.rawToken).status, "pending");
   assert.equal(f.store.accountForMember("commons", "target-member"), null);
   assert.equal(f.store.room("commons").state.members["target-member"], undefined);
@@ -355,6 +358,12 @@ test("an audit failure rolls back event, projection, binding, and accepted state
   const f = fixture(t);
   const issued = invitation(f, { requestId: "rollback" });
   const before = f.store.room("commons");
+  const recorded = growthCollector.stats().recorded;
+  const notices = [];
+  const subscription = growthFanout.subscribe({ types: ["member.joined"] }, envelope => {
+    notices.push({ memberId: envelope.fields.memberId, inTransaction: f.store.db.isTransaction });
+  });
+  t.after(() => growthFanout.unsubscribe(subscription));
   f.store.db.exec(`CREATE TRIGGER abort_invitation_accept BEFORE INSERT ON membership_invitation_events
     WHEN NEW.type='accepted' BEGIN SELECT RAISE(ABORT,'invitation audit unavailable'); END`);
   assert.throws(() => f.store.acceptInvitation(f.target.token, issued.rawToken, {
@@ -365,6 +374,13 @@ test("an audit failure rolls back event, projection, binding, and accepted state
   assert.equal(f.store.previewInvitation(issued.rawToken).status, "pending");
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM membership_invitation_events WHERE invitation_id=?").get(issued.result.invitation.id).n, 1);
   f.store.db.exec("DROP TRIGGER abort_invitation_accept");
+  assert.equal(growthCollector.stats().recorded, recorded);
+  assert.deepEqual(notices, []);
+  const options = { redemptionId: redemption(), expectedRevision: 0, expectedSessionBinding: f.target.session.sessionBinding };
+  assert.equal(f.store.acceptInvitation(f.target.token, issued.rawToken, options).duplicate, false);
+  assert.equal(f.store.acceptInvitation(f.target.token, issued.rawToken, options).duplicate, true);
+  assert.equal(growthCollector.stats().recorded, recorded + 1);
+  assert.deepEqual(notices, [{ memberId: "target-member", inTransaction: false }]);
 });
 
 test("two database connections serialize one acceptance and one exact no-write replay", t => {
