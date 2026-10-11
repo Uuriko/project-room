@@ -11,6 +11,7 @@ import { RoomStore } from '../server/store.mjs';
 import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { vapidFromEnv } from '../server/push-subscriptions.mjs';
+import { isGitHubConfigured } from '../server/github-oauth.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
@@ -126,6 +127,7 @@ export class ProjectRoom extends DurableObject {
       boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
       push: vapidFromEnv(env),
       googleAuth,
+      githubAuth: isGitHubConfigured(env) ? { clientId: env.GITHUB_OAUTH_CLIENT_ID, clientSecret: env.GITHUB_OAUTH_CLIENT_SECRET } : null,
       gmailAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY
       // the mailer seam reports mail_not_configured instead of breaking boot.

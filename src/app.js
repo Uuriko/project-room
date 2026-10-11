@@ -1,3 +1,4 @@
+import { installGitHubSignin } from './oauth-signin-ui.js';
 import { uiText } from "./strings.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -710,6 +711,8 @@ function ensureAccountSession() {
   accountRestoreFlight = accountClient.restore().finally(() => { accountRestoreFlight = null; });
   return accountRestoreFlight;
 }
+installGitHubSignin({ accountClient, ensureAccountSession, stashInviteForOAuth,
+  canStart: id => signinUI.canLeave() && (id !== 'invitation-github' || confirmInvitationSignin()) });
 // Sign-in & security settings (slice 7): mounted inside the account rooms
 // panel's <details>, opened from the session menu.
 const accountSettingsUI = createAccountSettingsUI({
