@@ -44,6 +44,10 @@ on:
         description: "Optional note for the receipt"
         required: false
         type: string
+      ci_override_reason:
+        description: "Explicit operator authorization to deploy while required CI is queued or running; failures still refuse"
+        required: false
+        type: string
       probe_override:
         description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
@@ -92,6 +96,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           INPUT_SHA: ${{ inputs.sha }}
+          CI_OVERRIDE_REASON: ${{ inputs.ci_override_reason }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           REPO: ${{ github.repository }}
         run: |
@@ -113,6 +118,11 @@ jobs:
             CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
             echo "$wf on $SHA: $CONCLUSION"
             if [ "$CONCLUSION" != "success" ]; then
+              if [ "$EVENT" = "workflow_dispatch" ] && [ -n "$CI_OVERRIDE_REASON" ] && { [ "$CONCLUSION" = "queued" ] || [ "$CONCLUSION" = "in_progress" ]; }; then
+                echo "::warning title=Operator-authorized CI wait override::$wf is $CONCLUSION; recorded operator reason in run summary"
+                printf '%s\n' "CI wait override for $wf ($CONCLUSION):" "$CI_OVERRIDE_REASON" >> "$GITHUB_STEP_SUMMARY"
+                continue
+              fi
               if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; deploy only dual-green commits"; fi
               skip "auto: $wf is $CONCLUSION on $SHA; the other gate's completion will retry"
             fi
