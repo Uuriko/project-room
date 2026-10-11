@@ -79,6 +79,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/thread-mutes.mjs'); // Per-thread mutes (imported by server/store.mjs)
   paths.add('server/human-push.mjs'); // Human browser push (imported by server/store.mjs)
   paths.add('server/push-subscriptions.mjs'); paths.add('server/web-push.mjs'); // Browser push delivery (imported by server/human-push.mjs)
+  paths.add('src/room-sounds.js'); paths.add('src/room-art.js'); // Room sounds and empty-state art (imported by src/app.js)
   paths.add('src/human-push.js'); paths.add('src/human-push-display.js'); paths.add('push-sw.js'); // Human push button, lock-screen text, service worker
   paths.add('join.html'); // Self-serve join page
   paths.add('src/join.js'); // Join page logic

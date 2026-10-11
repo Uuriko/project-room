@@ -41,6 +41,8 @@ import { attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisibl
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
+import { createRoomSounds, cueForNewItems, notificationKey } from "./room-sounds.js";
+import { EMPTY_ROOM_ART } from "./room-art.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
@@ -2442,7 +2444,7 @@ function renderMessages() {
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note empty-room">${EMPTY_ROOM_ART}No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -6459,6 +6461,24 @@ let humanPushUi = null;
 // notificationError on purpose: it is not a failed save, and the feed reload
 // that follows a mark-read clears errors and must not clear this.
 let notificationNote = "", notificationBefore = null, notificationLoading = false;
+// Room sounds: a cue for new items in your own notification feed only. The
+// first newest-page load for a room records what is already there in silence;
+// browsers allow audio only after a gesture, so the player unlocks on one.
+const roomSounds = createRoomSounds();
+let notificationSeen = null;
+for (const type of ["pointerdown", "keydown"]) document.addEventListener(type, () => roomSounds.unlock(), { once: true, capture: true });
+function noticeNewNotifications(feed) {
+  const items = feed?.notifications ?? [];
+  if (notificationSeen === null) { notificationSeen = new Set(items.map(notificationKey)); return; }
+  const cue = cueForNewItems(items, notificationSeen);
+  items.forEach(item => notificationSeen.add(notificationKey(item)));
+  if (!cue) return;
+  roomSounds.play(cue);
+  // The badge lives inside Catch up; the top-bar button is what is in view.
+  for (const node of [$("#topbar-catchup"), $("#notification-count")]) {
+    node.classList.remove("arrived"); void node.offsetWidth; node.classList.add("arrived");
+  }
+}
 // DM consent pairs for the signed-in member (PR #731).
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
@@ -6487,6 +6507,7 @@ const NOTIFICATION_COALESCE_MS = 1500;
 const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
+  notificationSeen = null;
   notificationBefore = null; notificationLoading = false;
   $("#notification-older").hidden = true; $("#notification-newest").hidden = true;
   notificationSerial++; notificationOwner = null; notificationFeed = null; notificationBusy = false; notificationError = ""; notificationNote = "";
@@ -6577,6 +6598,7 @@ async function loadNotifications() {
     if (!ownsNotifications(ticket) || request !== notificationSerial || !result) return;
     if (notificationBefore !== null && result.cursor >= notificationBefore) { notificationBefore = null; return loadNotifications(); }
     notificationFeed = result; notificationError = "";
+    if (notificationBefore === null) noticeNewNotifications(result);
   } catch {
     if (!ownsNotifications(ticket) || request !== notificationSerial) return;
     notificationError = "Notifications could not refresh.";

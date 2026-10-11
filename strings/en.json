@@ -370,5 +370,8 @@
   "human.face.openResult": "Open result",
   "human.face.addContext": "Add context",
   "human.assistantChange": "Change",
-  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain."
+  "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
+  "settings.sounds.legend": "Sounds",
+  "settings.sounds.label": "Play a sound when something needs you",
+  "settings.sounds.hint": "Mentions, replies and finished work, while this tab is open."
 }

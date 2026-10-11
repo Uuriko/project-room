@@ -1,4 +1,5 @@
 import { uiText } from "./strings.js";
+import { soundsEnabled, setSoundsEnabled } from "./room-sounds.js";
 // Account settings UI (slice 7, RC-2026-09-17-016).
 //
 // Renders the linked sign-in methods for the authenticated account and the
@@ -361,7 +362,9 @@ function section(id, title, body) {
 function appearanceHtml() {
   const selected = readThemePreference();
   const option = (value, label) => `<label><input type="radio" name="theme" value="${value}"${selected === value ? " checked" : ""}> ${label}</label>`;
-  return `<fieldset class="settings-appearance"><legend>Appearance</legend>${option("dark", "Dark")}${option("light", "Light")}${option("system", "Match system")}</fieldset>`;
+  const sounds = `<label><input type="checkbox" name="room-sounds"${soundsEnabled() ? " checked" : ""}> ${uiText("settings.sounds.label")}</label>`;
+  return `<fieldset class="settings-appearance"><legend>Appearance</legend>${option("dark", "Dark")}${option("light", "Light")}${option("system", "Match system")}</fieldset>`
+    + `<fieldset class="settings-appearance"><legend>${uiText("settings.sounds.legend")}</legend>${sounds}<p class="form-hint">${uiText("settings.sounds.hint")}</p></fieldset>`;
 }
 
 function profileSectionHtml(methods, pendingEmail = null) {
@@ -721,7 +724,9 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
 
   const onChange = event => {
     const input = event.target;
-    if (!input || input.name !== "theme" || !container?.contains(input)) return;
+    if (!input || !container?.contains(input)) return;
+    if (input.name === "room-sounds") { setSoundsEnabled(input.checked); return; }
+    if (input.name !== "theme") return;
     storeTheme(input.value);
   };
 
