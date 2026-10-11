@@ -40,6 +40,28 @@ export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds,
   };
 }
 
+// Discoverable recovery metadata belongs to the existing attempt journal, not
+// another queue. Persist it before claiming, including the lost-claim-reply case.
+export const sharedRunScope = connection => JSON.stringify([connection.origin, connection.roomId, connection.memberId]);
+export function initSharedRunJournal(db) {
+  db.exec("CREATE TABLE IF NOT EXISTS codex_shared_runs (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, publish TEXT)");
+  const columns = new Set(db.prepare("PRAGMA table_info(codex_shared_runs)").all().map(row => row.name));
+  for (const column of ["inputs", "continuation", "previous_binding", "prior_result", "scope", "run_id", "run_created_at"])
+    if (!columns.has(column)) db.exec(`ALTER TABLE codex_shared_runs ADD COLUMN ${column} TEXT`);
+  if (!columns.has("settled")) db.exec("ALTER TABLE codex_shared_runs ADD COLUMN settled INTEGER NOT NULL DEFAULT 0");
+  if (db.prepare("SELECT 1 FROM codex_shared_runs WHERE scope IS NULL LIMIT 1").get()
+    && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_runtime_attempts'").get()) {
+    // Older journals have the binding only in the runtime table. Preserve the
+    // original attempt and import its identity; never manufacture a new one.
+    for (const { binding: encoded } of db.prepare("SELECT binding FROM codex_runtime_attempts").all()) {
+      const binding = JSON.parse(encoded);
+      if (binding.kind !== "shared-assistant") continue;
+      db.prepare("UPDATE codex_shared_runs SET scope=?,run_id=?,run_created_at=? WHERE attempt_id=? AND scope IS NULL")
+        .run(sharedRunScope(binding), binding.runId, String(binding.runCreatedAt), binding.attemptId);
+    }
+  }
+}
+
 // One explicitly selected public assistant run, not an addressed reply request.
 // Caller supplies the same durable journal and isolated RPC transport as the
 // runtime adapter. No ambient sessions, process launch, or provider credentials.
@@ -52,19 +74,14 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   if (snapshot.viewerId !== connection.memberId) throw new Error("Wrong Room identity");
   const roomCreatedAt = snapshot.state.room.createdAt;
   const read = async () => {
-    const state = await client.assistant(undefined, { signal });
+    const state = await client.assistant(undefined, { signal, runId });
     const run = state.runs.find(item => item.id === runId);
     if (!run || run.coordinatorMemberId !== connection.memberId) throw new Error("Shared run is not assigned to this member");
     return run;
   };
   let run = await read();
   const key = digest([connection.origin, connection.roomId, connection.memberId, roomCreatedAt, run.id, run.createdAt]);
-  db.exec("CREATE TABLE IF NOT EXISTS codex_shared_runs (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, publish TEXT)");
-  if (!db.prepare("PRAGMA table_info(codex_shared_runs)").all().some(column => column.name === "inputs"))
-    db.exec("ALTER TABLE codex_shared_runs ADD COLUMN inputs TEXT");
-  for (const column of ["continuation", "previous_binding", "prior_result"])
-    if (!db.prepare("PRAGMA table_info(codex_shared_runs)").all().some(entry => entry.name === column))
-      db.exec(`ALTER TABLE codex_shared_runs ADD COLUMN ${column} TEXT`);
+  initSharedRunJournal(db);
   let record = db.prepare("SELECT * FROM codex_shared_runs WHERE id=?").get(key);
   if (!record) {
     if (run.status !== "queued" || run.attemptId) throw new Error("Shared attempt is already owned; reconcile original runtime");
@@ -72,6 +89,8 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
     db.prepare("INSERT INTO codex_shared_runs(id,attempt_id,publish) VALUES(?,?,NULL)").run(key, attemptId);
     record = { attempt_id: attemptId, publish: null };
   }
+  db.prepare("UPDATE codex_shared_runs SET scope=?,run_id=?,run_created_at=? WHERE id=?")
+    .run(sharedRunScope(connection), run.id, String(run.createdAt), key);
   const attemptId = record.attempt_id;
   const act = data => client.assistant({ runId, attemptId, ...data }, { signal });
   if (record.publish) {
@@ -96,7 +115,8 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
   const runtime = createCodexRuntimeHost({ db, rpc, cwd, policy, emit: event => draft.emit(event), timeoutMs, scope: connection,
     authorize: async (bound, action) => {
       const current = await read();
-      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt || current.sourceDeleted)
+      if (current.attemptId !== bound.attemptId || String(current.createdAt) !== bound.runCreatedAt
+        || current.sourceDeleted && !(stops.has(current.status) && ["read", "interrupt"].includes(action)))
         throw new Error("Shared runtime attempt was revoked");
       if (["start", "steer"].includes(action)) {
         if (current.status !== "working") throw new Error("Shared runtime is stopping");
