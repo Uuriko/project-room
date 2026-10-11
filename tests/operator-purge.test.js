@@ -49,7 +49,10 @@ function matchingRows(db, entry, kind, id) {
     params.push(id);
   }
   if (!parts.length) return 0;
-  if (RETIRED_TABLES.includes(entry.table) && !db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(entry.table)) return 0;
+  // Mirrors purgeTable(): optional entries (retired schemas, lazily created
+  // tables) are skipped when absent instead of failing the purge.
+  if ((entry.optional || RETIRED_TABLES.includes(entry.table))
+    && !db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(entry.table)) return 0;
   return db.prepare(`SELECT count(*) AS n FROM ${entry.table} WHERE ${parts.join(" OR ")}`).get(...params).n;
 }
 

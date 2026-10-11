@@ -139,3 +139,42 @@ test("lease inputs are validated", t => {
   ];
   for (const fn of bad) assert.throws(fn, err => err instanceof HeartbeatError && err.status === 422);
 });
+
+// Cleanup advisory (Dot review of #2536): acknowledged claim rows must not
+// survive ack — agent_wake_signal_claims is bookkeeping for unacked signals
+// only, and unbounded growth is a leak.
+test("ackWakes deletes the claim rows for the acked batch", t => {
+  const { hb, lease } = leased(t);
+  enqueue(hb, "ai_lease", 2);
+  const batch = claim(hb, lease.fencingToken);
+  assert.equal(batch.signals.length, 2);
+  const claimCount = () => hb.db.prepare("SELECT count(*) AS n FROM agent_wake_signal_claims").get().n;
+  assert.equal(claimCount(), 2, "claims recorded before ack");
+  const ok = hb.ackWakes({
+    agentId: "ai_lease", signalIds: batch.signals.map(s => s.signalId),
+    roomId: ROOM, fencingToken: lease.fencingToken,
+  });
+  assert.equal(ok.acknowledged.length, 2);
+  assert.equal(claimCount(), 0, "acked claim rows are deleted, not left behind");
+  const delivered = hb.db.prepare(
+    "SELECT count(*) AS n FROM agent_wake_signals WHERE agent_id=? AND delivered_at IS NOT NULL").get("ai_lease").n;
+  assert.equal(delivered, 2, "signal rows stay with delivered_at for the analytics derive");
+});
+
+test("release, reclaim and ack leaves no claim rows behind", t => {
+  const { hb, lease } = leased(t);
+  enqueue(hb, "ai_lease", 1);
+  const first = claim(hb, lease.fencingToken);
+  assert.equal(first.signals.length, 1);
+  assert.equal(hb.releaseListenerLease({ agentId: "ai_lease", roomId: ROOM, fencingToken: lease.fencingToken }).released, true);
+  const b = hb.acquireListenerLease({ agentId: "ai_lease", roomId: ROOM, listenerId: "listener-b", ttlMs: 60000 });
+  const again = claim(hb, b.fencingToken);
+  assert.equal(again.signals[0].redelivered, true, "re-claim after release replays the batch flagged");
+  const ok = hb.ackWakes({
+    agentId: "ai_lease", signalIds: [again.signals[0].signalId],
+    roomId: ROOM, fencingToken: b.fencingToken,
+  });
+  assert.equal(ok.acknowledged.length, 1);
+  assert.equal(hb.db.prepare("SELECT count(*) AS n FROM agent_wake_signal_claims").get().n, 0,
+    "the full release+reclaim+ack lifecycle leaves no claim rows");
+});

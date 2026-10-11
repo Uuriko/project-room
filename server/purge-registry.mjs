@@ -354,6 +354,24 @@ const ROWS = [
       ]
     }
   },
+  // Bolter steal #5 (durable wake-listener queue): the lease tables are
+  // created lazily, so legacy databases never have them — optional skips
+  // absent tables instead of failing the purge. room_key is '' for
+  // room-agnostic leases, which are not room data and survive room purge.
+  {
+    "table": "agent_wake_listener_leases",
+    "key": "room_key",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_key"
+      ],
+      "identity": [
+        "agent_id"
+      ]
+    }
+  },
   {
     "table": "agent_wake_polls",
     "key": "agent_id",
@@ -362,6 +380,28 @@ const ROWS = [
       "identity": [
         "agent_id"
       ]
+    }
+  },
+  // Claim rows point at their signal rows; the via phase deletes them before
+  // the parent agent_wake_signals rows so no orphan claims survive a room
+  // purge (claim-row cleanup cascades with signal cleanup).
+  {
+    "table": "agent_wake_signal_claims",
+    "key": "signal_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "identity": [
+        "agent_id"
+      ]
+    },
+    "via": {
+      "room": {
+        "parent": "agent_wake_signals",
+        "parentKey": "signal_id",
+        "childKey": "signal_id",
+        "scope": "room_id"
+      }
     }
   },
   {

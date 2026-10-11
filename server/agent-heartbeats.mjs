@@ -573,6 +573,17 @@ export class AgentHeartbeats {
     for (const signalId of signalIds) {
       if (stmt.run(at, agentId, signalId, roomId, roomId).changes > 0) acknowledged.push(signalId);
     }
+    // Cleanup advisory (Dot review of #2536): claim rows are bookkeeping for
+    // unacked signals only — once a signal is acked its claim row is garbage.
+    // Delete the acked batch's claim rows so agent_wake_signal_claims cannot
+    // grow without bound across ack+release cycles. The signal rows themselves
+    // stay (delivered_at is set) for the analytics derive; the cascade from
+    // claim cleanup to signal cleanup runs through the purge registry.
+    if (acknowledged.length > 0) {
+      const placeholders = acknowledged.map(() => "?").join(",");
+      this.db.prepare(`DELETE FROM agent_wake_signal_claims WHERE agent_id=? AND signal_id IN (${placeholders})`)
+        .run(agentId, ...acknowledged);
+    }
     acknowledged.push(...(this.store.workWakes?.ack(agentId, signalIds, roomId) ?? []));
     return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
   }
