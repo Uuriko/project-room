@@ -55,6 +55,21 @@ test("requestEdits → resubmit returns to pending with a bumped version", () =>
   assert.equal(queue.audit(proposal.proposalId).map(h => h.status).join(","),
     "pending,changes_requested,pending,approved");
 });
+test("resubmit persists the new draft and version on the stored record", () => {
+  const queue = createApprovalQueue({ clock: fixedClock([1000, 2000, 3000, 4000]), id: ids });
+  const proposal = propose(queue);
+  queue.requestEdits(proposal.proposalId, { by: human, edits: "Soften the opening line." });
+  queue.resubmit(proposal.proposalId, { draft: { body: "Revised opening — Tuesday?" }, byAgent: agent });
+  // The returned copy is not enough: get() must serve the resubmitted draft,
+  // or reviewers approve a draft they never saw (regression: M-7).
+  const stored = queue.get(proposal.proposalId);
+  assert.equal(stored.status, "pending");
+  assert.equal(stored.version, 2);
+  assert.equal(stored.draft.body, "Revised opening — Tuesday?");
+  assert.equal(stored.draft.subject, null);
+  assert.equal(stored.requestedEdits, null);
+  assert.equal(queue.list({ status: "pending" })[0].version, 2);
+});
 test("reject needs a reason and ends the proposal", () => {
   const queue = createApprovalQueue({ clock: fixedClock([1000, 2000]), id: ids });
   const proposal = propose(queue);
