@@ -22,6 +22,10 @@
 .assistant-run-status { flex: 0 0 auto; color: var(--muted); font-size: var(--text-sm); white-space: nowrap; }
 .assistant-run-resultline { flex: 2 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-sm); }
 .assistant-run summary .text-button { flex: 0 0 auto; margin: 0 0 0 .2rem; white-space: nowrap; }
+.assistant-decision summary { flex-wrap: wrap; overflow: visible; }
+.assistant-decision summary > strong { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
+.assistant-decision .assistant-run-status, .assistant-run-requester { white-space: normal; overflow-wrap: anywhere; }
+.assistant-run-requester { color: var(--muted); font-size: var(--text-sm); }
 .assistant-run-detail { padding: .2rem 0 .2rem 1.1rem; }
 .assistant-run-detail p { margin: .3rem 0; }
 .assistant-run-detail > .text-button { margin-right: .6rem; margin-block: .2rem; }

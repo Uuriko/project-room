@@ -11,6 +11,9 @@ export default {
   "email.cta.unsubscribe": "Unsubscribe",
   "email.row.fallback_head": "An update is waiting in Room",
   "human.workNoReview": "No review · Advanced options",
+  "human.askRequestedBy": "Asked by {name}",
+  "human.askParticipant": "Participant",
+  "human.decisionCount": "Requests needing a decision: {count}",
   "agentSignIn.credentialMismatch": "That agent ID and secret don’t match. Check both and try again.",
   "human.copy.001": "<div class=\"assistant-heading\"><strong>Room</strong><span id=\"room-assistant-status\"></span><button type=\"button\" id=\"assistant-setup\" class=\"text-button\">Connect</button><button type=\"button\" id=\"human-project-open\" class=\"text-button\">Project</button></div><details id=\"assistant-activity\"><summary>Activity</summary><div id=\"assistant-runs\"></div></details><p id=\"assistant-error\" class=\"form-hint\" role=\"status\"></p><button type=\"button\" id=\"assistant-retry\" class=\"text-button\" hidden>Retry request</button><button type=\"button\" id=\"assistant-review\" class=\"text-button\" hidden>Review current request</button><button type=\"button\" id=\"assistant-discard\" class=\"text-button\" hidden>Dismiss</button>",
   "human.copy.002": "Ask the room assistant in this shared conversation",
@@ -380,6 +383,7 @@ export default {
   "human.face.stopped": "Stopped",
   "human.face.sharedRequest": "Shared request",
   "human.face.openResult": "Open result",
+  "human.face.resolveDirection": "Resolve direction",
   "human.assistantChange": "Change",
   "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
   "chat.typingStatus": "{name} is typing"
