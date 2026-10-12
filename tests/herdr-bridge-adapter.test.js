@@ -545,6 +545,39 @@ test('F2: half-open probe success closes the breaker', async (t) => {
   } finally { await mock.close(); }
 });
 
+test('F3: half-open recovery works through connectSession (pre-check must not consume the probe)', async (t) => {
+  const mock = await startMockBridge({ failTimes: { '/v1/read': 999 } });
+  try {
+    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import(ADAPTER_PATH);
+    const breakerStore = new Map();
+    const env = makeEnv(mock);
+    const config = readHerdrBridgeConfig(env);
+    const out = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    assert.equal(out.backend, 'herdr');
+    const { adapter } = out;
+    t.after(async () => { await adapter.disconnect().catch(() => {}); });
+    // Trip the breaker.
+    for (let i = 0; i < 5; i++) {
+      await assert.rejects(adapter.readPane('pane-1', 'recent'), (e) => e instanceof TransportError || e instanceof ServerError);
+    }
+    await assert.rejects(adapter.readPane('pane-1', 'recent'), (e) => e.code === 'bridge_circuit_open');
+    // Window not yet elapsed: a new session still fails fast as circuit_open.
+    const early = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    assert.equal(early.backend, 'legacy');
+    assert.equal(early.reason, 'circuit_open');
+    await new Promise((r) => setTimeout(r, 650)); // pass the half-open window
+    mock.state.failTimes['/v1/read'] = 0;          // bridge recovers
+    // Regression (#2853): connectSession's pre-check spent the single
+    // half-open probe, so connect()'s own ping was refused and a tripped
+    // bridge could never recover through connectSession.
+    const recovered = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    assert.equal(recovered.backend, 'herdr', `expected recovery via connectSession, got ${recovered.backend}:${recovered.reason}`);
+    t.after(async () => { await recovered.adapter.disconnect().catch(() => {}); });
+    const pt = await recovered.adapter.readPane('pane-1', 'recent'); // normal traffic resumes
+    assert.equal(pt.text, 'hello');
+  } finally { await mock.close(); }
+});
+
 // ---------------------------------------------------------------------------
 // G. Subscribe / SSE — adapter-owned events_lost recovery
 // ---------------------------------------------------------------------------
