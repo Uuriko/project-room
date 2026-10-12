@@ -87,6 +87,9 @@ const out = {
   lag: measured?.reason ?? null,
   drift,
   probe_verdict: report.verdict,
+  // Fixed-matrix diagnostics only: no response bodies, paths or raw errors.
+  probe_note: report.note,
+  probe_endpoints: report.endpoints.map(({ label, status, latencyMs, ok }) => ({ label, status, latencyMs, ok })),
   door_revisions: { do: doors.doRev, worker: doors.workerRev },
   door_split: doorSplit,
   door_state: doorState,

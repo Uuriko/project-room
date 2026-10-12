@@ -15,6 +15,7 @@ const healthy = path => ({ status: 200, body: path === '/api/version'
 
 async function withServer(t, responseFor) {
   const server = createServer((req, res) => {
+    assert.equal(req.method, 'GET', 'probes must remain read-only');
     const { status, body } = responseFor(req.url);
     res.writeHead(status);
     res.end(typeof body === 'string' ? body : JSON.stringify(body));
@@ -44,6 +45,44 @@ for (const [name, responseFor] of [
     assert.equal(report.incident_window, false, 'denial or malformed metadata does not establish a DO outage');
   });
 }
+
+test('drift monitor preserves safe per-endpoint diagnostics for a partial canary failure', async t => {
+  const requests = [];
+  const privateDetail = 'synthetic-private-diagnostic';
+  const base = await withServer(t, path => {
+    requests.push(path);
+    assert.ok(['/', '/api/version', '/api/health', '/join', '/api/health/jobs', '/api/version/worker'].includes(path), 'unexpected probe path');
+    if (path === '/api/health/jobs') return {
+      status: 503,
+      body: { schema: 'room.job-health/1', status: 'unavailable', jobs: [],
+        error: privateDetail, url: `https://example.invalid/?token=${privateDetail}` },
+    };
+    return healthy(path === '/api/version/worker' ? '/api/version' : path);
+  });
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
+    assert.equal(error.code, 1);
+    const report = JSON.parse(error.stdout);
+    assert.equal(report.probe_verdict, 'partial');
+    assert.equal(report.probe_note, 'mixed failures - inspect per-endpoint results');
+    assert.equal(report.incident_window, false, 'a failed canary alone does not establish a DO outage');
+    assert.equal(report.drift, false);
+    assert.equal(report.door_split, false);
+    assert.deepEqual(report.probe_endpoints.map(({ label, status, ok }) => ({ label, status, ok })), [
+      { label: 'home', status: 200, ok: true },
+      { label: 'version', status: 200, ok: true },
+      { label: 'health', status: 200, ok: true },
+      { label: 'join-page', status: 200, ok: true },
+      { label: 'jobs-canary', status: 503, ok: false },
+    ]);
+    for (const endpoint of report.probe_endpoints) {
+      assert.deepEqual(Object.keys(endpoint).sort(), ['label', 'latencyMs', 'ok', 'status']);
+      assert.ok(Number.isSafeInteger(endpoint.latencyMs) && endpoint.latencyMs >= 0);
+    }
+    assert.ok(!`${error.stdout}${error.stderr}`.includes(privateDetail), 'response bodies and provider details must stay private');
+    return true;
+  });
+  assert.deepEqual(requests.sort(), ['/', '/api/health', '/api/health/jobs', '/api/version', '/api/version', '/api/version/worker', '/join'], 'diagnostics must reuse the existing five probes and two version-door reads');
+});
 
 test('valid public responses permit a matching revision and detect a real mismatch', async t => {
   let liveRevision = revision;
