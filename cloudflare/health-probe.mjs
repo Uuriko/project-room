@@ -27,8 +27,20 @@ export function createHealthProbe() {
       const joined = await race(inflight, timeoutMs);
       if (joined.timeout) track(inflight);
       if (joined.timeout || joined.error) return onUnready(joined.timeout ? "timeout" : "error", timing());
-      try { return onSnapshot(await snapshotResponse(await start()), timing()); }
-      catch { return onUnready("error", timing()); }
+      // The joiner's own start() is per-request, but it is not exempt from
+      // the budget: bound it by the time left after waiting for the gate,
+      // not a fresh timeoutMs, so the caller still answers within its
+      // overall timeout. On timeout keep its I/O alive via waitUntil,
+      // exactly as the leader branch does for its task.
+      const remainingMs = Math.max(0, timeoutMs - (performance.now() - started));
+      const own = (async () => snapshotResponse(await start()))();
+      const racedOwn = await race(own, remainingMs);
+      if (racedOwn.timeout) {
+        track(own);
+        return onUnready("timeout", timing());
+      }
+      if (racedOwn.error) return onUnready("error", timing());
+      return onSnapshot(racedOwn, timing());
     }
     let settle;
     const gate = new Promise(resolve => { settle = resolve; });
