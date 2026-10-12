@@ -1,13 +1,15 @@
-// Updates destination. Needs me, Mentions, All activity, and Saved.
+// Updates destination. Needs me, Mentions, All activity, and Read.
 // The badge counts actionable items only. Opening a row marks it read.
 // Done and Clear are the handled and dismissed marks. Keyboard reachable,
 // and the rows stay usable at 390px.
+
+import { uiText } from "./strings.js";
 
 const FILTERS = [
   { id: "needs", label: "Needs me" },
   { id: "mentions", label: "Mentions" },
   { id: "all", label: "All activity" },
-  { id: "saved", label: "Saved" }
+  { id: "saved", label: uiText("updates.filter.read") }
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);

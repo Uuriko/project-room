@@ -409,5 +409,6 @@ export default {
   "entry.signedOut": "Not signed in",
   "entry.connection": "Not connected · sign in required",
   "entry.refresh": "Refresh connection",
-  "result.discuss": "Discuss result"
+  "result.discuss": "Discuss result",
+  "updates.filter.read": "Read"
 };
