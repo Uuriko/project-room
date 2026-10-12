@@ -387,5 +387,6 @@ export default {
   "join.dead.scope": "Unable to open this invitation. Ask the person who invited you for a fresh link.",
   "join.dead.status": "This invite is unavailable. Sign in and request access.",
   "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
-  "join.dead.roomsLink": "Back to your rooms"
+  "join.dead.roomsLink": "Back to your rooms",
+  "updates.filter.read": "Read"
 };
