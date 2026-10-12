@@ -11,6 +11,8 @@ import {
   ensureAgentRoomRequestIdColumn
 } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { createWork } from "../server/work-claims.mjs";
+import { EVENT_TYPES as T, replay } from "../src/events.js";
 
 // PRODUCT-200 B7: POST /api/agent-rooms accepts an optional client-generated
 // requestId as an idempotency key. The client-supplied roomId already serves
@@ -20,7 +22,7 @@ import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 
 function setup(t, { capacity = 1000 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-agent-rooms-requestid-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
+  let store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("commons"));
   store.db.exec(agentRoomSchema);
   ensureAgentRoomRequestIdColumn(store.db);
@@ -29,7 +31,11 @@ function setup(t, { capacity = 1000 } = {}) {
   });
   const identity = store.identities.create("Owning Agent");
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, rooms, identity };
+  return { store, rooms, identity, reopen() {
+    store.close();
+    store = new RoomStore(join(directory, "room.sqlite"));
+    return { store, rooms: new AgentRooms(store) };
+  } };
 }
 
 const createArgs = (overrides = {}) => ({
@@ -107,3 +113,96 @@ test("a requestId retry does not spend creation budget", t => {
   assert.equal(second.ok, false, `second real creation is refused, got ${second.code}`);
   assert.equal(second.code, "rate_limited");
 });
+
+// Both keys identify the complete normalized create request, including whether
+// it seeds a starter. A conflicting replay must not look like a success.
+for (const key of ["requestId", "roomId"]) {
+  for (const [firstStarter, retryStarter] of [[false, true], [true, false], [false, undefined], [undefined, false]]) {
+    test(`${key} rejects a starter change from ${firstStarter} to ${retryStarter}`, t => {
+      const { store, rooms, identity } = setup(t);
+      const args = createArgs({ [key]: "starter-retry", ...(firstStarter === undefined ? {} : { starter: firstStarter }) });
+      const first = rooms.create(identity.secret, args);
+      const before = store.room(first.roomId).sequence;
+      const retryArgs = { ...args };
+      if (retryStarter === undefined) delete retryArgs.starter;
+      else retryArgs.starter = retryStarter;
+      assert.throws(() => rooms.create(identity.secret, retryArgs),
+        error => error.status === 409 && error.code === (key === "requestId" ? "request_conflict" : "room_exists"));
+      assert.equal(roomCount(store), 1);
+      assert.equal(store.room(first.roomId).sequence, before, "a rejected retry leaves room events unchanged");
+      assert.equal(Boolean(store.workClaims.get(first.roomId, "starter")), firstStarter !== false);
+    });
+  }
+  for (const [firstStarter, retryStarter] of [[false, false], [true, true], [true, undefined], [undefined, true]]) {
+    test(`${key} accepts equivalent starter values ${firstStarter} and ${retryStarter}`, t => {
+      const { store, rooms, identity } = setup(t);
+      const args = createArgs({ [key]: "starter-retry", ...(firstStarter === undefined ? {} : { starter: firstStarter }) });
+      const first = rooms.create(identity.secret, args);
+      const before = store.room(first.roomId).sequence;
+      const retryArgs = { ...args };
+      if (retryStarter === undefined) delete retryArgs.starter;
+      else retryArgs.starter = retryStarter;
+      const retry = rooms.create(identity.secret, retryArgs);
+      assert.equal(retry.duplicate, true);
+      assert.equal(retry.roomId, first.roomId);
+      assert.deepEqual(retry.starter, first.starter);
+      assert.equal(roomCount(store), 1);
+      assert.equal(store.room(first.roomId).sequence, before, "an identical retry creates no room events");
+    });
+  }
+}
+
+for (const key of ["requestId", "roomId"]) {
+  for (const starter of [false, true]) {
+    test(`${key} preserves starter:${starter} intent across board edits, replay and reopen`, t => {
+      const fixture = setup(t);
+      const { store, rooms, identity } = fixture;
+      const args = createArgs({ [key]: "starter-history", starter });
+      const first = rooms.create(identity.secret, args);
+      if (starter) store.workClaims.delete(first.roomId, "starter");
+      else store.workClaims.set(first.roomId, createWork({ id: "starter", title: "A later task" }, { now: store.now(), agentId: identity.identityId }));
+      // Generic settings commands refuse creation metadata. Ordinary settings
+      // updates must preserve it too.
+      assert.throws(() => store.command(identity.secret, first.roomId, {
+        id: "starter-tamper", type: T.ROOM_POLICY_SET,
+        data: { requireIndependentReview: false, requireOwnerDecision: false, agentStarterRequested: !starter }
+      }), error => error.status === 422 && error.code === "invalid_command");
+      store.command(identity.secret, first.roomId, {
+        id: "starter-settings", type: T.ROOM_POLICY_SET,
+        data: { requireIndependentReview: false, requireOwnerDecision: false }
+      });
+      const events = store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all(first.roomId).map(row => JSON.parse(row.body));
+      assert.equal(replay(events).room.agentStarterRequested, starter);
+      assert.equal(store.room(first.roomId).state.room.agentStarterRequested, starter);
+      const reopened = fixture.reopen();
+      const retry = reopened.rooms.create(identity.secret, args);
+      assert.equal(retry.duplicate, true);
+      assert.equal(retry.roomId, first.roomId);
+      assert.equal(Boolean(retry.starter), !starter, "the response still describes the current board");
+      assert.throws(() => reopened.rooms.create(identity.secret, { ...args, starter: !starter }),
+        error => error.status === 409 && error.code === (key === "requestId" ? "request_conflict" : "room_exists"));
+      assert.equal(roomCount(reopened.store), 1);
+    });
+  }
+  test(`${key} preserves legacy replay behavior when creation intent is absent`, t => {
+    const { store, rooms, identity } = setup(t);
+    const roomId = "legacy-agent-room";
+    const args = createArgs({ [key]: key === "roomId" ? roomId : "legacy-request" });
+    const events = initialRoom(roomId, identity.identityId);
+    Object.assign(events[0].data, { title: args.title, purpose: args.purpose, kind: args.kind });
+    Object.assign(events[1].data, { displayName: args.displayName, kind: "agent", identityId: identity.identityId });
+    store.initialize(events);
+    store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+      .run(roomId, identity.identityId, identity.identityId, store.now());
+    store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at,request_id) VALUES(?,?,?,?)")
+      .run(identity.identityId, roomId, store.now(), args.requestId ?? null);
+    assert.equal(store.room(roomId).state.room.agentStarterRequested, undefined);
+    for (const starter of [false, true]) {
+      const retry = rooms.create(identity.secret, { ...args, starter });
+      assert.equal(retry.duplicate, true);
+      assert.equal(retry.roomId, roomId);
+      assert.equal(retry.starter, null, "a legacy retry must not seed a missing task");
+    }
+    assert.equal(roomCount(store), 1);
+  });
+}

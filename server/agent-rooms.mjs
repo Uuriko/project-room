@@ -213,7 +213,8 @@ export class AgentRooms {
         if (prior) {
           const state = this.store.room(prior.room_id).state;
           const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-            && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
+            && state.room.kind === kind && state.members[memberId]?.displayName === displayName
+            && (state.room.agentStarterRequested === undefined || state.room.agentStarterRequested === wantStarter);
           if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
           return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId, displayName);
         }
@@ -222,7 +223,8 @@ export class AgentRooms {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
         const state = created ? this.store.room(roomId).state : null;
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-          && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
+          && state.room.kind === kind && state.members[memberId]?.displayName === displayName
+          && (state.room.agentStarterRequested === undefined || state.room.agentStarterRequested === wantStarter);
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return this.#duplicateCreateResponse(roomId, memberId, identity.identityId, displayName);
       }
@@ -246,10 +248,13 @@ export class AgentRooms {
       const createdCount = this.store.db.prepare("SELECT count(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n;
       if (createdCount >= AGENT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
       const at = new Date(this.store.now()).toISOString();
+      // Record the original starter choice in the creation event, independent
+      // of later board edits. Older rooms have no such metadata and retain
+      // their existing replay behavior rather than guessing from live tasks.
       // The identity is its own founding member: member id = identity id,
       // full owner permission set (bootstrap owner path in addMember).
       this.store.initialize([
-        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
+        event({ type: T.ROOM_CREATED, actorId: memberId, roomId, at, data: { roomId, ownerId: memberId, title, purpose, kind, agentStarterRequested: wantStarter, historyDefaultsVersion: HISTORY_DEFAULTS_VERSION } }), // PRIV-2
         event({ type: T.MEMBER_ADDED, actorId: memberId, roomId, at, data: { memberId, displayName, kind: "agent", permissions: [...PERMISSIONS], identityId: identity.identityId } })
       ]);
       // Link the identity so its pri_ secret authenticates to the new room.
