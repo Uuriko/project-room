@@ -58,6 +58,10 @@ test('chat requests activity only; Record loads the complete tail, retries failu
   assert.equal(await page.locator('#message-input').inputValue(), 'A draft stays here.');
   assert.ok(reads.slice(after).includes('activity'));
   assert.equal(reads.slice(after).includes('full'), false, 'closing Record restores lightweight live updates');
+  const absentRecordRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && !response.request().headers()['x-project-room-audit-view']);
+  await page.evaluate(() => { location.hash = '#event-no-such-record'; });
+  await absentRecordRead;
+  assert.equal(await page.locator('#settings-dialog').evaluate(node => node.open), false, 'an unresolved legacy event link does not open Record');
   await page.evaluate(id => { location.hash = '#pr-record/event/' + id; }, sourceEventId);
   await page.locator(`[data-event-record-id="${sourceEventId}"]`).waitFor();
   await page.waitForFunction(id => document.activeElement?.dataset.eventRecordId === id, sourceEventId);

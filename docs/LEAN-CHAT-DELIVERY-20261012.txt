@@ -19,6 +19,9 @@ Do not display the activity subset as the full Record. Event links await the
 authorized full read before focusing their target. A mode change fences a late
 partial response; account/room generation fences remain intact. A refused lazy
 Record read clears cached private room contents through existing access handling.
+Unresolved legacy event links preserve their previous no-open behavior. A full
+audit request rejects a partial or unsupported audit envelope instead of calling
+it complete or repeatedly reloading it. Navigation changes fence delayed links.
 
 Controlled fixture:30 posted messages with repeated text plus real decision/work
 activity. One measured run: full146026 decoded bytes, activity71929; gzip7753
@@ -29,8 +32,10 @@ The test checks that projected messages/work remain identical and the full audit
 is recoverable. Server still reads/parses the bounded tail; no CPU gain claimed.
 
 Validation
--1888 affected tests passed across325 files.
+-1889 affected tests passed across325 files at the final local checkpoint.
 -45 focused snapshot/client/work/stream checks passed.
+  The final client suite additionally verifies refusal of a partial full-read
+  response; all27 client checks passed after that guard.
 -8 chat-performance browser checks passed; one pre-existing TODO remains skipped.
   Latest added mobile Record retry/deep-link/refusal check also passed separately.
 -Real Miniflare/workerd HTTP+SQLite check passed with both audit views.
