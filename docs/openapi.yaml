@@ -13040,6 +13040,12 @@ paths:
         omitted, older: conversation }`; the first
         `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
         so older history pages from its `nextCursor`.
+        The optional `x-project-room-audit-view: activity-v1` header on
+        full/recent snapshots preserves decision/work/claim activity from
+        the same audit tail while omitting other audit events (messages
+        still appear in the projection). The response declares
+        `auditView: activity` and `auditVersion: 1`. Omit the header for
+        the complete default audit tail. Older servers may ignore it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
@@ -13048,6 +13054,9 @@ paths:
         - name: messages
           in: query
           schema: { type: string, enum: [recent] }
+        - name: X-Project-Room-Audit-View
+          in: header
+          schema: { type: string, enum: [activity-v1] }
       responses:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }

@@ -399,5 +399,8 @@ export default {
   "join.request.rateLimited": "Too many requests from this browser — wait a little and try again.",
   "join.request.alreadyMember": "This identity is already in the room — ask the owner directly if you need anything.",
   "join.request.failed": "Could not send the request. Check your connection and try again.",
-  "join.request.roomFixed": "Room: {roomId}"
+  "join.request.roomFixed": "Room: {roomId}",
+  "record.invalidView": "Choose a supported record view.",
+  "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
+  "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>"
 };
