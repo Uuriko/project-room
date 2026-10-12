@@ -181,7 +181,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     && (filters.connection === "all" || rowConnection(source) === filters.connection)
     && (!filters.unreadOnly || !source.readAt));
   function renderFilters() {
-    $("#inbox-filters").hidden = rows.length === 0;
+    $("#inbox-filters").hidden = rows.length === 0 && searchQuery === null;
     const option = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
     const present = new Map(rows.map(source => [rowChannel(source), null]));
     if (!present.has(filters.channel)) filters.channel = "all";
@@ -294,7 +294,13 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       renderFilters(); renderList();
       const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
       text("#inbox-status", result.total ? `${result.total} result${result.total === 1 ? "" : "s"} for “${result.query}”.` : `No results for “${result.query}”.`);
-    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { searchQuery = null; text("#inbox-status", errorText(error)); } }
+    } catch (error) {
+      if (owns() && turn === epoch && navigation === navigationEpoch && active) {
+        // Keep Clear usable while the previous results are still on screen.
+        const clear = $("#inbox-search-clear"); if (clear) clear.hidden = false;
+        text("#inbox-status", errorText(error));
+      }
+    }
     finally { if (searching === turn) searching = false; }
   }
   function clearSearch() {

@@ -1342,6 +1342,66 @@ test('late Inbox disconnect completion does not reopen Inbox over current room w
   await p.locator(`[data-connection-id="${mail.raw.connection.id}"]`).filter({ hasText: 'Disconnected' }).waitFor();
 });
 
+for (const mobile of [false, true]) for (const scenario of ['no matches', 'failed replacement']) test(`Inbox search recovery ${mobile ? 'mobile' : 'desktop'}: ${scenario} can be cleared`, { timeout: 25000 }, async t => {
+  const f = await setup(t, mobile), p = f.page;
+  await f.inbox();
+  if (mobile) await p.locator('#inbox-back').click();
+  const search = async query => {
+    await p.locator('#inbox-search-input').fill(query);
+    await p.locator('#inbox-search-form button[type=submit]').click();
+  };
+  if (scenario === 'no matches') {
+    await search('unmatchedsyntheticquery');
+    await p.locator('#inbox-status').filter({ hasText: 'No results for' }).waitFor();
+    assert.equal(await p.locator('#inbox-list [data-source-id]').count(), 0);
+  } else {
+    await search('Friday');
+    await p.locator('#inbox-status').filter({ hasText: '1 result for' }).waitFor();
+    assert.deepEqual(await p.locator('#inbox-list [data-source-id]').evaluateAll(rows => rows.map(row => row.dataset.sourceId)), ['second']);
+    await p.route('**/api/inbox/search?*', route => route.fulfill({ status: 503, contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'synthetic_search_failure', message: 'Synthetic search failure' } }) }), { times: 1 });
+    await search('launch');
+    await p.locator('#inbox-status').filter({ hasText: 'Couldn’t' }).waitFor();
+    assert.deepEqual(await p.locator('#inbox-list [data-source-id]').evaluateAll(rows => rows.map(row => row.dataset.sourceId)), ['second']);
+  }
+  assert.equal(await p.locator('#inbox-search-input').isVisible(), true);
+  assert.equal(await p.locator('#inbox-search-clear').isVisible(), true);
+  await p.locator('#inbox-search-input').focus();
+  assert.equal(await p.locator('#inbox-search-input').evaluate(el => el === document.activeElement), true);
+  await Promise.all([
+    p.waitForResponse(response => new URL(response.url()).pathname === '/api/inbox' && response.status() === 200),
+    p.locator('#inbox-search-clear').click()
+  ]);
+  await p.waitForFunction(() => document.querySelectorAll('#inbox-list [data-source-id]').length === 2);
+  assert.deepEqual((await p.locator('#inbox-list [data-source-id]').evaluateAll(rows => rows.map(row => row.dataset.sourceId))).sort(), ['note', 'second']);
+  assert.equal(await p.locator('#inbox-search-input').inputValue(), '');
+  assert.equal(await p.locator('#inbox-search-clear').isVisible(), false);
+});
+
+test('Inbox search recovery preserves ordinary channel filters and a genuinely empty inbox', { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page, mail = seedEmail(f);
+  const emailId = mail.importMessage();
+  await f.inbox();
+  await p.locator('#inbox-filter-channel').selectOption('sample');
+  assert.deepEqual((await p.locator('#inbox-list [data-source-id]').evaluateAll(rows => rows.map(row => row.dataset.sourceId))).sort(), ['note', 'second']);
+  await p.locator('#inbox-filter-channel').selectOption('email');
+  assert.deepEqual(await p.locator('#inbox-list [data-source-id]').evaluateAll(rows => rows.map(row => row.dataset.sourceId)), [emailId]);
+  await p.locator('#inbox-filter-channel').selectOption('all');
+  assert.equal(await p.locator('#inbox-list [data-source-id]').count(), 3);
+  assert.equal(await p.locator('#inbox-search-input').isVisible(), true);
+  assert.equal(await p.locator('#inbox-search-clear').isVisible(), false);
+  // Keep the real viewer/session envelope; only the successful list is empty.
+  await p.route('**/api/inbox?*', async route => {
+    const response = await route.fetch(), value = await response.json();
+    await route.fulfill({ response, json: { ...value, sources: [], nextCursor: null } });
+  }, { times: 1 });
+  await clickChrome(p, '#nav-inbox');
+  await p.locator('#inbox-status').filter({ hasText: 'No messages yet.' }).waitFor();
+  assert.equal(await p.locator('#inbox-list [data-source-id]').count(), 0);
+  assert.equal(await p.locator('#inbox-filters').isVisible(), false);
+  assert.equal(await p.locator('#inbox-empty').isVisible(), true);
+});
+
 for (const action of ['search', 'pagination']) test(`Inbox ${action} can restart after leaving a pending request`, { timeout: 25000 }, async t => {
   const f = await setup(t), p = f.page;
   // Exercise real service cursors using small pages instead of a large fixture.
