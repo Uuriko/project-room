@@ -153,6 +153,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 /* UI calming #6: the uppercase "AGENT" pill is gone (the square agent avatar
    already marks agent messages); this rule now styles only the Pinned chip. */
 .pinned-chip { padding: .08rem .34rem; border: 1px solid var(--line); border-radius: 99px; color: var(--violet); font-size: .62rem; text-transform: uppercase; }
+.sent-chip { color: var(--green); }
 .message-meta time { color: var(--muted); font-size: .7rem; }
 .mention { padding: 0; border: 0; background: transparent; color: var(--violet); font: inherit; font-weight: 650; cursor: pointer; }
 .mention.agent { color: var(--text); font-weight: 850; }
