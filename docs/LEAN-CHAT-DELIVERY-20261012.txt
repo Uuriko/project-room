@@ -1,0 +1,42 @@
+LEAN CHAT DELIVERY — IMPLEMENTATION RECEIPT
+12 October 2026. Base cf3cb66dc9fe8eceaf188966c0b04b79da60d38a.
+
+Ordinary browser snapshot refreshes opt into X-Project-Room-Audit-View:
+activity-v1. Messages and current room/work state are unchanged. From the same
+last100 committed audit records, retain decision.recorded, work/claim/review
+activity and events with workItemId needed by existing selectors. Omit other
+audit events whose message bodies already appear in the projection. Apply the
+existing authorization, history and private-message redaction to both views.
+
+The response explicitly declares auditView=activity and auditVersion=1. The
+complete audit tail remains the default for legacy clients. Negotiation uses a
+header because older servers' recent-query parser rejects unfamiliar query
+parameters; older servers can ignore the header and return their normal view.
+
+Record loads the complete tail on demand, keeps it current while open, and
+returns to activity reads when closed. Loading/failure/retry copy is localized.
+Do not display the activity subset as the full Record. Event links await the
+authorized full read before focusing their target. A mode change fences a late
+partial response; account/room generation fences remain intact. A refused lazy
+Record read clears cached private room contents through existing access handling.
+
+Controlled fixture:30 posted messages with repeated text plus real decision/work
+activity. One measured run: full146026 decoded bytes, activity71929; gzip7753
+versus3071 bytes. Approximately51% less decoded data and60% less gzip data.
+IDs/timestamps can vary slightly between runs. These are fixture payload sizes,
+not production timing percentiles or a claim of equivalent latency improvement.
+The test checks that projected messages/work remain identical and the full audit
+is recoverable. Server still reads/parses the bounded tail; no CPU gain claimed.
+
+Validation
+-1888 affected tests passed across325 files.
+-45 focused snapshot/client/work/stream checks passed.
+-8 chat-performance browser checks passed; one pre-existing TODO remains skipped.
+  Latest added mobile Record retry/deep-link/refusal check also passed separately.
+-Real Miniflare/workerd HTTP+SQLite check passed with both audit views.
+-Lint passed with zero errors and128 existing warnings; design/reachability/i18n
+  ratchets unchanged. Whitespace check passed.
+
+These counts overlap. Hosted exact-head CI remains the landing gate. No merge,
+production deploy, coordinator configuration or always-on host activation is
+part of this checkpoint. PR2805 remains a separate earlier integration carrier.

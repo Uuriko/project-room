@@ -19,6 +19,58 @@ import { admitHistoricalMember } from './unstamped-member.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 
+test('chat requests activity only; Record loads the complete tail, retries failure and returns to lean reads', { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(); f.store.roomFlood = { consume() {} };
+  const sourceEventId = f.store.command(f.keys.owner, 'commons', { id: 'audit-source', type: 'message.posted', data: { messageId: 'audit-message', body: 'A shared message whose audit is loaded on demand.' } }).event.id;
+  const server = createRoomServer({ store: f.store, streamInterval: 30 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  const errors = [], reads = []; let failRecord = false, denyRecord = false;
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/api/rooms/commons*', async route => {
+    const request = route.request(), url = new URL(request.url());
+    if (request.method() !== 'GET' || url.pathname !== '/api/rooms/commons') return route.continue();
+    const activity = request.headers()['x-project-room-audit-view'] === 'activity-v1'; reads.push(activity ? 'activity' : 'full');
+    if (!activity && denyRecord) return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: { code: 'forbidden' } }) });
+    if (!activity && failRecord) { failRecord = false; return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'service_unavailable' } }) }); }
+    return route.continue();
+  });
+  await page.goto(origin); await signInFixture(page, f.keys.owner);
+  await page.locator('[data-message-record-id="audit-message"]').waitFor();
+  assert.ok(reads.includes('activity'));
+  const before = reads.length; failRecord = true;
+  await openSettings(page, 'record-panel');
+  await page.locator('[data-record-retry]').waitFor();
+  assert.equal(await page.locator(`[data-event-record-id="${sourceEventId}"]`).count(), 0, 'partial activity is never presented as the complete audit');
+  await page.locator('[data-record-retry]').click();
+  await page.locator(`[data-event-record-id="${sourceEventId}"]`).waitFor();
+  assert.deepEqual(reads.slice(before).filter(view => view === 'full'), ['full', 'full']);
+  await page.locator('#settings-close').click();
+  await page.waitForFunction(() => !document.querySelector('#settings-dialog').open);
+  await page.locator('#message-input').fill('A draft stays here.');
+  const after = reads.length;
+  f.store.command(f.keys.owner, 'commons', { id: 'audit-arrival', type: 'message.posted', data: { messageId: 'audit-new-message', body: 'A new arrival' } });
+  await page.locator('[data-message-record-id="audit-new-message"]').waitFor();
+  assert.equal(await page.locator('#message-input').inputValue(), 'A draft stays here.');
+  assert.ok(reads.slice(after).includes('activity'));
+  assert.equal(reads.slice(after).includes('full'), false, 'closing Record restores lightweight live updates');
+  await page.evaluate(id => { location.hash = '#pr-record/event/' + id; }, sourceEventId);
+  await page.locator(`[data-event-record-id="${sourceEventId}"]`).waitFor();
+  await page.waitForFunction(id => document.activeElement?.dataset.eventRecordId === id, sourceEventId);
+  await page.evaluate(() => history.replaceState(null, '', location.pathname));
+  const leanRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && response.request().headers()['x-project-room-audit-view'] === 'activity-v1');
+  await page.locator('#settings-close').click();
+  await leanRead;
+  denyRecord = true; await openSettings(page, 'record-panel');
+  await page.locator('#main').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('[data-message-record-id="audit-message"]').count(), 0, 'a refused lazy read clears cached private Room content');
+  assert.deepEqual(errors, []);
+});
+
 test('ordinary chat arrivals preserve historical DOM and fetch only changed request subscriptions', { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture({ dmConsent: true });
   let clock = Date.now();
