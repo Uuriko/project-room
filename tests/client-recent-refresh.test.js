@@ -83,6 +83,16 @@ test('a server ignoring activity negotiation remains usable and default clients 
   }
 });
 
+test('a full Record read refuses a partial activity response instead of presenting it as complete', async t => {
+  let calls = 0; const seen = [];
+  const client = new RoomClient({ events: null, auditView: 'activity', onSnapshot: value => seen.push(value), fetcher: async () => {
+    calls++; return response({ ...full(1, [message('m1')]), auditView: 'activity', auditVersion: 1 });
+  } });
+  client.session = identity(); t.after(() => client.disconnect());
+  await client.refresh(); await assert.rejects(client.setAuditView('full'));
+  assert.equal(calls, 2); assert.equal(seen.length, 1);
+});
+
 test("a new message on the stream re-reads only the newest messages and keeps older history", async t => {
   const f = fixture(t, url => url === FULL ? full(9, history) : recent(10, [message("m4"), message("m5"), message("m6")], 3));
   await f.warm();

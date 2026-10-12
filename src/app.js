@@ -3220,15 +3220,24 @@ function revealRoom() {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   focusRecord($("#room-title"));
 }
-function revealEvent(id) {
+function revealEvent(id, requireExisting = false) {
   if (!state || busy) return;
-  const generation = client.generation;
-  openSettings("record-panel");
+  const generation = client.generation, navigationHash = location.hash;
+  if (!requireExisting) openSettings("record-panel");
   void client.setAuditView("full").then(() => {
-    if (generation !== client.generation || !state || !$("#settings-dialog").open) return;
+    if (generation !== client.generation || !state) return;
+    if (requireExisting && location.hash !== navigationHash) return;
+    if (requireExisting && !state.eventLog.some(event => event.id === id)) {
+      if (!$("#settings-dialog").open || !$("#record-panel").open) void client.setAuditView("activity").catch(() => {});
+      return;
+    }
+    if (requireExisting) openSettings("record-panel");
+    if (!$("#settings-dialog").open) return;
     focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
       .find(node => node.dataset.eventRecordId === id));
-  }).catch(() => {});
+  }).catch(error => {
+    if (generation === client.generation && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) client.handleFailure(error);
+  });
 }
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
@@ -3287,10 +3296,11 @@ function revealLocationHash() {
   for (const [prefix, reveal] of [["#message-", revealMessage], ["#work-", revealWork], ["#member-", revealMember], ["#event-", revealEvent]]) {
     if (!hash.startsWith(prefix)) continue;
     const id = decodeFragment(hash.slice(prefix.length));
+    if (id !== null && prefix === "#event-" && snapshotAuditView === "activity") { revealEvent(id, true); return; }
     const exists = prefix === "#message-" ? conversation.byId.has(id)
       : prefix === "#work-" ? Boolean(state.workItems[id])
       : prefix === "#member-" ? Boolean(state.members[id])
-      : snapshotAuditView === "activity" || state.eventLog.some(event => event.id === id);
+      : state.eventLog.some(event => event.id === id);
     if (id !== null && exists) { reveal(id); return; }
     break;
   }

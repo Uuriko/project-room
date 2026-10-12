@@ -566,6 +566,8 @@ export class RoomClient {
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           // A mode change during this read must not display a partial Record.
           if (auditView !== this.auditView) { flight.revisit = true; continue; }
+          if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
+            throw new Error(uiText("record.invalidView"));
           // A server without the recent view ignores the parameter and answers in full.
           const whole = full || !Object.hasOwn(read, "messagesWindow");
           let snapshot, partial = false, complete = whole;
