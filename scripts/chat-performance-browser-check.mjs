@@ -75,6 +75,35 @@ test('chat requests activity only; Record loads the complete tail, retries failu
   assert.deepEqual(errors, []);
 });
 
+test('a pending old-room Record read cannot block or replace the next account record', { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture();
+  f.store.initialize(initialRoom('other', 'owner')); f.store.createAccount('other-private-account'); f.store.bindHumanAccount('other', 'owner', 'other-private-account');
+  const otherKey = f.store.issueAccessKey('other', 'owner');
+  const otherEvent = f.store.command(otherKey, 'other', { id: 'new-account-record', type: 'message.posted', data: { messageId: 'new-account-message', body: 'New account private content' } }).event.id;
+  const server = createRoomServer({ store: f.store, streamInterval: 30 }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  let release; t.after(async () => { release?.(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
+  let captured, delivered;
+  const held = new Promise(resolve => { captured = resolve; }), finished = new Promise(resolve => { delivered = resolve; });
+  await page.route('**/api/rooms/commons*', async route => {
+    if (new URL(route.request().url()).pathname !== '/api/rooms/commons' || route.request().headers()['x-project-room-audit-view']) return route.continue();
+    const response = await route.fetch(), body = await response.text(); captured();
+    await new Promise(resolve => { release = resolve; });
+    await route.fulfill({ response, body }); delivered();
+  });
+  await openSettings(page, 'record-panel'); await held;
+  await page.locator('#settings-close').click(); await clickChrome(page, '#signout-button');
+  await signInFixtureInPlace(page, f.store, otherKey, 'other');
+  await page.locator('[data-message-record-id="new-account-message"]').waitFor();
+  await openSettings(page, 'record-panel');
+  await page.locator(`[data-event-record-id="${otherEvent}"]`).waitFor();
+  release(); await finished;
+  assert.equal(await page.locator(`[data-event-record-id="${otherEvent}"]`).count(), 1);
+  assert.equal(await page.locator('[data-message-record-id="test-welcome"]').count(), 0);
+});
+
 test('ordinary chat arrivals preserve historical DOM and fetch only changed request subscriptions', { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture({ dmConsent: true });
   let clock = Date.now();

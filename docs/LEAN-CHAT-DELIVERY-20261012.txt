@@ -22,6 +22,9 @@ Record read clears cached private room contents through existing access handling
 Unresolved legacy event links preserve their previous no-open behavior. A full
 audit request rejects a partial or unsupported audit envelope instead of calling
 it complete or repeatedly reloading it. Navigation changes fence delayed links.
+Room/account changes reset pending Record UI state. A held old-account full read
+cannot block the new account's Record or replace its contents. The real browser
+regression fails without this reset and passes with it.
 
 Controlled fixture:30 posted messages with repeated text plus real decision/work
 activity. One measured run: full146026 decoded bytes, activity71929; gzip7753
@@ -36,11 +39,14 @@ Validation
 -45 focused snapshot/client/work/stream checks passed.
   The final client suite additionally verifies refusal of a partial full-read
   response; all27 client checks passed after that guard.
--8 chat-performance browser checks passed; one pre-existing TODO remains skipped.
+-9 chat-performance browser checks passed; one pre-existing TODO remains skipped.
   Latest added mobile Record retry/deep-link/refusal check also passed separately.
 -Real Miniflare/workerd HTTP+SQLite check passed with both audit views.
 -Lint passed with zero errors and128 existing warnings; design/reachability/i18n
   ratchets unchanged. Whitespace check passed.
+-First hosted attempt at f28c35d4 reported one Updates-navigation timeout opening
+  its dialog. Two unchanged targeted local reproductions passed. No timeout or
+  assertion was relaxed; the final exact-head hosted run must qualify this too.
 
 These counts overlap. Hosted exact-head CI remains the landing gate. No merge,
 production deploy, coordinator configuration or always-on host activation is
