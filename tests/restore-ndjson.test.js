@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonText } from "../server/room-export.mjs";
-import { replayNdjsonInto, operatorRestoreResponse } from "../server/restore-ndjson.mjs";
+import { replayNdjsonInto, operatorRestoreResponse, RESTORE_MAX_BYTES } from "../server/restore-ndjson.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const OPERATOR_TOKEN = "operator-token-for-restore-tests";
@@ -130,6 +130,42 @@ test("operator restore refuses a live store and oversized bodies", async t => {
   const tooBig = await operatorRestoreResponse(
     fakeRequest({ body: "x".repeat(10), contentLength: 64 * 1024 * 1024 + 1 }), OPERATOR_TOKEN, target);
   assert.equal(tooBig.status, 413);
+});
+
+test("operator restore measures the body cap in bytes, not UTF-16 characters (#2949)", async t => {
+  // "é" is one UTF-16 code unit but two UTF-8 bytes: this body is under the
+  // cap in String.length yet over it in bytes, and a request without a
+  // Content-Length (chunked) skips the pre-read guard, so only a
+  // byte-accurate post-read cap can refuse it.
+  const target = openStore(t, "restore-ndjson-413-bytes-");
+  const body = "é".repeat(RESTORE_MAX_BYTES / 2 + 1);
+  assert.ok(body.length <= RESTORE_MAX_BYTES, "fixture is under the cap in characters");
+  assert.ok(Buffer.byteLength(body, "utf8") > RESTORE_MAX_BYTES, "fixture is over the cap in bytes");
+  const response = await operatorRestoreResponse(fakeRequest({ body }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 413);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "oversized restore writes nothing");
+});
+
+test("operator restore caps a chunked multibyte stream in bytes (#2949)", async t => {
+  const target = openStore(t, "restore-ndjson-413-stream-");
+  const encoder = new TextEncoder();
+  const chunk = encoder.encode("é".repeat(1_000_000)); // 1M characters, 2 MB
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < 40; i++) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const request = new Request("https://room.example/api/operator/restore", {
+    method: "POST",
+    headers: { authorization: `Bearer ${OPERATOR_TOKEN}` },
+    body: stream,
+    duplex: "half",
+  });
+  assert.equal(request.headers.get("content-length"), null, "chunked stream carries no Content-Length guard");
+  const response = await operatorRestoreResponse(request, OPERATOR_TOKEN, target);
+  assert.equal(response.status, 413);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "oversized restore writes nothing");
 });
 
 test("operator restore replays a valid export and reports the verified summary", async t => {

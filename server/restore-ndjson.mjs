@@ -167,6 +167,50 @@ function authorizeOperatorRestore(authorization, expected) {
   return timingSafeEqual(Buffer.from(actual), Buffer.from(wanted)) ? "ok" : "denied";
 }
 
+// UTF-8 byte length of a decoded string, stopping once `limit` is exceeded.
+// String.length counts UTF-16 code units, not bytes: multibyte characters
+// pass a length check while carrying several times the byte cap (#2949), so
+// the restore cap must never be measured in string characters.
+function utf8ByteLengthExceeds(text, limit) {
+  let bytes = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    if (bytes > limit) return true;
+  }
+  return false;
+}
+
+// Read the request body under RESTORE_MAX_BYTES, measured in bytes.
+// When the body is a stream, count each chunk as it arrives and cancel as
+// soon as the cap is exceeded, so an oversized chunked body (no
+// Content-Length for the pre-read guard) is never buffered in full.
+// Bodies without a stream (e.g. test doubles exposing only text()) fall back
+// to a byte-accurate check on the decoded string.
+async function readRestoreBody(request) {
+  if (request.body && typeof request.body.getReader === "function") {
+    const reader = request.body.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > RESTORE_MAX_BYTES) {
+        try { await reader.cancel(); } catch { /* already errored/closed */ }
+        return { tooLarge: true, text: "" };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return { tooLarge: false, text: new TextDecoder().decode(bytes) };
+  }
+  const text = await request.text();
+  return { tooLarge: utf8ByteLengthExceeds(text, RESTORE_MAX_BYTES), text };
+}
+
 const jsonHeaders = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 
 function jsonResponse(status, body) {
@@ -190,12 +234,13 @@ export async function operatorRestoreResponse(request, token, store) {
     return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
   let ndjson;
   try {
-    ndjson = await request.text();
+    const body = await readRestoreBody(request);
+    if (body.tooLarge)
+      return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
+    ndjson = body.text;
   } catch {
     return jsonResponse(400, { error: { code: "unreadable_body", message: "Could not read the restore body" } });
   }
-  if (ndjson.length > RESTORE_MAX_BYTES)
-    return jsonResponse(413, { error: { code: "too_large", message: "Restore is too large for a single request" } });
   let result;
   try {
     result = replayNdjsonInto(ndjson, store);
