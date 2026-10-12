@@ -6,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
 import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -327,6 +327,8 @@ const TIMELINE_PAGER_KEY = "pager:earlier";
 const timelineWindow = new Map();
 let timelineRevealing = false;
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
+const timelinePin = createTimelinePin();
+let pinScrollTop = null; // where the pin last moved the list; that scroll event is not the reader's
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, catchUpBoundary = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
@@ -367,6 +369,8 @@ try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
+  // Live refresh: a peer's consent decision arrives as dm.consent_changed.
+  onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
@@ -2301,8 +2305,9 @@ function renderMessages() {
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
   const listTop = Math.max(0, list.getBoundingClientRect().top);
-  const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
-    : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const listNearBottom = !pageScroll && list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const pinOnly = !pageScroll && !listNearBottom && timelinePin.holds(view, list); // at the newest only by the pin
+  const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80 : pinOnly || listNearBottom;
   const anchor = [...list.children].find(e => {
     if (e.hasAttribute("data-claim-update") || e.dataset.key === TIMELINE_PAGER_KEY) return false; // removed and repainted below
     const bounds = e.getBoundingClientRect();
@@ -2321,7 +2326,7 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
-  const newMessages = sameView && !revealing ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
+  const newMessages = sameView && !revealing ? arrivalsAfterShown(messages, m => previous.has(`message:${m.id}`)) : [];
   const newCount = newMessages.length;
   // Your own message, sent from this browser, always comes into view: it is
   // not news to you, and a "jump to latest" pill for it hides what you just said.
@@ -2466,8 +2471,14 @@ function renderMessages() {
   }
   restoreTimelineSelection(list, savedSelection);
   list.dataset.view = view;
-  if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
-  else if ((nearBottom || ownArrival) && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
+  if (!sameView) {
+    list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0;
+    if (viewPositions.has(view)) timelinePin.clear(); else timelinePin.set(view, list);
+  } else if ((nearBottom || ownArrival) && !focused) {
+    if (pinOnly && !ownArrival) { stickPinnedTimeline(list); if (newCount > 0) scheduleHorizonAdvance(); }
+    else { list.scrollTop = list.scrollHeight; timelinePin.set(view, list); }
+    newVisibleMessages = 0;
+  }
   else {
     if (!pageScroll && anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - anchorOffset;
     newVisibleMessages += newCount;
@@ -4992,9 +5003,31 @@ new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) close
 new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
   .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 // Attention: advancing the read horizon is scroll-driven (debounced). Both the
-// message list and the window can be the scroller depending on layout.
+// message list and the window can be the scroller depending on layout. Only a
+// reader's scroll counts: one that follows wheel, touch, a scroll key or a
+// pointer on the list's own scrollbar. The app's layout and programmatic
+// scrolls (chrome settling, menus closing, the pin) never mark anything read,
+// so Mark unread survives a reload. A reader scroll keeps the window open
+// while it runs, which covers touch momentum.
+const READER_SCROLL_MS = 1000;
+let readerScrollAt = -Infinity;
+const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+const noteReaderScroll = () => { readerScrollAt = performance.now(); };
+addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
+addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
+addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
+$("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
 for (const scroller of [$("#message-list"), window]) {
-  scroller.addEventListener("scroll", () => { if (nearBottomOfList()) scheduleHorizonAdvance(); }, { passive: true });
+  scroller.addEventListener("scroll", () => {
+    if (!readerScrolling()) return;
+    noteReaderScroll();
+    if (scroller !== window && pinScrollTop !== null) {
+      const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
+      if (pinned) return;
+    }
+    if (nearBottomOfList()) scheduleHorizonAdvance();
+  }, { passive: true });
 }
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
@@ -5230,6 +5263,23 @@ $("#reaction-sheet-options").addEventListener("click", e => {
   closeReactionSheet();
   setReaction(id, emoji);
 });
+// Chrome that mounts or resizes around the timeline after it opened at the
+// newest message (assistant panel, pill, composer) keeps it there (R68-1).
+if (globalThis.ResizeObserver) new ResizeObserver(() => {
+  const list = $("#message-list");
+  if (timelinePin.holds(list.dataset.view, list)) stickPinnedTimeline(list);
+}).observe($("#message-list"));
+// The pin moving the list is not the reader scrolling, so it never marks
+// anything read: its scroll event is skipped, and where the move hid a layout
+// change that took the list off the bottom, a pending read-horizon advance is
+// dropped as it would have been without the pin.
+function stickPinnedTimeline(list) {
+  const before = list.scrollTop, offBottom = list.scrollHeight - before - list.clientHeight >= 80;
+  list.scrollTop = list.scrollHeight; timelinePin.set(list.dataset.view, list);
+  if (list.scrollTop === before) return;
+  pinScrollTop = list.scrollTop;
+  if (offBottom) { clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null; }
+}
 // Long-press (touch/pen): hold a message to open the reaction sheet.
 $("#message-list").addEventListener("pointerdown", e => {
   if (e.pointerType === "mouse" || e.button !== 0) return;
@@ -6607,7 +6657,7 @@ let notificationNote = "", notificationBefore = null, notificationLoading = fals
 // DM consent pairs for the signed-in member (PR #731).
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
-let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0;
+let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0, dmConsentRefetchQueued = false;
 let friendBonds = [], friendBusy = false, friendSeq = 0, friendDmPeerId = null;
 // #660: server-derived presence states per member (memberId -> presence API
 // entry). Refreshed on room open and on an interval while visible; the rail
@@ -7139,22 +7189,30 @@ function stopPresencePoll() {
 // The signed-in member's consent pairs drive the People panel's Direct
 // messages sections and the composer's DM recipient hint. Load failures stay
 // silent (a stale list is worse than none); every action reports loudly.
+function dmConsentStale(seq, generation, room) {
+  // Compare the room, not the state object: every stream snapshot assigns a
+  // fresh state object, so an identity check discards a result that a
+  // mid-flight snapshot raced with even though nothing changed rooms.
+  return seq !== dmConsentSeq || generation !== client.generation || state?.room?.id !== room?.room?.id;
+}
 async function refreshDmConsents() {
-  if (!state || !session || $("#main").hidden || dmConsentBusy) return;
+  if (!state || !session || $("#main").hidden) { dmConsentRefetchQueued = false; return; }
+  if (dmConsentBusy) { dmConsentRefetchQueued = true; return; }
   const seq = ++dmConsentSeq, generation = client.generation, room = state;
   dmConsentBusy = true;
   try {
     const result = await fetchDmConsents(client);
-    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    if (dmConsentStale(seq, generation, room)) return;
     dmConsents = Array.isArray(result) ? result : [];
   } catch {
     // A failed refresh keeps the last known list: wiping it would flash the
     // whole People panel back to "no consent" while the failed action
     // already reported loudly through the notice banner.
-    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    if (dmConsentStale(seq, generation, room)) return;
   } finally {
     dmConsentBusy = false;
-    if (seq === dmConsentSeq && generation === client.generation && state === room) render();
+    if (!dmConsentStale(seq, generation, room)) render();
+    if (dmConsentRefetchQueued) { dmConsentRefetchQueued = false; void refreshDmConsents(); }
   }
 }
 async function runDmConsentAction(action, peerId, button) {
@@ -7180,7 +7238,7 @@ async function runDmConsentAction(action, peerId, button) {
     else if (action === "unblock") await unblockDmMember(client, peerId);
     else if (action === "revoke") await revokeDmConsent(client, peerId);
     else return;
-    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    if (dmConsentStale(seq, generation, room)) return;
     notice(action === "request" ? `DM request sent to ${peer.displayName}.`
       : action === "approve" ? `${peer.displayName} can now message you directly.`
       : action === "reject" ? `Declined ${peer.displayName}'s DM request.`
@@ -7188,14 +7246,18 @@ async function runDmConsentAction(action, peerId, button) {
       : action === "unblock" ? `${peer.displayName} unblocked — they can send a DM request again.`
       : `DM consent with ${peer.displayName} revoked.`);
   } catch (error) {
-    if (seq === dmConsentSeq && generation === client.generation && state === room) notice(dmConsentFailureMessage(error, peer.displayName), true);
+    if (!dmConsentStale(seq, generation, room)) notice(dmConsentFailureMessage(error, peer.displayName), true);
   } finally {
     dmConsentBusy = false;
     // Re-enable the clicked button: a failed action leaves the consent list
     // unchanged, so the post-action render skips the DOM (identical HTML) and
     // would otherwise leave the button dead until an unrelated re-render.
     if (button) button.disabled = false;
-    if (seq === dmConsentSeq && generation === client.generation && state === room) await refreshDmConsents();
+    const drained = dmConsentRefetchQueued;
+    dmConsentRefetchQueued = false;
+    // Drain even across a room switch: the queued request came from the old
+    // room, but the panel on the new room needs fresh consent data too.
+    if (!dmConsentStale(seq, generation, room) || drained) await refreshDmConsents();
   }
 }
 // ---- Friend / Bond ------------------------------------------------------------
