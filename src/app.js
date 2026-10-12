@@ -707,7 +707,7 @@ inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => st
   try { await client.refresh(); if (state && isCurrent()) revealMessage(receipt.messageId); }
   catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
 } });
-let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null, roomOpenVersion = 0;
 // Account-session restore flight: declared before the sign-in UI mounts.
 // The magic-link auto-redeem runs synchronously during mount (page load
 // with ?magic=), so ensureAccountSession must not sit in the temporal dead
@@ -1108,17 +1108,27 @@ async function ensureDefaultRoom() {
 }
 async function openAccountRoom(roomId) {
   if (invitationIsCommitting() || signoutLoading) return;
+  const version = ++roomOpenVersion, owned = accountClient.session, current = session, generation = client.generation, destination = location.href;
+  const returning = () => version === roomOpenVersion && !invitationIsCommitting() && !signoutLoading && location.href === destination
+    && owned?.authenticated && accountClient.session === owned && state?.room?.id === roomId
+    && current?.roomId === roomId && current.authMode === "account" && session === current && client.session === current
+    && client.generation === generation && roomGeneration === generation && client.ownsAccountSession();
+  // Returning to the still-owned room must not retire its drafts or view.
+  // Confirm first: another tab may have replaced the account cookie.
+  if (returning()) {
+    if (await confirmAccount() === true && returning()) $("#nav-rooms").click();
+    return;
+  }
   if (state) saveComposer();
   if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
-  const owned = accountClient.session;
-  if (await confirmAccount() !== true || accountClient.session !== owned) return;
+  if (await confirmAccount() !== true || version !== roomOpenVersion || accountClient.session !== owned) return;
   accessEndContext = "accepted-room-switch"; client.endAccess();
   history.replaceState(null, "", "?room=" + encodeURIComponent(roomId) + "#pr-view/rooms");
   try { await client.restore(roomId); }
   catch {
-    if (accountClient.session !== owned) return;
+    if (version !== roomOpenVersion || accountClient.session !== owned) return;
     showAccountWorkspace(); inboxUI.showRoomList();
     $("#account-rooms-status").textContent = "Couldn’t open that room. Refresh rooms to retry.";
   }
@@ -4822,7 +4832,7 @@ function roomActionEntries() {
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite", words: "share join link people agents", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-people-button", activate: true },
-    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", always: true },
+    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", always: true },
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
@@ -4994,7 +5004,17 @@ function chooseRoomAction(id) {
   if (id === "activity") { closeRoomActions(false); openActivity(); return; }
   if (id === "later") { closeRoomActions(false); openLater(); return; }
   if (id === "results") { selectWorkView("results"); return; }
-  if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
+  if (id === "create-room") {
+    if (invitationIsCommitting() || signoutLoading) return;
+    if (accountClient.session?.authenticated) {
+      inboxUI.showRoomList(true);
+      $("#account-room-create").open = true;
+      $("#account-room-title").focus();
+    } else {
+      openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus();
+    }
+    return;
+  }
   if (id === "landing") { openSettings("land-queue-panel"); return; }
   if (id === "referrals") { openSettings("referral-panel"); return; }
   if (id === "permissions") { openSettings("room-permissions"); return; }

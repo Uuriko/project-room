@@ -119,6 +119,12 @@ test("room actions offer only the current member's available flows", { timeout: 
   for (const id of ["write", "search", "catch-up", "people", "results", "how-invite", "how-agent", "how-inbox"]) assert.equal(await f.action(id).count(), 1);
   await f.action("how-inbox").click();
   assert.match(await f.page.locator("#status").textContent(), /Sign in with Google or email to open your Inbox/);
+  await f.open(); await f.action("create-room").click();
+  assert.equal(await f.page.locator("#room-actions-dialog").isVisible(), false);
+  assert.equal(await f.page.locator("#settings-dialog").isVisible(), true);
+  assert.equal(await f.page.locator("#create-room-details").evaluate(node => node.open), true);
+  assert.equal(await f.page.locator("#create-room-details > summary").evaluate(node => node === document.activeElement), true);
+  assert.equal(await f.page.locator("#account-room-form").isVisible(), false, "room-key entry keeps account sign-in guidance");
   await f.capture("guest");
 });
 

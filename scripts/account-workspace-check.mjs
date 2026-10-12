@@ -1,5 +1,5 @@
 import { openMagicSignin } from "./signin-browser-journey.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -115,6 +115,113 @@ test("account-only other-tab replacement clears a held private read and navigati
 test("legacy member entry does not expose an account Inbox", { timeout: 20000 }, async t => {
   const f = await setup(t), p = f.page;
   await p.goto(f.origin); await signInFixture(p, f.keys.guest); await p.locator("#main").waitFor(); assert.equal(await p.locator("#workspace-nav").isVisible(), false);
+});
+
+for (const mobile of [false, true]) test(`room entry ${mobile ? "touch" : "keyboard"}: Create Room opens the form and returning keeps the conversation`, { timeout: 35000 }, async t => {
+  const f = await setup(t, { mobile, member: true }), p = f.page;
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "channel.created", data: { channelId: "planning", name: "planning" } });
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "message.posted", data: { messageId: "room-entry-root", body: "Planning thread", channelId: "planning" } });
+  for (let i = 0; i < 28; i++) f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "message.posted", data: {
+    messageId: `room-entry-reply-${i}`, body: `Planning reply ${i}`, replyToId: "room-entry-root", channelId: "planning" } });
+  await f.login(); await clickChrome(p, "#nav-rooms");
+  await p.locator('[data-account-room="commons"]').click(); await p.locator("#main").waitFor();
+  await ensureSidebarOpen(p); await p.locator('#channel-list [data-channel="planning"]').click();
+  await p.locator('[data-message-record-id="room-entry-root"] .thread-link').click();
+  const input = p.locator("#message-input");
+  const creations = [];
+  p.on("request", request => {
+    if (request.method() === "POST" && /^\/api\/account-rooms(?:\/|$)/.test(new URL(request.url()).pathname)) creations.push(request.url());
+  });
+  await input.fill("Keep this thread reply");
+  const thread = await p.locator("#thread-bar").textContent();
+  const chooseCreate = async () => {
+    if (mobile) await clickChrome(p, "#room-actions-open"); else await input.press("Control+k");
+    await p.locator("#room-actions-query").fill("Create Room");
+    if (mobile) await p.locator('[data-room-action="create-room"]').tap(); else await p.locator("#room-actions-query").press("Enter");
+    await p.locator("#account-room-title").waitFor();
+    assert.equal(await p.locator("#room-actions-dialog").isVisible(), false);
+    assert.equal(await p.locator("#settings-dialog").isVisible(), false);
+    assert.equal(await p.locator("#account-room-title").evaluate(node => node === document.activeElement), true);
+    assert.equal(new URL(p.url()).hash, "#pr-view/room-list");
+  };
+  const scroll = await p.locator("#message-list").evaluate(node => { node.scrollTop = 40; return node.scrollTop; });
+  assert.ok(scroll > 0, "fixture has a scrollable thread");
+  await chooseCreate();
+  await p.locator("#account-room-title").fill("Unsubmitted room idea");
+  let warnings = 0;
+  p.removeAllListeners("dialog"); p.on("dialog", dialog => { warnings++; return dialog.dismiss(); });
+  await p.locator('[data-account-room="commons"]').click(); await p.locator("#main").waitFor();
+  assert.equal(warnings, 0, "returning to the current room is not a destructive switch");
+  assert.equal(await input.inputValue(), "Keep this thread reply");
+  assert.equal(await p.locator("#thread-bar").textContent(), thread);
+  assert.equal(await p.locator("#thread-bar").isVisible(), true);
+  assert.equal(await p.locator("#conversation-title").textContent(), "# planning");
+  assert.equal(await p.locator("#message-list").evaluate(node => node.scrollTop), scroll);
+  assert.equal(new URL(p.url()).searchParams.get("room"), "commons");
+  assert.equal(new URL(p.url()).hash, "#pr-view/rooms");
+  assert.equal(await p.locator("#conversation-title").evaluate(node => node === document.activeElement), true);
+  await chooseCreate();
+  assert.equal(await p.locator("#account-room-title").inputValue(), "Unsubmitted room idea", "reopening preserves the unfinished form");
+  await p.goBack(); await p.locator("#main").waitFor();
+  assert.equal(await input.inputValue(), "Keep this thread reply");
+  await p.goForward(); await p.locator("#account-room-title").waitFor();
+  assert.equal(await p.locator("#account-room-title").inputValue(), "Unsubmitted room idea");
+  assert.deepEqual(creations, [], "opening and revisiting the form never submits a room creation");
+});
+
+test("the latest room selection wins while account confirmation is pending", { timeout: 25000 }, async t => {
+  const f = await setup(t), p = f.page;
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.added", data: {
+    memberId: "room-picker", displayName: "Room picker", kind: "human", permissions: ["manage_members"] } });
+  f.store.createAccount("room-picker-account"); f.store.completeOnboarding("room-picker-account");
+  f.store.bindHumanAccount("commons", "room-picker", "room-picker-account");
+  const key = f.store.issueAccountAccessKey("room-picker-account");
+  const slot = f.store.createAccountSessionSlot(), auth = f.store.loginAccountSession(slot.token, key, 0);
+  f.store.createAccountRoom(slot.token, auth.sessionBinding, {
+    roomId: "other-choice", title: "Other choice", purpose: "A synthetic switch target", kind: "personal", displayName: "Owner" });
+  await f.login(p, key); await clickChrome(p, "#nav-rooms");
+  await p.locator('[data-account-room="commons"]').click(); await p.locator("#main").waitFor();
+  await p.locator("#message-input").fill("Keep the latest selection");
+  await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="other-choice"]').waitFor();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route("**/api/account-session", async route => {
+    if (route.request().method() !== "GET") return route.continue();
+    reached(); await held; return route.continue();
+  });
+  const restores = [];
+  p.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/session") restores.push(url.searchParams.get("room"));
+  });
+  let warnings = 0;
+  p.removeAllListeners("dialog"); p.on("dialog", dialog => { warnings++; return dialog.accept(); });
+  await p.locator('[data-account-room="other-choice"]').click(); await started;
+  await p.locator('[data-account-room="commons"]').click(); release();
+  await p.locator("#main").waitFor();
+  assert.equal(warnings, 1, "only the genuinely different room needs a switch warning");
+  assert.deepEqual(restores, [], "the older pending switch never retires and restores room access");
+  assert.equal(new URL(p.url()).searchParams.get("room"), "commons");
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep the latest selection");
+});
+
+test("returning to the current room still confirms account ownership before revealing it", { timeout: 25000 }, async t => {
+  const f = await setup(t, { member: true }), p = f.page;
+  await f.login(); await clickChrome(p, "#nav-rooms");
+  await p.locator('[data-account-room="commons"]').click(); await p.locator("#main").waitFor();
+  await p.locator("#message-input").fill("Private to the old account");
+  await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="commons"]').waitFor();
+  let confirmations = 0;
+  await p.route("**/api/account-session", route => {
+    if (route.request().method() !== "GET") return route.continue();
+    confirmations++;
+    return route.fulfill({ status: 409, json: { error: { code: "session_binding_changed", message: "Synthetic account replacement" } } });
+  });
+  await p.locator('[data-account-room="commons"]').click(); await p.locator("#auth-panel").waitFor();
+  assert.ok(confirmations > 0);
+  assert.equal(await p.locator("#main").isVisible(), false);
+  assert.equal(await p.locator("#message-input").inputValue(), "");
 });
 
 test("an account-home invitation joins explicitly and keeps the private draft", { timeout: 25000 }, async t => {
