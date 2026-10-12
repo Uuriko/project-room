@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { browserPlan, parseShard } from "../scripts/browser-shards.mjs";
+import { browserPlan, parseShard, verifyBrowserShards, SHARD_COUNT } from "../scripts/browser-shards.mjs";
 
 // Real Node tests, real wrapper and real CLI gate: covers omission/duplication,
 // lost child exit codes, missing matrix jobs and stale success artifacts.
@@ -77,10 +77,55 @@ test("single-shard re-run: latest attempt per shard wins, untouched shards keep 
   // (untouched shards from attempt 1; re-run shard from attempt 2).
   assert.equal(invoke([shardArg], { GITHUB_RUN_ATTEMPT: "2" }).status, 0);
   assert.equal(gate2().status, 0, "mixed-attempt success passes");
-  // A receipt from a different run fails closed even at a higher attempt.
-  writeFileSync(join(dir, "test-results/browser-shard-1-of-6-attempt-9.json"),
-    JSON.stringify({ index: 1, total: 6, files: [], planHash: "nope", status: 0, signal: null, revision: "rerun-revision", runId: "other-run", runAttempt: "9" }));
-  assert.notEqual(gate2().status, 0, "foreign runId receipt fails closed");
+  // Keep the attempt valid so only the foreign runId rejects this receipt.
+  const latestPath = join(dir, `test-results/browser-shard-${target.index}-of-6-attempt-2.json`);
+  const foreign = JSON.parse(readFileSync(latestPath, "utf8"));
+  writeFileSync(latestPath, JSON.stringify({ ...foreign, runId: "other-run" }));
+  const rejected = gate2();
+  assert.notEqual(rejected.status, 0, "foreign runId receipt fails closed");
+  assert.match(rejected.stderr, /mismatched evidence/);
+});
+
+test("browser receipt attempts are positive bounded integers and duplicates fail closed", async t => {
+  const files = Array.from({ length: SHARD_COUNT }, (_, i) => `scripts/check-${i}.mjs`);
+  const plan = browserPlan(`node --test ${files.join(" ")}`);
+  const ident = { matrixResult: "success", revision: "r", runId: "1", runAttempt: "2" };
+  const good = plan.shards.map(shard => ({
+    index: shard.index, total: SHARD_COUNT, files: shard.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "r", runId: "1", runAttempt: "1",
+  }));
+  for (const attempt of [undefined, null, "", "abc", "1.5", "0", "-1", "Infinity", "9007199254740992", "01", " 1", true, [], {}, 0, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const label = `${typeof attempt} ${JSON.stringify(attempt)}`;
+    await t.test(`rejects receipt attempt ${label}`, () => {
+      const bad = good.map((receipt, index) => index === 0 ? { ...receipt, runAttempt: attempt } : receipt);
+      assert.throws(() => verifyBrowserShards(plan, bad, ident), /invalid run attempt/);
+    });
+    await t.test(`rejects aggregator attempt ${label}`, () => {
+      assert.throws(() => verifyBrowserShards(plan, good, { ...ident, runAttempt: attempt }), /invalid run attempt|Missing run identity/);
+    });
+  }
+  await t.test("rejects a receipt from a future attempt", () => {
+    assert.throws(() => verifyBrowserShards(plan, [...good, { ...good[0], runAttempt: "3" }], ident), /future attempt/);
+  });
+  const failed = { ...good[0], status: 1 };
+  for (const [label, duplicate] of [
+    ["identical success", [...good, good[0]]],
+    ["success then failure", [...good, failed]],
+    ["failure then success", [failed, ...good]],
+    ["numeric and string attempts", [...good, { ...good[0], runAttempt: 1 }]],
+    ["superseded conflict", [...good, { ...good[0], runAttempt: "2" }, failed]],
+  ]) {
+    await t.test(`rejects duplicate ${label}`, () => {
+      assert.throws(() => verifyBrowserShards(plan, duplicate, ident), /Duplicate/);
+    });
+  }
+  await t.test("accepts mixed attempts in either order and safe integer numbers", () => {
+    const receipts = [failed, ...good.slice(1), { ...good[0], runAttempt: 2 }];
+    const result = { scripts: files.length, shards: SHARD_COUNT };
+    assert.deepEqual(verifyBrowserShards(plan, receipts, ident), result);
+    assert.deepEqual(verifyBrowserShards(plan, receipts.toReversed(), ident), result);
+    assert.deepEqual(verifyBrowserShards(plan, good, { ...ident, runAttempt: Number.MAX_SAFE_INTEGER }), result);
+  });
 });
 
 test("canonical suite partition is complete and deterministic with bounded timing estimates", () => {
