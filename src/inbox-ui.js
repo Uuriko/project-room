@@ -106,12 +106,12 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
     writeDestination("room-list", push);
     $("#nav-inbox").setAttribute("aria-current", "false"); $("#nav-rooms").setAttribute("aria-current", "page");
     $("#inbox-panel").hidden = true; $("#main").hidden = true;
-    $("#account-rooms-panel").hidden = false; onNavigate(); onRooms();
+    $("#account-rooms-panel").hidden = false; onNavigate({ intent: push }); onRooms();
   }
   function show(place, updateLocation = true, push = false) {
     navigationEpoch++; paging = searching = false;
     remember(); // Capture before hiding the reader, when scroll offsets are meaningful.
-    onNavigate();
+    onNavigate({ intent: push });
     active = place === "inbox";
     browsing = false;
     if (updateLocation) writeDestination(active ? "inbox" : "rooms", push);

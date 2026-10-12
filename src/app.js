@@ -702,7 +702,7 @@ portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: m
 resultCopyUI = installResultCopy({ client, getState: () => state });
 inboxUI = installInbox({ account: accountClient, room: client, getRoom: () => state, onOpenWork: id => revealWork(id),
   onAccountEnded: endAccountAccess, onRooms: () => loadAccountRooms(),
-  onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); },
+  onNavigate: ({ intent = false } = {}) => { if (intent) roomOpenVersion++; if (!$("#status").classList.contains("error")) clearNotice(); },
   onShared: async (receipt, isCurrent) => {
   try { await client.refresh(); if (state && isCurrent()) revealMessage(receipt.messageId); }
   catch { if (isCurrent()) notice("Shared. Refresh the room to view it.", true); }
@@ -1123,7 +1123,9 @@ async function openAccountRoom(roomId) {
   if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
-  if (await confirmAccount() !== true || version !== roomOpenVersion || accountClient.session !== owned) return;
+  if (await confirmAccount() !== true || version !== roomOpenVersion || accountClient.session !== owned
+      || location.href !== destination || client.generation !== generation || session !== current
+      || invitationIsCommitting() || signoutLoading) return;
   accessEndContext = "accepted-room-switch"; client.endAccess();
   history.replaceState(null, "", "?room=" + encodeURIComponent(roomId) + "#pr-view/rooms");
   try { await client.restore(roomId); }
@@ -5116,12 +5118,14 @@ $("#main").addEventListener("click", e => {
 // History can change the room query as well as the fragment. Those entries
 // need popstate dispatch even when the browser does not emit hashchange.
 window.addEventListener("popstate", () => {
+  roomOpenVersion++; // Back/Forward supersedes a room choice still confirming access.
   // JDOT-COH-NAV begin
   if (replayWorkNavigation()) return;
   // JDOT-COH-NAV end
   if (location.hash.startsWith("#pr-view/")) revealLocationHash();
 });
 window.addEventListener("hashchange", () => {
+  roomOpenVersion++;
   revealAgentSigninLink();
   const fragment = consumeInvitationFragment();
   if (redirectAgentInvite(fragment)) return;
@@ -7700,12 +7704,12 @@ function usageCapRow(label, cap, format = usageNumber) {
 }
 async function loadUsage() {
   if (!state || !client.session) return;
-  const request = ++usageRequest;
+  const request = ++usageRequest, generation = client.generation, owned = client.session;
   $("#usage-status").textContent = "Loading usage…";
   $("#usage-refresh").hidden = true;
   try {
     const usage = await client.request(client.path("/usage"));
-    if (request !== usageRequest || !state) return;
+    if (request !== usageRequest || !state || client.generation !== generation || client.session !== owned) return;
     const { members, sessions, spend, spendAllowance: ledger, caps, period } = usage;
     const spendNote = spend.reportedCents === "unknown" ? "no session reported spend"
       : spend.sessionsUnreported ? `${usageNumber(spend.sessionsUnreported)} of ${usageNumber(spend.sessionsReported + spend.sessionsUnreported)} sessions unreported` : "every session reported";
@@ -7738,7 +7742,7 @@ async function loadUsage() {
     ].join(""));
     $("#usage-status").textContent = "";
   } catch (error) {
-    if (request !== usageRequest || !state) return;
+    if (request !== usageRequest || !state || client.generation !== generation || client.session !== owned) return;
     $("#usage-status").textContent = error.status === 429 ? "Usage is rate limited; try again in a minute." : "Usage could not be loaded.";
     $("#usage-refresh").hidden = false;
   }

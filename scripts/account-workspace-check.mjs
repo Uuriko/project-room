@@ -1,5 +1,5 @@
 import { openMagicSignin } from "./signin-browser-journey.mjs";
-import { clickChrome, ensureSidebarOpen } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, openSettings, closeSettings } from "./room-chrome.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
@@ -169,7 +169,7 @@ for (const mobile of [false, true]) test(`room entry ${mobile ? "touch" : "keybo
   assert.deepEqual(creations, [], "opening and revisiting the form never submits a room creation");
 });
 
-test("the latest room selection wins while account confirmation is pending", { timeout: 25000 }, async t => {
+async function setupRoomChoices(t) {
   const f = await setup(t), p = f.page;
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.added", data: {
     memberId: "room-picker", displayName: "Room picker", kind: "human", permissions: ["manage_members"] } });
@@ -181,6 +181,11 @@ test("the latest room selection wins while account confirmation is pending", { t
     roomId: "other-choice", title: "Other choice", purpose: "A synthetic switch target", kind: "personal", displayName: "Owner" });
   await f.login(p, key); await clickChrome(p, "#nav-rooms");
   await p.locator('[data-account-room="commons"]').click(); await p.locator("#main").waitFor();
+  return f;
+}
+
+test("the latest room selection wins while account confirmation is pending", { timeout: 25000 }, async t => {
+  const f = await setupRoomChoices(t), p = f.page;
   await p.locator("#message-input").fill("Keep the latest selection");
   await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="other-choice"]').waitFor();
   let release, reached;
@@ -204,6 +209,95 @@ test("the latest room selection wins while account confirmation is pending", { t
   assert.deepEqual(restores, [], "the older pending switch never retires and restores room access");
   assert.equal(new URL(p.url()).searchParams.get("room"), "commons");
   assert.equal(await p.locator("#message-input").inputValue(), "Keep the latest selection");
+});
+
+for (const destination of ["Rooms", "Inbox", "Back", "Back and reopen"]) test(`newer ${destination} navigation retires a pending room choice`, { timeout: 30000 }, async t => {
+  const f = await setupRoomChoices(t), p = f.page;
+  await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="other-choice"]').waitFor();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route("**/api/account-session", async route => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch(); reached(); await held; return route.fulfill({ response });
+  });
+  const restores = [];
+  p.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/session") restores.push(url.searchParams.get("room"));
+  });
+  await p.locator('[data-account-room="other-choice"]').click(); await started;
+  if (destination === "Rooms") await clickChrome(p, "#nav-rooms");
+  else if (destination === "Inbox") await clickChrome(p, "#nav-inbox");
+  else { await p.goBack(); await p.locator("#main").waitFor(); }
+  if (destination !== "Inbox") await p.locator("#message-input").fill("Written after choosing to stay");
+  if (destination === "Back and reopen") {
+    await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="commons"]').waitFor();
+  }
+  const expectedUrl = p.url();
+  const confirmed = p.waitForResponse(response => new URL(response.url()).pathname === "/api/account-session");
+  release(); await confirmed; await p.waitForLoadState("networkidle");
+  assert.equal(p.url(), expectedUrl, "an old confirmation cannot replace the newer destination, even after returning to the same URL");
+  assert.deepEqual(restores, [], "obsolete selection does not retire room access or restore another room");
+  if (destination !== "Inbox") assert.equal(await p.locator("#message-input").inputValue(), "Written after choosing to stay");
+  assert.equal(await p.locator(destination === "Inbox" ? "#inbox-panel" : destination === "Back and reopen" ? "#account-rooms-panel" : "#main").isVisible(), true);
+});
+
+test("room snapshots do not cancel an explicitly chosen different room", { timeout: 30000 }, async t => {
+  const f = await setupRoomChoices(t), p = f.page;
+  await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="other-choice"]').waitFor();
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  await p.route("**/api/account-session", async route => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch(); reached(); await held; return route.fulfill({ response });
+  });
+  await p.locator('[data-account-room="other-choice"]').click(); await started;
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "message.posted", data: {
+    messageId: "room-choice-live-update", body: "A live snapshot while choosing a room" } });
+  await p.locator('[data-message-record-id="room-choice-live-update"]').waitFor({ state: "attached" });
+  release(); await p.locator("#main").waitFor();
+  await p.waitForFunction(() => new URL(location.href).searchParams.get("room") === "other-choice"
+    && document.querySelector("#room-title").textContent === "Other choice");
+});
+
+for (const outcome of ["success", "failure"]) for (const returnToFirstRoom of [false, true]) test(`Usage ${outcome} ignores a closed room${returnToFirstRoom ? " after reopening that room" : " after switching rooms"}`, { timeout: 35000 }, async t => {
+  const f = await setupRoomChoices(t), p = f.page;
+  let release, reached;
+  const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; });
+  t.after(() => release());
+  let first = true;
+  const holdFirstUsage = async route => {
+    if (!first) return route.continue();
+    first = false;
+    const response = await route.fetch(); reached(); await held;
+    if (outcome === "success") return route.fulfill({ response });
+    return route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ error: { code: "rate_limited", message: "Synthetic delayed refusal" } }) });
+  };
+  await p.route("**/api/rooms/commons/usage", holdFirstUsage);
+  await openSettings(p, "usage-panel"); await started; await closeSettings(p);
+  await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="other-choice"]').click();
+  await p.waitForFunction(() => document.querySelector("#room-title").textContent === "Other choice");
+  if (returnToFirstRoom) {
+    await clickChrome(p, "#choose-room"); await p.locator('[data-account-room="commons"]').click();
+    await p.waitForFunction(() => new URL(location.href).searchParams.get("room") === "commons" && document.querySelector("#main").hidden === false);
+  }
+  const settled = p.waitForResponse(response => new URL(response.url()).pathname === "/api/rooms/commons/usage");
+  release(); await settled; await p.waitForLoadState("networkidle");
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false, "late Usage never reopens closed settings");
+  assert.equal(await p.locator("#usage-grid").textContent(), "", "previous room or previous session cannot fill the current Usage panel");
+  assert.equal(await p.locator("#usage-status").textContent(), "", "old failures cannot mark the current room as failed");
+  assert.equal(await p.locator("#usage-refresh").isHidden(), true);
+  await p.unroute("**/api/rooms/commons/usage", holdFirstUsage);
+  const roomId = returnToFirstRoom ? "commons" : "other-choice";
+  const fresh = p.waitForResponse(response => new URL(response.url()).pathname === `/api/rooms/${roomId}/usage`);
+  await openSettings(p, "usage-panel"); const body = await (await fresh).json();
+  await p.waitForFunction(() => document.querySelector("#usage-grid").textContent !== "" && document.querySelector("#usage-status").textContent === "");
+  assert.equal(await p.locator("#usage-grid dl").first().locator("dd").first().textContent(), String(body.members.humans));
+  const current = await p.locator("#usage-grid").textContent();
+  await closeSettings(p); await openSettings(p, "usage-panel");
+  assert.equal(await p.locator("#usage-grid").textContent(), current, "closing and reopening the same owned room preserves its confirmed figures");
 });
 
 test("returning to the current room still confirms account ownership before revealing it", { timeout: 25000 }, async t => {
