@@ -34,7 +34,8 @@ function privateCache(directory, scope, workItemId, maxBytes) {
         while (length < bytes.length && (count = readSync(fd, bytes, length, bytes.length - length, null))) length += count;
         if (length > maxBytes) throw fail("context_cache_invalid");
         const value = JSON.parse(bytes.subarray(0, length).toString("utf8"));
-        if (value.version !== 1 || value.scope !== scope || value.workItemId !== workItemId
+        if (!value || typeof value !== "object" || Array.isArray(value)
+          || value.version !== 1 || value.scope !== scope || value.workItemId !== workItemId
           || value.integrity !== digest(value.discussion) || !Array.isArray(value.discussion?.items)
           || !integer(value.discussion.checkpoint) || typeof value.discussion.resumeToken !== "string"
           || !value.discussion.resumeToken || value.discussion.resumeToken.length > 4096) throw fail("context_cache_invalid");

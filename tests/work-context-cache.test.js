@@ -123,7 +123,12 @@ test("cache corruption is discarded; credential/member scope cannot reuse anothe
   const file = f.files()[0], value = JSON.parse(readFileSync(file, "utf8"));
   value.discussion.items[0].message.body = "Corrupted local text"; writeFileSync(file, JSON.stringify(value));
   const repaired = await f.read(); assert.equal(repaired.continuation.reset, true); assert.ok(!bodies(repaired).includes("Corrupted local text"));
-  writeFileSync(file, "invalid JSON"); assert.equal((await f.read()).continuation.reset, true);
+  for (const malformed of ["invalid JSON", "null", "42", "[]"]) {
+    writeFileSync(file, malformed);
+    const recovered = await f.read();
+    assert.equal(recovered.continuation.reset, true, `discard malformed root: ${malformed}`);
+    assert.ok(bodies(recovered).includes("Original text"));
+  }
   const other = { ...f.connection, memberId: "reviewer", token: f.keys.reviewer };
   const next = await readResumablePreparation(new RoomAgentClient(other), "test-handoff", { ...f.options, connection: other });
   assert.equal(next.continuation.reused, false); assert.equal(f.files().length, 2);
