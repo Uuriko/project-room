@@ -474,6 +474,7 @@
   "tests/lease-renewal.test.js": 40126,
   "tests/legal-pages.test.js": 36739,
   "tests/legal-templates-grounding.test.js": 7162,
+  "tests/legal-unpublish-fail-closed.test.js": 4937,
   "tests/lesson-contradictions.test.js": 4937,
   "tests/lesson-scorer.test.js": 4327,
   "tests/listing-check.test.js": 5493,
