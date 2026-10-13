@@ -30,6 +30,7 @@ const BOND_DM_DATA_SHAPES = {
 // covered by axFamilyRecovery() below; tests/errors-catalog-drift.test.js
 // fails if a catalogued code loses either kind of coverage.
 const AX_NAMED_RECOVERIES = {
+  aborted: ["The request ended early, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload.", "Resend the request; if it repeats, check for a dropped connection or an oversized payload."],
   access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
   account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
   active_members: ["The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner.", "Remove or transfer the active human members first."],
@@ -145,6 +146,7 @@ const AX_NAMED_RECOVERIES = {
   slot_not_authenticated: ["Only an authenticated session slot can rotate its token. Authenticate the slot first, then rotate.", "Authenticate the session slot, then rotate its token."],
   squad_disbanded: ["A disbanded squad has no roster changes. Create a new squad if one is needed.", "Create a new squad instead of changing this one's roster."],
   token_conflict: ["This key conflicts with an existing one. Generate a new key.", "Generate a new key and resend."],
+  transfer_ownership_required: ["You own shared rooms that must change hands first. Transfer ownership of each room named in the message to another member, then retry the account deletion.", "Transfer ownership of each listed room to another member, then retry the account deletion."],
   too_many_open_claims: ["Release or finish one of your open claims before assigning another.", "Release or finish an open claim, then assign."],
   unreadable_body: ["The restore body could not be read. Resend a complete, readable body.", "Resend the restore with a complete body."],
   unsupported_content: ["Only HTML pages can be fetched. Do not retry this URL as-is.", "Fetch an HTML page instead; do not retry this content type."],
