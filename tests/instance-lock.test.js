@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireInstanceLock, INSTANCE_LOCK_ERRORS } from "../server/instance-lock.mjs";
@@ -46,6 +46,36 @@ test("a stale lock (dead pid) is reclaimed", t => {
   const lock = acquireInstanceLock(lockPath);
   t.after(() => lock.release());
   assert.equal(lock.pid, process.pid, "the new owner holds the reclaimed lock");
+});
+
+test("a just-created empty lock file is treated as held, not stolen", t => {
+  const dir = lockDir(t);
+  const lockPath = join(dir, ".project-room.lock");
+  // The state a second boot observes when a peer has created the lock with
+  // openSync("wx") but has not written its payload yet. Reclaiming it would
+  // put both processes on one database.
+  writeFileSync(lockPath, "", { mode: 0o600 });
+  assert.throws(() => acquireInstanceLock(lockPath), error => {
+    assert.equal(error.code, "instance_lock_held");
+    assert.match(error.message, /refusing to boot/);
+    return true;
+  });
+  assert.ok(existsSync(lockPath), "the peer's lock file must not be unlinked");
+  assert.equal(readFileSync(lockPath, "utf8"), "", "the peer's lock file must not be overwritten");
+});
+
+test("an old empty lock file is a crash leftover and is reclaimed", t => {
+  const dir = lockDir(t);
+  const lockPath = join(dir, ".project-room.lock");
+  // A peer that crashed between create and write leaves an empty file that
+  // never gains a payload; once it is older than the startup grace window
+  // it must not block boots forever.
+  writeFileSync(lockPath, "", { mode: 0o600 });
+  const longAgo = new Date(Date.now() - 60 * 60 * 1000);
+  utimesSync(lockPath, longAgo, longAgo);
+  const lock = acquireInstanceLock(lockPath);
+  t.after(() => lock.release());
+  assert.equal(lock.pid, process.pid);
 });
 
 test("a malformed lock file is reclaimed, not fatal", t => {

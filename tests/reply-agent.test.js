@@ -372,6 +372,39 @@ test("stale heartbeats show unknown without transferring ownership; status does 
   await assert.rejects(send("delivered"), /recorded answer/);
   await send("needs_attention"); await assert.rejects(send("working"), /silently resume/);
 });
+test("cancelled and declined requests cannot be flipped to result_ready or needs_attention", async t => {
+  const f = await fixture(t);
+  const claim = async label => {
+    const requestMessageId = f.open(label).command.data.messageId;
+    const context = await f.client.replyContext(requestMessageId);
+    const basis = { expectedRequestRevision: context.request.revision, contextEventId: context.request.contextEventId };
+    const attemptId = label + "-host";
+    await f.client.requestRuns({ requestMessageId, attemptId, action: "claim", ...basis });
+    return { requestMessageId, attemptId };
+  };
+  const report = run => action => f.client.requestRuns({ requestMessageId: run.requestMessageId, attemptId: run.attemptId, action });
+  // Cancelled after claim: reports are accepted while the request is open, but
+  // the requester cancelling it must stop a stale host flipping the run state.
+  const cancelled = await claim("run-cancelled");
+  await report(cancelled)("result_ready");
+  assert.equal((await f.client.requestRuns()).runs[cancelled.requestMessageId].state, "result_ready");
+  const beforeCancel = await f.client.replyContext(cancelled.requestMessageId);
+  f.store.command(f.keys.owner, "commons", { id: "cancel-run", type: "reply_request.cancelled",
+    data: { requestMessageId: cancelled.requestMessageId, expectedRequestRevision: beforeCancel.request.revision, reason: "No longer needed" } });
+  assert.equal(f.store.room("commons").state.replyRequests[cancelled.requestMessageId].status, "cancelled");
+  await assert.rejects(report(cancelled)("needs_attention"), { code: "request_run_changed" });
+  await assert.rejects(report(cancelled)("result_ready"), { code: "request_run_changed" });
+  assert.equal((await f.client.requestRuns()).runs[cancelled.requestMessageId].state, "result_ready");
+  // Declined after claim: the recipient declines, so a stale host result must not surface.
+  const declined = await claim("run-declined");
+  const declineContext = await f.client.replyContext(declined.requestMessageId);
+  await f.client.replyAction("room_respond_to_request",
+    f.respond(declineContext, { requestId: "decline-run", responseOutcome: "declined" }));
+  assert.equal(f.store.room("commons").state.replyRequests[declined.requestMessageId].status, "declined");
+  await assert.rejects(report(declined)("result_ready"), { code: "request_run_changed" });
+  await assert.rejects(report(declined)("needs_attention"), { code: "request_run_changed" });
+  assert.equal((await f.client.requestRuns()).runs[declined.requestMessageId].state, "working");
+});
 test("paused agents cannot start and a definite preflight refusal can be retried after resume", async t => {
   const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("paused-host").command.data.messageId;
   f.store.wakeQueue.pause(f.keys.producer, "commons", { requestId: "pause-run", reason: null });

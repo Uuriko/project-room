@@ -38,6 +38,11 @@ export const KEEP = [
   "server/channel-adapters/discord-webhook.mjs",
   // Existing merge-queue integration remains unmounted.
   "server/merge-queue.mjs",
+  // Client stores restored for audit-wave-3c regression coverage (#2893);
+  // runtime wiring is a separate product decision, not implicit enablement.
+  "src/handoff-store.mjs",
+  "src/dm-room-wiring.mjs",
+  "src/owner-alerts.mjs",
   // Operational/test entry points not discovered by this literal graph.
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",

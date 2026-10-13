@@ -303,20 +303,30 @@ function breakerRecord(store, bridgeId) {
  * Gate a call: closed → pass; open → fail fast unless the half-open window
  * elapsed (then exactly one ping probe passes); half-open → only the ping
  * probe passes until it resolves.
+ *
+ * `peek` computes the same verdict WITHOUT consuming the half-open probe —
+ * for callers that only decide whether an attempt is worth making and let
+ * the real call spend the probe (connectSession's pre-check; its adapter's
+ * connect() ping is the probe).
  */
-function breakerGate(store, bridgeId, adapterMethod, nowMs, openMs) {
+function breakerGate(store, bridgeId, adapterMethod, nowMs, openMs, { peek = false } = {}) {
   const rec = breakerRecord(store, bridgeId);
-  if (rec.state === 'open') {
+  let state = rec.state;
+  let probeSent = rec.probeSent;
+  if (state === 'open') {
     if (nowMs - rec.openedAt >= openMs) {
-      rec.state = 'half-open';
-      rec.probeSent = false;
+      state = 'half-open';
+      probeSent = false;
     } else {
       return { ok: false };
     }
   }
-  if (rec.state === 'half-open') {
-    if (adapterMethod !== 'ping' || rec.probeSent) return { ok: false };
-    rec.probeSent = true;
+  if (state === 'half-open') {
+    if (adapterMethod !== 'ping' || probeSent) return { ok: false };
+    if (!peek) {
+      rec.state = 'half-open';
+      rec.probeSent = true;
+    }
     return { ok: true, probe: true };
   }
   return { ok: true };
@@ -1264,7 +1274,10 @@ export async function connectSession(opts = {}) {
     );
   }
 
-  const gate = breakerGate(store, route.id, 'ping', nowFn(), openMs);
+  // Pre-check only (peek): the half-open probe itself is spent by
+  // adapter.connect()'s ping below — consuming it here would leave that
+  // ping refused, so a tripped bridge could never recover via this path.
+  const gate = breakerGate(store, route.id, 'ping', nowFn(), openMs, { peek: true });
   if (!gate.ok) return fallback('circuit_open', `breaker open for bridge ${route.id}`);
 
   const adapter = new HerdrBridgeAdapter({

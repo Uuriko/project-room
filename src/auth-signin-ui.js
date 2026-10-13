@@ -49,6 +49,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   const statusNode = () => surface()?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
     statusText = text; statusError = error;
+    // A fresh sign-in outcome supersedes the stale panel-level notice left by
+    // sign-out (e.g. "Session ended; private drafts were cleared."): one alert
+    // at a time, so two red role=alert errors never show together.
+    if (text) {
+      const panelNotice = globalThis.document?.getElementById?.("auth-error");
+      if (panelNotice && panelNotice !== statusNode() && panelNotice.textContent) panelNotice.textContent = "";
+    }
     const node = statusNode();
     if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
   }

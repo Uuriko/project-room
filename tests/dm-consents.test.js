@@ -76,6 +76,20 @@ test("request rejects self, unknown members, inactive members", () => {
   assert.equal(errOf(() => dms.request("nope", "alice", "bob")).code, "room_not_found");
 });
 
+test("request rejects Object.prototype names as members (issue #2842)", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  // Member projections are plain objects from JSON.parse, so ids like
+  // "toString" resolve to inherited functions under a raw members[id]
+  // index and used to pass the active-member check. They are not members.
+  for (const id of ["toString", "valueOf", "hasOwnProperty", "constructor", "__proto__"]) {
+    assert.equal(errOf(() => dms.request("r1", "alice", id))?.code, "target_not_found", `target ${id}`);
+    assert.equal(errOf(() => dms.request("r1", id, "bob"))?.code, "requester_not_found", `requester ${id}`);
+  }
+  const rows = store.db.prepare("SELECT COUNT(*) AS n FROM dm_consents").get();
+  assert.equal(rows.n, 0);
+});
+
 test("decide: only the recorded target's approval flips to approved", () => {
   const store = makeStore({ r1: baseState() });
   const dms = new DmConsents(store);

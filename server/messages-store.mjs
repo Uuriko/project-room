@@ -227,10 +227,27 @@ function saveCursor(db, roomId, appliedSeq, eventId, state) {
       parity_at_seq=NULL`).run(roomId, appliedSeq, eventId, appliedSeq, JSON.stringify(state));
 }
 
+// Messages at or below projection.messagesArchive.throughSeq were moved out of
+// the projection and live only in this table; they are not stale rows.
+export function archiveMarker(db, roomId) {
+  const row = db.prepare(`SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,
+    json_extract(projection, '$.messagesArchive.count') AS count FROM rooms WHERE id=?`).get(roomId);
+  const throughSeq = Number.isInteger(row?.throughSeq) && row.throughSeq > 0 ? row.throughSeq : 0;
+  return { throughSeq, count: throughSeq && Number.isInteger(row.count) && row.count > 0 ? row.count : 0 };
+}
+
+// One archived message row (seq at or below the marker), or null. Archived
+// messages are not in the projection, so readers that need one by id use this.
+export function archivedMessageRow(db, roomId, messageId) {
+  const { throughSeq } = archiveMarker(db, roomId);
+  if (!throughSeq || typeof messageId !== "string") return null;
+  return db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=?").get(roomId, messageId, throughSeq) ?? null;
+}
+
 function pruneMessages(db, roomId) {
-  db.prepare(`DELETE FROM messages WHERE room_id=? AND message_id NOT IN (
+  db.prepare(`DELETE FROM messages WHERE room_id=? AND seq>? AND message_id NOT IN (
     SELECT json_extract(value, '$.id') FROM rooms, json_each(rooms.projection, '$.messages') WHERE rooms.id=?
-  )`).run(roomId, roomId);
+  )`).run(roomId, archiveMarker(db, roomId).throughSeq, roomId);
 }
 
 function resetRoom(store, roomId) {
@@ -382,8 +399,9 @@ function parityNumbers(db, roomId) {
   const table = db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS lastSeq FROM messages WHERE room_id=?").get(roomId);
   const posted = db.prepare(`SELECT COALESCE(MAX(sequence), 0) AS lastSeq FROM events
     WHERE room_id=? AND json_extract(body, '$.type')=?`).get(roomId, POSTED);
+  const archived = archiveMarker(db, roomId);
   return {
-    projectionCount,
+    projectionCount: projectionCount + archived.count,
     tableCount: table.n,
     projectionLastSeq: posted.lastSeq,
     tableLastSeq: table.lastSeq
@@ -436,7 +454,13 @@ function certifyMessagesParity(store) {
   for (const row of store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, POSTED)) {
     for (const id of affectedMessageIds(JSON.parse(row.body))) if (!sequences.has(id)) sequences.set(id, row.sequence);
   }
-  for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=?").all(roomId)) {
+  const archive = archiveMarker(store.db, roomId);
+  const archivedRows = archive.throughSeq
+    ? store.db.prepare("SELECT message_id, reply_to_id FROM messages WHERE room_id=? AND seq<=?").all(roomId, archive.throughSeq) : [];
+  if (archivedRows.length !== archive.count) throw new Error(`messages parity failed for ${roomId}: archived rows ${archivedRows.length}, marker count ${archive.count}`);
+  // Archived parents stay reachable for the thread-root comparison.
+  const threadMessages = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
+  for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND seq>?").all(roomId, archive.throughSeq)) {
     const message = messages.get(row.message_id);
     let record, reactions;
     try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); }
@@ -445,7 +469,7 @@ function certifyMessagesParity(store) {
       || row.seq !== sequences.get(message.id)
       || row.author_id !== message.authorId || row.body !== storedBody(message)
       || row.channel_id !== textOrNull(message.channelId)
-      || row.thread_root_id !== threadRootId(messages, message)
+      || row.thread_root_id !== threadRootId(threadMessages, message)
       || row.reply_to_id !== textOrNull(message.replyToId)
       || row.to_member_id !== textOrNull(message.toMemberId)
       || row.work_item_id !== textOrNull(message.workItemId)

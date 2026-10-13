@@ -44,10 +44,72 @@ test("every third-party action ref is pinned to a commit SHA, never a mutable ta
   }
 });
 
+// An exact release version (optionally v-prefixed), never a floating ref.
+const PINNED_VERSION = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+
+// Lines that actually configure or execute something. YAML/shell comment
+// lines are prose: a guard string quoted in a comment must neither satisfy
+// nor trip this test (the workflow's own comment mentions the old floating
+// `latest` URL, and a commented-out `sha256sum -c` verifies nothing).
+const activeLines = (text) =>
+  text.split("\n").filter((line) => !line.trimStart().startsWith("#"));
+
+// The named step's block, up to the next step (or end of file).
+const stepBlock = (text, name) => {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.includes(name));
+  if (start < 0) return "";
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\s+-\s+name:/.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start, end).join("\n");
+};
+
 test("mcp-registry-publish fetches mcp-publisher from a pinned release with checksum verification", () => {
   const text = readFileSync(join(WORKFLOWS, "mcp-registry-publish.yml"), "utf8");
-  assert.ok(!text.includes("releases/latest"),
+  const active = activeLines(text).join("\n");
+
+  // No floating release reference in any active line. The substring the old
+  // test banned, "releases/latest", never matched the real floating URL
+  // shape "releases/download/latest/…", so both shapes are rejected here.
+  assert.ok(!active.includes("releases/latest"),
     "mcp-publisher must come from a pinned release tag, not the floating releases/latest URL");
-  assert.ok(text.includes("sha256sum -c"),
-    "mcp-publisher download must be checksum-verified before extraction");
+  assert.ok(!/releases\/download\/latest(?:[/"'\s]|$)/.test(active),
+    "mcp-publisher must come from a pinned release tag, not the floating releases/download/latest URL");
+
+  // Every release-download segment is an exact version or the version
+  // variable whose pin is asserted below — never `latest` or another var.
+  for (const m of active.matchAll(/releases\/download\/([^\s/"']+)/g)) {
+    const segment = m[1];
+    assert.ok(segment === "${MCP_PUB_VERSION}" || PINNED_VERSION.test(segment),
+      `mcp-publisher download ref is not pinned to an exact release: ${segment}`);
+  }
+
+  // The version variable itself is a pinned literal: MCP_PUB_VERSION="latest"
+  // passed the old substring test and must fail here.
+  const version = active.match(/^\s*MCP_PUB_VERSION="([^"]+)"\s*$/m)?.[1];
+  assert.ok(version, "mcp-registry-publish.yml: MCP_PUB_VERSION assignment not found");
+  assert.ok(PINNED_VERSION.test(version),
+    `MCP_PUB_VERSION is not pinned to an exact release version: ${version}`);
+
+  // The checksum check must live in the install step itself (not a comment
+  // or a different step) and must apply to the downloaded tarball.
+  const step = stepBlock(text, "Install mcp-publisher");
+  assert.ok(step, "mcp-registry-publish.yml: 'Install mcp-publisher' step not found");
+  const code = activeLines(step).join("\n");
+  assert.ok(/curl\b[^\n]*\$\{?TARBALL\}?/.test(code),
+    "install step must download the mcp-publisher tarball");
+  assert.ok(/curl\b[^\n]*(\$\{BASE\}|releases\/download\/)[^\n]*checksums/.test(code),
+    "install step must download the checksums file from the same pinned release");
+  // Binding forms: grep the tarball's own entry out of the checksums file and
+  // pipe it to `sha256sum -c`, or run `sha256sum -c` on that checksums file.
+  const verify = code.match(/grep\b[\s\S]*?\$\{?TARBALL\}?[\s\S]*?checksums[\s\S]*?\|\s*sha256sum\s+-c\b/)
+    ?? code.match(/sha256sum\s+-c\s+[^\s]*checksums/);
+  assert.ok(verify,
+    "install step must checksum-verify the downloaded tarball: 'sha256sum -c' must consume the checksums entry for ${TARBALL} (a stray occurrence in a comment or another step does not count)");
+  const extractAt = code.search(/\btar\b[^\n]*\$\{?TARBALL\}?/);
+  assert.ok(extractAt > -1, "install step must extract the downloaded tarball");
+  assert.ok(code.indexOf(verify[0]) < extractAt,
+    "checksum verification of the tarball must run before it is extracted");
 });

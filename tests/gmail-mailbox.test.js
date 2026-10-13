@@ -47,6 +47,38 @@ test('Gmail connect uses Gmail modify consent and PKCE, survives a new service, 
   await assert.rejects(() => f.gmail.sync(f.slot.token, f.session.sessionBinding), { code: 'gmail_reconnect_required' });
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM private_inbox_sources').get().n, 1);
 });
+test('manual sync walks every list page before replacing folder membership', async t => {
+  const base = gmailContractFixture().messages[0].response.message;
+  const makeMessage = n => {
+    const m = structuredClone(base), suffix = String(1000 + n);
+    m.id = '18d3f2a1b4c5' + suffix; m.threadId = m.id; m.historyId = String(9876500 + n);
+    m.payload.headers = m.payload.headers.map(h => h.name === 'Message-ID' ? { ...h, value: `<sync-${n}@example.test>` } : h);
+    return m;
+  };
+  const total = 60, pageSize = 25, all = Array.from({ length: total }, (_, i) => makeMessage(i + 1)), byId = new Map(all.map(m => [m.id, m]));
+  const f = setup(t, { fetchImpl: async url => {
+    if (url.includes('/token')) return Response.json({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', scope });
+    if (url.endsWith('/profile')) return Response.json({ emailAddress: 'morgan@gmail.test' });
+    if (url.includes('/messages?')) {
+      const start = Number(new URL(url).searchParams.get('pageToken')?.replace('page-', '') ?? 0);
+      const body = { messages: all.slice(start, start + pageSize).map(m => ({ id: m.id, threadId: m.threadId })) };
+      if (start + pageSize < total) body.nextPageToken = 'page-' + (start + pageSize);
+      return Response.json(body);
+    }
+    return Response.json(byId.get(url.split('/messages/')[1]?.split('?')[0]));
+  } });
+  await f.complete(f.callback(f.begin()));
+  const connectionId = f.gmail.record(f.auth()).connectionId;
+  const members = () => f.store.connections.folder(f.account.id, connectionId, 'INBOX')?.members ?? [];
+  assert.equal(await f.gmail.sync(f.slot.token, f.session.sessionBinding), total);
+  assert.ok(f.calls.some(call => call.url.includes('pageToken=page-25')), 'sync followed nextPageToken to the second page');
+  assert.ok(f.calls.some(call => call.url.includes('pageToken=page-50')), 'sync followed nextPageToken to the third page');
+  assert.equal(members().length, total, 'folder membership covers the whole INBOX, not just the first page');
+  assert.equal(f.store.connections.folder(f.account.id, connectionId, 'INBOX').complete, true);
+  assert.equal(f.store.db.prepare('SELECT count(*) n FROM private_inbox_sources WHERE account_id=?').get(f.account.id).n, total);
+  assert.equal(await f.gmail.sync(f.slot.token, f.session.sessionBinding), total);
+  assert.equal(members().length, total, 'a repeat sync keeps the full membership');
+});
 test('denied or missing scopes never creates a connection', async t => {
   const f = setup(t, { scope: 'openid email profile' });
   const denied = f.callback(f.begin()); denied.searchParams.set('error', 'access_denied');

@@ -312,6 +312,15 @@ test("pending wake prefers messageId and workItemId", () => {
   assert.equal(work.next.tool, "room_read_work");
 });
 
+test("a new work revision keys separately from the handled revision", () => {
+  const rev3 = pendingWakeToItem({ signalId: "sig-2", kind: "work", roomId: "den", workItemId: "wi-1", workRevision: 3 });
+  const rev4 = pendingWakeToItem({ signalId: "sig-3", kind: "work", roomId: "den", workItemId: "wi-1", workRevision: 4 });
+  assert.equal(attentionKey(rev3), "work:den:wi-1:3");
+  const journal = markHandled(emptyJournal(), rev3, 1000);
+  assert.deepEqual(selectUnhandled([rev3, rev4], journal).map(item => item.seq), [4],
+    "the new revision stays fresh; only the handled revision is filtered out");
+});
+
 test("pull sends the saved needs-me cursor on the next pass", async t => {
   const directory = fixtureDir();
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -486,6 +495,26 @@ test("a later handoff for the same Work Item executes while each event retry sta
   const later = await run();
   assert.equal(later.executed.length, 1);
   await run(); assert.deepEqual(calls, [4, 9], "new event on same work runs once, same event retry does not rerun");
+});
+
+test("a later work revision executes while a redelivery of the handled revision does not rerun", async t => {
+  const directory = fixtureDir(); t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const env = { ROOM_AGENT_CONFIG: directory }, calls = [];
+  const workWake = (signalId, workRevision) => ({ signalId, kind: "work", roomId: "den", workItemId: "wi-1", workRevision });
+  const handlers = { needsMe: needsMe([]), acks: [], pendingWakes: [workWake("sig-w3", 3)] };
+  const fetchImpl = roomFetch(handlers);
+  const runner = async plan => { calls.push(plan.item.seq); return { code: 0 }; };
+  const run = () => pull({ env, fetchImpl, execute: true, runner });
+  await run();
+  assert.deepEqual(calls, [3]);
+  assert.deepEqual(handlers.acks, [{ signalIds: ["sig-w3"] }]);
+  await run();
+  assert.deepEqual(calls, [3], "redelivery of the handled revision does not rerun");
+  handlers.pendingWakes = [workWake("sig-w4", 4)];
+  const later = await run();
+  assert.equal(later.executed.length, 1);
+  assert.deepEqual(calls, [3, 4], "the new revision runs instead of being acked unhandled");
+  assert.deepEqual(handlers.acks.at(-1), { signalIds: ["sig-w4"] });
 });
 
 test("failed later handoff preserves retry and cursor despite an earlier completed event", async t => {

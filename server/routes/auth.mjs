@@ -311,6 +311,12 @@ export async function handleAuthGroup(ctx) {
     if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
       reject(401, "invalid_credentials", "Invalid email or password");
     }
+    // A pass against the dummy is not authentication: with no real account
+    // or no real verifier there is nothing to sign in to. Answer exactly
+    // like a wrong password so the response never reveals which case it was.
+    if (!accountId || !verifier) {
+      reject(401, "invalid_credentials", "Invalid email or password");
+    }
     const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
     store.accountLogins.touchMethod(accountId, passwordMethod.id);
     const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
@@ -339,6 +345,11 @@ export async function handleAuthGroup(ctx) {
     verifyChangeSession();
     const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
     if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+      reject(401, "invalid_credentials", "The current password is incorrect");
+    }
+    // An account with no password set has no current password to match; the
+    // dummy verifier must never stand in for one.
+    if (!verifier) {
       reject(401, "invalid_credentials", "The current password is incorrect");
     }
     const policy = checkPasswordPolicy(data.newPassword);
