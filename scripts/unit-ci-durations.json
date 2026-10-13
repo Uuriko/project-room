@@ -22,6 +22,7 @@
   "tests/account-settings-http.test.js": 93300,
   "tests/account-settings-ui.test.js": 5861,
   "tests/acquisition-loops.test.js": 24682,
+  "tests/acquisition-template-failure.test.js": 1611,
   "tests/action-classes.test.js": 16531,
   "tests/action-recovery.test.js": 15890,
   "tests/activity.test.js": 52818,
