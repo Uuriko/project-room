@@ -47,6 +47,7 @@ import {
   chargeSpendBeforeCall,
   readSpendGrantRoute,
   issueSpendGrantRoute,
+  revokeSpendGrantRoute,
 } from "../server/spend-grants.mjs";
 
 function setup(t) {
@@ -188,6 +189,32 @@ test("issueSpendGrantRoute: a grants:issue delegate cannot self-issue; the owner
   const own = issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
     { agentId: f.ownerMemberId, capCents: "100", perTxCapCents: "10" });
   assert.equal(own.spend.capCents, "100", "owner self-issue stays allowed");
+});
+
+// #3006: member projections are plain objects, so a raw members[agentId]
+// index resolves inherited Object.prototype names ("toString", ...) as
+// truthy — prototype-named phantom members must fail the member_not_found
+// gate on both issue and revoke, and issue must mint nothing for them.
+test("issue/revokeSpendGrantRoute: prototype names are not room members (#3006)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  for (const phantom of ["toString", "valueOf", "hasOwnProperty", "constructor", "toLocaleString"]) {
+    spendError(
+      () => issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
+        { agentId: phantom, capCents: "100", perTxCapCents: "10" }),
+      { status: 404, code: "member_not_found" });
+    assert.equal(resolveSpendGrant(f.store.db, f.roomId, phantom, { nowMs: now }), null,
+      `no grant row was minted for phantom member ${phantom}`);
+    spendError(
+      () => revokeSpendGrantRoute(f.store, f.owner.secret, f.roomId, phantom),
+      { status: 404, code: "member_not_found" });
+  }
+  // A real member still passes the gate on both routes.
+  const issued = issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
+    { agentId: f.peerMemberId, capCents: "100", perTxCapCents: "10" });
+  assert.equal(issued.spend.capCents, "100");
+  const revoked = revokeSpendGrantRoute(f.store, f.owner.secret, f.roomId, f.peerMemberId);
+  assert.equal(revoked.agentId, f.peerMemberId);
 });
 
 test("re-issue upserts caps (explicit un-revoke path)", async t => {
