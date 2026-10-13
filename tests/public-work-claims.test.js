@@ -93,6 +93,25 @@ test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks wi
   assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
 });
 
+test('artifact byte limit accepts a multibyte code point ending exactly at 64 KiB and rejects overflow', t => {
+  const f = fixture(t), [a] = f.identities;
+  f.enable('boundary-artifact');
+  f.service().act('boundary-artifact', a.secret, 'claim', claim('boundary-claim'));
+  const exact = 'a'.repeat(65532) + '🐈';
+  assert.equal(Buffer.byteLength(exact, 'utf8'), 65536);
+  const result = f.service().act('boundary-artifact', a.secret, 'finish', owned('boundary-finish', 1, { artifactText: exact, checksReported: [] }));
+  assert.equal(result.receipt.artifact.bytes, 65536);
+  assert.equal(result.receipt.artifact.sha256, createHash('sha256').update(Buffer.from(exact, 'utf8')).digest('hex'));
+  assert.deepEqual(f.service().artifact(result.receipt.receiptId), { artifactText: exact, sha256: result.receipt.artifact.sha256, bytes: 65536 });
+
+  f.enable('boundary-overflow');
+  f.service().act('boundary-overflow', a.secret, 'claim', claim('overflow-claim'));
+  const overflow = 'a'.repeat(65533) + '🐈';
+  assert.equal(Buffer.byteLength(overflow, 'utf8'), 65537);
+  assert.throws(() => f.service().act('boundary-overflow', a.secret, 'finish', owned('overflow-finish', 1, { artifactText: overflow, checksReported: [] })), code('invalid_public_work'));
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_receipts WHERE offer_id=?').get('boundary-overflow').n, 0);
+});
+
 test('a reused identity cannot submit an earlier generation after release and reclaim', t => {
   const f = fixture(t), [a] = f.identities; f.enable('same-identity');
   f.service().act('same-identity', a.secret, 'claim', claim('first'));
