@@ -135,11 +135,25 @@ export class Attention {
       const now = this.store.now();
       const prefs = this.prefs(roomId, auth.member.id);
       const due = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND state='pending' AND due_at<=? ORDER BY due_at,queue_key").all(roomId, auth.member.id, now);
-      const held = heldUntil(prefs, now);
+      // Each wake has its own delivery moment, computed from when it became
+      // due - not from now. heldUntil(prefs, due_at) answers "when does a
+      // wake due at due_at first become deliverable": for digest prefs that
+      // is the first digest boundary at/after due_at (moved out of quiet
+      // hours), so a wake due before today's digest hour is deliverable once
+      // that hour passes, instead of being re-held until tomorrow's just
+      // because the query happens later. A null hold means the wake was
+      // deliverable from its due moment.
+      const deliverNow = [], held = [];
+      for (const row of due) {
+        const wakeHeldUntil = heldUntil(prefs, row.due_at);
+        const deliverAt = wakeHeldUntil ?? row.due_at;
+        if (deliverAt <= now) deliverNow.push(row.queue_key);
+        else held.push({ queueKey: row.queue_key, dueAt: row.due_at, heldUntil: deliverAt, state: row.state });
+      }
       return {
-        roomId, viewerId: auth.member.id, evaluatedAt: now, preferences: prefs, heldUntil: held,
-        deliverNow: held === null ? due.map(row => row.queue_key) : [],
-        held: held === null ? [] : due.map(row => ({ queueKey: row.queue_key, dueAt: row.due_at, heldUntil: held, state: row.state }))
+        roomId, viewerId: auth.member.id, evaluatedAt: now, preferences: prefs,
+        heldUntil: held.length ? Math.min(...held.map(row => row.heldUntil)) : null,
+        deliverNow, held
       };
     });
   }
