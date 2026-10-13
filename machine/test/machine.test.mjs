@@ -358,6 +358,78 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
   });
 
+  test("a failed pf wiring persists the pmset and anchor changes already applied, so uninstall can revert them", async () => {
+    const home = homeDir();
+    const pfConf = join(home, "pf.conf");
+    const before = "scrub-anchor \"com.apple/*\"\n";
+    writeFileSync(pfConf, before);
+    writeFileSync(join(home, "pfctl-fail-f"), "");
+    const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
+    await spawnContext.run({ env }, async () => {
+      const applied = await applySystemChanges(home);
+      assert.equal(applied.ok, false);
+      // Regression for #2876: the pmset changes (and the loaded anchor)
+      // were already live when wiring failed, so the change record must
+      // exist on disk even though apply did not fully succeed.
+      const recordPath = join(home, "system-changes.json");
+      assert.equal(existsSync(recordPath), true);
+      const recorded = JSON.parse(readFileSync(recordPath, "utf8"));
+      assert.deepEqual(recorded.map(change => change.id), [
+        "pmset.disablesleep",
+        "pmset.autorestart",
+        "pf.anchor",
+      ]);
+      // And uninstall can actually replay that record.
+      const reverted = await revertSystemChanges(home);
+      assert.equal(reverted.ok, true, JSON.stringify(reverted));
+      assert.equal(existsSync(recordPath), false);
+    });
+    const log = readFileSync(join(home, "argv-log"), "utf8");
+    assert.match(log, /pmset "-a" "disablesleep" "0"/);
+    assert.match(log, /pmset "-a" "autorestart" "0"/);
+    assert.match(log, /pfctl "-a" "room\.machine" "-F" "all"/);
+    // The wiring failure itself still rolled its pf.conf edit back.
+    assert.equal(readFileSync(pfConf, "utf8"), before);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("a failed second defaults write persists the earlier changes, so uninstall reverts them all", async () => {
+    const home = homeDir();
+    const pfConf = join(home, "pf.conf");
+    writeFileSync(pfConf, "scrub-anchor \"com.apple/*\"\n");
+    // Only the second defaults write fails: pmset, the pf anchor, and the
+    // first defaults write have already been applied live by then.
+    writeFileSync(join(home, "defaults-fail-AllowedWiFiLocalNetworkAddresses"), "");
+    const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
+    await spawnContext.run({ env }, async () => {
+      const applied = await applySystemChanges(home);
+      assert.equal(applied.ok, false);
+      assert.match(applied.error, /defaults AllowedWiFiLocalNetworkAddresses failed/);
+      // Regression for #2876: everything applied before the failure must
+      // be in the persisted record, not only in the returned object.
+      const recordPath = join(home, "system-changes.json");
+      assert.equal(existsSync(recordPath), true);
+      const recorded = JSON.parse(readFileSync(recordPath, "utf8"));
+      assert.deepEqual(recorded.map(change => change.id), [
+        "pmset.disablesleep",
+        "pmset.autorestart",
+        "pf.anchor",
+        "defaults.AllowedEthernetLocalNetworkAddresses",
+      ]);
+      const reverted = await revertSystemChanges(home);
+      assert.equal(reverted.ok, true, JSON.stringify(reverted));
+      assert.equal(existsSync(recordPath), false);
+    });
+    const log = readFileSync(join(home, "argv-log"), "utf8");
+    assert.match(log, /pmset "-a" "disablesleep" "0"/);
+    assert.match(log, /pmset "-a" "autorestart" "0"/);
+    assert.match(log, /pfctl "-a" "room\.machine" "-F" "all"/);
+    assert.match(log, /defaults "delete" "com.apple.network.local-network" "AllowedEthernetLocalNetworkAddresses"/);
+    // The revert also removed the anchor reference wiring added to pf.conf.
+    assert.doesNotMatch(readFileSync(pfConf, "utf8"), /^anchor "room\.machine"$/m);
+    rmSync(home, { recursive: true, force: true });
+  });
+
   test("the machine token stays off argv, the child environment, and the hello body", async () => {
     const home = homeDir();
     const env = machineEnv(home);
