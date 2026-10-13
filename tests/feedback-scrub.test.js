@@ -51,6 +51,32 @@ test("every secret in a string is redacted, not just the first", () => {
   assert.equal(outPem.match(/\[REDACTED:private-key\]/g).length, 2);
 });
 
+test("#3011: tokens and JWTs whose final segment is exactly 8 chars ending in '-' are redacted", () => {
+  // The pre-fix defect: TOKEN_PREFIX_RE and JWT_RE ended with
+  // [A-Za-z0-9_-]{8,}\b. The class includes '-' (a non-word char), so when
+  // the final segment is exactly the 8-char minimum and ends in '-', the
+  // trailing \b cannot be satisfied and backtracking cannot go below
+  // {8,} — the pattern missed entirely and the secret survived verbatim.
+  for (const token of ["ghp_aaaaaaa-", "sk-aaaaaaa-", "AKIAaaaaaaa-"]) {
+    const out = scrubString(`x ${token} y`);
+    assert.ok(!out.includes(token), `raw token ${token} must not survive`);
+    assert.equal(out, "x [REDACTED:token] y");
+  }
+  const jwt = "eyJaaaaaaaa.bbbbbbbb.ccccccc-";
+  const jwtOut = scrubString(`x ${jwt} y`);
+  assert.ok(!jwtOut.includes(jwt), "raw jwt must not survive");
+  assert.equal(jwtOut, "x [REDACTED:jwt] y");
+
+  // Controls: the same shapes without the trailing '-' already redacted
+  // before the fix and must keep redacting.
+  assert.equal(scrubString("x ghp_aaaaaaaa y"), "x [REDACTED:token] y");
+  assert.equal(scrubString("x sk-aaaaaaaa y"), "x [REDACTED:token] y");
+  assert.equal(scrubString("x AKIAaaaaaaaa y"), "x [REDACTED:token] y");
+  assert.equal(
+    scrubString("x eyJaaaaaaaa.bbbbbbbb.cccccccc y"),
+    "x [REDACTED:jwt] y");
+});
+
 test("secret key names redact any value", () => {
   assert.equal(scrubValue("hunter2", "password"), "[REDACTED:credential]");
   assert.equal(scrubValue("Bearer abc", "authorization"), "[REDACTED:credential]");

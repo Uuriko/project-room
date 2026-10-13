@@ -15,13 +15,13 @@ const SECRET_KEY_RE =
 
 // JWT-shaped: three base64url segments. Global: a string can carry several
 // secrets, and replace() without /g would redact only the first.
-const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
+const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
 
 // PEM private key blocks.
 const PEM_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
 // Known vendor token prefixes.
-const TOKEN_PREFIX_RE = /\b(sk-|rk-|ghp_|gho_|ghu_|ghs_|xox[bap]-|AKIA|glpat-)[A-Za-z0-9_-]{8,}\b/g;
+const TOKEN_PREFIX_RE = /\b(sk-|rk-|ghp_|gho_|ghu_|ghs_|xox[bap]-|AKIA|glpat-)[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
 
 // Whole-value high-entropy blob (a bare token pasted as the entire value).
 // 40+ chars of token alphabet. Deliberately does NOT match structured error
