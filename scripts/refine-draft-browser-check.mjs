@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, messageAction } from "./room-chrome.mjs";
 // Simulated people in isolated rooms, including real browser failure recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -71,9 +71,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   assert.equal(refined.body, artifact); assert.equal(refined.proposal.attribution, "manual-unverified");
   assert.deepEqual(state().workItems[workId], prior);
   assert.equal(state().messages.find(message => message.id === "source-a").body, original);
-  const resultMenu = page.locator(`[data-message-record-id="${refined.id}"] details.message-more`);
-  if (!await resultMenu.evaluate(node => node.open)) await resultMenu.locator("summary").click();
-  await page.locator('[data-message-action="result"][data-message-id="' + refined.id + '"]').click();
+  await messageAction(page, refined.id, "result");
   await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, artifact);
   await page.locator('[name="producerId"]').selectOption("__unknown__");
   await page.locator('#action-fields [name="summary"]').fill("Welcome artifact, notes retained in the original.");
