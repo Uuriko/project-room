@@ -186,3 +186,50 @@ See [human offer controls](../archive/docs/history/HUMAN-HELP-OFFERS-2026-09-08.
 The brief joins existing facts: reported progress, current blocker, handoff, next responsible member, effective claim status, review requirements and reviews matching the exact current result. It includes live-read scope, evidence references, budget and room instructions. A handoff does not authorize restarting a stopped worker, and reported tests are not independently verified by this read. Refresh before a write; use the existing action tools and stable request IDs for retries. Resume support is required for the explicit compact option; an older service returns a failure rather than silently inventing context.
 
 The browser's **Use my AI** prompt is narrower: optional **Include progress and handoff** exports selected work prose but omits structured member identities, evidence URLs and repository paths. Review the preview because free text may itself contain private details. This does not send anything or change work.
+
+## Resume task discussion locally
+
+From the repository checkout, use your existing private connection directory:
+
+```sh
+node scripts/agent-work-preflight.mjs /absolute/private/connection-directory WORK_ID --resume
+```
+
+The first run reads the task discussion and saves a private local checkpoint
+with its text. Later runs validate that retained content and fetch appended
+discussion, while rereading current task instructions and permissions. No model
+or always-on coordinator is required. This option requires the corresponding
+consistent-read server version; it fails explicitly against older servers.
+
+Cache records live in `task-context/` inside the private connection directory,
+with private directory/file permissions. Each read defaults to a 30-second
+budget, 100 pages and a 4 MiB cache/response budget. Limits apply per task, not
+to the total directory. Rotating credentials creates a separate cache identity;
+old records are not automatically purged. Remove the `task-context/` directory
+when its retained discussion is no longer wanted; the next run rebuilds it.
+Output includes whether the read reused or reset context, retained/new item
+counts, page count and received discussion bytes.
+
+The saved text and completed token form one atomic cache record. An interrupted,
+partial or failed read does not advance it. If earlier discussion was edited,
+deleted, replaced during recovery, or its visibility changed, the server requires
+a reset. The consumer discards the old text and performs a fresh bounded read.
+It never returns cached discussion as a fallback for an authorization failure.
+Task context and discussion remain separate observations; changes after the
+frozen discussion horizon are reported, not silently included or approved.
+
+Without `--resume`, preflight keeps its existing stateless behavior. Its optional
+numeric checkpoint is a legacy sequence filter, not a safe persistent checkpoint.
+The preflight checkout checks and exit codes remain unchanged: exit 0 means reads
+and the fast guard passed, 2 requires review, and 1 means preparation failed.
+None means assignment, approval, tests passed, permission to execute, or deployment.
+Output and cache contain private room content; reading does not mark it read.
+
+SDK callers can request `client.workDiscussion(workId, { consistent: true })`,
+follow `discussion.nextCursor` until `hasMore` is false, and retain the final
+`discussion.resumeToken` with the complete text. Resume with `{ resumeToken }`.
+A continuation is valid only for its unchanged frozen selection. On
+`discussion_reset_required`, discard all retained text and start without the
+token. Store text and token together only after every page and current viewer
+scope have been checked. The preflight consumer implements that storage flow;
+MCP's numeric discussion checkpoint remains unchanged.
