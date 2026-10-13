@@ -252,4 +252,3 @@ export class AccountClient {
     }
   }
 }
-
