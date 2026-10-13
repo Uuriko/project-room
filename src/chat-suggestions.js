@@ -109,9 +109,9 @@ function bodyMentionsAgent(body, displayName) {
 }
 
 // A person's question that is still the latest message, with no thread
-// replies, after ASK_AGENT_AFTER_MS. Offers one active agent that is not the
-// asker and is not already mentioned; agents that can take work come first.
-export function askAgentSuggestion(message, { members = {}, replyCount = 0, now = Date.now(), waitMs = ASK_AGENT_AFTER_MS } = {}) {
+// replies, after ASK_AGENT_AFTER_MS. Availability is the caller's fresh server
+// observation, not an inference from membership or permission to take work.
+export function askAgentSuggestion(message, { members = {}, availability = new Map(), paused = new Map(), replyCount = 0, now = Date.now(), waitMs = ASK_AGENT_AFTER_MS } = {}) {
   const body = typeof message?.body === "string" ? message.body.trim() : "";
   if (!body.endsWith("?") || replyCount > 0) return null;
   const author = members[message.authorId];
@@ -121,7 +121,8 @@ export function askAgentSuggestion(message, { members = {}, replyCount = 0, now 
   const agents = Object.values(members).filter(m => m.kind === "agent" && m.active !== false && m.id !== message.authorId && m.displayName);
   if (agents.some(m => bodyMentionsAgent(body, m.displayName))) return null;
   const canWork = m => (m.permissions ?? []).includes("accept_work");
-  const pick = agents.sort((a, b) => Number(canWork(b)) - Number(canWork(a)) || a.displayName.localeCompare(b.displayName))[0];
+  const reachable = agents.filter(m => !paused.has(m.id) && ["listening", "working"].includes(availability.get(m.id)?.state));
+  const pick = reachable.sort((a, b) => Number(canWork(b)) - Number(canWork(a)) || a.displayName.localeCompare(b.displayName))[0];
   return pick ? { memberId: pick.id, name: pick.displayName } : null;
 }
 
