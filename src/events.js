@@ -452,8 +452,10 @@ export const DISPLAY_NAME_POLICY_VERSION = 1;
 // stamped events.
 export const PIN_DM_PARTY_POLICY_VERSION = 1;
 
+export const RESERVED_IDS = Object.freeze(["constructor", "prototype", "__proto__"]);
+
 export function validId(value) {
-  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
+  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !RESERVED_IDS.includes(value);
 }
 
 // #1004 follow-up: member projections are plain objects from JSON.parse, so

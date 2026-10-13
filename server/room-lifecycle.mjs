@@ -15,7 +15,7 @@
 // in server/writer-fence.mjs, advanced by the 0→34 migration chain in
 // server/store.mjs (recovery.mjs requires the version to equal it exactly).
 // This module owns the column and its data only — never PRAGMA user_version.
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, RESERVED_IDS, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
@@ -85,6 +85,7 @@ export function createAccountRoom(store, token, binding, request) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
   const { roomId, kind } = request;
+  if (typeof roomId === "string" && RESERVED_IDS.includes(roomId)) fail(422, "invalid_room_request", "Room id is reserved and cannot be used");
   if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
   if (!text(request.title, 120)) fail(422, "invalid_room_request", "Room name must be 1 to 120 characters");
   if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");

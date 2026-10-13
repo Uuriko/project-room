@@ -8,7 +8,7 @@ import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, RESERVED_IDS } from "../src/events.js";
 
 const signIn = (f, accountId) => {
   const key = f.store.issueAccountAccessKey(accountId), slot = f.store.createAccountSessionSlot();
@@ -98,4 +98,51 @@ test("HTTP: a fresh account POSTs its first room (201), the same id replays as 2
   res = await fetch(`${origin}/api/account-rooms`, { method: "POST", headers: guestHeaders, body: JSON.stringify(request("room-http-guest")) });
   assert.equal(res.status, 403, "an existing member without administration is still denied");
   assert.equal((await res.json()).error.code, "room_creation_denied");
+});
+
+// Issue #3013: reserved room IDs must produce a specific error, not the generic
+// format/length error. Malformed and overlong IDs still use the format message.
+for (const reservedId of RESERVED_IDS) {
+  test(`#3013: reserved room id "${reservedId}" is rejected with the reserved-id message`, t => {
+    const f = createAcceptanceFixture(); cleanup(t, f);
+    const fresh = freshAccount(f, `fresh-reserved-${reservedId}`);
+    assert.throws(
+      () => f.store.createAccountRoom(fresh.token, fresh.binding, request(reservedId)),
+      err => {
+        assert.equal(err.status, 422, "status must be 422");
+        assert.equal(err.code, "invalid_room_request", "code must be invalid_room_request");
+        assert.equal(err.message, "Room id is reserved and cannot be used", "message must name the reserved-id problem");
+        return true;
+      }
+    );
+  });
+}
+
+test("#3013: malformed room id (../x) is rejected with the format/length message", t => {
+  const f = createAcceptanceFixture(); cleanup(t, f);
+  const fresh = freshAccount(f, "fresh-malformed");
+  assert.throws(
+    () => f.store.createAccountRoom(fresh.token, fresh.binding, request("../x")),
+    err => {
+      assert.equal(err.status, 422, "status must be 422");
+      assert.equal(err.code, "invalid_room_request", "code must be invalid_room_request");
+      assert.equal(err.message, "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens", "message must name the format problem");
+      return true;
+    }
+  );
+});
+
+test("#3013: overlong room id (65 characters) is rejected with the format/length message", t => {
+  const f = createAcceptanceFixture(); cleanup(t, f);
+  const fresh = freshAccount(f, "fresh-overlong");
+  const longId = "a".repeat(65);
+  assert.throws(
+    () => f.store.createAccountRoom(fresh.token, fresh.binding, request(longId)),
+    err => {
+      assert.equal(err.status, 422, "status must be 422");
+      assert.equal(err.code, "invalid_room_request", "code must be invalid_room_request");
+      assert.equal(err.message, "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens", "message must name the format problem");
+      return true;
+    }
+  );
 });
