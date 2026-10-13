@@ -379,6 +379,11 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       this.clear();
       return true;
     },
+    unmount() {
+      container?.removeEventListener("click", onClick);
+      container?.removeEventListener("submit", onSubmit);
+      container = null;
+    },
     mount(target) {
       container = target;
       render();

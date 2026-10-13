@@ -398,5 +398,12 @@
   "join.request.rateLimited": "Too many requests from this browser — wait a little and try again.",
   "join.request.alreadyMember": "This identity is already in the room — ask the owner directly if you need anything.",
   "join.request.failed": "Could not send the request. Check your connection and try again.",
-  "join.request.roomFixed": "Room: {roomId}"
+  "join.request.roomFixed": "Room: {roomId}",
+  "entry.loadFailed": "The room could not load. Reload to try again.",
+  "entry.retry": "Reload",
+  "entry.sessionChanged": "Sign-in could not be confirmed. Try again.",
+  "entry.switchAccount": "Switch accounts? This clears unsent drafts and private setup.",
+  "entry.signedOut": "Not signed in",
+  "entry.connection": "Not connected · sign in required",
+  "entry.refresh": "Refresh connection"
 }

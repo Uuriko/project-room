@@ -153,3 +153,70 @@ test("TODO: a reused magic link's refusal is shown once, not twice", { todo: "au
   const again = await magicLinkReuse(t);
   assert.equal(await visibleCount(again, "not valid"), 1);
 });
+
+for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`fresh sign-in stays independent of workspace modules: ${theme}, ${kind.viewport.width}px`, async t => {
+  const f = await setup(t), page = await f.open(kind), requests = [];
+  await page.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  await page.goto(f.origin);
+  const form = page.locator('[data-signin-form="password"]');
+  await form.waitFor({ state: "visible" });
+  await page.waitForLoadState("networkidle");
+  assert.equal(requests.includes("/src/app.js"), false, "workspace stays unloaded at first paint and idle");
+  for (const path of ["/src/client.js", "/src/events.js", "/src/emoji-catalog.js", "/src/inbox-ui.js", "/src/request-access.js"])
+    assert.equal(requests.includes(path), false, path);
+  await page.locator("#agent-signin-button").click();
+  await page.locator("#agent-signin-ui input").first().waitFor({ state: "visible" });
+  await page.locator("#agent-auth-back").click();
+  await form.locator('[name="email"]').fill("entry-draft@example.invalid");
+  await page.locator("[data-forgot-password]").click();
+  await page.evaluate(() => history.back());
+  await form.waitFor({ state: "visible" });
+  assert.equal(await form.locator('[name="email"]').inputValue(), "entry-draft@example.invalid");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(requests.includes("/src/app.js"), false, "account and agent controls do not import workspace code");
+  await page.screenshot({ path: `test-results/signin-entry-${theme}-${kind.viewport.width}.png` });
+});
+
+test("a failed workspace download after signup resumes the same account without repeating signup", { timeout: 45000 }, async t => {
+  const f = await setup(t), page = await f.open(PHONE), writes = [];
+  page.on("request", request => { if (request.method() === "POST") writes.push(new URL(request.url()).pathname); });
+  await page.route("**/src/app.js", route => route.abort());
+  const email = "entry-recovery@example.invalid";
+  assert.equal(await signUp(page, f.origin, email), 202);
+  await page.locator("#entry-retry").waitFor({ state: "visible" });
+  const account = (await f.session(page)).account.id;
+  await page.unroute("**/src/app.js");
+  await page.locator("#entry-retry").click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal((await f.session(page)).account.id, account);
+  assert.equal(writes.filter(path => path === "/api/auth/password/signup").length, 1);
+  assert.equal(await page.locator("#auth-signin-ui").count(), 1);
+  await page.locator("#message-input").fill("A draft after entering the room");
+  await page.locator('#message-form button[type="submit"]').click();
+  await page.locator("#message-list").getByText("A draft after entering the room", { exact: true }).waitFor();
+  assert.equal(writes.filter(path => /\/commands$/.test(path)).length, 1, "one composer handler after the handoff");
+});
+
+test("a failed sign-in module download offers reload without losing the URL", async t => {
+  const f = await setup(t), page = await f.open(PHONE);
+  await page.route("**/src/signin-entry.js", route => route.abort());
+  await page.goto(f.origin);
+  await page.locator("#entry-retry").waitFor({ state: "visible" });
+  assert.equal(page.url(), f.origin + "/");
+  await page.unroute("**/src/signin-entry.js");
+  await page.locator("#entry-retry").click();
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+});
+
+test("cached HTML that names app.js directly still starts the existing workspace", async t => {
+  const f = await setup(t), page = await f.open();
+  await page.route(f.origin + "/", async route => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace('src="./src/entry.js"', 'src="./src/app.js"');
+    await route.fulfill({ response, body });
+  });
+  await page.goto(f.origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  assert.equal(await page.locator("#auth-signin-ui").count(), 1);
+});
