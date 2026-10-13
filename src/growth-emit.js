@@ -133,6 +133,10 @@ const fieldBuilders = {
     return fields;
   },
   "reaction.added": (roomEvent, data) => {
+    // The room core treats active:false as a removal (the member is deleted
+    // from the reaction set). A removal is not an addition: projecting it as
+    // reaction.added would inflate reaction totals.
+    if (data.active === false) return null;
     if (typeof data.messageId !== "string" || !data.messageId) return null;
     if (typeof data.reaction !== "string" || !data.reaction) return null;
     return { roomId: roomIdOf(roomEvent), messageId: data.messageId, reaction: data.reaction };
@@ -193,10 +197,19 @@ export function buildGrowthEvent(roomEvent, state = null) {
 // can never throw into the room path.
 //
 // Returns { state, growthOk, growthReason } where growthOk is true when an
-// event was recorded, false with a reason when the type was unmapped, the
-// envelope could not be built, or the collector refused/failed it.
+// event was recorded, false with a reason when the event was a duplicate
+// replay, the type was unmapped, the envelope could not be built, or the
+// collector refused/failed it.
 export function applyEventWithGrowth(current, incoming, collector) {
   const state = applyEvent(current, incoming);
+  // Idempotency: applyEvent treats an event whose id or idempotency key was
+  // already applied as a no-op and returns the projection unchanged. Such a
+  // replay must not be projected again — recording, fan-out, and mention
+  // emission would double-count an event the room applied once. Conflicting
+  // reuse of an id or key still throws inside applyEvent, before this check.
+  if (current?.seenEvents?.[incoming.id] || current?.seenIdempotencyKeys?.[incoming.idempotencyKey]) {
+    return { state, growthOk: false, growthReason: "duplicate room event" };
+  }
   try {
     if (!collector || typeof collector.record !== "function") {
       throw new TypeError("collector must expose record()");
