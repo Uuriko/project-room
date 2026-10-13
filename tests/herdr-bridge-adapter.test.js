@@ -963,3 +963,58 @@ test('K9: caller abort cancels an in-flight wait without a second bridge request
     assert.equal(mock.state.requests.filter(r => r.route === '/v1/wait').length, 1);
   } finally { await mock.close(); }
 });
+
+// ---------------------------------------------------------------------------
+// L. Caller-abort retry handling — an AbortSignal abort surfaces as
+// TimeoutError("aborted") but is a cancellation, not a bridge timeout, so
+// _call must not burn its remaining attempts (with jittered backoff) on it.
+// Regression (#2957): isRetryable returned true for every TimeoutError, so
+// an aborted call was retried; the retry's pre-abort check stopped a second
+// bridge request, but the abort only reached the caller after the extra
+// attempt and backoff. A pass-through spy on _fetchOnce makes the retry
+// burn observable deterministically (request counts alone cannot see it).
+// ---------------------------------------------------------------------------
+
+function countFetchAttempts(adapter) {
+  const original = adapter._fetchOnce.bind(adapter);
+  let count = 0;
+  adapter._fetchOnce = async (...args) => { count += 1; return original(...args); };
+  return () => count;
+}
+
+test('L1: caller abort of an in-flight wait is not retried — a single attempt', async t => {
+  let arrived;
+  const started = new Promise(resolve => { arrived = resolve; });
+  const mock = await startMockBridge({ handlers: { '/v1/wait': ({ res }) => {
+    arrived(); return new Promise(resolve => res.once('close', resolve));
+  } } });
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const attempts = countFetchAttempts(adapter);
+    const controller = new AbortController();
+    const waiting = adapter.waitForState('a', ['done'], { timeoutMs: 5000, signal: controller.signal });
+    const rejection = assert.rejects(waiting, /aborted/);
+    await started; controller.abort(); await rejection;
+    assert.equal(attempts(), 1, 'a caller abort must not be retried');
+    assert.equal(mock.state.requests.filter(r => r.route === '/v1/wait').length, 1);
+  } finally { await mock.close(); }
+});
+
+test('L2: an already-aborted signal makes a single _call attempt and no bridge request', async t => {
+  const mock = await startMockBridge();
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const attempts = countFetchAttempts(adapter);
+    const before = mock.state.requests.length;
+    await assert.rejects(
+      adapter._call({
+        adapterMethod: 'waitForState', timeoutMs: 1000, write: true,
+        signal: AbortSignal.abort(),
+        body: { mode: 'state', agentId: 'a', states: ['done'], timeoutMs: 1000 },
+      }),
+      /aborted/,
+    );
+    assert.equal(attempts(), 1, 'a pre-aborted call must not be retried');
+    assert.equal(mock.state.requests.length, before, 'no bridge request for an aborted call');
+  } finally { await mock.close(); }
+});
