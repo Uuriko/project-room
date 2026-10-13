@@ -90,6 +90,7 @@ export function mountSigninEntry({ openWorkspace }) {
   on($("#refresh-button"), "click", () => {
     if (signin.canLeave() && agent.canLeave()) void enterWorkspace({ restoreRoomSession: true }).catch(() => {});
   });
+  $("#refresh-button").disabled = false;
   on(window, "hashchange", () => {
     if (!signin.canLeave() || !agent.canLeave()) return;
     void enterWorkspace().catch(() => {});
