@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
@@ -278,4 +279,98 @@ test('prepared MCP reads resume after a completed checkpoint without skipping a 
   assert.deepEqual(privateRead.discussion.items.map(row => row.message.id), transport === 'hosted' ? [] : ['private-after-checkpoint']);
   assert.equal(f.store.snapshot(f.keys.producer, 'commons').cursor, 0);
   });
+});
+
+test("consistent discussion checkpoints survive restart and ignore unrelated changes while returning new replies", async t => {
+  const f = await fixture(t);
+  f.post("durable-parent", { workItemId: "test-handoff" });
+  const first = await f.client.workDiscussion("test-handoff", { consistent: true });
+  assert.equal(typeof first.discussion.resumeToken, "string");
+  f.post("unrelated-change");
+  const restarted = new RoomAgentClient(f.config);
+  const quiet = await restarted.workDiscussion("test-handoff", { resumeToken: first.discussion.resumeToken });
+  assert.deepEqual(ids(quiet), []);
+  f.post("durable-child", { replyToId: "durable-parent" });
+  const changed = await restarted.workDiscussion("test-handoff", { resumeToken: quiet.discussion.resumeToken });
+  assert.deepEqual(ids(changed), ["durable-child"]);
+  assert.equal(changed.discussion.consistent, true);
+  for (const options of [{ consistent: true, since: 0 }, { resumeToken: first.discussion.resumeToken, since: 0 },
+    { resumeToken: first.discussion.resumeToken, cursor: "bad" }]) {
+    await assert.rejects(restarted.workDiscussion("test-handoff", options));
+  }
+});
+
+test("consistent discussion resets edited/deleted prefixes and rereads surviving descendants without removed text", async t => {
+  const f = await fixture(t);
+  f.post("durable-edit", { workItemId: "test-handoff" });
+  f.post("durable-descendant", { replyToId: "durable-edit" });
+  const first = await f.client.workDiscussion("test-handoff", { consistent: true });
+  f.send("owner", T.MESSAGE_EDITED, { messageId: "durable-edit", expectedMessageRevision: 0, body: "corrected text" });
+  await assert.rejects(f.client.workDiscussion("test-handoff", { resumeToken: first.discussion.resumeToken }), { status: 409, code: "discussion_reset_required" });
+  const corrected = await f.client.workDiscussion("test-handoff", { consistent: true });
+  assert.equal(corrected.discussion.items.find(row => row.message.id === "durable-edit").message.body, "corrected text");
+  f.send("owner", T.MESSAGE_DELETED, { messageId: "durable-edit", expectedMessageRevision: 1 });
+  await assert.rejects(f.client.workDiscussion("test-handoff", { resumeToken: corrected.discussion.resumeToken }), { status: 409, code: "discussion_reset_required" });
+  const clean = await f.client.workDiscussion("test-handoff", { consistent: true });
+  assert.ok(!ids(clean).includes("durable-edit"));
+  assert.ok(ids(clean).includes("durable-descendant"));
+  assert.ok(clean.discussion.items.every(row => typeof row.message.body === "string"));
+});
+
+test("consistent pages reject changes to already delivered text and access scope", async t => {
+  const f = await fixture(t);
+  f.post("durable-page-a", { workItemId: "test-handoff" });
+  f.post("durable-page-b", { workItemId: "test-handoff" });
+  const first = await f.client.workDiscussion("test-handoff", { consistent: true, limit: 1 });
+  assert.equal(first.discussion.resumeToken, null);
+  const continuation = await f.client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 1 });
+  assert.equal(continuation.discussion.consistent, true);
+  const message = first.discussion.items[0].message;
+  f.send("owner", T.MESSAGE_EDITED, { messageId: message.id, expectedMessageRevision: 0, body: "changed after delivery" });
+  await assert.rejects(f.client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 1 }), { status: 409, code: "discussion_reset_required" });
+  const fresh = await f.client.workDiscussion("test-handoff", { consistent: true });
+  const member = f.store.room("commons").state.members.producer;
+  f.send("owner", T.MEMBER_ACCESS_CHANGED, { memberId: "producer", expectedMemberRevision: member.revision,
+    permissions: ["accept_work", "complete_work"], active: true });
+  await assert.rejects(f.client.workDiscussion("test-handoff", { resumeToken: fresh.discussion.resumeToken }), { status: 409, code: "discussion_reset_required" });
+});
+
+test("consistent checkpoints detect replacement preserving every event ID and head sequence", async t => {
+  const f = await fixture(t), roomId = "import-room";
+  f.store.initialize(initialRoom(roomId));
+  const key = f.store.issueAccessKey(roomId, "owner");
+  const send = (type, data) => f.store.command(key, roomId, { id: randomUUID(), type, data });
+  send(T.WORK_PROPOSED, { workItemId: "import-work", title: "Import", definitionOfDone: "Done",
+    accountableMemberId: "owner", mode: "read" });
+  send(T.MESSAGE_POSTED, { messageId: "durable-import", workItemId: "import-work", body: "original text" });
+  const client = new RoomAgentClient({ origin: f.origin, roomId, token: key });
+  const first = await client.workDiscussion("import-work", { consistent: true });
+  const lines = [...f.store.exportEvents(key, roomId)];
+  const post = lines.find(row => row.event.type === T.MESSAGE_POSTED && row.event.data.messageId === "durable-import");
+  post.event.data.body = "replacement text";
+  const head = lines.at(-1);
+  f.store.importEvents(key, roomId, lines);
+  assert.equal(f.store.room(roomId).sequence, head.sequence);
+  assert.equal(f.store.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, head.sequence).id, head.event.id);
+  await assert.rejects(client.workDiscussion("import-work", { resumeToken: first.discussion.resumeToken }), { status: 409, code: "discussion_reset_required" });
+  assert.equal((await client.workDiscussion("import-work", { consistent: true })).discussion.items.find(row => row.message.id === "durable-import").message.body, "replacement text");
+});
+
+test("consistent client binds final tokens to the frozen page and credential", async t => {
+  const f = await fixture(t);
+  f.post("durable-final", { workItemId: "test-handoff" });
+  const first = await f.client.workDiscussion("test-handoff", { consistent: true, limit: 1 });
+  const final = await f.client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 50 });
+  assert.equal(final.discussion.hasMore, false);
+  let value = final;
+  const client = new RoomAgentClient({ ...f.config, fetchImpl: async url => url.includes("work-discussion")
+    ? { ok: true, status: 200, json: async () => value } : fetch(url, { headers: { Authorization: "Bearer " + f.keys.producer } }) });
+  for (const key of ["scopeDigest", "prefixDigest", "anchorId"]) {
+    value = structuredClone(final);
+    value.discussion.resumeToken = cursorChange(value.discussion.resumeToken, token => token[key] = key === "anchorId" ? "other-event" : "0".repeat(64));
+    await assert.rejects(client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 50 }), { code: "invalid_response" });
+  }
+  const otherCredential = f.store.issueAccessKey("commons", "producer");
+  const otherClient = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: otherCredential });
+  await assert.rejects(otherClient.workDiscussion("test-handoff", { resumeToken: final.discussion.resumeToken }), { status: 409, code: "discussion_reset_required" });
 });
