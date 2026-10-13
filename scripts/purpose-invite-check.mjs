@@ -10,7 +10,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { signInFixture } from "./auth-signin.mjs";
+import { showGuestJoin, fillJoinName, signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
@@ -45,8 +45,12 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
   await signInFixture(inviter, f.keys.owner);
   await inviter.locator("#main").waitFor({ state: "visible" });
   await inviter.locator("#message-input").fill("Keep this unfinished thought");
-  let creates = 0;
-  inviter.on("request", request => { if (request.method() === "POST" && request.url().endsWith("/share-links")) creates++; });
+  let creates = 0, lists = 0;
+  inviter.on("request", request => {
+    if (!request.url().endsWith("/share-links")) return;
+    if (request.method() === "POST") creates++;
+    if (request.method() === "GET") lists++;
+  });
   const workDetails = inviter.locator('[data-work-record-id="test-handoff"] .work-details');
   await workDetails.locator("summary").first().click();
   const contextualInvite = inviter.locator('[data-focus-key="work-invite:test-handoff"]');
@@ -61,6 +65,7 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
   assert.match(await inviter.locator("#share-link-history-note").innerText(), /room and its history/);
   assert.equal(await inviter.locator("#growth-kit").isVisible(), false, "contextual invitations do not offer a competing generic link");
   assert.equal(creates, 0, "opening the dialog does not create a room share link");
+  assert.equal(lists, 0, "opening an invitation does not fetch hidden link management");
   assert.equal(await inviter.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "no horizontal page overflow");
   mkdirSync("test-results/context-invite", { recursive: true });
   await inviter.screenshot({ path: `test-results/context-invite/${width}-${theme}.png` });
@@ -86,6 +91,7 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
   assert.match(await inviter.locator("#share-purpose-note").textContent(), /Test: prepare an agenda/);
   assert.match(await inviter.locator("#share-purpose-note").textContent(), /read the room and its history/i);
   assert.doesNotMatch(await inviter.locator("#share-purpose-note").textContent(), /nothing else.*shared/i);
+  assert.equal(lists, 0, "creating and copying the link needs no list request");
   await inviterContext.close();
   mutate(T.WORK_BLOCKED, { reason: "The agenda needs updated dates", nextAction: "Correct dates" });
   const reopenedWork = currentWork();
@@ -95,10 +101,21 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
   const guest = await guestContext.newPage();
   guest.setDefaultTimeout(8000); guest.on("pageerror", error => errors.push(error.message));
   await guest.goto(url);
-  await guest.locator("#join-link-name").waitFor();
+  await guest.locator("#join-account-auth").waitFor();
+  assert.equal(await guest.locator("#join-link-form").isVisible(), false, "account entry has one form");
+  assert.equal(await guest.locator("#join-account-back").innerText(), "Join temporarily as a guest");
+  await guest.screenshot({ path: `test-results/context-invite/join-${width}-${theme}.png` });
+  await showGuestJoin(guest);
+  assert.equal(await guest.locator("#join-account-auth").isVisible(), false, "temporary joining hides account entry");
+  assert.match(await guest.locator("#join-guest-note").innerText(), /8 hours/);
+  await guest.locator("#join-account-signin").click();
+  assert.equal(await guest.locator("#join-link-form").isVisible(), false, "returning to login hides temporary joining");
+  await guest.locator("#join-account-back").focus();
+  await guest.keyboard.press("Enter");
+  assert.equal(await guest.locator("#join-link-name").evaluate(el => el === document.activeElement), true, "keyboard guest choice focuses the name");
   assert.equal(await guest.locator("#join-link-scope").isVisible(), true);
   assert.match(await guest.locator("#join-link-scope").innerText(), /Join the conversation/);
-  await guest.locator("#join-link-name").fill("Purposeful guest");
+  await fillJoinName(guest, "Purposeful guest");
   await guest.locator("#join-link-submit").click();
   await guest.locator("#main").waitFor({ state: "visible" });
   const card = guest.locator('[data-work-record-id="test-handoff"]');
@@ -120,7 +137,7 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
   const stale = await staleContext.newPage();
   stale.setDefaultTimeout(8000); stale.on("pageerror", error => errors.push(error.message));
   await stale.goto(`${origin}/#join/${staleToken}/work/no-such-item`);
-  await stale.locator("#join-link-name").fill("Stale guest");
+  await fillJoinName(stale, "Stale guest");
   await stale.locator("#join-link-submit").click();
   await stale.locator("#main").waitFor({ state: "visible" });
   assert.match(await stale.locator("#status").textContent(), /no longer/i);
@@ -132,7 +149,7 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
   const plain = await plainContext.newPage();
   plain.setDefaultTimeout(8000); plain.on("pageerror", error => errors.push(error.message));
   await plain.goto(`${origin}/#join/${f.links.valid}`);
-  await plain.locator("#join-link-name").fill("Plain guest");
+  await fillJoinName(plain, "Plain guest");
   await plain.locator("#join-link-submit").click();
   await plain.locator("#main").waitFor({ state: "visible" });
   assert.equal(await plain.locator('[data-work-record-id="test-handoff"] .work-details').evaluate(el => el.open), false, "plain link opens no item");

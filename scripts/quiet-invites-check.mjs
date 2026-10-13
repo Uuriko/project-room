@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { signInFixture } from "./auth-signin.mjs";
+import { showGuestJoin, fillJoinName, signInFixture } from "./auth-signin.mjs";
 
 for (const touch of [false, true]) {
   test(`quiet invitations ${touch ? 'touch' : 'desktop'}: disclosure, truthful limits, late-list ordering and retry`, { timeout: 60000 }, async t => {
@@ -52,11 +52,14 @@ for (const touch of [false, true]) {
         await route.fulfill({ response }); listDelivered.resolve();
       } else await route.continue();
     });
-    await clickChrome(page, "#invite-people-button"); await oldList.promise;
+    await clickChrome(page, "#invite-people-button");
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-management').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-settings-summary').textContent(), '24 hours · 10 guests');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'share-link-create');
+    assert.equal(firstGet, true, 'collapsed management makes no list request');
+    await page.locator('#share-management > summary').click(); await oldList.promise;
+    await page.locator('#share-management > summary').click();
     mkdirSync('test-results', { recursive: true });
     await page.screenshot({ path: `test-results/quiet-invite-${touch ? 'touch' : 'desktop'}-start.png` });
     await page.locator('#share-settings > summary').click();
@@ -114,7 +117,7 @@ for (const touch of [false, true]) {
     const guest = await (await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })).newPage();
     guest.setDefaultTimeout(10000);
     await guest.goto(`${origin}/#join/${fixture.links.valid}`);
-    await guest.locator('#join-link-form').waitFor({ state: 'visible' });
+    await showGuestJoin(guest);
     assert.equal(await guest.locator('#identity-label').textContent(), 'Room not open');
     assert.equal(await guest.locator('#connection-status').textContent(), 'Not connected · invitation preview');
     assert.equal(await guest.locator('#join-switch-warning').isVisible(), false);
@@ -132,9 +135,9 @@ for (const touch of [false, true]) {
 
     await page.locator('#message-input').fill('Keep this room draft');
     await page.evaluate(token => { location.hash = '#join/' + token; }, fixture.links.valid);
-    await page.locator('#join-link-form').waitFor({ state: 'visible' });
+    await showGuestJoin(page);
     assert.equal(await page.locator('#join-switch-warning').isVisible(), false, 'same-room invitation does not warn about an identity switch');
-    await page.locator('#join-link-name').fill('Ignored for existing membership');
+    await fillJoinName(page, 'Ignored for existing membership');
     await page.locator('#join-link-submit').click();
     await page.locator('#join-link-dialog').waitFor({ state: 'hidden' });
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep this room draft');

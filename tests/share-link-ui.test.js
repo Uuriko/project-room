@@ -128,6 +128,8 @@ test("invitation UI retries the same uncertain creation and preserves confirmed 
     node("#share-link-expiry").value = "24";
     node("#share-link-limit").value = "2";
     await node("#invite-people-button").handlers.click();
+    node("#share-management").open = true;
+    await node("#share-management").handlers.toggle();
     await node("#share-link-form").handlers.submit({ preventDefault() {} });
     assert.match(node("#share-link-status").textContent, /could not confirm the result/);
     assert.equal(node("#share-link-create").disabled, false);

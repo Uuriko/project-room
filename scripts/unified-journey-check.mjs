@@ -7,7 +7,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { signInFixture } from "./auth-signin.mjs";
+import { showGuestJoin, fillJoinName, signInFixture } from "./auth-signin.mjs";
 import { openCatchUp } from "./room-chrome.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 
@@ -40,8 +40,8 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
   await guest.locator("#join-link-status").filter({ hasText: /expired|cancelled|join limit|unavailable/i }).waitFor({ state: "visible" });
   assert.match(await guest.locator("#join-link-status").textContent(), /expired|cancelled|join limit|unavailable/i);
   await guest.goto(`${origin}/#join/${fixture.links.valid}`);
-  await guest.getByRole("button", { name: "Continue as guest", exact: true }).waitFor();
-  await guest.locator("#join-link-name").fill("Unified test guest");
+  await showGuestJoin(guest);
+  await fillJoinName(guest, "Unified test guest");
   await guest.locator("#join-link-submit").click();
   await guest.locator("#join-link-dialog").waitFor({ state: "hidden" });
   await guest.locator("#main").waitFor({ state: "visible" });

@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { signInFixture } from "./auth-signin.mjs";
+import { fillJoinName, signInFixture } from "./auth-signin.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 
 const fixtureLogins = new Map();
@@ -520,7 +520,7 @@ test("a shared invitation retains its pending account signup across Escape and n
   await page.locator("#join-link-submit").filter({ hasText: /^Join room$/ }).waitFor();
   await page.waitForFunction(() => document.querySelector("#join-link-dialog").getAttribute("aria-busy") === "false");
   assert.equal(await page.locator("#join-link-close").isDisabled(), false);
-  await page.locator("#join-link-name").fill("Signed-in shared participant");
+  await fillJoinName(page, "Signed-in shared participant");
   await page.locator("#join-link-submit").click();
   await page.waitForURL(`${f.origin}/?room=studio`); await page.locator("#main").waitFor({ state: "visible" });
 });

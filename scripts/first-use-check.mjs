@@ -12,7 +12,7 @@ import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T } from '../src/events.js';
-import { signInFixture } from "./auth-signin.mjs";
+import { fillJoinName, signInFixture } from "./auth-signin.mjs";
 
 // UI calming #2 moved "Make this work" into the per-message "⋯" overflow menu;
 // open it first, exactly as a member does.
@@ -64,7 +64,7 @@ for (const touch of [false, true]) {
     await owner.locator('#message-input').fill('');
     await ensureSidebarClosed(owner);
     await guest.goto(invitation);
-    await guest.locator('#join-link-name').fill('Maya');
+    await fillJoinName(guest, 'Maya');
     await guest.locator('#join-link-submit').click();
     await guest.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await guest.locator('#identity-label').textContent(), 'Maya');

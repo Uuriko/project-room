@@ -1,3 +1,4 @@
+import { fillJoinName } from "./auth-signin.mjs";
 // Synthetic browser journeys in disposable rooms; no real users or external data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +30,7 @@ for (const closed of ['full', 'cancelled', 'expired']) test(`a guest can reopen 
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${origin}/#join/${token}`);
-  await page.locator('#join-link-name').fill('Returning guest');
+  await fillJoinName(page, 'Returning guest');
   await page.locator('#join-link-submit').click();
   await page.locator('#main').waitFor({ state: 'visible' });
   const count = Object.keys(fixture.store.room('commons').state.members).length;
@@ -37,7 +38,7 @@ for (const closed of ['full', 'cancelled', 'expired']) test(`a guest can reopen 
   if (closed === 'expired') fixture.store.now = () => Date.now() + 3600001;
   await page.goto(`${origin}/#join/${token}`);
   await page.locator('#join-link-submit').waitFor({ state: 'visible' });
-  await page.locator('#join-link-name').fill('Returning guest');
+  await fillJoinName(page, 'Returning guest');
   await page.locator('#join-link-submit').click();
   await page.locator('#join-link-dialog').waitFor({ state: 'hidden' });
   await page.locator('#main').waitFor({ state: 'visible' });

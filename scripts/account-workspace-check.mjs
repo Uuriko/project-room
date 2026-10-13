@@ -11,7 +11,7 @@ import { SyntheticInboxTransport } from "../server/inbox-transport.mjs";
 import { SyntheticMailFixture } from "./synthetic-mail-fixture.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { randomBytes } from "node:crypto";
-import { signInFixture } from "./auth-signin.mjs";
+import { showGuestJoin, fillJoinName, signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, { mobile = false, member = false } = {}) {
   const f = createAcceptanceFixture();
@@ -125,8 +125,8 @@ test("an account-home invitation joins explicitly and keeps the private draft", 
     expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
   const before = f.store.room("commons").sequence;
   await p.evaluate(hash => { location.hash = hash; }, "#join/" + token);
-  await p.locator("#join-link-form").waitFor(); assert.equal(f.store.room("commons").sequence, before);
-  await p.locator("#join-link-name").fill("Synthetic member"); await p.locator("#join-link-submit").click();
+  await showGuestJoin(p); assert.equal(f.store.room("commons").sequence, before);
+  await fillJoinName(p, "Synthetic member"); await p.locator("#join-link-submit").click();
   await p.locator("#join-link-dialog").waitFor({ state: "hidden" }); await p.locator("#main").waitFor();
   await clickChrome(p, "#nav-inbox"); assert.equal(await p.locator("#inbox-draft").inputValue(), "Keep my private draft");
   assert.equal(f.provider.count(), 0);
@@ -222,8 +222,8 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
     expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
   const before = f.store.room("commons").sequence;
   await p.goto(f.origin + "/#join/" + token);
-  await p.locator("#join-link-form").waitFor();
-  assert.equal(await p.locator("#join-link-submit").textContent(), "Continue as guest");
+  await p.locator("#join-account-auth").waitFor();
+  assert.equal(await p.locator("#join-link-form").isVisible(), false);
   if (await p.locator("#join-account-signin").isVisible()) await p.locator("#join-account-signin").click();
   const form = await openMagicSignin(p);
   await form.locator('[name="email"]').fill(email);
@@ -241,7 +241,7 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
       magicStillInUrl: new URLSearchParams(location.search).has("magic") }));
     error.message += "\nLink redemption state: " + JSON.stringify(diagnosis); throw error;
   }
-  await p.locator("#join-link-form").waitFor();
+  await showGuestJoin(p);
   try { await p.locator("#join-link-submit").filter({ hasText: /^Join room$/ }).waitFor(); }
   catch (error) {
     const state = await p.evaluate(() => ({ invitationInUrl: location.hash.startsWith("#join/"),
@@ -252,7 +252,7 @@ for (const mode of ["signup", "login"]) test(`shared invitation: ${mode} returns
   assert.equal(await p.locator("#join-account-choices").isVisible(), false);
   assert.equal(await p.locator("#join-guest-note").isVisible(), false);
   assert.equal(f.store.room("commons").sequence, before, "sign-in alone does not redeem the invitation");
-  await p.locator("#join-link-name").fill("Account member"); await p.locator("#join-link-submit").click();
+  await fillJoinName(p, "Account member"); await p.locator("#join-link-submit").click();
   await p.locator("#main").waitFor(); await p.locator("#join-link-dialog").waitFor({ state: "hidden" });
   assert.equal(new URL(p.url()).searchParams.get("room"), "commons");
   await p.reload(); await p.locator("#main").waitFor();
@@ -264,11 +264,14 @@ test("shared invitation: Google handoff preserves invitation and purpose, guest 
   f.store.shareLinks.create(f.keys.owner, "commons", { requestId: "oauth-invite", linkToken: token,
     expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: 0 });
   await p.goto(f.origin + "/#join/" + token + "/message/test-welcome");
-  await p.locator("#join-link-name").fill("Keep my name");
-  // Sign-in and the guest form show together for a signed-out visitor.
-  assert.equal(await p.locator("#join-account-auth").isVisible(), true);
+  await fillJoinName(p, "Keep my name");
+  assert.equal(await p.locator("#join-account-auth").isVisible(), false);
   assert.equal(await p.locator("#join-link-name").inputValue(), "Keep my name");
   if (await p.locator("#join-account-signin").isVisible()) await p.locator("#join-account-signin").click();
+  assert.equal(await p.locator("#join-link-form").isVisible(), false);
+  await p.locator("#join-account-back").click();
+  assert.equal(await p.locator("#join-link-name").inputValue(), "Keep my name");
+  await p.locator("#join-account-signin").click();
   const scopeBounds = await p.locator("#join-link-scope").boundingBox();
   const googleBounds = await p.locator("#join-account-google").boundingBox();
   assert.ok(googleBounds.y >= scopeBounds.y + scopeBounds.height, "Google sign-in does not overlap the invitation text");

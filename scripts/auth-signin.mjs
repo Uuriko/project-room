@@ -1,5 +1,16 @@
 // Authenticate disposable local browser fixtures through the real credential API.
 // This helper never mounts a production form or injects store/session state.
+export async function showGuestJoin(page) {
+  await page.locator("#join-link-form:visible, #join-account-back:visible").first().waitFor();
+  if (await page.locator("#join-account-back").isVisible()) await page.locator("#join-account-back").click();
+  await page.locator("#join-link-form").waitFor({ state: "visible" });
+}
+
+export async function fillJoinName(page, name) {
+  await showGuestJoin(page);
+  await page.locator("#join-link-name").fill(name);
+}
+
 export async function signInFixture(page, accessKey, { returnTo = page.url() } = {}) {
   const origin = new URL(page.url()).origin;
   const hostname = new URL(origin).hostname;

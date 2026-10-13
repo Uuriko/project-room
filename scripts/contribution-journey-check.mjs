@@ -1,3 +1,4 @@
+import { fillJoinName } from "./auth-signin.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Full synthetic browser journey. No human research or autonomous-agent claims.
 import test from "node:test";
@@ -31,7 +32,7 @@ for (const touch of [false, true]) test(`contribution journey ${touch ? "touch" 
   send("room.history_visibility_set", { historyVisibility: "all" });
   let page = await context.newPage();
   await page.goto(`${origin}/#join/${f.links.valid}`);
-  await page.locator("#join-link-name").fill("Journey guest"); await page.locator("#join-link-submit").click();
+  await fillJoinName(page, "Journey guest"); await page.locator("#join-link-submit").click();
   await page.locator("#main").waitFor({ state: "visible" });
   const member = Object.values(state().members).find(person => person.displayName === "Journey guest");
   assert.ok(member); assert.deepEqual(member.permissions, []);

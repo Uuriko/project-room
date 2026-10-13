@@ -7,7 +7,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { signInFixture } from "./auth-signin.mjs";
+import { fillJoinName, signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, { touch = false, clipboard = false } = {}) {
   const fixture = createAcceptanceFixture();
@@ -76,12 +76,12 @@ for (const maxJoins of [1, 10]) test(`two tabs joining an invitation (${maxJoins
   }, null);
   const before = Object.keys(fixture.store.room('commons').state.members).length;
   await page.goto(`${origin}/#join/${token}`);
-  await page.locator('#join-link-name').fill('Winning guest');
+  await fillJoinName(page, 'Winning guest');
   const other = await page.context().newPage();
   other.on('pageerror', error => errors.push(error.message));
   other.setDefaultTimeout(10000);
   await other.goto(`${origin}/#join/${token}`);
-  await other.locator('#join-link-name').fill('Stale guest');
+  await fillJoinName(other, 'Stale guest');
   const pending = Promise.withResolvers(), release = Promise.withResolvers();
   releases.push(release.resolve);
   let requests = 0;
@@ -101,7 +101,7 @@ for (const maxJoins of [1, 10]) test(`two tabs joining an invitation (${maxJoins
   await other.getByRole('button', { name: 'Confirm and continue', exact: true }).waitFor();
   assert.equal(requests, 1, 'review cannot automatically join');
   assert.match(await other.locator('#join-link-status').textContent(), /Current browser identity:/);
-  await other.locator('#join-link-name').fill('Stale guest');
+  await fillJoinName(other, 'Stale guest');
   await other.getByRole('button', { name: 'Confirm and continue', exact: true }).click();
   await other.locator('#join-link-dialog').waitFor({ state: 'hidden' });
   assert.equal(await other.locator('#identity-label').textContent(), 'Winning guest');
@@ -128,7 +128,7 @@ test('guest sign-out recovery locks the current invitation and can join after co
     await route.continue();
   });
   await page.goto(`${origin}/#join/${fixture.links.valid}`);
-  await page.locator('#join-link-name').fill('Test recovered guest');
+  await fillJoinName(page, 'Test recovered guest');
   await page.locator('#join-link-submit').click();
   await page.locator('#join-link-signout').waitFor({ state: 'visible' });
   signingOut = true;
@@ -184,7 +184,7 @@ for (const failure of ['network', '429', '503']) {
       failure === 'network' ? 'join-link-close' : 'join-link-retry');
     assert.equal(joins, 0, 'retrying preview still does not join');
     await retry.click();
-    await page.locator('#join-link-form').waitFor({ state: 'visible' });
+    await page.locator('#join-account-auth').waitFor();
     assert.equal(await retry.isVisible(), false);
     assert.equal(previews.length, 3);
     assert.equal(previews.every(token => token === fixture.links.valid), true, 'all preview attempts retain the original secret');
@@ -192,7 +192,7 @@ for (const failure of ['network', '429', '503']) {
     assert.equal(joins, 0, 'successful preview needs a separate join submission');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'join-account-google', 'recovered signed-out preview starts with account sign-in choices');
     if (failure === 'network') await capture(page, 'preview-ready-touch');
-    await page.locator('#join-link-name').fill('Recovery test guest');
+    await fillJoinName(page, 'Recovery test guest');
     await page.locator('#join-link-submit').click();
     await page.locator('#main').waitFor({ state: 'visible' });
     assert.equal(joins, 1);
@@ -307,7 +307,7 @@ for (const touch of [false, true]) test(`purpose join ${touch ? 'mobile' : 'desk
     else await route.continue();
   });
   await page.goto(`${origin}/#join/${token}/work/test-handoff`);
-  await page.locator('#join-link-name').fill('Result recipient');
+  await fillJoinName(page, 'Result recipient');
   await page.locator('#join-link-submit').click();
   await page.locator('#join-link-status').filter({ hasText: "couldn't confirm whether you joined" }).waitFor();
   await page.locator('#join-link-close:enabled').click();
@@ -351,7 +351,7 @@ test('legacy alias link: lost committed join survives close and reload unchanged
   assert.doesNotMatch(await page.locator("#join-link-scope").textContent(), /invalid/i, "a persisted legacy alias is still an invitation");
   assert.equal(await page.locator("#shared-agent-details").isVisible(), false, "legacy aliases do not advertise a new agent URL");
   assert.equal(await page.locator("#shared-agent-instructions").inputValue(), "");
-  await page.locator('#join-link-name').fill('Historical invitation guest');
+  await fillJoinName(page, 'Historical invitation guest');
   await page.locator('#join-link-submit').click();
   await page.locator('#join-link-status').filter({ hasText: "couldn't confirm whether you joined" }).waitFor();
   await page.locator('#join-link-close:enabled').click();

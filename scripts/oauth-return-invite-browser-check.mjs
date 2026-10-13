@@ -1,3 +1,4 @@
+import { fillJoinName } from "./auth-signin.mjs";
 // A returning member who opens a friend's link and signs in with Google must
 // land on that invitation, not in their own first room. The Google callback
 // sends anyone who already has a room to /?room=<first room>, and the OAuth
@@ -76,7 +77,7 @@ for (const kind of ["join", "invite", "code", "code-stale"]) test(`returning Goo
   await page.goto(origin + "/" + fragment);
   const callback = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/google/callback");
   if (kind !== "invite") {
-    await page.locator("#join-link-form").waitFor();
+    await page.locator("#join-account-auth").waitFor();
     if (await page.locator("#join-account-signin").isVisible()) await page.locator("#join-account-signin").click();
     await page.locator("#join-account-google").click();
   } else {
@@ -93,7 +94,7 @@ for (const kind of ["join", "invite", "code", "code-stale"]) test(`returning Goo
   }
   if (kind !== "invite") {
     await page.locator("#join-link-submit").filter({ hasText: /^Join room$/ }).waitFor();
-    await page.locator("#join-link-name").fill("Returning friend"); await page.locator("#join-link-submit").click();
+    await fillJoinName(page, "Returning friend"); await page.locator("#join-link-submit").click();
     await page.locator(dialog).waitFor({ state: "hidden" });
     await page.waitForFunction(() => new URLSearchParams(location.search).get("room") === "commons");
   } else {
