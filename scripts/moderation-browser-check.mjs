@@ -1,4 +1,4 @@
-import { openMemberProfile, enableHumanAdvanced } from "./room-chrome.mjs";
+import { openMemberProfile, enableHumanAdvanced, messageAction } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 E4: a member reports a message to the room owner and mutes an author for
 // themselves; the owner alone sees the report list with the reporter's name.
@@ -48,9 +48,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await page.locator("#reports-section").isHidden(), true, "a non-owner never sees the report list");
     // Report: a short reason goes to the owner only; the room sees nothing.
     // Per-message actions live in the "⋯" overflow menu (UI calming #2).
-    const reportMenu = target.locator('details.message-more');
-    if (!(await reportMenu.evaluate(node => node.open))) await reportMenu.locator('summary').click();
-    await target.locator('[data-message-action="report"]').click();
+    await messageAction(page, "mod-target", "report");
     await page.locator("#report-dialog").waitFor({ state: "visible" });
     assert.match(await page.locator("#report-source").textContent(), /^Message from Test producer: Synthetic message/);
     await page.locator("#report-reason-input").fill("Off-topic and repeated.");
@@ -64,8 +62,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const sequenceBefore = f.store.room("commons").sequence;
     // Reporting again is a no-op receipt, not a second report.
     // The menu closed behind the first report; reopen it.
-    if (!(await reportMenu.evaluate(node => node.open))) await reportMenu.locator('summary').click();
-    await target.locator('[data-message-action="report"]').click();
+    await messageAction(page, "mod-target", "report");
     await page.locator("#report-reason-input").fill("Still off-topic.");
     await dialogPrimarySubmit(page, "#report-form").click();
     await page.locator("#report-dialog").waitFor({ state: "hidden" });
@@ -73,8 +70,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(f.reports().length, 1); assert.equal(f.store.room("commons").sequence, sequenceBefore, "reports append no room events");
     // Mute from the message: the author's messages collapse for this viewer only.
     // The menu closed behind the report; reopen it.
-    if (!(await reportMenu.evaluate(node => node.open))) await reportMenu.locator('summary').click();
-    await target.locator('[data-message-action="mute"]').click();
+    await messageAction(page, "mod-target", "mute");
     await target.locator(".message-muted").waitFor({ state: "visible" });
     assert.equal(await target.locator(".message-muted").textContent(), "Hidden: you muted Test producer.");
     assert.deepEqual(f.guestState().mutedMemberIds, ["producer"]);
