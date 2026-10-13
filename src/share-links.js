@@ -148,6 +148,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
   let kitOnly = false;
+  let invitationOpener = null, contextualInvitation = false;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
@@ -258,12 +259,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     && managementGeneration === client.generation && managementSession === client.session && client.ownsAccountSession() && canManage();
   const managementCurrent = (version, generation) => version === managementVersion && generation === client.generation && manager.open && ownsManagement();
   const escHtml = value => value.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  function refreshPurposes() {
-    const select = $("#share-link-purpose"), previous = select.value;
+  function refreshPurposes(selected = "") {
+    const select = $("#share-link-purpose");
     const items = listPurposes();
     select.innerHTML = `<option value="">Whole room</option>` + items.map(p =>
       `<option value="${escHtml(p.id)}">${p.done ? "Result" : "Question"} · ${escHtml(p.title)}</option>`).join("");
-    select.value = items.some(p => p.id === previous) ? previous : "";
+    select.value = items.some(p => p.id === selected) ? selected : "";
   }
   function updateCopyControls() {
     $("#share-link-copy").disabled = copying || !currentLink;
@@ -322,6 +323,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     code.hidden = !(state && id && canInviteMembers(state, id));
   }
   function applyKitChrome() {
+    const kit = $("#growth-kit"), intro = $("#share-link-intro"), title = $("#share-link-title");
+    if (kit) kit.hidden = contextualInvitation;
+    if (intro) intro.hidden = contextualInvitation;
+    if (title) title.textContent = contextualInvitation ? uiText("invite.toWork") : "Invite";
     const form = $("#share-link-form");
     const management = $("#share-management");
     if (management) management.hidden = kitOnly;
@@ -475,8 +480,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       throw error;
     }
   }
-  $("#invite-people-button").addEventListener("click", async () => {
+  async function openInvitation(purposeId = "", opener = $("#invite-people-button")) {
+    if (manager.open) return;
     const admin = canManage();
+    if (purposeId && (!admin || !listPurposes().some(item => item.id === purposeId))) return;
+    invitationOpener = { node: opener, key: opener?.dataset.focusKey, session: getSession(), generation: client.generation };
+    contextualInvitation = Boolean(purposeId);
     kitOnly = !admin;
     if (!admin) {
       if (!inRoom()) return;
@@ -492,7 +501,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     kitOnly = false;
     applyKitChrome();
     $("#share-local-note").hidden = !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
-    refreshPurposes();
+    refreshPurposes(purposeId);
     refreshAgentCode();
     // Member and co-admin links are the room creator's to make.
     // Optional chrome: its absence must never keep the dialog from opening.
@@ -501,11 +510,21 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (access) access.value = "guest";
     manager.showModal(); $("#share-link-create").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
-    await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
-  });
+    await Promise.all([list(version, generation).catch(() => {}), contextualInvitation ? Promise.resolve() : loadKit()]);
+  }
+  $("#invite-people-button").addEventListener("click", () => openInvitation());
+  $("#share-link-history-note").textContent = uiText("invite.roomHistory");
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
-  manager.addEventListener("close", () => { resetManagement(); if (!$("#invite-people-button").hidden) $("#invite-people-button").focus(); });
+  manager.addEventListener("close", () => {
+    const opener = invitationOpener; invitationOpener = null;
+    resetManagement();
+    if (!opener || opener.session !== getSession() || opener.generation !== client.generation) return;
+    const replacement = opener.key && [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key);
+    const target = [opener.node, replacement, $("#invite-people-button")].find(node => node?.isConnected
+      && !node.disabled && (node.checkVisibility?.() ?? Boolean(node.getClientRects().length)));
+    target?.focus({ preventScroll: true });
+  });
   $("#share-link-another").addEventListener("click", () => {
     clearResult(); $("#share-link-create").focus();
   });
@@ -887,7 +906,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const fragment = consumeJoinFragment(); if (fragment) open(fragment);
   });
   ensureGrowthChrome();
-  return { sync, resetManagement, open, syncAccountSigninBusy,
+  return { sync, resetManagement, open, syncAccountSigninBusy, canInviteToWork: canManage, openInvitation,
     pendingFragment: () => joinSecret ? shareLinksPendingFragment() : null,
     async resumeSignedIn() {
       if (!joinDialog.open || !joinSecret) return false;
