@@ -232,10 +232,12 @@ test("an incoming room link owns navigation while its workspace module downloads
   await page.evaluate(() => { location.hash = "#room/commons"; });
   const route = await held;
   assert.equal(await page.locator("#auth-panel").evaluate(node => node.inert), true);
+  assert.equal(await page.locator("#session-menu-button").isDisabled(), true, "account controls wait for their handlers");
   const button = await page.locator("#google-signin").boundingBox();
   await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2);
   assert.equal(requests.includes("/api/auth/google/start"), false, "old sign-in cannot replace pending entry");
   await route.continue();
   await page.waitForFunction(() => !document.querySelector("#auth-panel").inert);
+  assert.equal(await page.locator("#session-menu-button").isEnabled(), true);
   assert.match(page.url(), /#room\/commons$/);
 });
