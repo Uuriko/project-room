@@ -10937,14 +10937,19 @@ paths:
       parameters:
         - name: hostId
           in: query
-          required: true
+          required: false
           schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9._-]+$' }
-          description: Send the same input host name used for heartbeat reports.
+          description: >-
+            Send the same input host name used for heartbeat reports.
+            Optional when the identity has exactly one registered host —
+            that host is derived and echoed as `hostId` in the response.
+            Required when the identity has several registered hosts (the
+            422 names them).
         - name: waitMs
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '200': { description: "{ agentId, hostId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
