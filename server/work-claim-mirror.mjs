@@ -7,6 +7,8 @@ import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
+// createWork (work-claims.mjs) caps card titles at 512 characters.
+const MAX_TITLE_CHARS = 512;
 
 // Map a work item id to its board claim id. Ids that are already board-safe
 // pass through unchanged, so existing cards keep their ids. Any other id is
@@ -124,8 +126,17 @@ function refuseOccupiedSuccessor(nextId, sourceId) {
 function successor(store, roomId, actorId, sourceId, nextId, title, nowMs) {
   const registry = store.workClaims;
   if (registry.get(roomId, nextId)) return registry.get(roomId, nextId);
+  // #2967: a handoff's nextAction becomes the successor card's title, but the
+  // projection validator (recordHandoff in src/events.js) imposes no length
+  // cap on nextAction while createWork refuses titles over 512 chars — so a
+  // legal long handoff threw here and rolled back the whole projection
+  // command. The title is only a display label: bound it to the cap. The
+  // full nextAction is preserved verbatim on the source card's chain link
+  // (and in the projection's handoff record), so nothing is lost.
+  const rawTitle = title || nextId;
+  const boundedTitle = typeof rawTitle === "string" ? rawTitle.slice(0, MAX_TITLE_CHARS) : rawTitle;
   const created = createWork({
-    id: nextId, title: title || nextId, dependsOn: [sourceId], workItemId: nextId
+    id: nextId, title: boundedTitle, dependsOn: [sourceId], workItemId: nextId
   }, { now: nowMs, agentId: actorId });
   return commit(store, roomId, actorId, created, "created", nowMs);
 }
