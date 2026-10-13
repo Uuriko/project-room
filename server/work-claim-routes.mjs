@@ -1174,13 +1174,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
       const item = load(claimIdOf(reject, workClaimId));
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
-      const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
+      // #2966: expectedBasis names the basis the reviewer actually read;
+      // a stale one is a 409 work_claim_conflict (same as the release and
+      // reassign round preconditions), not a review of the current basis.
+      let reviewed;
+      try {
+        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs });
+      } catch (error) {
+        if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+          reject(409, error.code, `${error.message} — re-read the claim and retry with its current basis.`);
+        }
+        if (error instanceof ClaimError) reject(422, error.code, error.message);
+        throw error;
+      }
       const duplicate = reviewed.history === item.history;
       if (!duplicate) commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
       if (!duplicate && data.verdict === "changes_requested") {

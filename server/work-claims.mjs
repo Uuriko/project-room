@@ -987,7 +987,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
@@ -1002,9 +1002,42 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
     reviewUrl = url;
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
-  // Replaying the latest identical content never refreshes its old binding.
-  // A request ID is still needed to distinguish delayed retries after a newer verdict.
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) return Object.freeze(item);
+  // #2966, revised: an identical resubmission is ambiguous — it can be a
+  // blind retry of the request that already landed, or a deliberate
+  // re-review of changed context with the same wording ("LGTM" on a new CI
+  // head). The two must not be conflated: a blind retry never refreshes
+  // the old binding, or it would silently approve changed work (the
+  // approval-binding invariant), yet a reviewer must not be forced to
+  // invent new wording to re-approve a new head, or reviewed completion
+  // deadlocks. `expectedBasis` is the distinguishing signal: the caller
+  // names the current basis (owner, claimedAt, revision, ci.headSha) they
+  // actually reviewed, as read back from the claim. A supplied basis that
+  // no longer matches is a conflict, not a review of the current context.
+  const currentBasis = reviewBasisFor(item);
+  let namedBasis = null;
+  if (expectedBasis !== undefined && expectedBasis !== null) {
+    namedBasis = reviewBasisOf(expectedBasis);
+    if (!sameBasis(namedBasis, currentBasis)) {
+      fail("work_claim_conflict", `expected review basis does not match the current basis of work "${item.id}"`);
+    }
+  }
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) {
+    // A true replay on the still-current basis changes nothing.
+    if (currentReviewBasis(prior, item)) return Object.freeze(item);
+    // The prior basis is stale (or the record predates bases). Only a
+    // deliberate re-review — one naming the current basis — may refresh
+    // it, and only for the #2966 case: CI recorded a new head (headSha is
+    // the sole changed basis field and there is a current head to bind
+    // to), or the prior record is a legacy unbound review. A basis stale
+    // because the revision, owner or claim round changed, or because CI
+    // was cleared with no current head (a newly linked PR), still cannot
+    // be refreshed by identical content — that takes a fresh summary.
+    const soleHeadMove = prior.basis !== null && prior.basis !== undefined && currentBasis.headSha !== null
+      && prior.basis.headSha !== currentBasis.headSha
+      && ["version", "owner", "claimedAt", "revision"].every(key => prior.basis[key] === currentBasis[key]);
+    const deliberateRefresh = namedBasis !== null && (soleHeadMove || !prior.basis);
+    if (!deliberateRefresh) return Object.freeze(item);
+  }
   const at = isoOf(atMs);
   const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
