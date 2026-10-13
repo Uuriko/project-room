@@ -278,6 +278,28 @@ const blobsOf = value => {
     "each blob must match sha256:<64 lowercase hex characters>"));
   return Object.freeze([...value]);
 };
+// The final evidence a reviewer approved: any of tags, blobs, evidenceRefs and
+// deliveryMode, normalized (arrays sorted). A reviewed done that records
+// different values for one of these keys needs an approval that named them.
+const sortedOf = list => Object.freeze([...list].sort());
+const evidenceOf = value => {
+  check(value && typeof value === "object" && !Array.isArray(value), "evidence must be an object");
+  const keys = Object.keys(value);
+  check(keys.every(key => ["tags", "blobs", "evidenceRefs", "deliveryMode"].includes(key)), "evidence may name tags, blobs, evidenceRefs and deliveryMode");
+  const out = {};
+  if (value.tags !== undefined) out.tags = sortedOf(tagsOf(value.tags));
+  if (value.blobs !== undefined) out.blobs = sortedOf(blobsOf(value.blobs));
+  if (value.evidenceRefs !== undefined) out.evidenceRefs = sortedOf(evidenceRefsOf(value.evidenceRefs));
+  if (value.deliveryMode !== undefined && value.deliveryMode !== null) {
+    check(DELIVERY_MODES.includes(value.deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
+    out.deliveryMode = value.deliveryMode;
+  }
+  return Object.freeze(out);
+};
+// The claim's receipt evidence as it stood when a review was recorded.
+const snapshotOf = value => Object.freeze({ ...evidenceOf({ tags: value.tags ?? [], blobs: value.blobs ?? [], evidenceRefs: value.evidenceRefs ?? [] }),
+  deliveryMode: value.deliveryMode ?? null });
+const sameList = (a, b) => JSON.stringify(sortedOf(a ?? [])) === JSON.stringify(sortedOf(b ?? []));
 // Predicate for query-time tag filters (the route validates `tag=` params
 // against the same shape stored tags must have).
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
@@ -373,8 +395,10 @@ const reviewRecordOf = value => {
   check(value.url == null || (typeof value.url === "string" && value.url.length <= 300), "review url must be at most 300 characters");
   check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "review at must be an ISO timestamp");
   const basis = reviewBasisOf(value.basis);
+  const evidence = value.evidence == null ? null : evidenceOf(value.evidence);
+  const snapshot = value.snapshot == null ? null : snapshotOf(value.snapshot);
   return Object.freeze({ memberId: value.memberId, verdict: value.verdict, summary: value.summary, url: value.url ?? null, at: value.at,
-    ...(basis ? { basis } : {}) });
+    ...(basis ? { basis } : {}), ...(evidence ? { evidence } : {}), ...(snapshot ? { snapshot } : {}) });
 };
 const reviewsOf = value => {
   if (value === undefined || value === null) return Object.freeze([]);
@@ -920,7 +944,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, evidence, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
@@ -934,12 +958,14 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
     check(parsed && parsed.protocol === "https:" && !parsed.username && !parsed.password, "url must be an https URL without credentials");
     reviewUrl = url;
   }
+  // Optional: name the final receipt evidence being approved (see evidenceOf).
+  const named = evidence === undefined || evidence === null ? null : evidenceOf(evidence);
   const prior = item.reviews.find(entry => entry.memberId === agent);
   // Replaying the latest identical content never refreshes its old binding.
   // A request ID is still needed to distinguish delayed retries after a newer verdict.
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) return Object.freeze(item);
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl && JSON.stringify(prior.evidence ?? null) === JSON.stringify(named)) return Object.freeze(item);
   const at = isoOf(atMs);
-  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
+  const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item), ...(named ? { evidence: named } : {}), snapshot: snapshotOf(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
   const attestations = Object.freeze([
     ...item.attestations.filter(entry => entry.memberId !== agent),
@@ -1045,7 +1071,7 @@ export function releaseExpired(items, now) {
 // for independent_principal. Returns true when reviewerId may close the
 // work; unknown policies throw (programmer error), identity mismatches
 // simply return false.
-export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMembers } = {}) {
+export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMembers, finalEvidence } = {}) {
   const item = workOf(work);
   const effective = policy ?? item.reviewPolicy ?? DEFAULT_REVIEW_POLICY;
   check(REVIEW_POLICIES.includes(effective), `policy must be one of ${REVIEW_POLICIES.join(", ")}`);
@@ -1055,6 +1081,21 @@ export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMe
   if (reviewerId === item.owner || item.supersededBy) return false;
   const review = item.reviews.find(entry => entry.memberId === reviewerId);
   if (review?.verdict !== "approve" || !currentReviewBasis(review, item)) return false;
+  // finalEvidence: what this done would record, as supplied (undefined/null =
+  // keep the claim's current value). The final tags, blobs, evidenceRefs and
+  // deliveryMode must equal, as exact sets, what the approval covers: the keys it
+  // named, else the claim's values when the approval was recorded. Clearing counts
+  // as a change. An approval stored before snapshots existed covers only the
+  // claim's current values, so it cannot cover any supplied change.
+  if (finalEvidence) {
+    const covered = { ...(review.snapshot ?? snapshotOf(item)), ...(review.evidence ?? {}) };
+    for (const key of ["tags", "blobs", "evidenceRefs"]) {
+      const given = finalEvidence[key] ?? item[key] ?? [];
+      if (!sameList(given, covered[key])) return false;
+    }
+    const mode = finalEvidence.deliveryMode ?? item.deliveryMode ?? null;
+    if (mode !== (covered.deliveryMode ?? null)) return false;
+  }
   const attestation = item.attestations.find(entry => entry.memberId === reviewerId);
   if (!attestation || attestation.at !== review.at) return false;
   const reviewers = reviewMembers instanceof Set ? reviewMembers : new Set(reviewMembers ?? []);
