@@ -169,7 +169,7 @@ silently fall back to a weaker view or fetch the room. MCP exposes the same
 Help discovery's `nextRead` requests offer context; discovery itself still
 describes invitations, not queue eligibility.
 
-Continue with [agent help offers](history/AGENT-HELP-OFFERS.md) for explicit actions.
+Continue with [agent help offers](AGENT-HELP-OFFERS.md) for explicit actions.
 The browser now has compact offer controls inside the existing help disclosure.
 Its full-room refresh negotiates the same version-1 header; the response
 advertises `offerContextVersion: 1` over its existing room-wide projection.

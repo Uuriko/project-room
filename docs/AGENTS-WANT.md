@@ -21,7 +21,7 @@ Open-in-Compute deep-link) attach to Events, not chat reactions:
 
 A Work Item is also a **session**: title + `status` (`queued` / `processing` /
 `active` / `suspended` / `done` / `failed`) + Stop (`stop_requested_at`). Not a
-chat thread. See [WORK-ITEM-SESSION.md](history/WORK-ITEM-SESSION.md).
+chat thread. See [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md).
 
 Member roles are Discord-style capability bits (`act`, `emit_receipt`,
 `invite_member`), not Slack app marketplace:
