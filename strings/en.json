@@ -387,5 +387,10 @@
   "join.dead.status": "This invite is unavailable. Sign in and request access.",
   "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
   "join.dead.roomsLink": "Back to your rooms",
-  "result.discuss": "Discuss result"
+  "result.discuss": "Discuss result",
+  "result.copy": "Copy result",
+  "result.copying": "Copying result…",
+  "result.copied": "Result copied. Paste where you choose.",
+  "result.copyPending": "Copy not confirmed yet. You can select the result text to copy it manually.",
+  "result.copyFailed": "Could not copy. Try again or select the result text to copy it manually."
 }
