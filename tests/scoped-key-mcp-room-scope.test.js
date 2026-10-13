@@ -182,3 +182,54 @@ test("a room-pinned key with rooms:read and rooms:write keeps working", async t 
   const posted = await call(origin, "room_post_message", { roomId, id: "p-1", messageId: "p-m1", body: "pinned" }, key);
   assert.equal(posted.value.status, "posted");
 });
+
+import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
+import { hostedStdioToolDefinitions } from "../server/mcp-full-profile.mjs";
+
+// Minimal schema-valid arguments, so a call reaches the scope gate (which runs
+// after argument validation) instead of failing on its shape.
+function sampleArgs(name, roomId) {
+  const def = [...hostedMcpToolDefs, ...hostedStdioToolDefinitions()].find(entry => entry.name === name);
+  assert.ok(def, `${name} is an exposed tool`);
+  const args = {};
+  for (const key of def.inputSchema.required ?? []) {
+    const spec = def.inputSchema.properties[key];
+    const type = Array.isArray(spec.type) ? spec.type[0] : spec.type;
+    args[key] = key === "roomId" ? roomId : spec.enum ? spec.enum[0]
+      : type === "integer" || type === "number" ? 1 : type === "boolean" ? true : type === "array" ? []
+        : key === "deadline" ? "2099-01-01T00:00:00.000Z" : "x1";
+  }
+  return args;
+}
+
+// Every family of write tool: ordinary messages, reactions, reply requests and
+// responses, help offers, work actions, drafts, claims, bounties. A mutant that
+// classifies any of them as a read lets a rooms:read key through.
+const WRITE_TOOLS = [
+  "room_post_message", "room_react",
+  "room_reply", "room_respond_to_request", "room_request_reply", "room_cancel_request",
+  "room_offer_help", "room_select_help_offer", "room_withdraw_help_offer",
+  "room_begin_work", "room_start_work", "room_propose_work", "room_record_completion",
+  "room_post_draft", "room_close_work_claim",
+  "bounty_post", "bounty_claim",
+];
+
+test("a rooms:read key is refused 403 on every write tool family over MCP", async t => {
+  const { origin, roomId, issue } = await fixture(t);
+  const reader = issue(["rooms:read"]);
+  for (const name of WRITE_TOOLS) {
+    const result = await call(origin, name, sampleArgs(name, roomId), reader);
+    assert.equal(result.value?.code, "insufficient_scope", `${name}: ${JSON.stringify(result.value ?? result.body).slice(0, 160)}`);
+    assert.equal(result.value.status, 403, name);
+    assert.match(result.value.message ?? "", /rooms:write/, name);
+  }
+});
+
+test("a read-only key still reaches the read tools of the same families", async t => {
+  const { origin, roomId, issue } = await fixture(t);
+  const reader = issue(["rooms:read"]);
+  for (const name of ["room_list_requests", "room_read_inbox", "room_read_board", "bounty_list"]) {
+    const result = await call(origin, name, sampleArgs(name, roomId), reader);
+    assert.notEqual(result.value?.code, "insufficient_scope", name);
+  }
+});
