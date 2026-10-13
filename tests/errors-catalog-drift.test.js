@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { agentErrorAx } from "../src/agent-error.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = join(ROOT, "server");
@@ -151,5 +152,66 @@ test("no JSON-RPC numeric code section is empty", () => {
   const md = readFileSync(CATALOG, "utf8");
   for (const code of ["-32700", "-32600", "-32601", "-32602", "-32603", "-32001", "-32003"]) {
     assert.ok(md.includes(`\`${code}\``), `JSON-RPC code ${code} missing from the catalog`);
+  }
+});
+
+// #3055 recurrence guard: the catalog-presence checks above never verified
+// that agentErrorAx() actually maps a code. 287 catalogued codes fell
+// through to the "Unknown error '<code>' … this code has no known recovery"
+// hint even though their server messages name a concrete recovery. Run the
+// real agentErrorAx() over every catalogued server-emittable row — the
+// audit method from #3055 — and fail if any row hits that fallthrough.
+//
+// Scope notes, mirroring the audit:
+//   - Only rows with a numeric HTTP status reach the wire as an AX error
+//     envelope; `internal` / status-0 rows are excluded, except
+//     file_lease_conflict (catalogued at 0, but server/work-claim-routes.mjs
+//     builds agentErrorBody({ httpStatus: 409, code: "file_lease_conflict" })
+//     and returns it to the client), which is checked explicitly at 409.
+//   - agent_not_registered is excluded: it is owned by #3021 / PR #3044,
+//     not by #3055.
+const AX_COVERAGE_EXCLUDED = new Set(["agent_not_registered"]);
+
+function catalogAxRows() {
+  const rows = [];
+  for (const line of catalogSection().split("\n")) {
+    const m = /^\| `([a-z][a-z0-9_]*)` \| (\S+) \|/.exec(line);
+    if (!m || !/^\d+$/.test(m[2]) || m[2] === "0") continue;
+    // Same " | " split as catalogRetry(): pipes inside cells are escaped.
+    const cells = line.split(" | ");
+    rows.push({ code: m[1], httpStatus: Number(m[2]), message: cells[2] ? cells[2].trim() : "" });
+  }
+  return rows;
+}
+
+test("every catalogued server-emittable code has an AX recovery (#3055)", () => {
+  const rows = catalogAxRows();
+  assert.ok(rows.length > 800, `expected the full catalogued code set, got ${rows.length} numeric rows`);
+  rows.push({ code: "file_lease_conflict", httpStatus: 409, message: "file_lease_conflict is AX-routed at 409 (see scope note above)" });
+  const unmapped = [];
+  for (const { code, httpStatus, message } of rows) {
+    if (AX_COVERAGE_EXCLUDED.has(code)) continue;
+    const ax = agentErrorAx({ httpStatus, code, message });
+    if (ax.hint.startsWith("Unknown error")) unmapped.push(`${code} (${httpStatus})`);
+  }
+  assert.deepEqual(unmapped, [], `catalogued codes with no agentErrorAx() mapping or family coverage (Unknown fallthrough): ${unmapped.join(", ")}`);
+});
+
+test("flagship #3055 codes name their catalogued recovery, not 'no known recovery'", () => {
+  const cases = [
+    // [code, httpStatus, message, hint must match]
+    ["bond_proposed_by_peer", 409, 'That agent already proposed a bond to you (bondId bond_1). Answer it with bond.accept { bondId: "bond_1" } or bond.decline, then propose again.', /bond\.accept/],
+    ["file_lease_conflict", 409, 'Work "w1" overlaps files leased to alice (claim_1) until 2026-10-14T00:00:00.000Z: src/a.mjs', /leased to alice/],
+    ["peer_not_found", 404, "That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.", /get_room_context/],
+    ["invite_unavailable", 404, "No invite was issued for this code. Ask the inviter for a fresh code", /fresh code/],
+    ["credential_too_old", 410, "This credential is too old; ask the owner for a new invite.", /fresh|expired/i],
+    ["cursor_stale", 409, "The list changed; start again without a cursor", /without a cursor/],
+    ["ndjson_required", 415, "Use application/x-ndjson", /NDJSON/],
+    ["wake_dead", 409, "This wake is dead; requeue it explicitly.", /[Rr]equeue/],
+  ];
+  for (const [code, httpStatus, message, recovery] of cases) {
+    const ax = agentErrorAx({ httpStatus, code, message });
+    assert.doesNotMatch(ax.hint, /^Unknown error/, `${code} must not hit the Unknown fallthrough`);
+    assert.match(ax.hint, recovery, `${code} hint must name its catalogued recovery`);
   }
 });
