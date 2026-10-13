@@ -465,12 +465,17 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
   // A definitive outcome (a final receipt, or a sub-500 rejection) or any
   // edit to the message ends the logical send; the next submit mints fresh.
   let pendingKey = null, pendingFingerprint = null;
-  function render(note = "") {
+  // The last outcome line, retained across re-renders: the finally block in
+  // send() re-renders with no note to re-enable the button, and that render
+  // must not erase the specific sent/failed line the try/catch just showed.
+  let note = "";
+  function render(nextNote) {
+    if (nextNote !== undefined) note = nextNote;
     const own = Boolean(ownerKey());
     el.send.disabled = busy || !own;
     el.status.textContent = !own ? "Sign in to send."
       : state === "pending" ? "Sending…"
-      : state === "sent" ? "Sent."
+      : state === "sent" ? note || "Sent."
       : state === "failed" ? note || "Send failed."
       : note;
     el.status.dataset.sendState = state;
@@ -519,7 +524,7 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
   el.form.addEventListener("submit", send);
   render();
   return {
-    reset() { generation++; busy = false; state = "idle"; pendingKey = null; pendingFingerprint = null; render(); },
+    reset() { generation++; busy = false; state = "idle"; pendingKey = null; pendingFingerprint = null; render(""); },
     hasPending: () => busy,
     get state() { return state; }
   };
