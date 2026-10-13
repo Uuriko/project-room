@@ -42,7 +42,7 @@ export function workReadRefusal(error) {
 
 // A single selection keeps its existing response. Batches reuse the same reads,
 // preserve caller order and fail closed; no partial successful packet is returned.
-export async function readWorkSelection(client, args, { signal } = {}) {
+export async function readWorkSelection(client, args, { signal, hosted = false } = {}) {
   const batch = args.workItemIds !== undefined;
   const ids = batch ? args.workItemIds : [args.workItemId];
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 4 || !ids.every(validId)
@@ -59,9 +59,11 @@ export async function readWorkSelection(client, args, { signal } = {}) {
     const context = args.includeDiscussion ? await prepareWork(client, id, { ...options, discussionSince: args.discussionSince })
       : await client.workContext(id, options);
     readSignal.throwIfAborted();
-    if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = context.roomId;
-    for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
-    if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = context.roomId;
+    if (hosted) {
+      if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = context.roomId;
+      for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = context.roomId;
+      if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = context.roomId;
+    }
     return (args.brief ?? batch) ? { roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
       evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}),
       brief: workContextMarkdown(context), ...(context.preparation ? { preparation: context.preparation } : {}) } : context;

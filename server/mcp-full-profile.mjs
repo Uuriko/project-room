@@ -358,7 +358,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       const value = await readWorkSelection({
         workContext: (id, options) => store.workContext(secret, roomId, id, options),
         workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
-      }, rest);
+      }, rest, { hosted: true });
       return { value, isError: false };
     } catch (error) {
       const value = workReadRefusal(error);
