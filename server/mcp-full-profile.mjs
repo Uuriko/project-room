@@ -19,13 +19,13 @@ import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
 
-import { prepareWork } from "../client/work-preparation.mjs";
+import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { workContextMarkdown, paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
+import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
@@ -315,20 +315,17 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
   }
   if (name === "room_read_work") {
-    const options = { includeSource: rest.includeSource ?? false, includeOffers: rest.includeOffers ?? false };
-    const context = rest.includeDiscussion ? await prepareWork({
-      workContext: (id, options) => store.workContext(secret, roomId, id, options),
-      workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
-    }, rest.workItemId, { ...options, discussionSince: rest.discussionSince }) : store.workContext(secret, roomId, rest.workItemId, options);
-    if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = roomId;
-    for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = roomId;
-    if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = roomId;
-    if (!rest.brief) return { value: context, isError: false };
-    return { value: {
-      roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
-      evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}), brief: workContextMarkdown(context),
-      ...(context.preparation ? { preparation: context.preparation } : {})
-    }, isError: false };
+    try {
+      const value = await readWorkSelection({
+        workContext: (id, options) => store.workContext(secret, roomId, id, options),
+        workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
+      }, rest);
+      return { value, isError: false };
+    } catch (error) {
+      const value = workReadRefusal(error);
+      if (value) return { value, isError: true };
+      throw error;
+    }
   }
   if (name === "room_read_work_discussion") {
     return { value: store.workDiscussion(secret, roomId, rest.workItemId, {
