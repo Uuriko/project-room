@@ -560,3 +560,34 @@ test("archiving keeps the answer of a question that is only kept as a reply ance
   const ids = f.store.room("commons").state.messages.map(m => m.id);
   assert.ok(ids.includes("k") && ids.includes("q") && ids.includes("ans"), "k, its ancestor q and q's answer all stay");
 });
+
+test("event-log redaction still applies to archived messages (a withdrawn archived message keeps no body)", async t => {
+  const { redactEventPage } = await import("../server/redact-read.mjs");
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-gone", body: "oops secret" });
+  f.send(f.human, T.MESSAGE_DELETED, { messageId: "old-gone", expectedMessageRevision: 0, reason: "x" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-live", body: "still here" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-edit", body: "first version" });
+  f.send(f.human, T.MESSAGE_EDITED, { messageId: "old-edit", body: "second version", expectedMessageRevision: 0 });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-gone"), false);
+  // An older withdrawal can still carry the original body in the log row.
+  const page = { events: [{ sequence: 1, event: { type: "message.posted", id: "old-gone", data: { messageId: "old-gone", body: "oops secret" } } }] };
+  const out = redactEventPage(page, f.store.redactionMessages("commons"));
+  assert.equal(out.events[0].event.data.body, null);
+  // A live archived message keeps its current body (not the tombstone), and an edited one
+  // shows the current version, not the first. These fail if archived messages are not looked up.
+  const ids = f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(!ids.includes("old-live") && !ids.includes("old-edit"), "both are archived");
+  const live = redactEventPage({ events: [
+    { sequence: 2, event: { type: "message.posted", id: "old-live", data: { messageId: "old-live", body: "still here" } } },
+    { sequence: 3, event: { type: "message.posted", id: "old-edit", data: { messageId: "old-edit", body: "first version" } } },
+    { sequence: 4, event: { type: "message.edited", data: { messageId: "old-edit", body: "second version" } } },
+  ] }, f.store.redactionMessages("commons"));
+  assert.equal(live.events[0].event.data.body, "still here", "a live archived message keeps its body");
+  assert.equal(live.events[1].event.data.body, "second version", "an edited archived message shows the current body, not v1");
+  assert.equal(live.events[2].event.data.body, "second version");
+});

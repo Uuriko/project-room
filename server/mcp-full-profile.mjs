@@ -91,7 +91,7 @@ async function roomMessages(store, secret, roomId, args, memberId) {
   const latest = args.latest ?? false;
   // Edit/delete redaction is per-event (projection-indexed), so applying it
   // per scanned page is equivalent to applying it to the whole log.
-  const currentMessages = store.room(roomId).state.messages;
+  const currentMessages = store.redactionMessages(roomId);
   const fetchPage = (cursor, pageLimit) =>
     redactEventPage(store.eventsAfter(secret, roomId, cursor, pageLimit), currentMessages);
   const mapMessage = ({ sequence, event }) => ({
