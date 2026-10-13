@@ -29,12 +29,35 @@ test("deploy status (GET /work-claims/status) degrades to the cached value, neve
 });
 
 test("claim PR sweep reports unconfigured or error per item, never throws", async () => {
-  const items = [{ roomId: "r1", id: "c1", repo: "acme/private", number: 7, pullRequests: [{ repo: "acme/private", number: 7 }] }];
+  // A due item must satisfy pullRequestDue: a live claim state and a
+  // singular pullRequest carrying its url/repo/number (pullLinks shape).
+  // The previous fixture ({repo, number, pullRequests:[{repo, number}]})
+  // had neither, so it was filtered out as not due, fetch was never
+  // invoked, and the assertions below could not fail.
+  const pull = { url: "https://github.com/acme/private/pull/7", repo: "acme/private", number: 7 };
+  const items = [{ roomId: "r1", id: "c1", state: "in_progress", pullRequest: pull, pullRequests: [pull] }];
+  const expectedKind = {
+    "no network": "error",
+    "401 bad credentials": "unconfigured",
+    "500 from GitHub": "error"
+  };
   for (const [name, fetchImpl] of Object.entries(transports)) {
-    const batch = await collectPullRequestLookups(items, { fetchImpl, token: null, nowMs: 1_750_000_000_000 });
-    assert.equal(typeof batch, "object", name);
+    const calls = [];
+    const countingFetch = async (...args) => { calls.push(args); return fetchImpl(...args); };
+    const batch = await collectPullRequestLookups(items, { fetchImpl: countingFetch, token: null, nowMs: 1_750_000_000_000 });
+    assert.equal(calls.length, 1, `${name}: the lookup must actually reach fetch`);
+    assert.equal(String(calls[0][0]), "https://api.github.com/repos/acme/private/pulls/7", name);
+    assert.equal(batch.results.length, 1, name);
+    assert.equal(batch.results[0].claimId, "c1", name);
+    assert.equal(batch.results[0].roomId, "r1", name);
+    assert.equal(batch.results[0].url, pull.url, name);
+    assert.equal(batch.results[0].kind, expectedKind[name], name);
+    assert.equal(batch.rateLimitedUntil, null, name);
+    assert.equal(batch.budgetExceeded, false, name);
   }
   const unauth = await collectPullRequestLookups(items, { fetchImpl: transports["401 bad credentials"], token: null, nowMs: 1 });
+  assert.equal(unauth.results.length, 1, "a 401 still produces a per-item result");
+  assert.equal(unauth.results[0].kind, "unconfigured", "a 401 is reported as unconfigured");
   const kinds = JSON.stringify(unauth);
   assert.ok(!/"kind":"open"/.test(kinds), "a 401 is never read as an open PR");
 });
