@@ -719,6 +719,7 @@ export class BountyEscrow {
     this._arbiters = createArbiters();
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
     this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
+    this._settlementDecidedEvent = null; // transient: bounty.decided event emitted by a dispute settlement
     this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
     this._rubricCheckTransient = null; // transient: arbiter's rubric re-check, consumed by the dispute settlement's resolution
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
@@ -2372,6 +2373,7 @@ export class BountyEscrow {
       // Attribute the inline settlement to the decider whose ruling caused it.
       this._settlementActor = act;
       this._settlementSigned = [];
+      this._settlementDecidedEvent = null;
       this._rubricCheckTransient = checkedRubric;
       try {
         const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
@@ -2388,7 +2390,12 @@ export class BountyEscrow {
       const signed = this._settlementSigned ?? [];
       this._settlementSigned = null;
       const settled = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId));
-      const event = this._event(roomId, "bounty.decided",
+      // The settlement itself emitted bounty.decided (in _settleDispute, so
+      // keeper settlements emit it too); reuse that event for the receipt.
+      // The inline emission remains only as a fallback for a finalize whose
+      // settlement was a no-op (already settled), preserving the receipt
+      // contract without ever double-emitting.
+      const event = this._settlementDecidedEvent ?? this._event(roomId, "bounty.decided",
         { bountyId, actor: act, before: "disputed", after: settled.state,
           data: { disputeId: bounty.disputeId, outcome, resolution: settled.resolution,
             // Reputation projection reads these (server/bounty-reputation.mjs).
@@ -2397,6 +2404,7 @@ export class BountyEscrow {
             // Slice #4 + #6: the verifier whose pinned-rubric acceptance is
             // on trial — an "upheld" outcome overturns it (acceptance_overturned).
             verifier: bounty.attestation?.recordedBy ?? null } });
+      this._settlementDecidedEvent = null;
       return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
         receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
     });
@@ -2538,6 +2546,25 @@ export class BountyEscrow {
       actor });
     this._event(roomId, settleKind === "cancel" ? "bounty.refunded" : "bounty.released",
       { bountyId, actor, before: "disputed", after: bounty.state, data: { resolution: bounty.resolution } });
+    // Every dispute settlement is a decision, so it emits bounty.decided
+    // here — the single settlement path all outcomes pass through (decider
+    // ruling via _onDisputeFinalized, keeper terminal retry, and the keeper
+    // 14-day timeout-default, which reaches no other producer). Without
+    // this, timeout-default settlements never landed on the event stream
+    // and the reputation projector (server/bounty-reputation.mjs) never
+    // applied their signals. Outcome-less settlements (a withdrawn dispute
+    // carries no verdict) emit nothing, as before.
+    if (typeof outcome === "string" && outcome.length > 0) {
+      this._settlementDecidedEvent = this._event(roomId, "bounty.decided",
+        { bountyId, actor, before: "disputed", after: bounty.state,
+          data: { disputeId: bounty.disputeId, outcome, resolution: bounty.resolution,
+            // Reputation projection reads these (server/bounty-reputation.mjs).
+            claimant: bounty.claimant,
+            challenger: challenger ?? null,
+            // Slice #4 + #6: the verifier whose pinned-rubric acceptance is
+            // on trial — an "upheld" outcome overturns it (acceptance_overturned).
+            verifier: bounty.attestation?.recordedBy ?? null } });
+    }
     return signed;
   }
 
