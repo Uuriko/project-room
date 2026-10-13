@@ -114,6 +114,21 @@ test("unknown recipients, oversized and malformed messages are rejected with a s
   for (const reason of Object.values(emailRoutingRejections)) assert.match(reason, /^[ -~]{1,64}$/, "reject reasons are short ASCII");
 });
 
+test("a malformed or stale profile from the connection lookup is rejected, not thrown", async () => {
+  // Regression #2930: resolveRoutedConnection calls emailConnection(found) with
+  // no conversion, so EmailContractError escaped routeInboundEmail's outer
+  // catch (which only converts EmailRoutingError) instead of becoming a reject.
+  const malformed = await routeInboundEmail(inbound(), { lookup: () => ({ accountId: "a" }) });
+  assert.deepEqual(malformed, { decision: { accept: false, reason: emailRoutingRejections.malformed }, code: "invalid_email_connection", match: null, tag: null,
+    connection: null, envelope: null, requestId: null, messageId: null, rawDigest: null, preview: null, truncated: false });
+  const stale = await routeInboundEmail(inbound(), { lookup: () => ({ ...connection(), provider: "unknown-provider", revision: 0 }) });
+  assert.deepEqual(stale.decision, { accept: false, reason: emailRoutingRejections.malformed }); assert.equal(stale.code, "invalid_email_connection");
+  const badAlias = await routeInboundEmail(inbound(), { lookup: () => ({ ...connection(), aliases: [{ name: "Help" }] }) });
+  assert.deepEqual(badAlias.decision, { accept: false, reason: emailRoutingRejections.malformed }); assert.equal(badAlias.code, "invalid_email");
+  // Non-contract lookup failures are infrastructure errors and still propagate.
+  await assert.rejects(routeInboundEmail(inbound(), { lookup: () => { throw new Error("database down"); } }), /database down/);
+});
+
 test("completeRoutedImport builds the importer's page.apply request and reports duplicates", async () => {
   const routed = await routeInboundEmail(inbound(), { lookup });
   const first = completeRoutedImport(routed);
