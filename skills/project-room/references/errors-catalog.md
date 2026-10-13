@@ -781,6 +781,7 @@ response's own `hint`/`next` when it names something more specific.
 | `offer_exists` | 409 | Offer ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_limit` | 409 | This room has reached its offer limit | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_not_found` | 404 | Offer not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `opening_not_owner` | 403 | Opening "${opening.openingId}" was declared by another member — only its declarer can change or close its terms | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `operator_unconfigured` | 403 | The operator account is not configured | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `opportunities_store_missing` | 500 | Opportunity feed requires a store with a db handle | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `origin_denied` | 403 | reject(403, "origin_denied", required ? "Origin header is required" : "Request origin is not allowed"); } } // The public Join-with-code door (getdash | follow hint | Follow this error's hint and next steps. |
