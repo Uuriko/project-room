@@ -52,6 +52,20 @@ const PUSH_EVENT_TYPES = Object.freeze(["message.posted", "dm.posted", "bond.pro
 // carries push/cadence fields. The token and bearer credentials are stored
 // but never returned in any response, never logged, and never put in room
 // state/events.
+//
+// Issue #2913: wake-signal coalescing is scoped per room. Message and
+// claim-wake ids repeat across rooms (claim TASK-1 can exist in two rooms),
+// but the original table declared UNIQUE(agent_id, message_id), so a wake
+// enqueued for room A suppressed the same message id's wake for room B. The
+// coalescing key is now the unique index agent_wake_signals_coalesce on
+// (agent_id, COALESCE(room_id, ''), message_id): the expression keeps
+// room-less signals coalescing with each other (a plain UNIQUE would treat
+// NULL room_ids as distinct and stop coalescing them). Deployed databases
+// still carry the old table-level constraint — convergeWakeSignalRoomScope
+// (below) rebuilds the table row-preserving at boot, mirroring
+// convergeBountyDeployedSchema, because CREATE TABLE IF NOT EXISTS cannot
+// rewrite stored DDL and the strict DDL-text verifySchema compares it
+// verbatim.
 export const agentHeartbeatSchema = `
   CREATE TABLE IF NOT EXISTS agent_hosts (
     agent_id TEXT NOT NULL, host_id TEXT NOT NULL,
@@ -65,9 +79,9 @@ export const agentHeartbeatSchema = `
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK(kind IN ('mention','dm')),
     room_id TEXT, message_id TEXT,
-    created_at INTEGER NOT NULL, delivered_at INTEGER,
-    UNIQUE(agent_id, message_id)
+    created_at INTEGER NOT NULL, delivered_at INTEGER
   );
+  CREATE UNIQUE INDEX IF NOT EXISTS agent_wake_signals_coalesce ON agent_wake_signals(agent_id, COALESCE(room_id, ''), message_id);
   CREATE INDEX IF NOT EXISTS agent_wake_signals_pending ON agent_wake_signals(agent_id, delivered_at);
   CREATE TABLE IF NOT EXISTS agent_push_configs (
     agent_id TEXT NOT NULL, host_id TEXT NOT NULL,
@@ -220,6 +234,42 @@ function isMissingTable(error) {
   return /no such (table|column)/i.test(String(error?.message ?? ""));
 }
 
+// Issue #2913: deployed databases carry agent_wake_signals with the original
+// table-level UNIQUE(agent_id, message_id). ALTER TABLE cannot rewrite the
+// stored CREATE TABLE text, so — like convergeBountyDeployedSchema — rebuild
+// the table row-preserving when its stored DDL has drifted from the expected
+// text, then recreate its indexes (RENAME drops them). Idempotent: a
+// converged (or fresh, or absent) table is left alone. Runs inside the
+// store's boot transaction before the schema exec; the table is unfenced.
+export function convergeWakeSignalRoomScope(db) {
+  const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+  const chunks = agentHeartbeatSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
+  let tableDdl = null;
+  const indexDdls = [];
+  for (const sql of chunks) {
+    const normalized = normalize(sql);
+    if (/^CREATE TABLE agent_wake_signals\b/.test(normalized)) tableDdl = sql;
+    else if (/^CREATE (?:UNIQUE )?INDEX \w+ ON agent_wake_signals\b/.test(normalized)) indexDdls.push(sql);
+  }
+  const tableRow = name => db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(name);
+  const actual = tableRow("agent_wake_signals")?.sql;
+  if (!actual) return; // Fresh database: the schema exec creates the new shape.
+  if (normalize(actual) === normalize(tableDdl)) {
+    // Table already converged; the coalesce index is purely additive.
+    for (const indexDdl of indexDdls) db.exec(indexDdl);
+    return;
+  }
+  const legacy = "agent_wake_signals_legacy_2913";
+  if (tableRow(legacy)) throw new Error(`Wake signal schema convergence blocked: ${legacy} already exists`);
+  const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all("agent_wake_signals").map(r => r.name);
+  const colList = cols.join(", ");
+  db.exec(`ALTER TABLE agent_wake_signals RENAME TO ${legacy}`);
+  db.exec(tableDdl);
+  db.exec(`INSERT INTO agent_wake_signals (${colList}) SELECT ${colList} FROM ${legacy}`);
+  db.exec(`DROP TABLE ${legacy}`);
+  for (const indexDdl of indexDdls) db.exec(indexDdl);
+}
+
 export class AgentHeartbeats {
   constructor(store, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS } = {}) {
     this.store = store;
@@ -249,7 +299,7 @@ export class AgentHeartbeats {
   verifySchema({ allowAbsent = false } = {}) {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
     const expected = agentHeartbeatSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
-      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
+      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|(?:UNIQUE )?INDEX) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
     if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
     for (const { sql, actual } of expected) {
       if (normalize(actual) !== normalize(sql)) throw new Error("Agent heartbeat schema requires operator reconciliation");
@@ -722,7 +772,8 @@ export class AgentHeartbeats {
   }
 
   // Enqueue a wake signal for an agent (mention or DM). Coalesced on
-  // (agent_id, message_id): the same message wakes an agent exactly once.
+  // (agent_id, room_id, message_id) — issue #2913: message ids repeat
+  // across rooms, so the same message wakes an agent once per room.
   enqueueWake({ agentId, kind, roomId = null, messageId }) {
     checkAgentId(agentId);
     check(WAKE_KINDS.includes(kind), 422, "invalid_wake",
@@ -737,7 +788,7 @@ export class AgentHeartbeats {
       (signal_id, agent_id, kind, room_id, message_id, created_at, delivered_at)
       VALUES (?, ?, ?, ?, ?, ?, NULL)`).run(signalId, agentId, kind, roomId, messageId, at);
     const row = this.db.prepare(
-      "SELECT * FROM agent_wake_signals WHERE agent_id=? AND message_id=?").get(agentId, messageId);
+      "SELECT * FROM agent_wake_signals WHERE agent_id=? AND room_id IS ? AND message_id=?").get(agentId, roomId, messageId);
     // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
     // poll waiter (coalesced duplicates don't — nothing new arrived).
     if (applied.changes > 0) this._releaseWakeWaiter(agentId, roomId);
@@ -894,7 +945,7 @@ export class AgentHeartbeats {
 
   // Queue a wake for every agent that has registered at least one host.
   // Mode and presence do not matter. An agent with no host has nowhere to
-  // deliver the signal. Coalescing stays on agent plus message.
+  // deliver the signal. Coalescing stays on agent plus room plus message.
   wakeIfOffline({ agentId, kind, roomId = null, messageId }) {
     checkAgentId(agentId);
     if (this.statusOf(agentId).hosts.length === 0)

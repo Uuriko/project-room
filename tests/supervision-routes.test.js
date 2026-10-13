@@ -175,11 +175,20 @@ test("a member cannot read, see, or act on another member's card", async () => {
   const card = await deriveOne(owner);
   const intruder = harness({ store, sources, memberId: OTHER });
   const seen = await intruder.call({ method: "POST", route: "seen", cardId: card.id });
+  assert.equal(seen.rejected.length, 1);
   assert.equal(seen.rejected[0].status, 404);
+  // `rejected` is shared by the harness and accumulates across calls, so
+  // assert on each call's own new entry — not rejected[0], the stale seen
+  // rejection — otherwise a regression allowing pick/dismiss on another
+  // member's card would go uncaught.
+  const beforePick = intruder.rejected.length;
   const picked = await intruder.call({ method: "POST", route: "pick", cardId: card.id, bodyData: { suggestionIndex: 1 } });
-  assert.equal(picked.rejected[0].status, 404);
+  assert.equal(picked.rejected.length, beforePick + 1);
+  assert.equal(picked.rejected[beforePick].status, 404);
+  const beforeDismiss = intruder.rejected.length;
   const dismissed = await intruder.call({ method: "POST", route: "dismiss", cardId: card.id });
-  assert.equal(dismissed.rejected[0].status, 404);
+  assert.equal(dismissed.rejected.length, beforeDismiss + 1);
+  assert.equal(dismissed.rejected[beforeDismiss].status, 404);
 });
 
 // ---------------------------------------------------------------------------
@@ -293,6 +302,31 @@ test("pick on a confirm-gated suggestion returns a challenge; confirm requires {
     method: "POST", route: "confirm", cardId: card.id, bodyData: { confirm: true },
   });
   assert.equal(late.rejected.at(-1)?.code, "illegal_transition");
+});
+
+test("refetch {fired:true} from acting is refused — an unconfirmed confirm-class write cannot be reported fired (#2960)", async () => {
+  const store = makeMemoryStore();
+  const sources = sourcesFor({ claims: [blockedClaim()] });
+  const confirmSuggestion = {
+    id: "s1", index: 1, kind: "release_grant", title: "Release the grant",
+    reason: "confirm-class action: cannot be undone", gate: "confirm",
+    api: { method: "POST", path: `/api/rooms/${ROOM}/grants/g1/release`, body: {} },
+    deepLink: null, draft: null, badge: "⚠ confirm — cannot be undone",
+  };
+  const h = harness({ store, sources, decide: () => [confirmSuggestion] });
+  const card = await deriveOne(h);
+  const challenged = await h.call({
+    method: "POST", route: "pick", cardId: card.id,
+    bodyData: { suggestionIndex: 1 },
+  });
+  assert.equal(challenged.sent.at(-1).obj.card.state, "acting");
+  // No /confirm ever happened. A bare {fired:true} report must not dispatch.
+  const refused = await h.call({
+    method: "POST", route: "refetch", cardId: card.id, bodyData: { fired: true },
+  });
+  assert.equal(refused.rejected.at(-1).status, 409);
+  assert.equal(refused.rejected.at(-1).code, "illegal_transition");
+  assert.equal(store.getCard(ROOM, OP, card.id).state, "acting");
 });
 
 // ---------------------------------------------------------------------------

@@ -22,8 +22,12 @@ export function attentionKey(item) {
     fail("invalid_attention_item");
   }
   // Handoffs reuse the Work Item id; each new handoff has its own event.
+  // Work wakes reuse the work item id too; each new revision is a new wake
+  // (pendingWakeToItem carries the revision in seq). Both kinds key on seq:
+  // without it a later event or revision looks already-handled and the new
+  // wake is suppressed, then acked unhandled.
   // Message wakes can lack seq, so their identity stays message-based.
-  if (item.kind === "handoff") {
+  if (item.kind === "handoff" || item.kind === "work") {
     if (!Number.isSafeInteger(item.seq) || item.seq < 0) fail("invalid_attention_item");
     return `${item.kind}:${item.roomId}:${item.id}:${item.seq}`;
   }

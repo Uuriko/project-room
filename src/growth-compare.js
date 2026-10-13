@@ -48,9 +48,6 @@ const checkSummary = (summary, label) => {
   if (!isPlainObject(summary.engagement)) {
     throw new TypeError(`compareSummaries: "${label}".engagement must be an object`);
   }
-  if (!Array.isArray(summary.topMentionedAgents)) {
-    throw new TypeError(`compareSummaries: "${label}".topMentionedAgents must be an array`);
-  }
   if (!isPlainObject(summary.window)) {
     throw new TypeError(`compareSummaries: "${label}".window must be an object`);
   }
@@ -59,16 +56,33 @@ const checkSummary = (summary, label) => {
       throw new TypeError(`compareSummaries: "${label}".totals["${type}"] must be a number`);
     }
   }
-  for (const entry of summary.topMentionedAgents) {
-    if (!isPlainObject(entry) || typeof entry.agentId !== "string" || typeof entry.mentions !== "number") {
-      throw new TypeError(`compareSummaries: "${label}".topMentionedAgents entries must be {agentId, mentions}`);
-    }
-  }
+  checkMentionedAgents(summary, label, "topMentionedAgents", true);
+  // allMentionedAgents (the untruncated C5 ranking) is optional so
+  // summaries built before it existed still validate; when present it
+  // must be well-formed, since the movers below are built from it.
+  checkMentionedAgents(summary, label, "allMentionedAgents", false);
   return summary;
 };
 
-const mentionMap = topMentionedAgents =>
-  new Map(topMentionedAgents.map(entry => [entry.agentId, entry.mentions]));
+const checkMentionedAgents = (summary, label, field, required) => {
+  const list = summary[field];
+  if (list === undefined && !required) return;
+  const name = ['"', label, '".', field].join("");
+  if (!Array.isArray(list)) {
+    throw new TypeError(`compareSummaries: ${name} must be an array`);
+  }
+  for (const entry of list) {
+    if (!isPlainObject(entry) || typeof entry.agentId !== "string" || typeof entry.mentions !== "number") {
+      throw new TypeError(`compareSummaries: ${name} entries must be {agentId, mentions}`);
+    }
+  }
+};
+
+// Prefer the untruncated ranking: topMentionedAgents is capped at the
+// summary's topN (default 10), so movers built from it alone silently
+// drop every agent ranked outside the top-10 (#2975).
+const mentionMap = summary =>
+  new Map((summary.allMentionedAgents ?? summary.topMentionedAgents).map(entry => [entry.agentId, entry.mentions]));
 
 const ratioDelta = (currentRatio, previousRatio) => {
   if (currentRatio === null && previousRatio === null) {
@@ -121,8 +135,8 @@ export function compareSummaries(current, previous) {
     )
   };
 
-  const currentMentions = mentionMap(current.topMentionedAgents);
-  const previousMentions = mentionMap(previous.topMentionedAgents);
+  const currentMentions = mentionMap(current);
+  const previousMentions = mentionMap(previous);
   const agentIds = [...new Set([...currentMentions.keys(), ...previousMentions.keys()])];
   const topMentionedMovers = agentIds
     .map(agentId => {

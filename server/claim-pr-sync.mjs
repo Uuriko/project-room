@@ -160,6 +160,35 @@ async function fetchCommitDocument(url, { fetchImpl, token, nowMs, deadline = In
   return { kind: "ok", body: read.body };
 }
 
+// The rollup reads only the combined status's state, its total_count, and
+// the first https target_url, so a split read persists just that digest on
+// the pull instead of the whole GitHub body.
+function digestCiStatus(body) {
+  if (!body || typeof body !== "object") return null;
+  const total = Number(body.total_count);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const target = Array.isArray(body.statuses)
+    ? body.statuses.find(entry => typeof entry?.target_url === "string" && entry.target_url.startsWith("https://"))
+    : null;
+  return Object.freeze({
+    state: typeof body.state === "string" ? body.state : null,
+    totalCount: total,
+    targetUrl: target ? target.target_url : null
+  });
+}
+
+// Expand a persisted digest back into the body shape rollupClaimCi reads.
+function ciStatusBody(digest) {
+  if (!digest || typeof digest !== "object") return null;
+  const total = Number(digest.totalCount);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return {
+    state: typeof digest.state === "string" ? digest.state : null,
+    total_count: total,
+    statuses: typeof digest.targetUrl === "string" ? [{ target_url: digest.targetUrl }] : []
+  };
+}
+
 // Combined commit status, then check runs, inside the calls still left in
 // this tick. A missing call leaves the cursor where the next tick continues.
 async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, budget, deadline = Infinity }) {
@@ -168,13 +197,21 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
   let status = null;
   let checkRuns = [];
   let cursor = pullRequest.ciCursor === "checks" ? "checks" : "status";
+  // Resuming at "checks": the earlier leg already fetched the combined
+  // status and its digest was persisted on the pull. Fold it back in, or
+  // the rollup below would see the check runs alone.
+  if (cursor === "checks") status = ciStatusBody(pullRequest.ciStatus);
   if (cursor === "status") {
     if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, budget: Date.now() > deadline };
     budget.remaining -= 1;
     const read = await fetchCommitDocument(`${base}/status`, { fetchImpl, token, nowMs, deadline });
     if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return read;
-    if (read.kind === "ok") status = read.body;
+    // A failed fetch is not an empty status: leave the cursor on "status"
+    // so the next tick retries this leg instead of rolling up a bogus CI
+    // state built from the missing half.
+    if (read.kind !== "ok") return { cursor, partial: true, status };
+    status = read.body;
     cursor = "checks";
   }
   if (cursor === "checks") {
@@ -183,7 +220,11 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
     const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs, deadline });
     if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
-    if (read.kind === "ok") checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
+    // Same guard for the check-runs leg: a failed fetch must not advance
+    // the cursor to "done" or record a rollup built from the status alone.
+    // The status already fetched rides along so the resume keeps it.
+    if (read.kind !== "ok") return { cursor, partial: true, status };
+    checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
     cursor = "done";
   }
   const rollup = rollupClaimCi({ status, checkRuns, pullUrl: pullRequest.url });
@@ -239,7 +280,9 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       } else if (signals.ci) {
         looked = { ...looked, ci: signals.ci, ciCursor: signals.cursor };
       } else if (signals.cursor) {
-        looked = { ...looked, ciCursor: signals.cursor };
+        // A split read: keep the combined status it already fetched, or the
+        // resumed leg would roll up the check runs alone.
+        looked = { ...looked, ciCursor: signals.cursor, ciStatus: digestCiStatus(signals.status) };
       }
       if (signals.budget) {
         const result = {
@@ -330,7 +373,14 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       changed = recorded.changed;
     }
     if (result.ciCursor) {
-      next = { ...next, pullRequest: { ...next.pullRequest, ciCursor: result.ciCursor } };
+      next = { ...next, pullRequest: {
+        ...next.pullRequest,
+        ciCursor: result.ciCursor,
+        // The combined-status digest of a split read rides with its cursor.
+        // A completed read folded the status into result.ci, so it clears;
+        // a result carrying no digest keeps the one already stored.
+        ciStatus: result.ci ? null : (result.ciStatus !== undefined ? result.ciStatus : (next.pullRequest.ciStatus ?? null))
+      } };
     }
     const delay = result.ciCursor && result.ciCursor !== "done"
       ? 0

@@ -54,8 +54,20 @@ export class MemberPermissionRequests {
       const principalId = identityId ?? `member:${member.id}`;
       const existing = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid);
       if (existing) {
-        const basis = permissionRequestContents(existing).upgrade;
+        const contents = permissionRequestContents(existing);
+        const basis = contents.upgrade;
         if (existing.room_id !== roomId || existing.identity_id !== principalId || basis?.memberId !== member.id) {
+          fail(409, "request_conflict", "requestId is already in use");
+        }
+        // Idempotency is a retry of the same request, not a licence to
+        // reuse the key for a different one: a replay whose permissions
+        // (compared as a set, since order carries no meaning) or note
+        // differ from the stored request conflicts instead of silently
+        // returning the old request as if it were the new one.
+        const samePermissions = contents.permissions.length === permissions.length
+          && contents.permissions.every(p => permissions.includes(p));
+        const sameNote = (existing.note ?? null) === (note?.trim() || null);
+        if (!samePermissions || !sameNote) {
           fail(409, "request_conflict", "requestId is already in use");
         }
         return this.access.toRequest(existing);

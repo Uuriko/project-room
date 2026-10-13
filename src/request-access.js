@@ -2,9 +2,10 @@
 // signed-in users with no rooms. The dead-invite dialog owns the same flow
 // for strangers with dead links (src/app.js wires #invitation-request-form);
 // this module serves the account-rooms panel (#account-request-form) and
-// needs no invitation at all. It reuses the public, unauthenticated
-// POST /api/access-requests flow: mint a self-serve identity (an identity
-// alone grants nothing), file the request, let the room owner approve/deny.
+// needs no invitation at all. It reuses the POST /api/access-requests
+// flow: mint a self-serve identity (an identity alone grants nothing),
+// file the request with the minted identity's secret as proof, and let
+// the room owner approve/deny.
 //
 // The pure orchestration (build/submit) is exported for tests; the DOM
 // wiring at the bottom only runs in a browser.
@@ -54,6 +55,12 @@ export function buildGeneralAccessRequest({ roomId, displayName, note, referredB
 export async function submitGeneralAccessRequest({ client, storage, roomId, displayName, note, referredBy }) {
   const body = buildGeneralAccessRequest({ roomId, displayName, note, referredBy });
   const stashed = readAccessRequest(storage, body.roomId);
+  // Reuse the stashed requestId, not just the identity: requestId is the
+  // server's idempotency key, so a retry after a lost response must carry
+  // the original id or the server files a duplicate request (and spends
+  // rate-limit quota) instead of returning the existing row. A fresh id is
+  // minted only when this browser has no stashed request for the room.
+  if (stashed?.requestId) body.requestId = stashed.requestId;
   let identityId = stashed?.identityId ?? null;
   let secret = stashed?.secret ?? null;
   if (!identityId) {
@@ -72,7 +79,7 @@ export async function submitGeneralAccessRequest({ client, storage, roomId, disp
     requestId: body.requestId,
     displayName: body.displayName,
   });
-  await client.submitAccessRequest(body);
+  await client.submitAccessRequest({ ...body, secret });
   return { requestId: body.requestId, roomId: body.roomId, identityId };
 }
 

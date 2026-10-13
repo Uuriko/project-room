@@ -542,7 +542,7 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   const accessRes = await post(origin, "/api/access-requests", {
     roomId: room.roomId, identityId: applicant.identityId, displayName: "Access Applicant",
     requestedPermissions: [], note: null, requestId: `ar_${randomUUID().replaceAll("-", "").slice(0, 12)}`,
-  });
+  }, applicant.secret);
   assert.equal(accessRes.status, 201);
   const access = await accessRes.json();
   assert.equal(access.next[0]?.action, "poll-status");

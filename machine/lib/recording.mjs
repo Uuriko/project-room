@@ -84,8 +84,16 @@ export function pruneRecordings(home, retentionDays = RETENTION_DAYS_DEFAULT, no
 }
 
 export function manifestBytes(home, claimId) {
-  const path = join(claimDir(home, claimId), "manifest.jsonl");
-  if (!existsSync(path)) writeFileSync(path, "", { mode: 0o600 });
+  const dir = claimDir(home, claimId);
+  const path = join(dir, "manifest.jsonl");
+  if (!existsSync(path)) {
+    // A lease that never ran a mutating desktop tool has no recordings dir
+    // yet (only appendManifest/captureConsoleFrame create it). Create it
+    // here too, otherwise writeFileSync throws ENOENT and machine.release
+    // fails in closeReceipt, leaving the slot permanently held.
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(path, "", { mode: 0o600 });
+  }
   const bytes = readFileSync(path);
   return bytes.length <= ROOM_FILE_MAX_BYTES ? bytes : bytes.subarray(bytes.length - ROOM_FILE_MAX_BYTES);
 }

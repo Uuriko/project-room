@@ -154,11 +154,12 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
   // --- 4. Request to join: no invite at all; the owner decides. ---
   const identityRes = await post("/api/agent-identities", { displayName: "Requester" });
   assert.ok([200, 201].includes(identityRes.status));
-  const { identityId } = await identityRes.json();
+  const { identityId, secret: requesterSecret } = await identityRes.json();
+  secrets.push(requesterSecret);
   const requested = await post("/api/access-requests", {
     roomId: "commons", identityId, displayName: "Requester",
     requestedPermissions: ["accept_work"], note: null, requestId: randomUUID(),
-  });
+  }, requesterSecret);
   assert.equal(requested.status, 201);
   const listed = await get("/api/rooms/commons/access-requests", ownerKey);
   assert.equal(listed.status, 200);

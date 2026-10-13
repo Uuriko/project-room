@@ -111,7 +111,10 @@ function rankLines(lines, query, maxTokens) {
   let used = 0;
   for (const doc of scored) {
     const cost = Math.max(1, doc.tokens.length);
-    if (kept.length && used + cost > maxTokens) break;
+    // maxTokens is a hard budget: a line whose cost alone exceeds the
+    // remaining budget is never kept (not even as the first/only line) —
+    // skip it and keep scanning for lower-ranked lines that do fit.
+    if (used + cost > maxTokens) continue;
     kept.push({ id: doc.id, source: doc.source, text: doc.text, score: Math.round(doc.score * 1000) / 1000, untrusted: true });
     used += cost;
     if (used >= maxTokens) break;

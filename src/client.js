@@ -1,5 +1,5 @@
 import { accountSessionError, sameAccountSession } from "./account-client.js";
-export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, solveIdentityMintProof } from "./account-client.js";
+export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, solveIdentityMintProof, submitIdentityMint, IDENTITY_MINT_POW_ESCALATION_BITS, escalatedIdentityMintPowBits } from "./account-client.js";
 import { uiText } from "./strings.js";
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";

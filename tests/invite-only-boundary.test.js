@@ -139,12 +139,12 @@ const PROBES = {
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.
   "GET /api/opportunities.json": [undefined, 200],
-  // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
-  // "read" is not a room permission and never was; a later vocabulary check
-  // started refusing it with 422, so this probe stopped reaching the thing it
-  // is here to prove - that an unknown identity gets a bare 404 that says
-  // nothing about whether the identity or the room exists.
-  "POST /api/access-requests": [{ roomId: "commons", identityId: "no-such-identity", displayName: "Boundary probe", requestedPermissions: ["steer"], note: "probe", requestId: "probe-request-1" }, 404],
+  // Self-serve access request is NOT an open route since issue #2912: it
+  // requires the filing identity's secret as Bearer, so it carries no
+  // anonymous probe here. Its shape-valid anonymous behavior (unknown
+  // identity and unknown room answer the identical bare 404, before any
+  // credential is consulted) is pinned by tests/discoverability.test.js
+  // ("cold access request 404") and tests/access-request-identity-proof.test.js.
   // Verification tier: a public read by design, so an agent can gate on another
   // agent's tier before working with it. An unknown id is not a 404 - it answers
   // 200 with level "unverified", which is the same answer a real-but-unattested

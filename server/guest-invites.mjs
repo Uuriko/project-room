@@ -347,7 +347,11 @@ export class GuestInvites {
   sweepExpiredGuests(roomId, room, actorMemberId) {
     for (const member of Object.values(room.state.members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== "agent" || member.active === false) continue;
-      const cred = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'")
+      // Guests accumulate credential rows (rotation and renewal revoke the
+      // old row and insert a fresh one), so judge the seat by an unrevoked
+      // row only: an arbitrary row may be a revoked predecessor whose live
+      // successor must keep the seat. Mirrors GuestAgentLinks#sweepExpired.
+      const cred = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0")
         .get(roomId, member.id);
       if (cred && cred.revoked === 0 && cred.expires_at > this.store.now()) continue;
       const eventId = `guest-agent-end-${hash(`${member.id}:${cred?.hash || "none"}`).slice(0, 40)}`;

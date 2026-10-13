@@ -351,6 +351,13 @@ export class MachineBot {
       return;
     }
     this.provider = await this.resolveProvider();
+    // Every task that reaches begin() is a new task, so reset the cached
+    // provider here: it otherwise keeps the previous task's conversation
+    // and never seeds the new task text (#2869). Resetting in begin() —
+    // not just on a provider-side task-text change — also covers a new
+    // task whose text is identical to the previous one. Providers without
+    // conversation state may omit reset().
+    this.provider?.reset?.();
     this.active = {
       roomId: source.roomId,
       messageId: source.messageId,

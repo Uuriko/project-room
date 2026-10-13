@@ -19,7 +19,7 @@ import { applySystemChanges, revertSystemChanges } from "../lib/system.mjs";
 import { startGuest, prepareGolden } from "../lib/vms.mjs";
 import { saveSecret } from "../lib/secrets.mjs";
 import { requestApproval, takeApproval } from "../lib/approvals.mjs";
-import { readManifest } from "../lib/recording.mjs";
+import { manifestBytes, readManifest } from "../lib/recording.mjs";
 import { startFakeRelay } from "./fake-relay.mjs";
 
 const fakes = fileURLToPath(new URL("../fakes/", import.meta.url));
@@ -237,6 +237,26 @@ test.describe("room-machine", { concurrency: false }, () => {
       assert.equal(huge.error.code, "output_capped");
     });
     rmSync(home, { recursive: true, force: true });
+  });
+
+  test("manifestBytes returns an empty manifest for a lease that never ran a mutating desktop tool", async () => {
+    const home = homeDir();
+    try {
+      // No recordings/<claimId> dir exists yet: appendManifest and
+      // captureConsoleFrame (which create it) only run for mutating
+      // desktop tools, so a lease doing only e.g. shell.vm /
+      // machine.status reaches closeReceipt -> manifestBytes with no dir.
+      // Regression for #2872: this used to throw ENOENT, so
+      // machine.release threw, the slot stayed held, and no result was sent.
+      const bytes = manifestBytes(home, "fresh-claim");
+      assert.equal(bytes.length, 0);
+      assert.equal(existsSync(join(home, "recordings", "fresh-claim", "manifest.jsonl")), true);
+      assert.deepEqual(readManifest(home, "fresh-claim"), []);
+      // A second call (dir now exists) keeps returning the empty manifest.
+      assert.equal(manifestBytes(home, "fresh-claim").length, 0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   test("a mutating desktop call records a frame hash and does not capture the host screen", async () => {
