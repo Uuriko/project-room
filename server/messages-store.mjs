@@ -244,6 +244,19 @@ export function archivedMessageRow(db, roomId, messageId) {
   return db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=?").get(roomId, messageId, throughSeq) ?? null;
 }
 
+// Current records of archived messages whose body contains the lowercase
+// needle, oldest first, for readers that scan every message (search).
+export function archivedMatchingRecords(db, roomId, needle) {
+  const { throughSeq } = archiveMarker(db, roomId);
+  if (!throughSeq) return [];
+  const out = [];
+  for (const row of db.prepare("SELECT body, record_json FROM messages WHERE room_id=? AND seq<=? AND body IS NOT NULL AND instr(lower(body), ?)>0 ORDER BY seq")
+    .all(roomId, throughSeq, needle)) {
+    try { out.push({ ...JSON.parse(row.record_json), body: row.body }); } catch { /* an unreadable record is not searchable */ }
+  }
+  return out;
+}
+
 function pruneMessages(db, roomId) {
   db.prepare(`DELETE FROM messages WHERE room_id=? AND seq>? AND message_id NOT IN (
     SELECT json_extract(value, '$.id') FROM rooms, json_each(rooms.projection, '$.messages') WHERE rooms.id=?
