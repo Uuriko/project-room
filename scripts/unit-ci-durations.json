@@ -347,6 +347,7 @@
   "tests/guest-join.test.js": 154040,
   "tests/guest-scope-gate-http.test.js": 50935,
   "tests/guest-signout-ui.test.js": 5863,
+  "tests/guest-sweep-rotated-credential.test.mjs": 25940,
   "tests/guest-token-expiry.test.js": 28770,
   "tests/handoff-case.test.js": 14447,
   "tests/handoff-envelope.test.js": 11155,
@@ -1171,5 +1172,13 @@
   "milliseconds": 13660,
   "method": "Solo wall-clock ms of `node --test tests/work-claim-mirror-id.test.js`; all 5 tests passed. This slow local host runs peer files ~18x their recorded values, so treat as a conservative relative weight.",
   "purpose": "Measured allocation only; test discovery remains authoritative. Adding this entry brings the unmeasured set from 41 back to the UNMEASURED_CAP of 40 (main already sits at the cap, so the new #2854 test file tripped the shard-plan gate in unit/coverage CI)."
+ },
+ "fix2847Measurement": {
+  "date": "2026-10-13",
+  "runtime": "Node v24.20.0 Linux local",
+  "file": "tests/guest-sweep-rotated-credential.test.mjs",
+  "milliseconds": 25940,
+  "method": "Solo wall-clock ms of `node --test tests/guest-sweep-rotated-credential.test.mjs`; both tests passed (node --test reported duration_ms 23519). This slow local host runs peer files well above their recorded values, so treat as a conservative relative weight.",
+  "purpose": "Measured allocation only; test discovery remains authoritative. Adding this entry brings the unmeasured set from 41 back to the UNMEASURED_CAP of 40 (main already sits at the cap, so the new #2847 test file tripped the shard-plan gate in PR #3002's hosted CI)."
  }
 }
