@@ -102,8 +102,17 @@ export function completeRoutedImport(routed, { folder = null, expectedCursor = n
   if (!routed?.decision?.accept) throw new EmailRoutingError("email_routing_not_accepted", routed?.decision?.reason ?? null);
   if (priorReceipt) return { duplicate: true, receipt: priorReceipt, request: null };
   const { envelope, requestId, connection } = routed;
+  // A single routed message is never evidence that a folder enumeration
+  // finished, so preserve the folder's completeness instead of forcing
+  // complete:true. While a scan is in progress (complete:false with
+  // scanMembers set), plan() treats the scan set as the target: a forced
+  // complete would promote that partial set to members and clear the scan,
+  // dropping previously imported members the scan has not re-observed yet.
+  // A folder that does not exist yet is created by routed messages alone,
+  // so it starts complete.
+  const complete = folder?.complete !== false;
   return { duplicate: false, receipt: null, request: { action: "page.apply", requestId, connectionId: connection.id, connectionRevision: connection.revision,
-    folderId: emailRoutingFolderId, expectedRevision: folder?.revision ?? 0, expectedCursor, cursor: requestId, complete: true, reset: needsReset,
+    folderId: emailRoutingFolderId, expectedRevision: folder?.revision ?? 0, expectedCursor, cursor: requestId, complete, reset: needsReset,
     observations: [{ kind: "message", envelope, expectedSourceRevision: sourceRevision }] } };
 }
 // Convenience for a store with an account session: state, prior receipt,
