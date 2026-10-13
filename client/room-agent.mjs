@@ -716,35 +716,51 @@ export class RoomAgentClient {
     return result;
   }
   async workDiscussion(workItemId, options = {}) {
-    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["since", "cursor", "limit", "signal"].includes(key))) throw new Error("Use discussion checkpoint, cursor, limit and signal only");
-    const { since, cursor = null, limit = 20, signal } = options, integer = n => Number.isSafeInteger(n) && n >= 0;
-    if (!validId(workItemId) || !integer(limit) || limit < 1 || limit > 50 || (since !== undefined && !integer(since))
+    if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["since", "cursor", "limit", "signal", "consistent", "resumeToken"].includes(key))) throw new Error("Use discussion checkpoint, cursor, limit and signal only");
+    const { since, cursor = null, limit = 20, signal, consistent = false, resumeToken = null } = options, integer = n => Number.isSafeInteger(n) && n >= 0;
+    if (typeof consistent !== "boolean" || consistent && since !== undefined
+      || resumeToken !== null && (typeof resumeToken !== "string" || resumeToken.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(resumeToken) || cursor !== null || since !== undefined)
+      || !validId(workItemId) || !integer(limit) || limit < 1 || limit > 50 || (since !== undefined && !integer(since))
       || (cursor !== null && (typeof cursor !== "string" || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(cursor) || since !== undefined))) throw new Error("Choose one task and either a checkpoint or its continuation");
     const query = new URLSearchParams({ workItemId, limit });
     if (cursor !== null) query.set("cursor", cursor);
     if (since !== undefined) query.set("since", since);
+    if (consistent) query.set("consistent", "true");
+    if (resumeToken !== null) query.set("resumeToken", resumeToken);
     const result = await this.#request(`/work-discussion?${query}`, undefined, signal), page = result?.discussion, current = result?.current;
     const invalid = () => { throw new RoomClientError(200, "invalid_response", "Work discussion does not match the request"); };
-    const continuation = token => {
+    const continuation = (token, kind = "page") => {
       let value;
+      if (typeof token !== "string" || token.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(token)) invalid();
       try { value = JSON.parse(Buffer.from(token, "base64url").toString("utf8")); } catch { invalid(); }
-      const keys = ["version", "roomId", "workItemId", "viewerId", "horizon", "anchorId", "since", "after"];
+      const keys = ["version", "roomId", "workItemId", "viewerId", "horizon", "anchorId", "since", "after",
+        ...(value?.version === 2 ? ["kind", "scopeDigest", "prefixDigest"] : [])];
       if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length || !keys.every(key => Object.hasOwn(value, key))
-        || Buffer.from(JSON.stringify(value)).toString("base64url") !== token || value.version !== 1
-        || value.roomId !== this.#roomId || value.workItemId !== workItemId || value.viewerId !== result.viewerId || !validId(value.anchorId)
-        || !integer(value.horizon) || !integer(value.since) || !integer(value.after) || value.since > value.after || value.after >= value.horizon) invalid();
+        || Buffer.from(JSON.stringify(value)).toString("base64url") !== token || ![1, 2].includes(value.version)
+        || value.roomId !== this.#roomId || value.workItemId !== workItemId || value.viewerId !== result?.viewerId || !validId(value.anchorId)
+        || !integer(value.horizon) || !integer(value.since) || !integer(value.after) || value.since > value.after || value.after > value.horizon
+        || kind === "page" && value.after >= value.horizon
+        || value.version === 2 && (value.kind !== kind || !/^[a-f0-9]{64}$/.test(value.scopeDigest)
+          || !/^[a-f0-9]{64}$/.test(value.prefixDigest)
+          || kind === "checkpoint" && (value.since !== value.horizon || value.after !== value.horizon))
+        || kind === "checkpoint" && value.version !== 2) invalid();
       return value;
     };
+    const requested = cursor === null ? null : continuation(cursor);
+    const resumed = resumeToken === null ? null : continuation(resumeToken, "checkpoint");
+    const durable = consistent || resumed !== null || requested?.version === 2;
+    const start = resumed?.horizon ?? since ?? 0;
+    if (durable && (page?.consistent !== true || requested && requested.version !== 2
+      || (page.hasMore ? page.resumeToken !== null : typeof page.resumeToken !== "string"))) invalid();
     if (result?.contentTrust !== CONTENT_TRUST || result?.contractVersion !== 1 || result.roomId !== this.#roomId || result.workItemId !== workItemId || !validId(result.viewerId)
       || result.selection?.rule !== "source-linked-descendants-v1" || result.scope?.membership !== "room" || result.scope.targetedMessages !== "room-visible" || result.scope.externalExecution !== false
       || !page || !integer(page.horizon) || !integer(page.since) || !integer(page.after) || page.since > page.after || page.after > page.horizon
-      || page.cursor !== cursor || (cursor === null && (page.since !== (since ?? 0) || page.after !== (since ?? 0)))
+      || page.cursor !== cursor || (cursor === null && (page.since !== start || page.after !== start))
       || page.limit !== limit || !Array.isArray(page.items) || page.items.length > limit || typeof page.hasMore !== "boolean"
       || !integer(current?.evaluatedThrough) || current.evaluatedThrough < page.horizon || !Number.isFinite(Date.parse(current.evaluatedAt))
       || !integer(current.workRevision) || current.next?.workItemId !== workItemId || current.next.workRevision !== current.workRevision
       || (page.hasMore ? !page.items.length || page.checkpoint !== null || typeof page.nextCursor !== "string" || page.nextCursor.length > 2048
         || !/^[A-Za-z0-9_-]+$/.test(page.nextCursor) || page.nextCursor === cursor : page.nextCursor !== null || page.checkpoint !== page.horizon)) invalid();
-    const requested = cursor === null ? null : continuation(cursor);
     if (requested && ["horizon", "since", "after"].some(key => requested[key] !== page[key])) invalid();
     let after = page.after, bytes = 0; const ids = new Set(), events = new Set();
     for (const row of page.items) {
@@ -767,10 +783,17 @@ export class RoomAgentClient {
       after = row.sequence; ids.add(message.id); events.add(row.eventId); bytes += Buffer.byteLength(JSON.stringify(canonical));
     }
     if (bytes > 65536 || page.rowBytes !== bytes || (page.hasMore && after >= page.horizon)) invalid();
+    const sameWindow = token => {
+      if (token.version !== 2 || token.horizon !== page.horizon
+        || requested && ["scopeDigest", "prefixDigest", "anchorId"].some(key => token[key] !== requested[key])
+        || resumed && token.scopeDigest !== resumed.scopeDigest) invalid();
+    };
     if (page.hasMore) {
       const next = continuation(page.nextCursor);
+      if (durable) sameWindow(next);
       if (next.horizon !== page.horizon || next.since !== page.since || next.after !== after || (requested && requested.anchorId !== next.anchorId)) invalid();
     }
+    if (durable && !page.hasMore) sameWindow(continuation(page.resumeToken, "checkpoint"));
     return result;
   }
   // Personal to this credential's member, never included in shared orientation.

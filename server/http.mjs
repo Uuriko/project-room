@@ -4423,10 +4423,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
+        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "consistent", "resumeToken", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("consistent") && params.get("consistent") !== "true"
+          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), limit from 1 to 50, and either cursor, resumeToken or legacy since. consistent=true starts a durable read. Supply each parameter once; since must be a non-negative integer.");
         const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
-          cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
+          cursor: params.get("cursor"), consistent: params.get("consistent") === "true", resumeToken: params.get("resumeToken"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
         });
         // RC-2026-09-19-070: DM visibility is enforced inside

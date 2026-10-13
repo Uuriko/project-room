@@ -4424,19 +4424,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
+  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit });
+      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit, consistent, resumeToken });
       const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
-      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
+      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)
+        || window.basis && this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.basis.horizon)?.id !== window.basis.anchorId) fail(409, window.consistent ? "discussion_reset_required" : "discussion_history_changed", "Discussion history changed; restart after recovery");
       const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
+      const floor = this.historyFloor(roomId, auth.member.id, room.sequence);
+      const scope = window.consistent ? [roomId, workItemId, auth.member.id, auth.member.revision ?? 0, auth.credentialHash ?? null,
+        auth.account?.id ?? null, auth.account?.authEpoch ?? null, auth.sessionBinding ?? null, auth.sessionRevision ?? null,
+        this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=1").get(roomId)?.id ?? null,
+        floor ? [floor.sequence, floor.at, [...floor.sameInstant].sort()] : null] : null;
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
         now: this.now(), metadata, window, anchorId, cursor,
-        floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
+        floor, scope }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
