@@ -545,6 +545,36 @@ test("re-adding a pull request keeps one row and can move the claimant", async t
   assert.equal(events[1].data.claimantMemberId, memberId);
 });
 
+test("prototype-named phantom members are not room members (#3023)", async t => {
+  const { store } = fixture(t);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot()).fetchImpl });
+  // These ids pass validId but are not members; a raw members[id] index
+  // resolves them to inherited Object.prototype values (truthy, with
+  // .active undefined), so #member must resolve through ownMember only.
+  for (const phantom of ["toString", "valueOf", "hasOwnProperty"]) {
+    await assert.rejects(
+      () => store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: phantom }),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `add with phantom claimant ${phantom}`
+    );
+    await assert.rejects(
+      () => store.landQueue.add("commons", phantom, { repo: "acme/demo", prNumber: 969 }),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `add by phantom actor ${phantom}`
+    );
+    assert.throws(
+      () => store.landQueue.list("commons", phantom),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `list by phantom actor ${phantom}`
+    );
+  }
+  // No queue row was created for any phantom claimant.
+  assert.equal(store.landQueue.list("commons", "owner").items.length, 0);
+  // Positive control: a real own member still passes the membership check.
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  assert.equal(added.item.claimantMemberId, "owner");
+});
+
 async function listen(t, store) {
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
