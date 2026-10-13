@@ -77,7 +77,9 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *     stopAfterRepeatedNoopWakes: boolean // true: stand down after repeated
  *                                        // wakes that produce no action
  *   },
- *   eventCursor: string,       // opaque base64url resume token for the event log
+ *   eventCursor: number,       // room event sequence at generation; resume the
+ *                              // event log with GET …/events?after=<eventCursor>
+ *                              // or SSE Last-Event-ID
  *   generatedAt: string        // ISO-8601 generation time
  * }
  */
@@ -134,11 +136,10 @@ const pinnedOf = ({ messageId, pinnedById, pinnedAt, message }) => ({
   messageId, pinnedById, pinnedAt, authorId: message.authorId, body: message.body, untrusted: true
 });
 
-// Opaque resume token for the event log: versioned, self-describing to the
-// server, meaningless to clients. Encodes the room event sequence the pack
-// was generated from.
-const cursorOf = sequence =>
-  Buffer.from(JSON.stringify({ v: 1, seq: sequence }), "utf8").toString("base64url");
+// eventCursor is the room's numeric event sequence — the value the event
+// log actually resumes from (GET …/events?after=<seq>, SSE Last-Event-ID).
+// It was previously an opaque base64url token that no endpoint parsed back
+// (#3222), so the cursor this pack handed out could not be used anywhere.
 
 export function buildActivationPack(store, roomSlug, viewerId = null) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
@@ -173,7 +174,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     repoHead: null,
     participationRules: { ...roomPolicy(state), trust: roomTrust(state).enabled },
     coordinationNorms: { ...COORDINATION_NORMS },
-    eventCursor: cursorOf(sequence),
+    eventCursor: sequence,
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {

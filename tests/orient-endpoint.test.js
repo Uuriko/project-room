@@ -76,7 +76,10 @@ test("orient serves the member-scoped payload", async t => {
   assert.equal(payload.member.kind, "agent");
   assert.deepEqual(payload.member.permissions, ["accept_work", "write_external", "complete_work"]);
   assert.ok(Number.isSafeInteger(payload.evaluatedThrough) && payload.evaluatedThrough > 0);
-  assert.ok(typeof payload.eventCursor === "string" && payload.eventCursor.length > 0);
+  // #3222: eventCursor is the numeric sequence itself — the value the
+  // events/SSE resume paths accept — not an opaque token.
+  assert.equal(payload.eventCursor, payload.evaluatedThrough);
+  assert.equal(payload.cursors.eventCursor, payload.evaluatedThrough);
   assert.equal(payload.orientation.purpose, "Fixture room for the orient endpoint.");
   assert.equal(payload.workTotal, 1);
   assert.equal(payload.work.length, 1);
@@ -90,6 +93,39 @@ test("orient serves the member-scoped payload", async t => {
   assert.equal(typeof item.next.needsAttention, "boolean");
   assert.equal(payload.links.activationPack, `/api/rooms/${ROOM}/activation-pack`);
   assert.ok(!Number.isNaN(Date.parse(payload.generatedAt)));
+});
+
+test("orient eventCursor round-trips through events + SSE resume (#3222)", async t => {
+  const f = fixture(t);
+  const origin = await serve(t, f.store);
+  const payload = await (await getOrient(origin, ROOM, f.workerKey)).json();
+  const cursor = payload.eventCursor;
+  assert.ok(Number.isSafeInteger(cursor) && cursor > 0);
+  const getEvents = async after => {
+    const res = await fetch(`${origin}/api/rooms/${ROOM}/events?after=${after}`,
+      { headers: { Authorization: `Bearer ${f.workerKey}` } });
+    assert.equal(res.status, 200);
+    return (await res.json()).events;
+  };
+  // At the head: resuming from the emitted cursor yields nothing new —
+  // the cursor names exactly the sequence the payload was generated at.
+  assert.deepEqual(await getEvents(cursor), []);
+  // Post one event, then resume two ways with the same emitted cursor.
+  const posted = f.store.command(f.ownerKey, ROOM, { id: "orient-cursor-post", type: T.MESSAGE_POSTED,
+    data: { messageId: "orient-cursor-msg", body: "posted after orient" } });
+  const events = await getEvents(cursor);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event.data?.messageId, "orient-cursor-msg");
+  // SSE: Last-Event-ID set to the emitted cursor replays only that event.
+  const stream = await fetch(`${origin}/api/rooms/${ROOM}/stream`,
+    { headers: { Authorization: `Bearer ${f.workerKey}`, "Last-Event-ID": String(cursor) } });
+  assert.equal(stream.status, 200);
+  const reader = stream.body.getReader();
+  t.after(() => reader.cancel().catch(() => {}));
+  const first = new TextDecoder().decode((await reader.read()).value);
+  assert.match(first, /posted after orient/);
+  assert.match(first, new RegExp(`id: ${posted.sequence}`));
+  await reader.cancel().catch(() => {});
 });
 
 test("orient scopes the member record to the caller", async t => {
