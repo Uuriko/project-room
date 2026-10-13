@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { messageVisibleTo, syncMessageRows } from "../server/messages-store.mjs";
+import { listOpenQuestions } from "../server/open-questions.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
 // Message rows are written in the same transaction as the message event.
@@ -499,4 +500,44 @@ test("a message kept only because it was pinned is archived on a later run once 
   f.store.checkMessagesParity();
   assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
   assert.ok(!ids().includes("p-0"), "once unpinned it is archived like any other old message");
+});
+
+test("archiveMessages keeps unanswered questions so the open-questions list does not shrink", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-open", body: "Who owns the invoice?" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-answered", body: "Is staging up?" });
+  f.send(f.agent, T.MESSAGE_POSTED, { messageId: "a-1", body: "yes", replyToId: "q-answered" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `pad-${i}`, body: `pad ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  const ids = f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(ids.includes("q-open"), "the unanswered question stays");
+  assert.ok(!ids.includes("q-answered"), "an answered old question can be archived");
+});
+
+test("archiving keeps every open question (more than the reader's 100-newest cap) and what closes a kept one", t => {
+  const f = fixture(t);
+  f.store.roomFlood = { consume: () => false, refund() {} }; // 130 quick posts would hit the per-member burst limit
+  const openFor = who => listOpenQuestions(f.store, who, "commons", { limit: 100 }).openQuestions.map(q => q.messageId);
+  for (let i = 0; i < 130; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `oq-${i}`, body: `open ${i}?` });
+  // Public question closed only by a DM to its asker: the public view still sees it open.
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-dm", body: "who has the key?" });
+  f.send(f.agent, T.MESSAGE_POSTED, { messageId: "a-dm", toMemberId: "human", body: "I do", replyToId: "q-dm" });
+  // Pinned question closed by a public answer.
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-pin", body: "is staging up?" });
+  f.send(f.agent, T.MESSAGE_POSTED, { messageId: "a-pin", body: "yes", replyToId: "q-pin" });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "q-pin" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `pad-${i}`, body: `pad ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  const views = { human: f.human, agent: f.agent, stranger: f.stranger };
+  const before = Object.fromEntries(Object.entries(views).map(([name, token]) => [name, openFor(token)]));
+  assert.ok(before.human.length > 0 && !before.human.includes("q-dm"), "the asker sees the DM-answered question as closed");
+  assert.ok(before.stranger.includes("q-dm"), "a public view still sees it open");
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  for (const [name, token] of Object.entries(views)) assert.deepEqual(openFor(token), before[name], `${name}'s open questions are unchanged by the archive`);
+  const ids = f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(ids.includes("a-dm") && ids.includes("a-pin"), "the answers that close kept questions stay");
+  assert.ok(ids.includes("oq-0") && ids.includes("oq-129"), "all 130 open questions stay, not just the newest 100");
 });

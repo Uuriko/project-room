@@ -1,4 +1,5 @@
 import { hydrateProjection, storedProjection } from "./projection-at-rest.mjs";
+import { openQuestionRetention } from "./open-questions.mjs";
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
 // same transaction as the event insert. MSG-2 replays events that landed
@@ -519,6 +520,12 @@ function retainedByState(state) {
   }
   for (const id of Object.keys(state.replyRequests ?? {})) keep.add(id);
   for (const message of state.messages ?? []) if (typeof message?.workItemId === "string" && message.workItemId) keep.add(message.id);
+  // Open questions: the list a reader gets is derived from state.messages, so an
+  // archived open question would silently leave it, and an archived answer would
+  // reopen a kept one. One uncapped pass keeps every question that is open for
+  // some viewer, and every message that could close a kept question (including
+  // pinned and work-linked questions already kept above).
+  for (const id of openQuestionRetention(state.messages ?? [], keep)) keep.add(id);
   return keep;
 }
 
