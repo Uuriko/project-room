@@ -212,6 +212,7 @@ const WRITE_TOOLS = [
   "room_begin_work", "room_start_work", "room_propose_work", "room_record_completion",
   "room_post_draft", "room_close_work_claim",
   "bounty_post", "bounty_claim",
+  "room_create", "squads_create", "room_decide_access_request", "bond_propose", "bond_accept", "dm_posted", "room_discard_file", "remove_land_item",
 ];
 
 test("a rooms:read key is refused 403 on every write tool family over MCP", async t => {
