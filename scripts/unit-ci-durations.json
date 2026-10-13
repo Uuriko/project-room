@@ -54,6 +54,7 @@
   "tests/agent-identities.test.js": 123094,
   "tests/agent-identity-secrets.test.js": 34387,
   "tests/agent-inbox-keys.test.js": 56080,
+  "tests/agent-inbox-optional-args.test.js": 71171,
   "tests/agent-inbox.test.js": 22234,
   "tests/agent-invite-ui.test.js": 4101,
   "tests/agent-invites.test.js": 219516,
