@@ -607,6 +607,7 @@
   "tests/project-offers-tablet.test.js": 1000,
   "tests/project-offers.test.js": 31232,
   "tests/projection-cache.test.js": 25328,
+  "tests/projection-envelope-at-rest.test.js": 1822,
   "tests/proposed-by.test.js": 46306,
   "tests/provider-heartbeats.test.js": 16802,
   "tests/provision.test.js": 110022,
