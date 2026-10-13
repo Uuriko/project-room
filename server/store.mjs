@@ -44,7 +44,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archivedMatchingRecords, archiveRoomMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -4251,10 +4251,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       // PRIV-2: a since_join reader sees no thread rooted before their join.
       const floor = this.historyFloor(roomId, auth.member.id);
-      const root = room.state.messages.find(m => m.id === messageId);
+      // Archived messages live only in the messages table; a DM there is shown to its parties only.
+      const archived = archivedThreadRecords(this.db, roomId, messageId)
+        .filter(m => !m.toMemberId || m.authorId === auth.member.id || m.toMemberId === auth.member.id);
+      const root = room.state.messages.find(m => m.id === messageId) ?? archived.find(m => m.id === messageId);
       if (!root || !messageInHistory(root, floor)) fail(404, "message_not_found", "Message not found");
       const byParent = new Map();
-      for (const m of room.state.messages) {
+      for (const m of [...archived, ...room.state.messages]) {
         if (!m.replyToId || !messageInHistory(m, floor)) continue;
         if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
         byParent.get(m.replyToId).push(m);
