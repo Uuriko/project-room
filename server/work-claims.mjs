@@ -204,6 +204,7 @@ const pullRequestOf = value => {
   let rateLimitedUntil = null;
   let pollBackoffMs = null;
   let ciCursor = null;
+  let ciStatus = null;
   if (value !== null && typeof value === "object") {
     if (value.outcome !== undefined && value.outcome !== null) {
       check(value.outcome === "merged" || value.outcome === "closed", "pullRequest outcome must be merged or closed");
@@ -233,10 +234,25 @@ const pullRequestOf = value => {
       check(value.ciCursor === "status" || value.ciCursor === "checks" || value.ciCursor === "done", "pullRequest ciCursor must be status, checks, or done");
       ciCursor = value.ciCursor;
     }
+    if (value.ciStatus !== undefined && value.ciStatus !== null) {
+      // The digest of a combined status fetched by a split CI read (#2841):
+      // it rides with ciCursor "checks" so the resumed read can roll it up.
+      // Without whitelisting it here, any state-machine write between the
+      // two ticks would drop it and resurrect the split-read bug.
+      check(value.ciStatus !== null && typeof value.ciStatus === "object" && !Array.isArray(value.ciStatus), "pullRequest ciStatus must be an object");
+      check(value.ciStatus.state === undefined || value.ciStatus.state === null || (typeof value.ciStatus.state === "string" && value.ciStatus.state.length <= 64), "pullRequest ciStatus state must be a short string");
+      check(typeof value.ciStatus.totalCount === "number" && Number.isFinite(value.ciStatus.totalCount) && value.ciStatus.totalCount >= 0, "pullRequest ciStatus totalCount must be a non-negative number");
+      check(value.ciStatus.targetUrl === undefined || value.ciStatus.targetUrl === null || (typeof value.ciStatus.targetUrl === "string" && value.ciStatus.targetUrl.startsWith("https://") && value.ciStatus.targetUrl.length <= 2048), "pullRequest ciStatus targetUrl must be an https URL");
+      ciStatus = Object.freeze({
+        state: typeof value.ciStatus.state === "string" ? value.ciStatus.state : null,
+        totalCount: value.ciStatus.totalCount,
+        targetUrl: typeof value.ciStatus.targetUrl === "string" ? value.ciStatus.targetUrl : null
+      });
+    }
   }
   return Object.freeze({
     url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
-    etag, rateLimitedUntil, pollBackoffMs, ciCursor
+    etag, rateLimitedUntil, pollBackoffMs, ciCursor, ciStatus
   });
 };
 const pullRequestsOf = value => {
