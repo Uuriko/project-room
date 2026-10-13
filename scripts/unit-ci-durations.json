@@ -1078,6 +1078,7 @@
   "tests/webhook-retry-backoff.test.js": 600,
   "tests/work-claim-conflict-hint.test.js": 309,
   "tests/work-claim-idempotency.test.js": 322,
+  "tests/work-claim-mirror-id.test.js": 13660,
   "tests/work-claim-mirror-successor.test.js": 800,
   "tests/work-claim-renew-probe-b.test.js": 125,
   "tests/work-claim-renew-probes.test.js": 120,
@@ -1162,5 +1163,13 @@
   "purpose": "Measured allocation only; test discovery remains authoritative."
  },
  "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
- "pr2463UnmeasuredRefreshMeasurement": "42 unmeasured files (40 on main 80846d7c plus tests/email-gate-no-mailer.test.js and tests/email-verification-health.test.js from #2463): solo wall-clock ms of `node --test <file>` on Linux Node v24.19.0, 2026-10-10, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership."
+ "pr2463UnmeasuredRefreshMeasurement": "42 unmeasured files (40 on main 80846d7c plus tests/email-gate-no-mailer.test.js and tests/email-verification-health.test.js from #2463): solo wall-clock ms of `node --test <file>` on Linux Node v24.19.0, 2026-10-10, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
+ "fix2854Measurement": {
+  "date": "2026-10-13",
+  "runtime": "Node v24.20.0 Linux local",
+  "file": "tests/work-claim-mirror-id.test.js",
+  "milliseconds": 13660,
+  "method": "Solo wall-clock ms of `node --test tests/work-claim-mirror-id.test.js`; all 5 tests passed. This slow local host runs peer files ~18x their recorded values, so treat as a conservative relative weight.",
+  "purpose": "Measured allocation only; test discovery remains authoritative. Adding this entry brings the unmeasured set from 41 back to the UNMEASURED_CAP of 40 (main already sits at the cap, so the new #2854 test file tripped the shard-plan gate in unit/coverage CI)."
+ }
 }
