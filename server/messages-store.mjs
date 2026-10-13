@@ -254,6 +254,19 @@ export function archivedMessageRow(db, roomId, messageId) {
     .get(roomId, messageId, throughSeq, retainedJson) ?? null;
 }
 
+// Current records of archived messages in one thread (the root itself when it is
+// archived, plus archived replies filed under it), oldest first.
+export function archivedThreadRecords(db, roomId, rootId) {
+  const { throughSeq, retainedJson } = archiveMarker(db, roomId);
+  if (!throughSeq || typeof rootId !== "string") return [];
+  const out = [];
+  for (const row of db.prepare("SELECT record_json, body FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?)) AND (message_id=? OR thread_root_id=?) ORDER BY seq")
+    .all(roomId, throughSeq, retainedJson, rootId, rootId)) {
+    try { const record = JSON.parse(row.record_json); out.push(row.body === null ? record : { ...record, body: row.body }); } catch { /* unreadable rows are skipped */ }
+  }
+  return out;
+}
+
 // Current records of archived messages whose body contains the lowercase
 // needle, oldest first, for readers that scan every message (search).
 export function archivedMatchingRecords(db, roomId, needle) {
