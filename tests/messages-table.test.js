@@ -272,3 +272,19 @@ test("parity accepts a tail reply whose thread root was archived", t => {
   archiveOldest(f, 2);
   assert.equal(f.store.checkMessagesParity().ok, true);
 });
+
+test("follow-up events of an archived direct message stay hidden from non-parties", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "dm-1", toMemberId: "agent", body: "private" });
+  f.send(f.human, T.MESSAGE_EDITED, { messageId: "dm-1", body: "private edited", expectedMessageRevision: 0 });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "pub-1", body: "public" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const dmSeq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='dm-1'").get().seq;
+  const count = f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n;
+  archiveOldest(f, count);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "dm-1"), false);
+  const types = token => f.store.eventsAfter(token, "commons", dmSeq, 100).events.map(({ event: e }) => `${e.type}:${e.data?.messageId ?? ""}`);
+  assert.ok(types(f.human).includes("message.edited:dm-1"), "a party still sees the edit");
+  assert.ok(types(f.agent).includes("message.edited:dm-1"), "the addressee still sees the edit");
+  assert.equal(types(f.stranger).includes("message.edited:dm-1"), false, "a non-party must not see the edit");
+});
