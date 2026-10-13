@@ -607,3 +607,36 @@ test("the thread view of an archived root (and archived replies under a kept roo
   assert.deepEqual(ids(f.human), ["old-reply", "old-dm-reply"]);
   assert.deepEqual(ids(f.stranger), ["old-reply"]);
 });
+
+test("the thread view of an archived reply still lists its own archived replies, once each", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "t-root", body: "root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "t-reply", body: "reply", replyToId: "t-root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "t-deep", body: "deep", replyToId: "t-reply" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "t-dm", toMemberId: "agent", body: "private", replyToId: "t-reply" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "t-pinned", body: "pinned sibling", replyToId: "t-root" });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "t-pinned" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `pad-${i}`, body: `pad ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  const live = f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(!live.includes("t-reply") && !live.includes("t-deep"), "the reply and its reply are archived");
+  assert.ok(live.includes("t-pinned") && live.includes("t-root"), "the pinned sibling and its ancestor root stay in the projection");
+  // A message posted after the archive is live but has a row in the table too.
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "t-late", body: "late", replyToId: "t-root" });
+  const tree = (token, id) => { const node = f.store.messageThread(token, "commons", id).thread; return { id: node.id, replies: node.replies.map(r => tree2(r)) }; };
+  const tree2 = node => ({ id: node.id, replies: node.replies.map(tree2) });
+  // The archived reply lists its own replies (private ones only to a party).
+  assert.deepEqual(tree(f.human, "t-reply"), { id: "t-reply", replies: [{ id: "t-deep", replies: [] }, { id: "t-dm", replies: [] }] });
+  assert.deepEqual(tree(f.stranger, "t-reply"), { id: "t-reply", replies: [{ id: "t-deep", replies: [] }] });
+  // The root's view has each message once: the retained pinned sibling and the live late reply are in the
+  // projection and the table, and must not be listed twice.
+  assert.deepEqual(tree(f.human, "t-root"), { id: "t-root", replies: [
+    { id: "t-reply", replies: [{ id: "t-deep", replies: [] }, { id: "t-dm", replies: [] }] },
+    { id: "t-pinned", replies: [] },
+    { id: "t-late", replies: [] },
+  ] });
+  // A stranger still learns nothing about an archived DM reply by asking for it.
+  assert.throws(() => f.store.messageThread(f.stranger, "commons", "t-dm"), /not found|Message not found/i);
+});
