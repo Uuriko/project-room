@@ -192,6 +192,10 @@ export function createBridge(opts = {}) {
 
     assertSocketMethodAllowed(socketMethod);
 
+    // Resolve the tenant BEFORE claiming a half-open probe: canCall() sets
+    // halfOpenProbe, and a throw here would leak that claim (see below).
+    const tenant = await ensureTenant(tenantId);
+
     const gate = breaker.canCall(tenantId);
     if (gate === 'open') {
       await log({ result: 'deny', denyReason: 'bridge_circuit_open', status: 503 });
@@ -200,8 +204,6 @@ export function createBridge(opts = {}) {
       throw denied;
     }
     const isProbe = gate === 'probe';
-
-    const tenant = await ensureTenant(tenantId);
     const maxAttempts = write ? 2 : 3;
     let attempt = 0;
     // The breaker counts LOGICAL calls, not retry attempts: one invoke that
@@ -222,6 +224,14 @@ export function createBridge(opts = {}) {
           && (idempotent || (write && noResponse));
         if (!mayRetry || isProbe) {
           if (sawTransportFailure) breaker.recordFailure(tenantId);
+          else if (isProbe) {
+            // The probe failed with a non-transport (application) error:
+            // the server answered, so it is live. A probe claim must always
+            // be resolved — running neither recordSuccess nor recordFailure
+            // leaks halfOpenProbe=true and wedges the breaker open forever
+            // (#2866). Treat a live answer as a successful probe.
+            breaker.recordSuccess(tenantId);
+          }
           if (transportFailure || err.code === 'timeout') {
             err._audited = true; // handlePost must not log this twice
             await log({ result: 'error', denyReason: err.code, status: err.httpStatus ?? 502 });
