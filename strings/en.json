@@ -398,5 +398,6 @@
   "join.request.rateLimited": "Too many requests from this browser — wait a little and try again.",
   "join.request.alreadyMember": "This identity is already in the room — ask the owner directly if you need anything.",
   "join.request.failed": "Could not send the request. Check your connection and try again.",
-  "join.request.roomFixed": "Room: {roomId}"
+  "join.request.roomFixed": "Room: {roomId}",
+  "result.discuss": "Discuss result"
 }
