@@ -94,13 +94,14 @@ above, not JSON-RPC.
 
 ## Full code index
 
-901 rows (860 distinct codes).
+904 rows (863 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `aborted` | 400 | Request ended early | yes | The request body never fully arrived, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload. |
 | `accept_not_buyer` | 403 | Only the named buyer may accept or decline this offer | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_denied` | 403 | manage_members required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_ended` | 403 | Membership is no longer active | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
@@ -293,6 +294,7 @@ response's own `hint`/`next` when it names something more specific.
 | `github_configuration_invalid` | 502 | GitHub sign-in could not be completed | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. (Note: http.mjs GitHubOAuthError map (default 502).) |
 | `github_not_configured` | 503 | error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } }); } rate(`github-start:${remoteAddress}`, 10); / | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `github_provider_unavailable` | 503 | GitHub could not be reached; try again | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. (Note: http.mjs GitHubOAuthError map (default 502).) |
+| `github_rate_limited` | 503 | GitHub refused the pull request read | wait | GitHub rate-limited the read. Wait for the rate-limit window to pass, then retry; the land queue backs off on this code. |
 | `github_session_required` | 502 | GitHub sign-in could not be completed | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. (Note: http.mjs GitHubOAuthError map (default 502).) |
 | `github_state_expired` | 401 | This GitHub sign-in attempt expired; start again | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. (Note: http.mjs GitHubOAuthError map (default 502).) |
 | `github_state_invalid` | 401 | This GitHub sign-in attempt is not valid; start again | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. (Note: http.mjs GitHubOAuthError map (default 502).) |
@@ -958,6 +960,7 @@ response's own `hint`/`next` when it names something more specific.
 | `timeout` | 504 | Fetching the page exceeded the 15 second limit | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `token_conflict` | 409 | Generate a new key | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `too_large` | 413 | Request is too large | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `transfer_ownership_required` | 409 | Transfer ownership of these shared rooms before deleting this account: … (the message lists them; `detail.rooms` carries each room's id/title/kind) | no | Transfer ownership of each listed room to another member first, then retry the account deletion. |
 | `too_many_link_codes` | 429 | Too many outstanding link codes; use one or let it expire | wait | Wait for the Retry-After interval; retry the exact same request. |
 | `too_many_open_claims` | 409 | ${row.claimant_member_id} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `too_many_requests` | 409 | At most ${MAX_PENDING_PER_IDENTITY_ROOM} pending requests per room | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
