@@ -64,6 +64,11 @@ export class RequestRuns {
       }
       if (input.action === "delivered" && request.status !== "answered")
         fail("request_run_not_delivered", "The original request has no recorded answer");
+      // Intermediate host reports are only meaningful while the request is
+      // still open: a cancelled or declined (or already answered) request must
+      // not be flipped to result_ready / needs_attention by a stale host.
+      if ((input.action === "result_ready" || input.action === "needs_attention") && request.status !== "open")
+        fail("request_run_changed", "Request changed, paused or closed; inspect the original attempt");
       if (input.action === "claim") {
         if (row) fail("request_run_owned", "This attempt is already reserved; its execution outcome must be reconciled");
         this.store.db.prepare("INSERT INTO request_runs VALUES(?,?,?,?,?,'working',?)").run(roomId, request.openingEventId, request.id, auth.member.id, input.attemptId, this.store.now());
