@@ -686,6 +686,13 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
+// Commands that name an existing message, and which field names it.
+const ARCHIVED_REF_FIELDS = Object.freeze({
+  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
+  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
+  [T.MESSAGE_POSTED]: "replyToId"
+});
+
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
@@ -4822,6 +4829,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
+        }
+      }
+      // Archived messages are not in the projection, so the reducer cannot change
+      // them or thread under them. Refuse with a clear error. A DM the actor is
+      // not a party to reads like an unknown id, so nothing about it is confirmed.
+      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
+      if (archivedRef) {
+        const refId = command.data?.[archivedRef];
+        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
+          const archivedRow = archivedMessageRow(this.db, roomId, refId);
+          if (archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id)) {
+            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
+          }
         }
       }
       // A reaction on a DM is shown to its parties and the answer would
