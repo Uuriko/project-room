@@ -177,7 +177,7 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("u");
     await page.locator('.chat-divider.unread', { hasText: "New messages" }).first().waitFor({ state: "visible" });
 
-    // The room-actions palette lists Activity and Later entries (desktop:
+    // The room-actions palette lists Activity and Later entries, routed to Updates (desktop:
     // the palette button is hidden on small screens).
     if (!mobile) {
       await clickChrome(page, "#room-actions-open");
@@ -186,7 +186,9 @@ for (const mobile of [false, true]) {
       await page.locator("#room-actions-query").fill("activity");
       await page.waitForFunction(() => [...document.querySelectorAll("#room-actions-list [data-room-action]")].some(el => el.textContent.toLowerCase().includes("activity")));
       await page.locator("#room-actions-list [data-room-action]").first().click();
-      await dialog.waitFor({ state: "visible" });
+      // Since the Updates projection (#1319) the palette's Activity entry opens
+      // the Updates list (All filter); the Activity dialog itself is `g a` above.
+      await page.locator("#updates-dialog").waitFor({ state: "visible" });
       await page.keyboard.press("Escape");
     }
 
