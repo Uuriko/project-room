@@ -47,24 +47,58 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
   const surface = () => container;
   const statusNode = () => surface()?.querySelector("[data-signin-status]") ?? null;
-  function setStatus(text, error = false) {
-    statusText = text; statusError = error;
-    // A fresh sign-in outcome supersedes the stale panel-level notice left by
-    // sign-out (e.g. "Session ended; private drafts were cleared."): one alert
-    // at a time, so two red role=alert errors never show together.
-    if (text) {
-      const panelNotice = globalThis.document?.getElementById?.("auth-error");
-      if (panelNotice && panelNotice !== statusNode() && panelNotice.textContent) panelNotice.textContent = "";
-    }
-    const node = statusNode();
-    if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
+  function capturePanelNotice() {
+    const node = globalThis.document?.getElementById?.("auth-error");
+    return { node, text: node?.textContent, generation: accountClient.generation, session: accountClient.session };
   }
-  async function authedSession() {
-    await ensureAccountSession();
+  function paintStatus() {
+    const node = statusNode();
+    if (node) { node.textContent = statusText; node.classList.toggle("visible", Boolean(statusText)); node.classList.toggle("error", Boolean(statusText) && statusError); }
+  }
+  function transferPanelNotice(notice, generation, session, nextGeneration, nextSession) {
+    if (notice?.generation === generation && notice.session === session
+      && accountClient.owns(nextGeneration, nextSession)) {
+      notice.generation = nextGeneration; notice.session = nextSession;
+    }
+  }
+  function dismissPanelNotice(notice) {
+    if (notice.dismissed) return;
+    notice.dismissed = true;
+    // Only the unchanged notice and account view owned by this attempt may
+    // be dismissed. Never adopt a notice written by an awaited host callback.
+    if (notice.node && notice.node !== statusNode()
+      && globalThis.document?.getElementById?.("auth-error") === notice.node
+      && notice.node.textContent === notice.text
+      && accountClient.owns(notice.generation, notice.session)) notice.node.textContent = "";
+  }
+  function setStatus(text, error = false, notice = capturePanelNotice()) {
+    statusText = text; statusError = error;
+    if (text) dismissPanelNotice(notice);
+    paintStatus();
+  }
+  async function authedSession(notice) {
+    const generation = accountClient.generation, session = accountClient.session;
+    const preparation = ensureAccountSession();
+    const preparedGeneration = accountClient.generation, pendingSession = accountClient.session;
+    const prepared = await preparation;
+    // The host either returns the existing session or starts/joins its restore
+    // flight synchronously. Only that flight's still-current result can adopt
+    // the previously empty account slot; a superseding restore returns null.
+    if (!session && !pendingSession && prepared
+      && (preparedGeneration === generation || preparedGeneration === generation + 1)) {
+      transferPanelNotice(notice, generation, session, preparedGeneration, prepared);
+    }
     return accountClient.currentSession("signing in");
   }
+  async function restoreOutcomeSession(notice) {
+    const generation = accountClient.generation, session = accountClient.session;
+    const restoration = accountClient.restore(), restoreGeneration = accountClient.generation;
+    const restored = await restoration;
+    if (restored) transferPanelNotice(notice, generation, session, restoreGeneration, restored);
+    return restored;
+  }
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
-  const mutationApi = async (session, path, data, validate) => {
+  const mutationApi = async (session, path, data, validate, notice) => {
     const generation = accountClient.generation;
     const owns = () => accountClient.owns(generation, session);
     try {
@@ -79,15 +113,17 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code);
       if (uncertain && owns()) {
         accountClient.invalidate(generation, session);
+        transferPanelNotice(notice, generation, session, generation + 1, null);
+        if (notice) dismissPanelNotice(notice);
         await onSignInUncertain?.();
       }
       throw error;
     }
   };
-  const authApi = (session, path, data) => mutationApi(session, path, data, view => {
+  const authApi = (session, path, data, notice) => mutationApi(session, path, data, view => {
     const signed = view?.session ?? view;
     return signed?.authenticated === true && typeof signed.account?.id === "string" && Boolean(signed.account.id.trim());
-  });
+  }, notice);
   function currentView() {
     if (pendingTerms) return "terms";
     if (welcome) return "welcome";
@@ -151,11 +187,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       node.setAttribute("aria-busy", String(busy));
       for (const control of node.querySelectorAll("input, button")) control.disabled = busy;
     }
-    setStatus(statusText, statusError);
+    paintStatus();
     onViewChange?.(currentView());
   }
   const paintBusySurface = render;
-  async function finish(view) {
+  async function finish(view, notice) {
     const session = view?.session ?? view;
     if (!session?.authenticated || !session?.account) throw new Error(uiText("signin.copy.016"));
     if (session.terms?.required) {
@@ -166,22 +202,25 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     pendingTerms = null;
     setStatus("");
+    dismissPanelNotice(notice);
     await onSignedIn(session);
   }
 
   async function withBusy(fn) {
     if (busy) return;
+    const notice = capturePanelNotice();
+    const setOutcome = (text, error = false) => setStatus(text, error, notice);
     busy = true; onBusyChange?.(true); paintBusySurface(); setStatus("");
-    try { await fn(); }
-    catch (error) { setStatus(failureText(error), true); }
+    try { await fn(setOutcome, notice); }
+    catch (error) { setOutcome(failureText(error), true); }
     finally { busy = false; onBusyChange?.(false); paintBusySurface(); }
   }
 
-  async function redeem(email, code) {
+  async function redeem(email, code, notice) {
     try {
-      const session = await authedSession();
-      const view = await authApi(session, "/api/auth/magic/consume", { email, code, sessionRevision: session.sessionRevision });
-      await finish(view);
+      const session = await authedSession(notice);
+      const view = await authApi(session, "/api/auth/magic/consume", { email, code, sessionRevision: session.sessionRevision }, notice);
+      await finish(view, notice);
     } catch (error) {
       if (error.code === "magic_account_mismatch") pendingLink = { kind: "magic", email, code };
       throw error;
@@ -194,9 +233,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (!provider?.get || await beforeSignIn?.() === false) return;
       const email = surface()?.querySelector('[name="email"]')?.value?.trim();
       if (email) passwordEmail = email;
-      await withBusy(async () => {
+      await withBusy(async (_setOutcome, notice) => {
         try {
-          const session = await authedSession();
+          const session = await authedSession(notice);
           const generation = accountClient.generation;
           const options = await api(session, "/api/auth/passkey/authenticate/options", {});
           const credential = await provider.get({ publicKey: toAuthenticationPublicKey(options) });
@@ -204,8 +243,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
           if (!accountClient.owns(generation, session)) throw new Error(uiText("signin.copy.001"));
           const view = await authApi(session, "/api/auth/passkey/authenticate/finish", {
             challengeId: options.challengeId, response: toAuthenticationResponse(credential), sessionRevision: session.sessionRevision
-          });
-          await finish(view);
+          }, notice);
+          await finish(view, notice);
         } catch (error) {
           if (error?.name === "NotAllowedError") throw new Error(uiText("signin.passkey.cancelled"));
           throw error;
@@ -250,7 +289,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (event.target?.closest?.("[data-magic-switch]")) {
       if (!pendingLink || onAccountSwitch?.() !== true) return;
       const link = pendingLink;
-      await withBusy(async () => {
+      await withBusy(async (_setOutcome, notice) => {
         let ended;
         try { ended = await accountClient.logout(); }
         catch (error) {
@@ -262,7 +301,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         if (accountClient.session?.authenticated) throw new Error(uiText("signin.copy.018"));
         pendingLink = null;
         if (link.kind === "reset") { resetEmail = link.email; resetCode = link.code; emailMethod = "reset"; resetPhase = "form"; }
-        else await redeem(link.email, link.code);
+        else await redeem(link.email, link.code, notice);
       });
       return;
     }
@@ -282,10 +321,10 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (form.dataset.signinForm === "terms") {
       const session = pendingTerms;
       if (!session?.terms?.version) return;
-      await withBusy(async () => {
+      await withBusy(async (_setOutcome, notice) => {
         const accepted = await api(session, "/api/account/terms", { version: session.terms.version });
         pendingTerms = null;
-        await finish(accepted);
+        await finish(accepted, notice);
       });
       return;
     }
@@ -295,18 +334,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (fields.newPassword?.length < 10 || fields.newPassword?.length > 256) { setStatus(uiText("signin.copy.020"), true); return; }
       if (fields.newPassword !== fields.confirmPassword) { setStatus(uiText("signin.copy.021"), true); return; }
       if (await beforeSignIn?.() === false) return;
-      await withBusy(async () => {
-        const session = await authedSession(), generation = accountClient.generation;
+      await withBusy(async (setOutcome, notice) => {
+        const session = await authedSession(notice), generation = accountClient.generation;
         try {
-          await mutationApi(session, "/api/auth/password/reset/consume", { email: resetEmail, code: resetCode, newPassword: fields.newPassword, sessionRevision: session.sessionRevision }, reply => reply?.status === "password_reset" && reply.signInRequired === true);
+          await mutationApi(session, "/api/auth/password/reset/consume", { email: resetEmail, code: resetCode, newPassword: fields.newPassword, sessionRevision: session.sessionRevision }, reply => reply?.status === "password_reset" && reply.signInRequired === true, notice);
         } catch (error) {
           if (error.code === "reset_account_mismatch") pendingLink = { kind: "reset", email: resetEmail, code: resetCode };
           throw error;
         }
         if (!accountClient.invalidate(generation, session)) throw Object.assign(new Error(uiText("signin.copy.022")), { status: 409, code: "auth_view_changed" });
+        transferPanelNotice(notice, generation, session, generation + 1, null);
         resetCode = ""; passwordEmail = resetEmail; emailMethod = "password"; passwordMode = "login";
+        dismissPanelNotice(notice);
         await onPasswordResetComplete?.();
-        setStatus(uiText("signin.copy.023"));
+        setOutcome(uiText("signin.copy.023"));
       }); return;
     }
     if (form.dataset.signinForm === "password") {
@@ -316,8 +357,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         setStatus(uiText("signin.copy.024"), true); return;
       }
       if (await beforeSignIn?.() === false) return;
-      await withBusy(async () => {
-        const session = await authedSession();
+      await withBusy(async (setOutcome, notice) => {
+        const session = await authedSession(notice);
         if (passwordMode === "signup") {
           // Signup also rotates the account cookie. Reconcile an uncertain
           // result and ignore obsolete replies just as password login does.
@@ -326,39 +367,40 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
             reply => {
               if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
               return true;
-            });
-          const restored = await accountClient.restore();
+            }, notice);
+          const restored = await restoreOutcomeSession(notice);
           if (!restored) return; // A newer restoration owns the account now.
           if (restored?.authenticated) {
+            dismissPanelNotice(notice);
             await onSignedIn?.(restored);
-            setStatus(reply.mailConfigured ? uiText("signin.copy.026") : uiText("signin.copy.027"));
+            setOutcome(reply.mailConfigured ? uiText("signin.copy.026") : uiText("signin.copy.027"));
           } else {
             // Unauthenticated after a uniform 202 means the email was already
             // registered. Never promise a sign-in link when mail is off.
-            setStatus(reply.mailConfigured
+            setOutcome(reply.mailConfigured
               ? uiText("signin.copy.028")
               : uiText("signin.copy.029"));
           }
           return;
         }
-        const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
-        await finish(view);
+        const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision }, notice);
+        await finish(view, notice);
       }); return;
     }
     if (form.dataset.signinForm === "magic-code") {
       const code = [...form.querySelectorAll('input[name]')].find(input => input.name === "code")?.value?.trim() ?? "";
       if (!magicManualCode || !code || await beforeSignIn?.() === false) return;
-      await withBusy(() => redeem(magicEmail, code)); return;
+      await withBusy((_setOutcome, notice) => redeem(magicEmail, code, notice)); return;
     }
     const resetting = form.dataset.signinForm === "reset-request";
     if (!resetting && form.dataset.signinForm !== "magic-request") return;
     const email = [...form.querySelectorAll('input[name]')].find(input => input.name === "email")?.value?.trim() ?? "";
     if (resetting) resetEmail = email; else magicEmail = email;
-    await withBusy(async () => {
-      const session = await authedSession();
+    await withBusy(async (setOutcome, notice) => {
+      const session = await authedSession(notice);
       const returnTo = onMagicLinkRequest?.();
       const reply = await api(session, resetting ? "/api/auth/password/reset/request" : "/api/auth/magic/request", { email, ...(returnTo ? { returnTo } : {}) });
-      if (reply?.status === "unavailable") { setStatus(reply.message || uiText("signin.copy.030"), true); return; }
+      if (reply?.status === "unavailable") { setOutcome(reply.message || uiText("signin.copy.030"), true); return; }
       if (reply?.status !== "sent") throw new Error(uiText("signin.copy.031"));
       if (resetting) resetPhase = "sent"; else magicPhase = "sent"; magicManualCode = false;
       render();
@@ -383,11 +425,11 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       return;
     }
     if (link.kind === "invalid") {
-      const message = uiText("signin.copy.032");
+      const message = uiText("signin.copy.032"), notice = capturePanelNotice();
       // Mounting hosts finish wiring their other sign-in controls this turn.
       await Promise.resolve();
       onMagicLinkFailure?.(message);
-      setStatus(uiText("signin.copy.033", { fragmentA: message }), true);
+      setStatus(uiText("signin.copy.033", { fragmentA: message }), true, notice);
       return;
     }
     const { proof, email } = link;
@@ -404,9 +446,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     setStatus(uiText("signin.copy.034"));
     // The host makes redemption failures visible even before email entry opens.
     let linkFailure = null;
-    await withBusy(async () => {
+    await withBusy(async (_setOutcome, notice) => {
       try {
-        await redeem(email, code);
+        await redeem(email, code, notice);
       } catch (error) {
         linkFailure = failureText(error);
         throw error;
