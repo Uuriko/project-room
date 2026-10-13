@@ -210,7 +210,7 @@ export class GmailMailbox {
         this.store.connections.apply(token, { action: 'page.apply', requestId: randomUUID(), connectionId: record.connectionId, connectionRevision: c.profile.revision,
           folderId: 'INBOX', expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor, cursor: 'gmail-recent:' + randomUUID(), complete: i === batches.length - 1, reset: i === 0, observations: batches[i] }, binding);
       }
-      this.save(current, { ...latest, usable: undefined, historyId: null, historyPage: null, syncedAt: new Date(this.store.now()).toISOString() });
+      this.save(current, { ...latest, usable: undefined, historyId: null, historyPage: null, resetHistoryId: null, syncedAt: new Date(this.store.now()).toISOString() });
       return observations.length;
     });
   }
