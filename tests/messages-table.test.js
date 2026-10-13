@@ -560,3 +560,19 @@ test("archiving keeps the answer of a question that is only kept as a reply ance
   const ids = f.store.room("commons").state.messages.map(m => m.id);
   assert.ok(ids.includes("k") && ids.includes("q") && ids.includes("ans"), "k, its ancestor q and q's answer all stay");
 });
+
+test("event-log redaction still applies to archived messages (a withdrawn archived message keeps no body)", async t => {
+  const { redactEventPage } = await import("../server/redact-read.mjs");
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-gone", body: "oops secret" });
+  f.send(f.human, T.MESSAGE_DELETED, { messageId: "old-gone", expectedMessageRevision: 0, reason: "x" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-gone"), false);
+  // An older withdrawal can still carry the original body in the log row.
+  const page = { events: [{ sequence: 1, event: { type: "message.posted", id: "old-gone", data: { messageId: "old-gone", body: "oops secret" } } }] };
+  const out = redactEventPage(page, f.store.redactionMessages("commons"));
+  assert.equal(out.events[0].event.data.body, null);
+});
