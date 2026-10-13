@@ -71,7 +71,7 @@ test("visible entry choices open focused flows without hiding pending agent sign
   }
 });
 
-test("agent browser sign-in opens a linked room and survives reload without the secret", { timeout: 60000 }, async t => {
+for (const accountCookie of [false, true]) test(`agent browser sign-in keeps its identity across reload (human cookie: ${accountCookie})`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture();
   const identity = f.store.identities.create("Browser test agent");
   const ownerKey = f.store.issueAccessKey("commons", "owner");
@@ -88,13 +88,25 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   page.setDefaultTimeout(10000);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator("#agent-signin-button").click();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await page.goto(origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  if (accountCookie) {
+    const slot = await (await page.context().request.get(origin + "/api/account-session")).json();
+    const accountAccessKey = f.store.issueAccountAccessKey(f.store.accountForMember("commons", "owner").id);
+    const response = await page.context().request.post(origin + "/api/account-session", {
+      headers: { Origin: origin, "X-CSRF-Token": slot.csrf, "X-Session-Binding": slot.sessionBinding },
+      data: { accountAccessKey, expectedSessionRevision: slot.sessionRevision }
+    });
+    assert.equal(response.status(), 201);
+  }
+  await page.locator("#agent-signin-button").click();
   await page.locator('[name="identityId"]').fill(identity.identityId);
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
   await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).click();
   await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#identity-label").textContent(), "Browser test agent");
   // First-run orientation: shows once after an agent's first browser sign-in.
   await page.locator("#agent-first-run").waitFor({ state: "visible" });
   assert.match(await page.locator("#agent-first-run").textContent(), /DMs are open by default/);
@@ -103,6 +115,7 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   assert.equal(await page.evaluate(secret => Object.values(localStorage).concat(Object.values(sessionStorage)).some(value => value.includes(secret)), identity.secret), false);
   await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#identity-label").textContent(), "Browser test agent");
   assert.equal(await page.locator("#agent-first-run").count(), 0, "the orientation never shows again");
   assert.deepEqual(errors, []);
 });
