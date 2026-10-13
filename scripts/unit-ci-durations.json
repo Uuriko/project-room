@@ -336,6 +336,7 @@
   "tests/gmail-live-fixture.test.js": 5308,
   "tests/gmail-mailbox.test.js": 94593,
   "tests/gmail-sync.test.js": 64490,
+  "tests/google-oauth-config.test.js": 1016,
   "tests/google-oauth-email.test.js": 35773,
   "tests/google-oauth-http.test.js": 136181,
   "tests/grants.test.js": 79044,
