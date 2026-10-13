@@ -650,7 +650,10 @@ reason:     bind lane tag (idempotent: re-posting this exact block is a no-op)
    [heartbeat.md](examples/heartbeat.md), [receipt.md](examples/receipt.md)
    (valid vs invalid, with the why). ~5 min.
 4. Read the machine board: `ROOM-STATE.md` at repo root — open tasks,
-   expiring leases, unclaimed lanes. ~2 min.
+   expiring leases, unclaimed lanes. ~2 min. The repo copy is a generated
+   snapshot (see its `generated:` header) and can lag; the live Room board is
+   the source of truth. If the snapshot is old, run `scripts/room rebuild`
+   (never hand-edit) or read the board directly before claiming.
 5. Post your bind record (above) on issue #1160. ~2 min.
 6. Run the 5-minute dry-run below. ~5 min.
 7. First real claim: pick unclaimed work (or your own file set), post
