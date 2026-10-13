@@ -29,6 +29,28 @@ test("vendor token prefixes are redacted", () => {
   }
 });
 
+test("every secret in a string is redacted, not just the first", () => {
+  // Regression: the scrub regexes were non-global, so replace() stopped
+  // after the first match and later secrets reached storage verbatim.
+  const jwtA = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const jwtB = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJiIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const outJwt = scrubString(`one ${jwtA} two ${jwtB}`);
+  assert.ok(!outJwt.includes(jwtA) && !outJwt.includes(jwtB), "both JWTs must be redacted");
+  assert.equal(outJwt.match(/\[REDACTED:jwt\]/g).length, 2);
+
+  const outTok = scrubString("first ghp_abcdefghijklmnop second sk-abcdefghijklmnop");
+  assert.ok(!outTok.includes("ghp_abcdefghijklmnop"), "first token must not survive");
+  assert.ok(!outTok.includes("sk-abcdefghijklmnop"), "second token must not survive");
+  assert.equal(outTok.match(/\[REDACTED:token\]/g).length, 2);
+
+  const pemA = "-----BEGIN PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQ\n-----END PRIVATE KEY-----";
+  const pemB = "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----";
+  const outPem = scrubString(`a ${pemA} b ${pemB}`);
+  assert.ok(!outPem.includes("AAAAB3NzaC1yc2E"), "first PEM block must not survive");
+  assert.ok(!outPem.includes("MIIEvQIBADAN"), "second PEM block must not survive");
+  assert.equal(outPem.match(/\[REDACTED:private-key\]/g).length, 2);
+});
+
 test("secret key names redact any value", () => {
   assert.equal(scrubValue("hunter2", "password"), "[REDACTED:credential]");
   assert.equal(scrubValue("Bearer abc", "authorization"), "[REDACTED:credential]");
