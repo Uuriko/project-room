@@ -286,10 +286,13 @@ function stashInviteForOAuth() {
   if (typeof pendingJoin === "string" && pendingJoin.startsWith("#join/")) stashPendingJoin(window.sessionStorage, pendingJoin);
   else clearPendingJoin(window.sessionStorage);
 }
-// The Google entry point is a plain anchor: stash a live invitation before
-// the navigation, since the OAuth round-trip drops the #invite/ fragment.
+// The Google and GitHub entry points are plain anchors: stash a live
+// invitation before the navigation, since the OAuth round-trip drops the
+// #invite/ fragment.
 { const googleButton = $("#google-signin");
   if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+{ const githubButton = $("#github-signin");
+  if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
 let briefReconcileNote = ""; // Catch-up reconciliation failure, shown in the brief while the dialog is open.
 let portableWorkUI = null;
@@ -3813,6 +3816,7 @@ function syncSigninView(view) {
   $("#signin-methods").hidden = auxiliary;
   $("#signin-entry-routes").hidden = auxiliary;
   $("#google-signin").hidden = view === "welcome";
+  $("#github-signin").hidden = view === "welcome";
   $("#terms-notice").hidden = view === "welcome";
 }
 function showSigninMethods() {
