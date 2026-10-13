@@ -3935,7 +3935,7 @@ paths:
         '409': { description: nothing_to_request, request_conflict, too_many_requests, or room_archived }
         '422': { description: invalid_request or invalid_session_binding }
         '429': { description: rate_limited }
-  /api/rooms/{roomId}/access-requests/{id}/decide:
+  /api/rooms/{roomId}/access-requests/{requestId}/decide:
     post:
       summary: Decide a join or permission request
       description: >-
@@ -3959,7 +3959,7 @@ paths:
         - accountSession: []
       parameters:
         - $ref: '#/components/parameters/RoomId'
-        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: requestId, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
@@ -10872,6 +10872,7 @@ paths:
                 mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
                 cadenceSeconds: { type: number, exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat" }
+                workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
                 pushNotification:
                   type: object
                   required: [url, token]

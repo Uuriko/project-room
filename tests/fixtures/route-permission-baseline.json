@@ -105,7 +105,7 @@
     "POST /api/referral-invites/redeem",
     "POST /api/reports/public",
     "POST /api/rooms/{roomId}/access-requests",
-    "POST /api/rooms/{roomId}/access-requests/{id}/decide",
+    "POST /api/rooms/{roomId}/access-requests/{requestId}/decide",
     "POST /api/rooms/{roomId}/activity-read",
     "POST /api/rooms/{roomId}/activity-read-all",
     "POST /api/rooms/{roomId}/add_land_item",
