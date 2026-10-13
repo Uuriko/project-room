@@ -233,3 +233,15 @@ test("a read-only key still reaches the read tools of the same families", async 
     assert.notEqual(result.value?.code, "insufficient_scope", name);
   }
 });
+
+test("a key pinned to another room is told it is limited to its room, on read and write, as REST says", async t => {
+  const { origin, roomId, issue } = await fixture(t);
+  for (const scopes of [["mcp:room:other"], ["mcp:room:other", "rooms:read", "rooms:write"]]) {
+    const key = issue(scopes);
+    for (const [name, args] of [["room_read_board", { roomId }], ["room_post_message", { roomId, id: "p1", messageId: "p1", body: "x" }]]) {
+      const result = await call(origin, name, args, key);
+      assert.equal(result.value.code, "insufficient_scope", `${scopes} ${name}`);
+      assert.equal(result.value.message, "This key is limited to its room", `${scopes} ${name}`);
+    }
+  }
+});

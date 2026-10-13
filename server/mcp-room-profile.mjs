@@ -450,7 +450,7 @@ async function callLandTool(store, secret, name, args) {
 // failure; an idempotent duplicate retry is voided (the original call
 // already paid).
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
-  enforceMcpApiKeyRoomScope(store, secret, name);
+  enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   const spend = chargeSpendBeforeCall(store, secret, name, args);
   if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
@@ -961,8 +961,13 @@ const MCP_ROOM_WRITE_TOOLS = new Set([
 export function mcpRoomToolScope(name) {
   return MCP_ROOM_WRITE_TOOLS.has(name) ? "rooms:write" : "rooms:read";
 }
-function enforceMcpApiKeyRoomScope(store, secret, name) {
+function enforceMcpApiKeyRoomScope(store, secret, name, roomId) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
+  // A room-pinned key used on another room gets the same answer as REST and
+  // the full profile (store.authenticate), not a missing-scope answer.
+  const pinned = mcpRoomAllowlist(store, secret);
+  if (pinned && typeof roomId === "string" && !pinned.includes(roomId))
+    throw new ServiceError(403, "insufficient_scope", "This key is limited to its room");
   const required = mcpRoomToolScope(name);
   if (!required) return;
   if (!mcpKeyGrantsScope(store, secret, required))
