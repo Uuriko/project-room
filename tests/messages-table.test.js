@@ -591,3 +591,19 @@ test("event-log redaction still applies to archived messages (a withdrawn archiv
   assert.equal(live.events[1].event.data.body, "second version", "an edited archived message shows the current body, not v1");
   assert.equal(live.events[2].event.data.body, "second version");
 });
+
+test("the thread view of an archived root (and archived replies under a kept root) still works, and archived DMs stay private", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-root", body: "old root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-reply", body: "old reply", replyToId: "old-root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm-reply", toMemberId: "agent", body: "private reply", replyToId: "old-root" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-root"), false);
+  const ids = token => f.store.messageThread(token, "commons", "old-root").thread.replies.map(r => r.id);
+  assert.equal(f.store.messageThread(f.human, "commons", "old-root").thread.id, "old-root");
+  assert.deepEqual(ids(f.human), ["old-reply", "old-dm-reply"]);
+  assert.deepEqual(ids(f.stranger), ["old-reply"]);
+});
