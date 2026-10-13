@@ -363,13 +363,17 @@ test("consistent client binds final tokens to the frozen page and credential", a
   const final = await f.client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 50 });
   assert.equal(final.discussion.hasMore, false);
   let value = final;
-  const client = new RoomAgentClient({ ...f.config, fetchImpl: async url => url.includes("work-discussion")
+  const client = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer, fetchImpl: async url => url.includes("work-discussion")
     ? { ok: true, status: 200, json: async () => value } : fetch(url, { headers: { Authorization: "Bearer " + f.keys.producer } }) });
   for (const key of ["scopeDigest", "prefixDigest", "anchorId"]) {
     value = structuredClone(final);
     value.discussion.resumeToken = cursorChange(value.discussion.resumeToken, token => token[key] = key === "anchorId" ? "other-event" : "0".repeat(64));
     await assert.rejects(client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 50 }), { code: "invalid_response" });
   }
+  value = null;
+  await assert.rejects(client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 50 }), { code: "invalid_response" });
+  value = { ...final, discussion: { ...final.discussion, resumeToken: "a".repeat(2049) } };
+  await assert.rejects(client.workDiscussion("test-handoff", { cursor: first.discussion.nextCursor, limit: 50 }), { code: "invalid_response" });
   const otherCredential = f.store.issueAccessKey("commons", "producer");
   const otherClient = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: otherCredential });
   await assert.rejects(otherClient.workDiscussion("test-handoff", { resumeToken: final.discussion.resumeToken }), { status: 409, code: "discussion_reset_required" });
