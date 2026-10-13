@@ -320,8 +320,11 @@ export async function previewAgentInvite(origin, code, options = {}) {
   return value;
 }
 export async function requestAccess(origin, { roomId, identityId, displayName, requestedPermissions, note, requestId } = {}, options = {}) {
+  // Filing in an identity's name requires its secret as Bearer (issue
+  // #2912); the secret travels only in the header, never in the body.
+  requireIdentitySecret(options.identitySecret);
   // The route requires all six keys, including an idempotency key.
-  const value = await discoveryRequest(origin, "/api/access-requests", { method: "POST", body: {
+  const value = await discoveryRequest(origin, "/api/access-requests", { method: "POST", token: options.identitySecret, body: {
     roomId, identityId, displayName, requestedPermissions,
     note: typeof note === "string" ? note : "",
     requestId: typeof requestId === "string" && requestId ? requestId : `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`,

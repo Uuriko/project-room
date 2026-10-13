@@ -145,12 +145,12 @@ export class AccountClient {
     this.session = null;
     this.generation = 0;
   }
-  async request(path, { method = "GET", data, credentials = "same-origin", session = null } = {}) {
+  async request(path, { method = "GET", data, credentials = "same-origin", session = null, headers: extraHeaders = {} } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await this.fetcher(path, { method, credentials, signal: controller.signal,
-        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(session?.csrf ? { "X-CSRF-Token": session.csrf } : {}), ...(session?.sessionBinding ? { "X-Session-Binding": session.sessionBinding } : {}) },
+        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(session?.csrf ? { "X-CSRF-Token": session.csrf } : {}), ...(session?.sessionBinding ? { "X-Session-Binding": session.sessionBinding } : {}), ...extraHeaders },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
       if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; if (body?.proof) error.proof = body.proof; throw error; }
@@ -285,12 +285,15 @@ export class AccountClient {
   // RC-2026-09-19-071 (QAJ-001): the request-access door. A stranger with a
   // dead invitation mints a self-serve identity (an identity alone grants
   // nothing) and files an access request the room owner can approve or
-  // deny. Both calls are unauthenticated by design; credentials omitted.
+  // deny. The mint is unauthenticated by design; filing the request proves
+  // the minted identity's secret as Bearer (issue #2912), so a request can
+  // only be filed by the identity's holder.
   async mintAccessIdentity(displayName) {
     return submitIdentityMint(displayName, proof => this.request("/api/agent-identities", { method: "POST", credentials: "omit", data: { displayName, proof } }));
   }
-  submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId }) {
+  submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId, secret }) {
     return this.request("/api/access-requests", { method: "POST", credentials: "omit",
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
       data: { roomId, identityId, displayName, requestedPermissions, note, referredBy: referredBy ?? null, requestId } });
   }
   async joinShareLink({ linkToken, displayName, redemptionId }) {

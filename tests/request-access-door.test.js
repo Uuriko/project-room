@@ -95,6 +95,7 @@ test("submit: mints once, submits with the minted identity, stashes the record",
   const sent = client.calls[0];
   assert.equal(sent.roomId, "muse-room");
   assert.equal(sent.identityId, "ai_test123");
+  assert.equal(sent.secret, "pri_test", "the minted identity's secret travels with the filing as proof (issue #2912)");
   assert.equal(sent.displayName, "Ada");
   assert.match(sent.requestId, /^ar_[0-9a-f]{16}$/);
   assert.equal(result.requestId, sent.requestId);
