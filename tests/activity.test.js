@@ -339,3 +339,25 @@ test("a since_join reactivation hides the earlier mention from the activity feed
   const ownerFeed = listActivity(store, owner, "commons");
   assert.equal(ownerFeed.items.some(item => item.messageId === "gap-msg"), false, "the owner was not mentioned");
 });
+
+test("saved messages and the read horizon keep working for an archived message over HTTP, including both DELETE routes", async t => {
+  const f = await serve(t);
+  const sendAs = (token, data) => f.store.command(token, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data });
+  sendAs(f.mayaKey, { messageId: "old", body: "old saved note" });
+  for (let i = 0; i < 6; i++) sendAs(f.ownerKey, { messageId: `pad-${i}`, body: `pad ${i}` });
+  const save = (data, method = "POST") => f.call("/api/rooms/commons/saved", { method, token: f.mayaKey, data });
+  const listed = async () => (await f.call("/api/rooms/commons/saved", { token: f.mayaKey })).body.items;
+  assert.equal((await save({ messageId: "old", saved: true })).status, 200);
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old"), false, "archived out of the projection");
+  assert.deepEqual((await listed()).map(i => [i.messageId, i.body]), [["old", "old saved note"]], "saved list still shows it");
+  assert.equal((await f.call("/api/rooms/commons/read-horizon", { method: "POST", token: f.mayaKey, data: { threadId: "", lastReadMessageId: "old" } })).status, 200);
+  assert.equal((await save({ messageId: "old" }, "DELETE")).status, 200, "DELETE /saved");
+  assert.equal((await listed()).length, 0);
+  assert.equal((await save({ messageId: "old", saved: true })).status, 200, "an archived message can be saved again");
+  assert.equal((await f.call("/api/rooms/commons/saved/old", { method: "DELETE", token: f.mayaKey })).status, 200, "DELETE /saved/:id");
+  assert.equal((await listed()).length, 0);
+  assert.equal((await save({ messageId: "missing" }, "DELETE")).status, 404);
+});
