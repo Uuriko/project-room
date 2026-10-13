@@ -193,34 +193,60 @@ export function holdForRateLimit(item, nowMs, until) {
 const RED_CONCLUSIONS = new Set(["failure", "cancelled", "timed_out", "action_required"]);
 const NEUTRAL_CONCLUSIONS = new Set(["neutral", "skipped"]);
 
-// Combined commit status plus check runs, reduced to the claim's ci.state.
-// A failure wins. Anything still running stays pending. All-success is
-// success. Only neutral or skipped signals, or no signal at all, is neutral.
-export function rollupClaimCi({ status = null, checkRuns = [], pullUrl = null } = {}) {
-  let failure = false;
-  let pending = false;
-  let success = 0;
-  for (const run of Array.isArray(checkRuns) ? checkRuns : []) {
-    const conclusion = run?.conclusion ?? null;
-    if (RED_CONCLUSIONS.has(conclusion)) failure = true;
-    else if (conclusion === "success") success += 1;
-    else if (NEUTRAL_CONCLUSIONS.has(conclusion)) continue;
-    else pending = true;
+// Check identity includes the producing app and workflow. A job name in a
+// different workflow must not erase a failure. Unmapped suites stay distinct.
+export function rollupClaimCi({ status = null, checkRuns = [], workflowRuns = [], requiredChecks = null, complete = true, pullUrl = null } = {}) {
+  const workflows = new Map(workflowRuns.map(run => [run.check_suite_id, run]));
+  const workflowKey = run => JSON.stringify([run.workflow_id, run.event ?? null]);
+  const currentWorkflows = new Map();
+  for (const workflow of workflowRuns) {
+    const key = workflowKey(workflow);
+    if (!currentWorkflows.has(key) || workflow.id > currentWorkflows.get(key).id) currentWorkflows.set(key, workflow);
   }
-  const total = status && typeof status === "object" ? Number(status.total_count) : 0;
-  if (Number.isFinite(total) && total > 0) {
-    if (status.state === "failure" || status.state === "error") failure = true;
-    else if (status.state === "success") success += 1;
-    else pending = true;
+  const latest = new Map();
+  for (const [index, observed] of (Array.isArray(checkRuns) ? checkRuns : []).entries()) {
+    const workflow = workflows.get(observed?.check_suite?.id);
+    const current = workflow ? currentWorkflows.get(workflowKey(workflow)) : null;
+    // A newly queued execution may not have emitted its first job yet. Its
+    // predecessor's success is not evidence for the new execution. The same
+    // applies to old jobs while a retry of the same workflow run is starting.
+    const retrying = current?.run_attempt > 1 && current.status !== "completed"
+      && (current.status !== "in_progress" || !Number.isFinite(Date.parse(observed?.started_at))
+        || !Number.isFinite(Date.parse(current.run_started_at)) || Date.parse(observed.started_at) < Date.parse(current.run_started_at));
+    const run = current && (current.id > workflow.id || retrying)
+      ? { ...observed, id: 0, status: "queued", conclusion: null } : observed;
+    const identity = workflow?.workflow_id ? [workflow.workflow_id, workflow.event ?? null] : run?.check_suite?.id ?? "unspecified";
+    const key = JSON.stringify([run?.app?.id ?? null, identity, run?.name ?? `unnamed-${index}`]);
+    const rank = [Number(current?.id ?? 0), Number(run?.id ?? 0)];
+    const prior = latest.get(key);
+    if (!prior || rank[0] > prior.rank[0] || (rank[0] === prior.rank[0] && rank[1] > prior.rank[1])) latest.set(key, { run, rank });
   }
-  let state = "neutral";
-  if (failure) state = "failure";
-  else if (pending) state = "pending";
-  else if (success > 0) state = "success";
+  const runs = [...latest.values()].map(entry => entry.run);
   const statuses = Array.isArray(status?.statuses) ? status.statuses : [];
-  const target = statuses.find(entry => typeof entry?.target_url === "string" && entry.target_url.startsWith("https://"));
-  const url = target?.target_url || (typeof pullUrl === "string" ? pullUrl : null);
-  return { state, url };
+  const runState = run => {
+    if (run?.status && run.status !== "completed") return "pending";
+    if (RED_CONCLUSIONS.has(run?.conclusion) || run?.conclusion === "startup_failure" || run?.conclusion === "stale") return "failure";
+    if (run?.conclusion === "success") return "success";
+    return NEUTRAL_CONCLUSIONS.has(run?.conclusion) ? "neutral" : "pending";
+  };
+  const legacyState = state => state === "error" ? "failure" : ["success", "failure"].includes(state) ? state : "pending";
+  const reduce = states => states.includes("failure") ? "failure" : states.includes("pending") ? "pending" : states.includes("success") ? "success" : "neutral";
+  const states = runs.map(runState);
+  if (Number(status?.total_count) > 0) states.push(legacyState(status.state));
+  let requiredState = null;
+  if (complete && Array.isArray(requiredChecks)) {
+    const required = requiredChecks.flatMap(check => {
+      const name = typeof check === "string" ? check : check.context;
+      const app = typeof check === "string" ? null : check.app_id ?? check.integration_id;
+      const matches = runs.filter(run => run.name === name && (app == null || app === -1 || run.app?.id === app)).map(runState);
+      // When a context exists as both a check and a legacy status, both count.
+      matches.push(...statuses.filter(row => row.context === name && (app == null || app === -1 || row.app?.id === app)).map(row => legacyState(row.state)));
+      return matches.length ? matches : ["pending"];
+    });
+    requiredState = reduce(required);
+  }
+  const target = statuses.find(entry => typeof entry?.target_url === "string" && entry.target_url.startsWith("https://") && entry.target_url.length <= 300);
+  return { state: complete ? reduce(states) : null, requiredState, url: target?.target_url || (typeof pullUrl === "string" ? pullUrl : null) };
 }
 
 export function pullRequestDue(item, nowMs) {
