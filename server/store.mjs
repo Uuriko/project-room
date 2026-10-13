@@ -5271,11 +5271,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
     const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    // Decision #25: trial seats receive mention wakes in their room. Guest
+    // members are seated through guest_members, never identity_links, so
+    // the identity_links-only lookup silently dropped every trial-seat
+    // wake. Fall back to the guest seat's identity. Deliberately local to
+    // this fan-out: identityIdForMember (the work-wake resolver) keeps
+    // NOT resolving guests — work wakes stay excluded for trial seats.
+    const guestLinkOf = this.db.prepare("SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId);
+      const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
       if (!link) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
