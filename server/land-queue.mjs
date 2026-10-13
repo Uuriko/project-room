@@ -22,7 +22,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
-import { claimWork, createWork, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
+import { claimWork, createWork, reassignWork, isTerminalClaimState, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
 
 // Caller-supplied idempotency key, same shape as access-requests'
 // REQUEST_ID_PATTERN: retries with the same key replay the stored response.
@@ -482,8 +482,45 @@ const viewFromClaim = (item, roomId) => {
   };
 };
 
+// Bring an existing mirrored claim's owner in line with the land_queue
+// row, which is the queue's source of truth for the claimant. Returns true
+// when the claim changed. A handoff consumes the new claimant's open-claim
+// slot just like the create mirror below, so an at-cap claimant fails here
+// (409 too_many_open_claims) — callers that must not commit a divergent row
+// run this inside the same transaction as the row write, and
+// migrateLandQueueClaims already swallows that code for its best-effort
+// pass. Terminal claims consume no slot and the state machine will not
+// reassign them, so only the mirrored owner field moves.
+function syncMirroredLandClaimOwner(store, row) {
+  if (!row.claimant_member_id || typeof store.workClaims.get !== "function") return false;
+  const existing = store.workClaims.get(row.room_id, row.item_id);
+  if (!existing || existing.owner === row.claimant_member_id) return false;
+  const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
+  const now = typeof store.now === "function" ? store.now() : row.updated_at ?? row.created_at;
+  let updated;
+  if (existing.state === "unclaimed") {
+    // Re-claim it the way the create mirror claims: no lease.
+    assertClaimantCap(store, row);
+    updated = claimWork(existing, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
+  } else if (isTerminalClaimState(existing.state)) {
+    updated = { ...existing, owner: row.claimant_member_id };
+  } else {
+    assertClaimantCap(store, row);
+    updated = reassignWork(existing, existing.owner ?? row.added_by_member_id, row.claimant_member_id,
+      { authority: true, now });
+  }
+  store.workClaims.set(row.room_id, updated);
+  return true;
+}
+
 function mirrorLandClaim(store, row) {
-  if (!row || !store?.workClaims || store.workClaims.has(row.room_id, row.item_id)) return false;
+  if (!row || !store?.workClaims) return false;
+  if (store.workClaims.has(row.room_id, row.item_id)) {
+    // The claim already exists: create nothing, but never leave its owner
+    // pointing at a previous claimant when the row has moved on.
+    syncMirroredLandClaimOwner(store, row);
+    return false;
+  }
   const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
   const revision = row.merged_sha || row.tip_source_revision || row.head_sha || null;
   const now = row.created_at;
@@ -703,17 +740,25 @@ export class LandQueue {
   async #addExecute(roomId, memberId, parsedRepo, parsedPr, claimant) {
     const existing = this.#byPr(roomId, parsedRepo, parsedPr);
     if (existing) {
-      if (claimant !== existing.claimant_member_id) {
-        this.store.transaction(() => {
+      // The mirror sync runs inside the same transaction as the row write:
+      // a mirror failure (e.g. the new claimant is at the open-claim cap)
+      // rolls the reassignment and its receipt back instead of reporting an
+      // error for a change that already committed, and a mirrored claim
+      // that already exists has its owner moved to the new claimant rather
+      // than keeping the old one.
+      this.store.transaction(() => {
+        if (claimant !== existing.claimant_member_id) {
           this.db.prepare("UPDATE land_queue SET claimant_member_id=?, updated_at=? WHERE room_id=? AND item_id=?")
             .run(claimant, this.store.now(), roomId, existing.item_id);
+        }
+        mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
+        if (claimant !== existing.claimant_member_id) {
           // The claimant reassignment is a board write: it commits its
           // land.updated receipt (changed ["reassigned"]) in the same
           // transaction as the row, so the handoff is observable.
           this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, existing.item_id)), ["reassigned"]);
-        });
-      }
-      mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
+        }
+      });
       const item = viewFromRow(this.#row(roomId, existing.item_id));
       return this.#refreshRow(item, { duplicate: true });
     }
