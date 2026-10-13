@@ -236,6 +236,14 @@ export function archiveMarker(db, roomId) {
   return { throughSeq, count: throughSeq && Number.isInteger(row.count) && row.count > 0 ? row.count : 0 };
 }
 
+// One archived message row (seq at or below the marker), or null. Archived
+// messages are not in the projection, so readers that need one by id use this.
+export function archivedMessageRow(db, roomId, messageId) {
+  const { throughSeq } = archiveMarker(db, roomId);
+  if (!throughSeq || typeof messageId !== "string") return null;
+  return db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=?").get(roomId, messageId, throughSeq) ?? null;
+}
+
 function pruneMessages(db, roomId) {
   db.prepare(`DELETE FROM messages WHERE room_id=? AND seq>? AND message_id NOT IN (
     SELECT json_extract(value, '$.id') FROM rooms, json_each(rooms.projection, '$.messages') WHERE rooms.id=?

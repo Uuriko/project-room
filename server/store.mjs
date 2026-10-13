@@ -44,7 +44,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -1858,6 +1858,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // MSG-2: replay events into messages. Idempotent. A mid-batch stop keeps
   // the committed prefix on messages_backfill_cursor.
+  // [authorId, toMemberId] of an archived direct message, else null.
+  archivedDmParties(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    return row && row.to_member_id ? [row.author_id, row.to_member_id] : null;
+  }
+
   backfillMessages(options = {}) {
     return runMessagesBackfill(this, options);
   }
@@ -4472,7 +4478,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
-      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, id => this.archivedDmParties(roomId, id));
       const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, viewerId, isOwner)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
@@ -4650,7 +4656,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
       const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
-      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
+      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, id => this.archivedDmParties(roomId, id)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, auth.member.id, isOwner)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
