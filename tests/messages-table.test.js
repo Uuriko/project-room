@@ -323,3 +323,24 @@ test("REST search resolves archived hits instead of dropping them, and still hid
   assert.deepEqual(await searchIds(f.human), ["old-pub", "old-dm", "new-pub"]);
   assert.deepEqual(await searchIds(f.stranger), ["old-pub", "new-pub"]);
 });
+
+test("changing or replying to an archived message is refused with a clear error, a stranger's DM probe is not confirmed", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "old public" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "old private" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "new-pub", body: "new" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const dmSeq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  archiveOldest(f, f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n);
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  const before = f.store.room("commons").sequence;
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_EDITED, { messageId: "old-pub", body: "x", expectedMessageRevision: 0 })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_DELETED, { messageId: "old-pub", expectedMessageRevision: 0, reason: "x" })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: "old-pub", reaction: "like", active: true })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_PINNED, { messageId: "old-pub" })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-1", body: "r", replyToId: "old-pub" })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-2", body: "r", replyToId: "old-dm" })), "message_archived");
+  assert.notEqual(code(() => f.send(f.stranger, T.MESSAGE_POSTED, { messageId: "probe", body: "r", replyToId: "old-dm" })), "message_archived");
+  assert.equal(f.store.room("commons").sequence, before, "a refused command appends nothing");
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "fine", body: "ordinary posts still work" });
+});
