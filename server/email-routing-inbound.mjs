@@ -69,7 +69,14 @@ export async function routeInboundEmail({ from = "", to, raw, rawSize, receivedA
   try {
     const declared = Number.isSafeInteger(rawSize) ? rawSize : rawBytes(raw);
     if (!Number.isFinite(declared) || declared > limits.rawBytes || rawBytes(raw) > limits.rawBytes) reject("email_routing_too_large", emailRoutingRejections.tooLarge);
-    const routed = await resolveRoutedConnection(to, lookup);
+    let routed;
+    try { routed = await resolveRoutedConnection(to, lookup); }
+    catch (error) {
+      // A malformed/stale profile from the lookup is a malformed message, not
+      // an infrastructure failure: convert it to a reject like normalizeRoutedEmail below.
+      if (error?.name !== "EmailContractError") throw error;
+      reject(error.code, emailRoutingRejections.malformed);
+    }
     if (!routed) reject("email_routing_unknown_recipient", emailRoutingRejections.unknownRecipient);
     let parsed;
     try { parsed = parseMimeMessage(raw, { limits: { rawBytes: limits.rawBytes } }); }
