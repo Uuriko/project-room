@@ -452,8 +452,16 @@ export const DISPLAY_NAME_POLICY_VERSION = 1;
 // stamped events.
 export const PIN_DM_PARTY_POLICY_VERSION = 1;
 
+// Prototype names are denied as ids even when they satisfy the charset, so
+// a plain object keyed by id can never resolve (or be assigned) through
+// Object.prototype. Callers that validate user-supplied ids check
+// isReservedId first so the rejection can name the real cause instead of
+// collapsing into a charset error (#3013).
+export const RESERVED_IDS = Object.freeze(["constructor", "prototype", "__proto__"]);
+export const isReservedId = value => typeof value === "string" && RESERVED_IDS.includes(value);
+
 export function validId(value) {
-  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
+  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !isReservedId(value);
 }
 
 // #1004 follow-up: member projections are plain objects from JSON.parse, so
