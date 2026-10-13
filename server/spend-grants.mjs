@@ -59,7 +59,7 @@ import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
-import { spendPricingEnabled } from "../src/events.js";
+import { ownMember, spendPricingEnabled } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
 export const SPEND_DENOMINATION = "credits";
@@ -511,17 +511,31 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     remainingAfterCents: replayedReserved ? remainingNowCents() : intToCents(outcome.remainingAfter),
     ...(replayedReserved ? { replayed: "reserved" } : {}),
     settle() {
-      const moved = transition("settled", Date.now());
-      releaseRoomReservation();
-      // Single-use grants are consumed by their first settled call.
-      if (moved) {
-        const terms = rowToTerms(db.prepare(
-          `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
-        if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
-      }
-      return moved;
+      // #2959: the transition, the room-reservation release, and the
+      // single-use revocation are one atomic unit. Splitting them left a
+      // settled authorization whose room reservation stayed 'active'
+      // forever (the reaper only voids still-'reserved' rows) — or a
+      // settled single-use grant that was never revoked — if the process
+      // died or a write failed between the steps.
+      return transact(db, () => {
+        const moved = transition("settled", Date.now());
+        releaseRoomReservation();
+        // Single-use grants are consumed by their first settled call.
+        if (moved) {
+          const terms = rowToTerms(db.prepare(
+            `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
+          if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
+        }
+        return moved;
+      });
     },
-    void() { const moved = transition("voided", null); releaseRoomReservation(); return moved; },
+    void() {
+      return transact(db, () => {
+        const moved = transition("voided", null);
+        releaseRoomReservation();
+        return moved;
+      });
+    },
   });
 }
 
@@ -560,20 +574,28 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
   });
 }
 
+// #2959: the standalone forms share the handle forms' atomicity rule —
+// the authorization transition and the room-reservation release commit
+// together or not at all, so a failure between them cannot strand an
+// 'active' room reservation behind a settled/voided authorization.
 export function settleSpend(db, { roomId, agentId, nonce } = {}) {
-  const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
-    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-    .run(Date.now(), roomId, agentId, nonce);
-  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
-  return info.changes > 0;
+  return transact(db, () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
+      .run(Date.now(), roomId, agentId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
+    return info.changes > 0;
+  });
 }
 
 export function voidSpend(db, { roomId, agentId, nonce } = {}) {
-  const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
-    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-    .run(roomId, agentId, nonce);
-  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
-  return info.changes > 0;
+  return transact(db, () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
+      .run(roomId, agentId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
+    return info.changes > 0;
+  });
 }
 
 // The trust-boundary entry point for MCP dispatch. Returns null when no
@@ -633,7 +655,7 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
     const room = store.room(roomId);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
-    if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     // #1521: this call mints money — a grants:issue delegate cannot issue
     // a spend grant to themselves (a reproduced 1,000,000-cent self-issued
     // grant row was the proof). The room owner is full authority
@@ -662,7 +684,7 @@ export function revokeSpendGrantRoute(store, token, roomId, agentId, expectedSes
     const room = store.room(roomId);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
-    if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     const revoked = revokeSpendGrant(store.db, roomId, agentId, { nowMs });
     return { roomId, agentId, revoked, evaluatedThrough: store.room(roomId).sequence };
   });

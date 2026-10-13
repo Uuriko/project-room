@@ -31,6 +31,7 @@ const defs = {
   idempotency_conflict: [409, 'idempotency key reused with different input'],
   timeout: [504, 'herdr socket call timed out', true],
   transport_error: [502, 'herdr socket transport failure', true],
+  server_error: [502, 'herdr server returned an error'],
   bridge_circuit_open: [503, 'tenant circuit breaker is open'],
   too_many_streams: [429, 'too many concurrent event streams for this tenant'],
   tenant_unavailable: [503, 'tenant herdr server is unreachable'],
@@ -42,11 +43,16 @@ export function bridgeError(code, message, extra = {}) {
 }
 
 /** Map a herdr socket error payload to a bridge error. Socket-level denials
- *  (occupant pinning, binding) are never retried. */
+ *  (occupant pinning, binding) are never retried. An unrecognised code is an
+ *  application error from a live server — the socket client sets
+ *  gotResponse=true for these — so it maps to the non-retryable
+ *  `server_error`, never `transport_error`: a transport classification would
+ *  make invoke() retry a deterministic error and count it toward the
+ *  circuit breaker, taking a healthy tenant's bridge down. */
 export function fromSocketError(sockErr) {
   const code = sockErr?.code;
   if (code === 'occupant_changed') return bridgeError('occupant_changed');
   if (code === 'pane_not_found' || code === 'not_found') return bridgeError('pane_not_found');
   if (code === 'method_unsupported' || code === 'unknown_method') return bridgeError('method_unsupported');
-  return bridgeError('transport_error', `herdr error: ${code ?? 'unknown'}`);
+  return bridgeError('server_error', `herdr error: ${code ?? 'unknown'}`);
 }

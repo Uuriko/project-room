@@ -573,7 +573,7 @@ below. Use [WORK-CLAIMS.md](WORK-CLAIMS.md) for current API/review semantics and
   are accepted only on the `done` transition; pointers do not upload evidence
   or verify its contents. Empty arrays explicitly clear completion metadata.
 
-- `reviewWorkItem(id, { verdict, summary, url? })` records an explicit review
+- `reviewWorkItem(id, { verdict, summary, url?, expectedBasis? })` records an explicit review
   by the authenticated, authorized non-owner. The legacy `{ note }` form
   records a note, not approval. Manual non-self completion needs `reviewedBy`
   naming a current authorized reviewer whose latest `approve` matches the

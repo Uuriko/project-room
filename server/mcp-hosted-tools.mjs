@@ -140,7 +140,7 @@ export const hostedRoomTools = [
     requestId: { ...idField, maxLength: 64, description: "requestId from room_list_access_requests." },
     decision: { type: "string", enum: ["approve", "deny"] },
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
-    note: { type: "string", maxLength: 500 }
+    note: { type: ["string", "null"], maxLength: 500 }
   }, ["roomId", "requestId", "decision"]), false),
   tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate) or explicit permissions. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,

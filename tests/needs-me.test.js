@@ -79,6 +79,35 @@ test('needs-me continuation preserves overflow DMs, mentions, rooms and tied lan
 // suggestion hit missing_request_id on the documented path. Contract: every
 // mention/dm suggestion includes a stable, non-empty requestId that is
 // deterministic across calls (retrying the suggestion is idempotent).
+// #2941: roomDmsOf read message.posted events straight from the raw log, so
+// a DM deleted before the recipient polled still surfaced (inviting a reply
+// to a tombstone) and an edited DM showed its pre-edit body. The item must
+// follow the live projection: deleted DMs are absent, edited DMs show the
+// current body.
+test('needs-me room DMs honour deletions and edits', t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  const rooms = new AgentRooms(store);
+  const ada = store.identities.create('Ada');
+  const bob = store.identities.create('Bob');
+  const roomId = 'dm-current-state';
+  const owner = store.identities.create('OwnerDm');
+  rooms.create(owner.secret, { roomId, title: 'dm', purpose: 'x', kind: 'personal' });
+  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+  setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
+  const post = (id, body) => store.command(bob.secret, roomId, { id, type: 'message.posted', data: { messageId: id, body, toMemberId: ada.identityId } });
+  post('dm-live', 'live dm body');
+  post('dm-edited', 'original pre-edit body');
+  post('dm-deleted', 'deleted dm body');
+  store.command(bob.secret, roomId, { id: 'edit-1', type: 'message.edited', data: { messageId: 'dm-edited', expectedMessageRevision: 0, body: 'edited current body' } });
+  store.command(bob.secret, roomId, { id: 'delete-1', type: 'message.deleted', data: { messageId: 'dm-deleted', expectedMessageRevision: 0 } });
+  const dms = collectNeedsMe(store, ada.secret, {}).items.filter(i => i.kind === 'dm' && i.channel === 'room');
+  assert.deepEqual(dms.map(i => i.id).sort(), ['dm-edited', 'dm-live'], 'deleted DM must not surface as an attention item');
+  assert.equal(dms.find(i => i.id === 'dm-edited').summary, 'edited current body', 'edited DM must show its current body, not the pre-edit text');
+  assert.equal(dms.find(i => i.id === 'dm-live').summary, 'live dm body');
+});
+
 test('needs-me room_reply suggestions carry a stable requestId', t => {
   const store = new RoomStore(':memory:');
   t.after(() => store.close());

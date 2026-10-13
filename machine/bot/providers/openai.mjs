@@ -29,10 +29,23 @@ function mapAction(action) {
 export function createOpenAiProvider({ key, model, fetchImpl }) {
   let input = [];
   let responseId = null;
+  let currentTask = null;
   return {
     name: "openai",
     computerUse: true,
+    reset() {
+      input = [];
+      responseId = null;
+      currentTask = null;
+    },
     async next({ task, observations }) {
+      // A different task starts a fresh conversation, with no stale
+      // previous_response_id chaining it to the previous task.
+      if (task !== currentTask) {
+        input = [];
+        responseId = null;
+        currentTask = task;
+      }
       if (input.length === 0) input = [{ role: "user", content: task }];
       else if (observations.length > 0) {
         input = observations.map(observation => ({

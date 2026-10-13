@@ -68,6 +68,9 @@ export const activitySchema = `
 // no statement (e.g. a trailing -- comment).
 
 // A DM message is visible only to its author and its recipient.
+// A message from the projection, else its current record from the messages table
+// (archived messages are no longer in the projection).
+const messageOrArchived = (store, roomId, id) => store.room(roomId).state.messages.find(m => m.id === id) ?? store.archivedMessage(roomId, id);
 const dmVisible = (message, memberId) =>
   !message?.toMemberId || message.authorId === memberId || message.toMemberId === memberId;
 
@@ -208,7 +211,7 @@ function viewerEnvelope(auth, roomId) {
 // tombstones are honoured. DM rows for conversations the viewer is not a
 // party to are dropped (fail closed), mirroring the pins route.
 function eventView(store, roomId, row, memberId, floor = null) {
-  const message = store.room(roomId).state.messages.find(m => m.id === row.message_id);
+  const message = messageOrArchived(store, roomId, row.message_id);
   // PRIV-2: a since_join reader's activity follows the same floor as every
   // other message read. A mention recorded before removal stays in the table
   // after reactivation; the body must not come back with it.
@@ -361,7 +364,7 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
   const member = auth.member;
   return store.transaction(() => {
     if (lastReadMessageId !== null) {
-      const message = store.room(roomId).state.messages.find(m => m.id === lastReadMessageId);
+      const message = messageOrArchived(store, roomId, lastReadMessageId);
       // Same answer for a DM the reader is not party to, and for a message
       // from before a since_join reactivation, as for an unknown id.
       if (!message || !dmVisible(message, member.id) || !messageInHistory(message, store.historyFloor(roomId, member.id))) {
@@ -380,7 +383,7 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
 // --- saved messages -----------------------------------------------------------
 
 function savedView(store, roomId, row, memberId, floor = null) {
-  const message = store.room(roomId).state.messages.find(m => m.id === row.message_id);
+  const message = messageOrArchived(store, roomId, row.message_id);
   // PRIV-2: a since_join reader's saved list follows the same floor as every
   // other message read.
   if (!message || !dmVisible(message, memberId) || !messageInHistory(message, floor)) return null;
@@ -422,7 +425,7 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
   const auth = authed(store, token, roomId, expectedSessionBinding);
   const member = auth.member;
   return store.transaction(() => {
-    const message = store.room(roomId).state.messages.find(m => m.id === data.messageId);
+    const message = messageOrArchived(store, roomId, data.messageId);
     if (!message || !dmVisible(message, member.id)) fail(404, "message_not_found", "No such message in this room");
     if (data.saved && !messageInHistory(message, store.historyFloor(roomId, member.id))) fail(404, "message_not_found", "No such message in this room");
     if (data.saved && message.deletedAt) fail(409, "message_deleted", "A deleted message cannot be saved");

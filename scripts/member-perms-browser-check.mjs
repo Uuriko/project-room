@@ -128,7 +128,7 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
 
   const joiner = f.store.identities.create("Ordinary Joiner");
   f.access.request("commons", { identityId: joiner.identityId, displayName: "Ordinary Joiner",
-    requestedPermissions: [], requestId: "browser_join_request" });
+    requestedPermissions: [], requestId: "browser_join_request" }, joiner.secret);
   const owner = await f.login("owner"), row = attentionRow(owner);
   await row.waitFor();
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");

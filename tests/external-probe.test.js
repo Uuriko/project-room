@@ -11,6 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import worker from "../cloudflare/external-probe-worker.mjs";
+import { runExternalProbe } from "../cloudflare/external-probe.mjs";
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -346,6 +347,41 @@ test("a streak that cannot be saved does not notify", async t => {
   assert.deepEqual(first.alerts, []);
   assert.deepEqual(second.alerts, []);
   assert.deepEqual(hooks, []);
+});
+
+test("ops-room alert is prefixed with /room on a getdasha door origin, and not on a service origin", async () => {
+  // Regression for #2863: ROOM_AGENT_ORIGIN=https://www.getdasha.com is the
+  // documented door form (no /room path). On that host /api/* is Webflow, so
+  // the room command must go to /room/api/rooms/<id>/commands or it is lost.
+  for (const [doorOrigin, expected] of [
+    ["https://www.getdasha.com", "https://www.getdasha.com/room/api/rooms/ops/commands"],
+    ["https://getdasha.com", "https://getdasha.com/room/api/rooms/ops/commands"],
+    ["https://room.trydemigod.com", "https://room.trydemigod.com/api/rooms/ops/commands"]
+  ]) {
+    const posted = [];
+    const fetchImpl = async input => {
+      const url = String(input instanceof URL ? input.href : input);
+      if (url.includes("/rooms/ops/commands")) {
+        posted.push(url);
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ status: "unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    };
+    const env = {
+      PROBE_ORIGIN: "https://probe.example",
+      PROBE_STATE: memoryKv(),
+      ROOM_AGENT_ORIGIN: doorOrigin,
+      ROOM_AGENT_ROOM: "ops",
+      ROOM_AGENT_TOKEN: "probe-test-token"
+    };
+    const first = await runExternalProbe(env, fetchImpl);
+    assert.equal(first.consecutiveFailures, 1);
+    assert.deepEqual(posted, []);
+    const second = await runExternalProbe(env, fetchImpl);
+    assert.equal(second.consecutiveFailures, 2);
+    assert.deepEqual(posted, [expected], `room alert URL for ${doorOrigin}`);
+    assert.equal(second.alerts.find(alert => alert.destination === "room")?.ok, true);
+  }
 });
 
 test("fetch does not run the probe", async t => {

@@ -1,16 +1,43 @@
 // Projection claim commands (MCP and the work-item form) write the same
 // work-claims board the REST routes use. A handoff or supersede leaves a
 // successor card that depends on the source, so the chain is visible there.
+import { createHash } from "node:crypto";
 import { createWork, claimWork, renewWork, updateWork, roomWorkClaimConfig, openClaimCount } from "./work-claims.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 
 const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
+// createWork (work-claims.mjs) caps card titles at 512 characters.
+const MAX_TITLE_CHARS = 512;
 
+// Map a work item id to its board claim id. Ids that are already board-safe
+// pass through unchanged, so existing cards keep their ids. Any other id is
+// encoded reversibly instead of squashed: "_" is the escape character
+// ("__" is "_", "_p" is ".", "_c" is ":", "_x<hex>_" is any other character
+// by code point) and the result takes an "_e" prefix. Valid work item ids
+// start with a letter or digit (src/events.js validId), so a pass-through
+// id can never start with "_" and the encoded space is disjoint from it:
+// "task.1", "task:1" and "task_1" land on three different cards. An
+// encoding that would overflow the 128-char board limit falls back to
+// "_h" plus a SHA-256 prefix of the original id — deterministic, and two
+// distinct ids collide only if their digests do. (The previous mapping
+// replaced every non-board character with "_" and truncated to 120 chars,
+// merging distinct ids onto one card; #2854.)
 export function boardClaimId(workItemId) {
   if (typeof workItemId === "string" && BOARD_ID.test(workItemId)) return workItemId;
-  const cleaned = String(workItemId ?? "").replace(/[^A-Za-z0-9_-]/g, "_").replace(/^_+/, "").slice(0, 120);
-  return BOARD_ID.test(cleaned) ? cleaned : "workitem";
+  const raw = String(workItemId ?? "");
+  if (!raw) return "workitem";
+  let encoded = "";
+  for (const char of raw) {
+    if (/^[A-Za-z0-9-]$/.test(char)) encoded += char;
+    else if (char === "_") encoded += "__";
+    else if (char === ".") encoded += "_p";
+    else if (char === ":") encoded += "_c";
+    else encoded += `_x${char.codePointAt(0).toString(16)}_`;
+  }
+  const candidate = `_e${encoded}`;
+  if (BOARD_ID.test(candidate)) return candidate;
+  return `_h${createHash("sha256").update(raw).digest("hex").slice(0, 40)}`;
 }
 
 function filesFrom(data) {
@@ -99,8 +126,17 @@ function refuseOccupiedSuccessor(nextId, sourceId) {
 function successor(store, roomId, actorId, sourceId, nextId, title, nowMs) {
   const registry = store.workClaims;
   if (registry.get(roomId, nextId)) return registry.get(roomId, nextId);
+  // #2967: a handoff's nextAction becomes the successor card's title, but the
+  // projection validator (recordHandoff in src/events.js) imposes no length
+  // cap on nextAction while createWork refuses titles over 512 chars — so a
+  // legal long handoff threw here and rolled back the whole projection
+  // command. The title is only a display label: bound it to the cap. The
+  // full nextAction is preserved verbatim on the source card's chain link
+  // (and in the projection's handoff record), so nothing is lost.
+  const rawTitle = title || nextId;
+  const boundedTitle = typeof rawTitle === "string" ? rawTitle.slice(0, MAX_TITLE_CHARS) : rawTitle;
   const created = createWork({
-    id: nextId, title: title || nextId, dependsOn: [sourceId], workItemId: nextId
+    id: nextId, title: boundedTitle, dependsOn: [sourceId], workItemId: nextId
   }, { now: nowMs, agentId: actorId });
   return commit(store, roomId, actorId, created, "created", nowMs);
 }

@@ -83,6 +83,9 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
 // Every branch names what happened and what to do — no dead ends.
 export function joinErrorMessage({ status, code, action = "join" } = {}) {
   const again = "Check your connection and try again.";
+  if ((code === "request_timeout" || code === "preview_timeout") && action === "join") {
+    return { title: uiText("join.timedOut.title"), message: uiText("join.timedOut.message"), retry: true };
+  }
   if (status === 0) return { title: "Couldn't reach the room", message: again, retry: true };
   switch (code) {
     case "invite_unavailable":
@@ -141,22 +144,39 @@ function fail({ title, message, retry }) {
   if (retryEl) retryEl.hidden = !retry;
 }
 
-async function apiFetch(url, { method = "GET", data } = {}) {
-  let response;
+// Every apiFetch call is bounded by this deadline so a stalled network can
+// never leave the page stuck — neither on the loader (#1608, preview) nor on
+// the disabled "Joining…" button (#2979, redeem). Must stay below the join
+// watchdog in join-watchdog.js (15s) so the module handles the timeout
+// first when it is running. Exported for unit tests.
+export const API_TIMEOUT_MS = 10_000;
+
+export async function apiFetch(url, { method = "GET", data, timeoutMs = API_TIMEOUT_MS, fetchImpl = globalThis.fetch } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    response = await fetch(url, {
-      method,
-      credentials: "same-origin",
-      headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
-      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
-    });
-  } catch {
-    return { ok: false, status: 0, error: { code: "network_error" } };
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method,
+        credentials: "same-origin",
+        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
+        signal: controller.signal,
+        ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+      });
+    } catch {
+      return { ok: false, status: 0, error: { code: controller.signal.aborted ? "request_timeout" : "network_error" } };
+    }
+    let body = null;
+    try { body = await response.json(); } catch {
+      if (controller.signal.aborted) return { ok: false, status: 0, error: { code: "request_timeout" } };
+      /* non-JSON body */
+    }
+    if (!response.ok) return { ok: false, status: response.status, error: body?.error ?? { code: "request_failed" } };
+    return { ok: true, status: response.status, body };
+  } finally {
+    clearTimeout(timer);
   }
-  let body = null;
-  try { body = await response.json(); } catch { /* non-JSON body */ }
-  if (!response.ok) return { ok: false, status: response.status, error: body?.error ?? { code: "request_failed" } };
-  return { ok: true, status: response.status, body };
 }
 
 function renderConsent(preview) {
@@ -181,12 +201,6 @@ function renderConsent(preview) {
   $("join-name")?.focus();
 }
 
-// The preview fetch has no server-side deadline; bound it so a stalled
-// network can never leave the loader up forever (#1608). Must stay below
-// the inline watchdog in join.html (15s) so the module handles the timeout
-// first when it is running.
-const PREVIEW_TIMEOUT_MS = 10_000;
-
 // Retry starts a newer boot(); an older boot resolving late must not clobber
 // it — without this, a timed-out first attempt firing after a retry would
 // blank a screen the retry already rendered.
@@ -210,10 +224,9 @@ async function boot() {
     return;
   }
   const apiBase = serviceApiBase(globalThis.location?.pathname);
-  const preview = await Promise.race([
-    apiFetch(`${apiBase}/agent-invites/preview?code=${encodeURIComponent(code)}`),
-    new Promise(resolve => setTimeout(() => resolve({ ok: false, status: 0, error: { code: "preview_timeout" } }), PREVIEW_TIMEOUT_MS)),
-  ]);
+  // apiFetch bounds this with API_TIMEOUT_MS, so a stalled preview can
+  // never leave the loader up forever (#1608).
+  const preview = await apiFetch(`${apiBase}/agent-invites/preview?code=${encodeURIComponent(code)}`);
   if (seq !== bootSeq) return;
   if (!preview.ok) {
     fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));

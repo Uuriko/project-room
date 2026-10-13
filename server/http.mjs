@@ -843,9 +843,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // return events, the room projection, or an export show the tombstone for
   // a deleted message and only the current body after an edit. The log
   // itself is not rewritten.
-  function projectionMessages(id) {
-    return store.room(id).state.messages;
-  }
   // Bounded request reader shared by JSON and NDJSON routes. A declared
   // oversize is refused immediately while draining in the background: a stalled
   // sender must not hold a connection open until its request timeout. For
@@ -912,7 +909,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
-        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
+        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
         for (const item of batch.events) {
           res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
@@ -1003,12 +1000,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             || (typeof member?.displayName === "string" ? member.displayName : "");
           const identity = resolvedIdentityId ? store.identities.get(resolvedIdentityId) : null;
           const ipHash = rateHash(String(remoteAddress ?? ""));
+          // Scoring runs after the join, so the member list already contains
+          // the joiner. Exclude the joiner's own membership from the
+          // comparison set: sybilName measures similarity to the OTHER
+          // members, so an exact match must mean someone else's name (and a
+          // name nobody else holds must not self-match at similarity 1.0).
+          const isSelf = m => Boolean(m) && ((memberId && m.id === memberId)
+            || (resolvedIdentityId && m.identityId === resolvedIdentityId));
+          let droppedSelf = members.some(isSelf);
+          const existingDisplayNames = [];
+          for (const m of members) {
+            if (!m || m.active === false || typeof m.displayName !== "string") continue;
+            if (isSelf(m)) continue;
+            if (!droppedSelf && resolvedDisplayName
+              && m.displayName.toLowerCase().trim() === resolvedDisplayName.toLowerCase().trim()) {
+              // The joiner's own just-added membership, not identified by id
+              // on this path: drop exactly one occurrence, so any identical
+              // name left in the set belongs to another member.
+              droppedSelf = true;
+              continue;
+            }
+            existingDisplayNames.push(m.displayName);
+          }
           const decision = evaluateAdmission({
             identityId: resolvedIdentityId, displayName: resolvedDisplayName, path,
             identityAgeMs: identity && Number.isFinite(identity.createdAt) ? Math.max(0, now - identity.createdAt) : null,
-            existingDisplayNames: members
-              .filter(m => m && m.active !== false && typeof m.displayName === "string")
-              .map(m => m.displayName),
+            existingDisplayNames,
             recentJoins: {
               byIdentity: resolvedIdentityId ? store.jevShadow.recentJoinCount({ identityId: resolvedIdentityId, windowMs: jevVelocityWindowMs }) : 0,
               byIp: store.jevShadow.recentJoinCount({ ipHash, windowMs: jevVelocityWindowMs }),
@@ -3113,8 +3130,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.invites.preview(code));
       }
       // Self-serve access requests: an identity without membership asks to
-      // join. Unauthenticated (the identity is not a member yet); the
-      // module rate-limits per identity and never reveals more than 404.
+      // join. The caller proves the identity's secret as Bearer (issue
+      // #2912 — the identity is not a member yet, but filing in its name
+      // requires holding its secret); the module rate-limits per identity
+      // and never reveals more than 404 for unknown rooms/identities.
       if (url.pathname === "/api/access-requests" && req.method === "POST") {
         // The other three open POST routes all bound themselves per address
         // before reading a body; this one did not, so the only limit it had was
@@ -3144,6 +3163,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           additionalProperties: false,
         }, data);
         if (diagnosis) {
+          // Issue #2912 made this an identity-secret route: a caller who
+          // presents no credential at all gets the 401 before any field
+          // diagnosis, so anonymous probes learn nothing from validation
+          // (SEC-03 ordering, tests/anon-auth-before-validation.test.js).
+          // A caller who does present a credential keeps the field-level
+          // diagnosis below, and a shape-valid body still reaches the
+          // service, whose identical bare 404 for unknown rooms/identities
+          // (before proof is consulted) is unchanged.
+          if (!bearer(req)) reject(401, "unauthenticated", "Identity secret required: present the filing identity's current secret as Bearer");
           const parts = [];
           if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
           if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
@@ -3172,8 +3200,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       // POST-only route: a wrong method is 405 (Allow: POST), not a 404
-      // unknown-route, so a mistaken GET reads as a method error.
+      // unknown-route, so a mistaken GET reads as a method error. Anonymous
+      // callers get the 401 first (SEC-03 ordering, as above): the method
+      // error is only revealed to a caller presenting a credential.
       if (url.pathname === "/api/access-requests" && req.method !== "POST") {
+        if (!bearer(req)) reject(401, "unauthenticated", "Identity secret required: present the filing identity's current secret as Bearer");
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent room ownership, self-serve path: a self-minted identity
@@ -3767,7 +3798,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
       // the DM's own visibility (server/dm-event-visibility.mjs).
-      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages);
+      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages, [], id => store.archivedDmParties(roomId, id));
       const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
@@ -4183,7 +4214,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (result.messages?.length) {
           const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
           result.messages = result.messages.filter(hit => {
-            const message = byId.get(hit.id);
+            const message = byId.get(hit.id) ?? store.archivedMessage(roomId, hit.id);
             return message ? dmMessageVisible(message) : false;
           });
         }
@@ -4290,7 +4321,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
+          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), store.redactionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           recordRoomExport(store, selected.token, roomId, "html", fence); // PRIV-2
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
@@ -4312,7 +4343,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           visible.push(line);
         }
         let exportSequence = 0;
-        for (const line of redactEventRows(visible, projectionMessages(roomId))) {
+        for (const line of redactEventRows(visible, store.redactionMessages(roomId))) {
           exportSequence += 1;
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
@@ -4935,11 +4966,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
           }
           const tail = Number(params.get("tail"));
-          return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), projectionMessages(roomId)));
+          return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), store.redactionMessages(roomId)));
         }
         return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), projectionMessages(roomId)));
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), store.redactionMessages(roomId)));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
@@ -4997,7 +5028,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
         const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
-        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, projectionMessages(roomId));
+        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, store.redactionMessages(roomId));
         return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {

@@ -21,7 +21,8 @@ function fixture(methods) {
   const listeners = {};
   const container = { innerHTML: "", addEventListener(name, fn) { listeners[name] = fn; }, removeEventListener() {}, contains: () => true,
     querySelector: selector => selector === "[data-deletion-dialog]" ? dialog : selector === 'form[data-form="delete-account"]' ? form : null };
-  const client = { currentSession: () => ({}), async request(path) {
+  const client = { session: {}, generation: 0, currentSession() { return this.session; },
+    owns(generation, session) { return generation === this.generation && this.session === session; }, async request(path) {
     if (path === "/api/auth/methods") return { methods };
     if (path === "/api/account/deletion/plan") return { confirmationToken: "fixture-only", summary: { text: "inventory" }, plan: { rooms: {} } };
     throw new Error("Unexpected request: " + path);

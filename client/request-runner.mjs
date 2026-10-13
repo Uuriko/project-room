@@ -92,7 +92,16 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   const timer = setInterval(() => {
     if (heartbeat) return;
     heartbeat = report(attemptId, "working", basis, AbortSignal.timeout(10000))
-      .catch(error => controller.abort(error)).finally(() => { heartbeat = null; });
+      .catch(error => {
+        // Only a definite service refusal (the request changed, paused or
+        // closed) stops the host. A transient report failure — network
+        // drop, timeout, 5xx, or throttling (408/429) — must not: aborting
+        // here kills healthy work and leaves the journal row without an
+        // outcome, which every later run then refuses as unknown. Other
+        // report sites tolerate failures the same way.
+        if (error?.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429)
+          controller.abort(error);
+      }).finally(() => { heartbeat = null; });
   }, 30000);
   try {
     controller.signal.throwIfAborted();

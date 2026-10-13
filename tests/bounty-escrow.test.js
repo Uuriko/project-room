@@ -218,6 +218,28 @@ test("claim locks the 1-credit bond; double claim is rejected; only funded is cl
   expectConserved(escrow);
 });
 
+test("poster cannot claim their own bounty (#3008); a different member still can", () => {
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow);
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  // Self-claim is rejected: every later guard (accept distinct from claimant,
+  // claimant cannot dispute own submission) assumes poster != claimant, so a
+  // self-claimed bounty dead-ends in-review with escrow + bond locked.
+  expectCode(() => escrow.claimBounty(ROOM, bounty.bountyId, { claimant: JILL }), "not_authorized");
+  // The rejected claim changes nothing: bounty stays funded/unclaimed, no
+  // bond was locked for the poster, and conservation holds.
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "funded");
+  assert.equal(after.claimant, null);
+  assert.equal(bal(escrow, JILL).locked, 10); // only the funded amount
+  expectConserved(escrow);
+  // A different member can still claim it.
+  const { receipt } = escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  assert.equal(receipt.kind, "bond-lock");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).claimant, GROK);
+  expectConserved(escrow);
+});
+
 test("watch is sticky: claim expiry does not unfollow", () => {
   const { escrow } = makeEscrow();
   const bounty = post(escrow);

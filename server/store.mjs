@@ -44,7 +44,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -145,7 +145,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
@@ -686,6 +686,13 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
+// Commands that name an existing message, and which field names it.
+const ARCHIVED_REF_FIELDS = Object.freeze({
+  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
+  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
+  [T.MESSAGE_POSTED]: "replyToId"
+});
+
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
@@ -1529,6 +1536,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
+      // Issue #2913: deployed wake-signal tables still carry the pre-room
+      // UNIQUE(agent_id, message_id); converge first (row-preserving
+      // rebuild), since IF NOT EXISTS cannot rewrite the stored DDL.
+      convergeWakeSignalRoomScope(this.db);
       this.db.exec(agentHeartbeatSchema);
       // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
       this.db.exec(workWakeSchema);
@@ -1858,6 +1869,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // MSG-2: replay events into messages. Idempotent. A mid-batch stop keeps
   // the committed prefix on messages_backfill_cursor.
+  // The current record of an archived message (no longer in the projection), else null.
+  archivedMessage(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    if (!row?.record_json) return null;
+    try { return JSON.parse(row.record_json); } catch { return null; }
+  }
+
+  // The projection messages plus a lookup for archived ones, for event-log redaction.
+  redactionMessages(roomId) {
+    const messages = [...this.room(roomId).state.messages];
+    Object.defineProperty(messages, "archivedLookup", { value: id => this.archivedMessage(roomId, id) });
+    return messages;
+  }
+
+  // [authorId, toMemberId] of an archived direct message, else null.
+  archivedDmParties(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    return row && row.to_member_id ? [row.author_id, row.to_member_id] : null;
+  }
+
+  // Default-off compaction (dry run unless dryRun:false). See archiveRoomMessages.
+  archiveMessages(roomId, options = {}) {
+    return archiveRoomMessages(this, roomId, options);
+  }
+
   backfillMessages(options = {}) {
     return runMessagesBackfill(this, options);
   }
@@ -4215,10 +4251,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       // PRIV-2: a since_join reader sees no thread rooted before their join.
       const floor = this.historyFloor(roomId, auth.member.id);
-      const root = room.state.messages.find(m => m.id === messageId);
+      // Archived messages live only in the messages table; a DM there is shown to its parties only.
+      const archived = archivedThreadRecords(this.db, roomId, messageId)
+        .filter(m => !m.toMemberId || m.authorId === auth.member.id || m.toMemberId === auth.member.id);
+      const root = room.state.messages.find(m => m.id === messageId) ?? archived.find(m => m.id === messageId);
       if (!root || !messageInHistory(root, floor)) fail(404, "message_not_found", "Message not found");
       const byParent = new Map();
-      for (const m of room.state.messages) {
+      for (const m of [...archived, ...room.state.messages]) {
         if (!m.replyToId || !messageInHistory(m, floor)) continue;
         if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
         byParent.get(m.replyToId).push(m);
@@ -4257,7 +4296,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // a cursor is resolved, so a cursor can only point at a match this
         // caller would see anyway.
         const matches = [];
-        for (const m of room.state.messages ?? []) {
+        // Archived messages are not in the projection; they are older than every
+        // projected message, so they come first.
+        for (const m of [...archivedMatchingRecords(this.db, roomId, needle), ...(room.state.messages ?? [])]) {
           if (m.body == null) continue; // tombstone (deleted or redacted)
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
@@ -4472,7 +4513,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
-      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, id => this.archivedDmParties(roomId, id));
       const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, viewerId, isOwner)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
@@ -4650,7 +4691,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
       const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
-      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
+      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, id => this.archivedDmParties(roomId, id)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, auth.member.id, isOwner)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
@@ -4688,6 +4729,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
+    // #2951: a flood token spent below lives in an in-memory bucket that the
+    // command transaction cannot roll back, so remember the spend and refund
+    // it in the catch if anything after consume() fails — validation, the
+    // reducer, persistence, or the transaction commit itself.
+    let floodSpend = null;
+    try {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
@@ -4718,7 +4765,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
-      this.roomFlood.consume(roomId, auth.member.id, command.type);
+      if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
+        floodSpend = { memberId: auth.member.id, type: command.type };
+      }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       // bond.list is a read. It does not append a ledger event, so an archived
       // room can still answer it. Writes below still hit refuseArchivedWrite.
@@ -4795,6 +4844,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
+        }
+      }
+      // Archived messages are not in the projection, so the reducer cannot change
+      // them or thread under them. Refuse with a clear error. A DM the actor is
+      // not a party to reads like an unknown id, so nothing about it is confirmed.
+      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
+      if (archivedRef) {
+        const refId = command.data?.[archivedRef];
+        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
+          const archivedRow = archivedMessageRow(this.db, roomId, refId);
+          const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
+          // An archived message can still hold a pin (older archives did not retain pins).
+          // Unpinning is allowed for anyone who may see the message and refused, like a
+          // live DM, for a non-party; the reducer cannot check it without the message.
+          const stillPinned = command.type === T.MESSAGE_UNPINNED && (room.state.pins ?? []).some(pin => pin.messageId === refId);
+          if (archivedRow && stillPinned) {
+            if (!party) fail(422, "command_rejected", "Cannot unpin a direct message you are not a party to");
+          } else if (party) {
+            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
+          }
+        }
+      }
+      // A new post cannot reuse the id of an archived message: the reducer only
+      // sees the projection, so it would otherwise accept a second message under
+      // that id. Same refusal as a live duplicate; it reads the same for a DM.
+      if (command.type === T.MESSAGE_POSTED) {
+        const newId = command.data?.messageId || command.id;
+        if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
+            && archivedMessageRow(this.db, roomId, newId)) {
+          fail(409, "command_rejected", "Message already exists");
         }
       }
       // A reaction on a DM is shown to its parties and the answer would
@@ -5098,6 +5177,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
+    } catch (error) {
+      // The test doubles that replace roomFlood expose only consume(), so a
+      // missing refund (or a spend consume() did not report) means no refund.
+      if (floodSpend && typeof this.roomFlood.refund === "function") {
+        try { this.roomFlood.refund(roomId, floodSpend.memberId, floodSpend.type); }
+        catch { /* a refund failure must never mask the command's own error */ }
+      }
+      throw error;
+    }
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):

@@ -85,6 +85,28 @@ test("a handoff still creates a successor when that card is free", async () => {
   assert.equal(registry.get("room1", "lane").chain.at(-1).targetId, "lane-next");
 });
 
+test("a handoff with a nextAction over the 512-char title cap still creates its successor (#2967)", async () => {
+  const { registry, store, call } = board();
+  await call("owner", "create", "longlane", { id: "longlane", title: "Long lane" });
+  await call("other", "claim", "longlane", { files: ["client/a.mjs"], leaseHours: 24 });
+  const nextAction = `Continue the adapter migration: ${"verify the next shard, ".repeat(30)}then hand back`;
+  assert.ok(nextAction.length > 512, `fixture nextAction must exceed the title cap (got ${nextAction.length})`);
+  const successor = mirrorProjectionClaim(store, "room1", "other", {
+    type: "work.handoff_recorded",
+    at,
+    data: { workItemId: "longlane", doneSummary: "partial", nextAction, limitReason: "context" },
+  });
+  assert.equal(successor.id, "longlane-next");
+  assert.equal(successor.state, "unclaimed");
+  assert.deepEqual(successor.dependsOn, ["longlane"]);
+  assert.ok(successor.title.length <= 512, `successor title must fit the cap (got ${successor.title.length})`);
+  assert.equal(successor.title, nextAction.slice(0, 512));
+  // The full nextAction is not lost: it stays verbatim on the source chain link.
+  const link = registry.get("room1", "longlane").chain.at(-1);
+  assert.equal(link.targetId, "longlane-next");
+  assert.equal(link.note, nextAction);
+});
+
 test("a supersede does not adopt another member's live card as the replacement", async () => {
   const { registry, store, call } = board();
   await call("owner", "create", "old-lane", { id: "old-lane", title: "Old lane" });

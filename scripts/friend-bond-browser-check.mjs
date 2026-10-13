@@ -40,7 +40,7 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
   const asked = await post(origin, "/api/access-requests", {
     roomId, identityId: quill.identityId, displayName: "Quill",
     requestedPermissions: ["accept_work"], note: null, requestId
-  });
+  }, quill.secret);
   assert.equal(asked.status, 201);
   const decided = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, {
     decision: "approve", permissions: ["accept_work"], note: null
@@ -183,7 +183,7 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   const asked = await post(origin, "/api/access-requests", {
     roomId, identityId: quill.identityId, displayName: "Quill",
     requestedPermissions: ["accept_work"], note: null, requestId
-  });
+  }, quill.secret);
   assert.equal(asked.status, 201);
   const decided = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, {
     decision: "approve", permissions: ["accept_work"], note: null

@@ -450,6 +450,7 @@ async function callLandTool(store, secret, name, args) {
 // failure; an idempotent duplicate retry is voided (the original call
 // already paid).
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
+  enforceMcpApiKeyRoomScope(store, secret, name);
   enforceMcpCallVisibility(store, identity, name);
   const spend = chargeSpendBeforeCall(store, secret, name, args);
   if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
@@ -539,7 +540,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
-    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.room(roomId).state.messages), auth.member.id);
+    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.redactionMessages(roomId)), auth.member.id);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
@@ -933,6 +934,39 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (!record) return false;
   return (record.scopes ?? []).some(scope =>
     scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+// The HTTP room routes confine api-key callers to their stored scopes (reads
+// need rooms:read, writes need rooms:write; the room-route gate in
+// server/http.mjs). The hosted core-profile room tools call the same store
+// methods, so this gate, run in callRoomTool (the single funnel for them),
+// holds MCP to the same rule: a key without the matching scope gets 403
+// insufficient_scope instead of the member's full access. Owner identity
+// secrets and room credentials are not api keys and pass untouched. A key's
+// mcp:room:<id> scope only narrows which rooms it may reach (see
+// mcpRoomAllowlist); it grants no read or write by itself, and the onboarding
+// token carries rooms:read and rooms:write next to it.
+// Heartbeat, wake and webhook tools never reach callRoomTool; they run through
+// callWakeTool under the mcp:wake gate and are unchanged here.
+const MCP_ROOM_WRITE_TOOLS = new Set([
+  "room_create", "room_join",
+  "squads_create", "squads_update_members", "squads_disband",
+  "room_post_message", "room_react",
+  "add_land_item", "remove_land_item", "report_tip",
+  "room_put_file", "room_discard_file", "room_commit_file",
+  "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
+  "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
+  "dm_posted",
+]);
+export function mcpRoomToolScope(name) {
+  return MCP_ROOM_WRITE_TOOLS.has(name) ? "rooms:write" : "rooms:read";
+}
+function enforceMcpApiKeyRoomScope(store, secret, name) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
+  const required = mcpRoomToolScope(name);
+  if (!required) return;
+  if (!mcpKeyGrantsScope(store, secret, required))
+    throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
 }
 
 function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;

@@ -325,6 +325,67 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(fetched, false);
   });
 
+  test("anthropic provider forwards screenshot images as image blocks in tool_result", async () => {
+    const seen = [];
+    const provider = createAnthropicProvider({
+      key: "sk-anthropic-test",
+      model: "claude-sonnet-4-5",
+      fetchImpl: async (url, init) => {
+        seen.push({ url, body: JSON.parse(init.body) });
+        if (seen.length === 1) {
+          return jsonResponse({ content: [{ type: "tool_use", id: "toolu_1", input: { action: "screenshot" } }] });
+        }
+        if (seen.length === 2) {
+          return jsonResponse({
+            content: [
+              { type: "tool_use", id: "toolu_2", input: { action: "screenshot" } },
+              { type: "tool_use", id: "toolu_3", input: { action: "left_click", coordinate: [1, 2] } },
+            ],
+          });
+        }
+        return jsonResponse({ content: [{ type: "text", text: "done" }] });
+      },
+    });
+    await provider.next({ task: "open Safari", observations: [] });
+    // loop.mjs puts the screenshot in observation.image as a data URL and
+    // reduces observation.result to { image: true, bytes } (see summarize()).
+    await provider.next({
+      task: "open Safari",
+      observations: [{
+        id: "toolu_1",
+        tool: "desktop.screenshot",
+        result: { image: true, bytes: 5 },
+        image: "data:image/png;base64,aGVsbG8=",
+      }],
+    });
+    const toolResult = seen[1].body.messages.at(-1).content[0];
+    assert.equal(toolResult.type, "tool_result");
+    assert.equal(toolResult.tool_use_id, "toolu_1");
+    assert.ok(Array.isArray(toolResult.content), "screenshot tool_result content must be content blocks, not a JSON string");
+    assert.deepEqual(
+      toolResult.content.find(block => block.type === "text"),
+      { type: "text", text: JSON.stringify({ image: true, bytes: 5 }) },
+    );
+    assert.deepEqual(
+      toolResult.content.find(block => block.type === "image"),
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } },
+    );
+    // Observations without a usable data-URL image stay plain text results:
+    // no empty or malformed image block may reach the API.
+    await provider.next({
+      task: "open Safari",
+      observations: [
+        { id: "toolu_2", tool: "desktop.screenshot", result: { output: "plain" }, image: null },
+        { id: "toolu_3", tool: "desktop.click", result: { ok: true }, image: "not-a-data-url" },
+      ],
+    });
+    const followUps = seen[2].body.messages.at(-1).content;
+    assert.equal(typeof followUps[0].content, "string");
+    assert.equal(followUps[0].content, JSON.stringify({ output: "plain" }));
+    assert.equal(typeof followUps[1].content, "string");
+    assert.equal(followUps[1].content, JSON.stringify({ ok: true }));
+  });
+
   test("bot enable stays off until a room is named, and status does not print a key", () => {
     const home = homeDir();
     try {

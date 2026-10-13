@@ -10,6 +10,10 @@
 //     ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, and ROOM_AGENT_TOKEN are the
 //     existing connection names and are used when the PROBE_ROOM_* name is
 //     unset. The token and the webhook URL are never written into the notice.
+//     A getdasha door origin (https://www.getdasha.com, no /room path) is
+//     prefixed via edgeDoorApiPath: /api/* there is Webflow, not the Worker.
+
+import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
 
 export const FAILURES_BEFORE_ALERT = 2;
 export const DEFAULT_ORIGIN = "https://room.trydemigod.com";
@@ -318,7 +322,7 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
     if (room.room) {
       const commandId = `probe-${state.incidentId}-${kind}`;
       const command = { id: commandId, type: "message.posted", data: { messageId: commandId, body: notice } };
-      jobs.push(postJson(fetchImpl, new URL(`/api/rooms/${encodeURIComponent(room.room.roomId)}/commands`, room.room.origin), command, {
+      jobs.push(postJson(fetchImpl, new URL(edgeDoorApiPath(room.room.origin, `/api/rooms/${encodeURIComponent(room.room.roomId)}/commands`), room.room.origin), command, {
         authorization: `Bearer ${room.room.credential}`
       }, limitMs).then(ok => {
         if (ok) state = { ...state, alertedRoom: page };
