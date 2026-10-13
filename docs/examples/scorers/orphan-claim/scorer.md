@@ -19,9 +19,9 @@ Judge only the receipt + trace for this Work Item. Return exactly one label.
 
 Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
 [ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md). Graph:
-[ROOM-RECEIPT-GRAPH-V0.md](../../../history/ROOM-RECEIPT-GRAPH-V0.md).
+[ROOM-RECEIPT-GRAPH-V0.md](../../../../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md).
 Architecture spine:
-[ROOM-COHESIVE-ARCHITECTURE.md](../../../history/ROOM-COHESIVE-ARCHITECTURE.md).
+[ROOM-COHESIVE-ARCHITECTURE.md](../../../../archive/docs/history/ROOM-COHESIVE-ARCHITECTURE.md).
 Closed-set labels may pin `model: jev` when a TypeSafe / Gateway key
 is present ([ROOM-SCORER.md](../../../ROOM-SCORER.md) Jev rung).
 Absent key → `fast-default`. `delegation.spawn` without

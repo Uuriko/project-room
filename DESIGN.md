@@ -14,7 +14,7 @@ Precedence, highest first:
 4. The room-antislop filter.
 
 The Sep 20 public-face and DM-consent engineering design that used to live at
-this path is now [archived in docs/history](docs/history/DESIGN-2026-09-20.md).
+this path is now [archived](archive/docs/history/DESIGN-2026-09-20.md).
 
 ## Where this comes from
 

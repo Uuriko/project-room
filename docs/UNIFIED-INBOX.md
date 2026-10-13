@@ -10,7 +10,7 @@ token or secret is in code, tests, docs or journals. See
 [Live Telegram](#live-telegram-zero-spend) and
 [Fixture versus live](#fixture-versus-live) below. The ordered human steps to switch
 Telegram and email on in production, and the checks that prove they are
-live, are in [GO-LIVE-CHECKLIST.md](history/GO-LIVE-CHECKLIST.md). A live email provider still
+live, are in [GO-LIVE-CHECKLIST.md](../archive/docs/history/GO-LIVE-CHECKLIST.md). A live email provider still
 needs its own reviewed slice and separate authorization, exactly as
 [CURRENT-ROOM.md](CURRENT-ROOM.md) says for a real mailbox.
 
@@ -506,7 +506,7 @@ once that file is next edited).
    the address and a name. The card reads "Inbound: fixture mailbox · not yet
    routed" and "Sending: not available". Recorded fixtures import through
    `scripts/*-contract-fixture.mjs`; nothing polls a mailbox.
-2. To route real mail (#144 is merged: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`; still pending: the Worker `email()` mount in `cloudflare/room.mjs` and the rules below, see [EMAIL-ROUTING.md](history/EMAIL-ROUTING.md)): enable Email Routing on the domain (or a subdomain such
+2. To route real mail (#144 is merged: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`; still pending: the Worker `email()` mount in `cloudflare/room.mjs` and the rules below, see [EMAIL-ROUTING.md](../archive/docs/history/EMAIL-ROUTING.md)): enable Email Routing on the domain (or a subdomain such
    as `mail.<domain>`), accept the MX and SPF records Cloudflare adds, add a
    routing rule per address (or the domain catch-all) with the action "Send
    to a Worker" pointing at the room Worker, and agree the address scheme

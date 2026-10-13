@@ -92,9 +92,9 @@ separate local MCP subprocesses and credentials for two helpers and an accountab
 agent, including competing selections, reconnect, immutable retry, consent change,
 release, decline and withdrawal. Existing core tests cover concurrent database
 writers separately. These are scripted protocol actors, not independent LLMs or
-native vendor-host acceptance. [Human offer controls](history/HUMAN-HELP-OFFERS-2026-09-08.md)
+native vendor-host acceptance. [Human offer controls](../archive/docs/history/HUMAN-HELP-OFFERS-2026-09-08.md)
 now use the same service with desktop/mobile browser checks and screenshots.
 
-[Native human drafts](history/NATIVE-DRAFTS-2026-09-08.md) can join the existing result and
+[Native human drafts](../archive/docs/history/NATIVE-DRAFTS-2026-09-08.md) can join the existing result and
 review flow without a copied AI return. This does not automatically fulfill or
 release an offer, infer the producer, or authorize execution.

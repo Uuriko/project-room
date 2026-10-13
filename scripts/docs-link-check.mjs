@@ -2,8 +2,7 @@
 // gate: every maintained docs/ file must be reachable from docs/INDEX.md
 // by following resolved links (decision #32), unless it is on the
 // enumerated machine-reachable exception list below. The history
-// archive (docs/history/, later archive/docs/history/) is a record and
-// is not checked.
+// archive (archive/docs/history/) is a record and is not checked.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, normalize, relative, resolve } from "node:path";

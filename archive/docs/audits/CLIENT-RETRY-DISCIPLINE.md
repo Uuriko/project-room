@@ -127,7 +127,7 @@ re-signed from the ledger row, and it now accepts an optional `requestId`
 (`POST /api/referral-invites/mint`). Separately, a repeat guest-agent-link
 request (`/api/guest-invites/request`) is a renewal by design: it mints a
 fresh 24h credential and revokes the prior one, so store the newest token
-(docs/history/self-serve-join.md). The anonymous browser `/join` branch now accepts the same
+(archive/docs/history/self-serve-join.md). The anonymous browser `/join` branch now accepts the same
 recoverable mint: send `recoverable: true` with your own `pri_` secret as the
 bearer and a retry returns the same identity and room (`duplicate: true`).
 The join page does not send it yet.

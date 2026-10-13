@@ -3,14 +3,14 @@
 17 September 2026. Contract. Not a live API yet.
 
 Architecture spine:
-[ROOM-COHESIVE-ARCHITECTURE.md](history/ROOM-COHESIVE-ARCHITECTURE.md)
+[ROOM-COHESIVE-ARCHITECTURE.md](../archive/docs/history/ROOM-COHESIVE-ARCHITECTURE.md)
 (Second · Connect · ledger).
 
 Master plan:
 ROOM-STEALS-FULL-BUILD-2026-09-17.md.
 
 Scorers: [ROOM-SCORER.md](ROOM-SCORER.md). Personas:
-[ROOM-PERSONAS-FACTORY.md](history/ROOM-PERSONAS-FACTORY.md).
+[ROOM-PERSONAS-FACTORY.md](../archive/docs/history/ROOM-PERSONAS-FACTORY.md).
 
 Cua Fleet fields below are optional. The Cua desktop contract and Fleet
 spike live on [ROOM-CUA-DESKTOP.md](ROOM-CUA-DESKTOP.md) and
@@ -21,14 +21,14 @@ at those **Done receipts**. Do not invent scores without a trace.
 Interlateral Agent Interaction Receipt fields
 (`principalId`, `authorityClaimed`, `sourceManifest[]`,
 `reversibility`, `expiration`) are optional honesty fields. See
-[ROOM-TRUST-HANDOFF-V0.md](history/ROOM-TRUST-HANDOFF-V0.md) and
+[ROOM-TRUST-HANDOFF-V0.md](../archive/docs/history/ROOM-TRUST-HANDOFF-V0.md) and
 ROOM-INTERLATERAL-RESEARCH-2026-09-17.md.
-Maturity labels live on [ROOM-ARTIFACT-MATURITY.md](history/ROOM-ARTIFACT-MATURITY.md);
+Maturity labels live on [ROOM-ARTIFACT-MATURITY.md](../archive/docs/history/ROOM-ARTIFACT-MATURITY.md);
 a receipt does not promote past Live Note / Discussion Paper.
 
 Receipt graph (additive): `id` + `citedReceiptIds[]`. When Agent B
 relies on Agent A’s output, B cites A’s receipt id. Orphan claims
-fail the scorer. See [ROOM-RECEIPT-GRAPH-V0.md](history/ROOM-RECEIPT-GRAPH-V0.md)
+fail the scorer. See [ROOM-RECEIPT-GRAPH-V0.md](../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md)
 and [examples/scorers/orphan-claim/scorer.md](examples/scorers/orphan-claim/scorer.md).
 
 ## Why
@@ -47,7 +47,7 @@ claims-board Done face. `room.receipt.v1` is the Work Item artifact pack
 a scorer can grade.
 
 Compute jobs are not Room receipts. Compute stays a separate run factory
-([BRIDGE-COMPUTE.md](history/BRIDGE-COMPUTE.md)). A Compute honesty receipt
+([BRIDGE-COMPUTE.md](../archive/docs/history/BRIDGE-COMPUTE.md)). A Compute honesty receipt
 (`UNKNOWN` when unmeasured) may *correlate* to a Work Item; it does not
 satisfy this schema.
 
@@ -99,7 +99,7 @@ satisfy this schema.
 | Field | Rule |
 | --- | --- |
 | `kind` | Exactly `room.receipt.v1`. |
-| `id` | Stable Room receipt id. Required for this pack to be **citable**. Missing `id` is honest for an unpersisted draft. See [ROOM-RECEIPT-GRAPH-V0.md](history/ROOM-RECEIPT-GRAPH-V0.md). |
+| `id` | Stable Room receipt id. Required for this pack to be **citable**. Missing `id` is honest for an unpersisted draft. See [ROOM-RECEIPT-GRAPH-V0.md](../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md). |
 | `workItemId` | The Work Item this evidence belongs to. |
 | `persona` | One of `foreman` · `triage` · `implementation` · `review` · `scorer`. |
 | `agentMemberId` | Room member id of the agent who produced the artifacts. No display name, email, or account id. |
@@ -126,7 +126,7 @@ reversibility, until when. They do not replace `agentMemberId` /
 | Field | Rule |
 | --- | --- |
 | `principalId` | Room member id of the attested human principal. `null` if none. An agent without a principal cannot claim authority. No display name, email, or account id. |
-| `authorityClaimed` | Grant the actor claims (e.g. `write`, `vote`, `ask-before-public`, `ask-before-irreversible`). A claim is not a grant. Visible authority cards are a later face — [ROOM-TRUST-HANDOFF-V0.md](history/ROOM-TRUST-HANDOFF-V0.md). |
+| `authorityClaimed` | Grant the actor claims (e.g. `write`, `vote`, `ask-before-public`, `ask-before-irreversible`). A claim is not a grant. Visible authority cards are a later face — [ROOM-TRUST-HANDOFF-V0.md](../archive/docs/history/ROOM-TRUST-HANDOFF-V0.md). |
 | `sourceManifest` | Enumerated sources relied on. Paths / URLs / checksums only. **No people-data.** Empty is honest when nothing was cited. |
 | `reversibility` | `reversible` · `irreversible` · `unknown`. Drafting vs file / sign / transmit / trigger external systems. |
 | `expiration` | ISO-8601. When the claimed authority lapses. `null` is unknown, not forever. |
@@ -136,7 +136,7 @@ People-data ban still holds: screenshots, shell excerpts, and
 inbox. `peopleData` on every artifact remains `false`.
 
 A Done receipt defaults to Live Note / Discussion Paper honesty
-([ROOM-ARTIFACT-MATURITY.md](history/ROOM-ARTIFACT-MATURITY.md)). These fields
+([ROOM-ARTIFACT-MATURITY.md](../archive/docs/history/ROOM-ARTIFACT-MATURITY.md)). These fields
 do not bump maturity.
 
 ### Receipt graph (additive)
@@ -149,7 +149,7 @@ pack. Orphan claims fail
 | --- | --- |
 | `citedReceiptIds` | Ids of prior `room.receipt.v1` objects this receipt relied on. Empty is honest first hop. No self-cite. DAG, not a mash. Receipt ids only — not chips, chat mentions, or Compute jobs. |
 
-Full rules: [ROOM-RECEIPT-GRAPH-V0.md](history/ROOM-RECEIPT-GRAPH-V0.md).
+Full rules: [ROOM-RECEIPT-GRAPH-V0.md](../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md).
 Scorers never rewrite this field. A `delegation.spawn` hop cites
 `parentReceiptId` — ROOM-JEV-CODEX-SPAWN-STEAL-2026-09-17.md.
 
@@ -203,7 +203,7 @@ aggregate “72% quality” field on the receipt.
 4. Releasing a Cua claim does not mark the Work Item completed.
    Deleting the pool does not erase Room history.
 5. `emit_receipt` stays owner-gated unless explicitly granted
-   ([MEMBER-CAPABILITIES.md](history/MEMBER-CAPABILITIES.md)).
+   ([MEMBER-CAPABILITIES.md](../archive/docs/history/MEMBER-CAPABILITIES.md)).
 6. Session `done` ([WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md)) is not
    this object. An agent or steerer still records the session event.
 
