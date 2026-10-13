@@ -154,6 +154,11 @@ function step(store, roomId, now) {
     if (store.room(roomId).state.messages?.some(message => message.id === messageId)) return null;
     if (chosen.state === "unclaimed") {
       commitClaim(store, roomId, claimWork(chosen, agent.id, { leaseHours: null, now, note: "Assigned by Room Guide" }), "claimed", ROOM_GUIDE_ID, now);
+    } else if (chosen.owner !== agent.id || chosen.state === "done" || chosen.state === "closed") {
+      // The chosen claim was taken (or finished) by someone else before this
+      // agent joined. Do not announce it as the agent's or wake them for it;
+      // leave the step un-done so a later release can still be assigned.
+      return null;
     }
     const name = agent.displayName || agent.id;
     appendRoomEvent(store, roomId, {

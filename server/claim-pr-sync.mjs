@@ -207,7 +207,11 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
     const read = await fetchCommitDocument(`${base}/status`, { fetchImpl, token, nowMs, deadline });
     if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return read;
-    if (read.kind === "ok") status = read.body;
+    // A failed fetch is not an empty status: leave the cursor on "status"
+    // so the next tick retries this leg instead of rolling up a bogus CI
+    // state built from the missing half.
+    if (read.kind !== "ok") return { cursor, partial: true, status };
+    status = read.body;
     cursor = "checks";
   }
   if (cursor === "checks") {
@@ -216,7 +220,11 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
     const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs, deadline });
     if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
-    if (read.kind === "ok") checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
+    // Same guard for the check-runs leg: a failed fetch must not advance
+    // the cursor to "done" or record a rollup built from the status alone.
+    // The status already fetched rides along so the resume keeps it.
+    if (read.kind !== "ok") return { cursor, partial: true, status };
+    checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
     cursor = "done";
   }
   const rollup = rollupClaimCi({ status, checkRuns, pullUrl: pullRequest.url });

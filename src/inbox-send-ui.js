@@ -459,6 +459,12 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
   }
   const threadEl = ids.threadId ? $(ids.threadId) : null;
   let state = "idle", busy = false, generation = 0;
+  // The idempotency key of the current logical send, retained across
+  // uncertain attempts: a retry of an unchanged message reuses the key, so
+  // the server replays its journaled receipt instead of delivering twice.
+  // A definitive outcome (a final receipt, or a sub-500 rejection) or any
+  // edit to the message ends the logical send; the next submit mints fresh.
+  let pendingKey = null, pendingFingerprint = null;
   function render(note = "") {
     const own = Boolean(ownerKey());
     el.send.disabled = busy || !own;
@@ -473,17 +479,24 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
     event?.preventDefault?.();
     const gen = generation, owner = ownerKey();
     if (!owner || busy) return;
-    // One idempotency key per user-initiated send: the server replays the
-    // journaled receipt for a repeated key instead of delivering twice, so an
-    // uncertain retry (dropped response, double submit) never double-sends.
-    const data = { channel: el.channel.value, to: el.to.value.trim(), subject: el.subject.value, body: el.body.value,
-      requestId: crypto.randomUUID() };
+    // One idempotency key per logical send: the server replays the
+    // journaled receipt for a repeated key instead of delivering twice, so
+    // an uncertain retry (dropped response, resubmit of the same message)
+    // never double-sends. The key is minted once per distinct payload and
+    // retained until the send resolves definitively (see below).
+    const data = { channel: el.channel.value, to: el.to.value.trim(), subject: el.subject.value, body: el.body.value };
     const threadId = threadEl?.value.trim();
     if (threadId) data.threadId = threadId;
+    const fingerprint = JSON.stringify(data);
+    if (fingerprint !== pendingFingerprint) { pendingKey = crypto.randomUUID(); pendingFingerprint = fingerprint; }
+    data.requestId = pendingKey;
     busy = true; state = "pending"; render();
     try {
       const value = await api.request("/channel-sends", { method: "POST", data }, validDirectSendResponse);
       if (gen !== generation || owner !== ownerKey()) return;
+      // A final receipt (sent or failed) is journaled under this key; the
+      // logical send is over, so a later submit is a new send.
+      pendingKey = null; pendingFingerprint = null;
       state = value.send.status;
       render(state === "sent"
         ? `Sent via ${value.send.channel === "gmail" ? "Gmail" : "Telegram"}.`
@@ -491,6 +504,12 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
       if (state === "sent") el.form.reset();
     } catch (error) {
       if (gen !== generation || owner !== ownerKey()) return;
+      // A sub-500 rejection is definitive — the server refused the send or
+      // journaled a final failure, so nothing was delivered — and the
+      // retained key is dropped. Anything else (5xx, a dropped response) is
+      // uncertain: the send may already be journaled, so the key stays for
+      // the retry to replay it.
+      if (error?.status && error.status < 500) { pendingKey = null; pendingFingerprint = null; }
       state = "failed";
       render(directSendErrorText(error?.code));
     } finally {
@@ -500,7 +519,7 @@ export function installInboxDirectSend({ api, ownerKey, ids }) {
   el.form.addEventListener("submit", send);
   render();
   return {
-    reset() { generation++; busy = false; state = "idle"; render(); },
+    reset() { generation++; busy = false; state = "idle"; pendingKey = null; pendingFingerprint = null; render(); },
     hasPending: () => busy,
     get state() { return state; }
   };

@@ -62,7 +62,7 @@ const DEFAULT_TIMEOUTS = {
 const NEVER_RETRY = new Set([
   'auth_denied', 'method_blocked', 'method_unsupported', 'occupant_changed',
   'binding_mismatch', 'input', 'idempotency_conflict', 'pane_not_found',
-  'handle_not_found',
+  'handle_not_found', 'server_error',
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

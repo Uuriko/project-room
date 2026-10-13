@@ -347,6 +347,7 @@
   "tests/guest-join.test.js": 154040,
   "tests/guest-scope-gate-http.test.js": 50935,
   "tests/guest-signout-ui.test.js": 5863,
+  "tests/guest-sweep-rotated-credential.test.mjs": 25940,
   "tests/guest-token-expiry.test.js": 28770,
   "tests/handoff-case.test.js": 14447,
   "tests/handoff-envelope.test.js": 11155,
@@ -397,6 +398,7 @@
   "tests/inbox-collision.test.js": 5296,
   "tests/inbox-conversation-auth.test.js": 39646,
   "tests/inbox-digest-sla-routes.test.js": 23714,
+  "tests/inbox-direct-send-idempotency.test.js": 2962,
   "tests/inbox-handoff.test.js": 5259,
   "tests/inbox-import-guards.test.js": 54799,
   "tests/inbox-internal-notes.test.js": 4643,
@@ -474,6 +476,7 @@
   "tests/lease-renewal.test.js": 40126,
   "tests/legal-pages.test.js": 36739,
   "tests/legal-templates-grounding.test.js": 7162,
+  "tests/legal-unpublish-fail-closed.test.js": 4937,
   "tests/lesson-contradictions.test.js": 4937,
   "tests/lesson-scorer.test.js": 4327,
   "tests/listing-check.test.js": 5493,
@@ -487,6 +490,7 @@
   "tests/machine-approval-cursor.test.js": 2180,
   "tests/machine-bot-board-stop.test.js": 1000,
   "tests/machine-bot-halt.test.js": 1921,
+  "tests/machine-bot-provider-task-isolation.test.js": 5635,
   "tests/machine-control-during-call.test.js": 3012,
   "tests/machine-pause-restart.test.js": 1000,
   "tests/magic-account-switch.test.js": 36197,
@@ -1054,6 +1058,7 @@
   "tests/first-room-copy.test.js": 133,
   "tests/github-unconfigured-sweep.test.js": 475,
   "tests/herdr-bridge.test.js": 9706,
+  "tests/herdr-bridge-unknown-socket-error.test.js": 7280,
   "tests/inbox-stitch-fuzz.test.js": 179,
   "tests/machine-pause-duration.test.js": 152,
   "tests/maintenance-signals.test.js": 573,
@@ -1078,6 +1083,7 @@
   "tests/webhook-retry-backoff.test.js": 600,
   "tests/work-claim-conflict-hint.test.js": 309,
   "tests/work-claim-idempotency.test.js": 322,
+  "tests/work-claim-mirror-id.test.js": 13660,
   "tests/work-claim-mirror-successor.test.js": 800,
   "tests/work-claim-renew-probe-b.test.js": 125,
   "tests/work-claim-renew-probes.test.js": 120,
@@ -1162,5 +1168,21 @@
   "purpose": "Measured allocation only; test discovery remains authoritative."
  },
  "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
- "pr2463UnmeasuredRefreshMeasurement": "42 unmeasured files (40 on main 80846d7c plus tests/email-gate-no-mailer.test.js and tests/email-verification-health.test.js from #2463): solo wall-clock ms of `node --test <file>` on Linux Node v24.19.0, 2026-10-10, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership."
+ "pr2463UnmeasuredRefreshMeasurement": "42 unmeasured files (40 on main 80846d7c plus tests/email-gate-no-mailer.test.js and tests/email-verification-health.test.js from #2463): solo wall-clock ms of `node --test <file>` on Linux Node v24.19.0, 2026-10-10, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
+ "fix2854Measurement": {
+  "date": "2026-10-13",
+  "runtime": "Node v24.20.0 Linux local",
+  "file": "tests/work-claim-mirror-id.test.js",
+  "milliseconds": 13660,
+  "method": "Solo wall-clock ms of `node --test tests/work-claim-mirror-id.test.js`; all 5 tests passed. This slow local host runs peer files ~18x their recorded values, so treat as a conservative relative weight.",
+  "purpose": "Measured allocation only; test discovery remains authoritative. Adding this entry brings the unmeasured set from 41 back to the UNMEASURED_CAP of 40 (main already sits at the cap, so the new #2854 test file tripped the shard-plan gate in unit/coverage CI)."
+ },
+ "fix2847Measurement": {
+  "date": "2026-10-13",
+  "runtime": "Node v24.20.0 Linux local",
+  "file": "tests/guest-sweep-rotated-credential.test.mjs",
+  "milliseconds": 25940,
+  "method": "Solo wall-clock ms of `node --test tests/guest-sweep-rotated-credential.test.mjs`; both tests passed (node --test reported duration_ms 23519). This slow local host runs peer files well above their recorded values, so treat as a conservative relative weight.",
+  "purpose": "Measured allocation only; test discovery remains authoritative. Adding this entry brings the unmeasured set from 41 back to the UNMEASURED_CAP of 40 (main already sits at the cap, so the new #2847 test file tripped the shard-plan gate in PR #3002's hosted CI)."
+ }
 }

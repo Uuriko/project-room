@@ -59,7 +59,7 @@ import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
-import { spendPricingEnabled } from "../src/events.js";
+import { ownMember, spendPricingEnabled } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
 export const SPEND_DENOMINATION = "credits";
@@ -633,7 +633,7 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
     const room = store.room(roomId);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
-    if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     // #1521: this call mints money — a grants:issue delegate cannot issue
     // a spend grant to themselves (a reproduced 1,000,000-cent self-issued
     // grant row was the proof). The room owner is full authority
@@ -662,7 +662,7 @@ export function revokeSpendGrantRoute(store, token, roomId, agentId, expectedSes
     const room = store.room(roomId);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
-    if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     const revoked = revokeSpendGrant(store.db, roomId, agentId, { nowMs });
     return { roomId, agentId, revoked, evaluatedThrough: store.room(roomId).sequence };
   });

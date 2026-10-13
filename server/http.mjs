@@ -4183,7 +4183,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (result.messages?.length) {
           const byId = new Map(store.room(roomId).state.messages.map(message => [message.id, message]));
           result.messages = result.messages.filter(hit => {
-            const message = byId.get(hit.id);
+            const message = byId.get(hit.id) ?? store.archivedMessage(roomId, hit.id);
             return message ? dmMessageVisible(message) : false;
           });
         }

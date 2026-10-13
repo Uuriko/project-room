@@ -97,11 +97,18 @@ function effectiveRequestParams(found) {
 // ---------------------------------------------------------------------------
 
 // Tools whose description states the REST equivalent outright, e.g.
-// "Same call as POST /api/agent-rooms." A trailing "and METHOD /path"
-// continues the same claim (room_list_peer_dms names two routes).
+// "Same call as POST /api/agent-rooms." The verb phrase between "Same"
+// and "as" varies by author — call, read, reads, store call, write,
+// data, checks, body and store call — so match any run of lowercase
+// words there; pinning a verb list silently left tools whose authors
+// picked another verb (room_decide_access_request: "Same write as …",
+// room_work_claim_provenance: "Same data as …", heartbeat_set: "Same
+// body and store call as …") completely uncompared (#2899). A trailing
+// "and METHOD /path" continues the same claim (room_list_peer_dms
+// names two routes).
 function routeClaims(description) {
   const claims = [];
-  const sentence = /Same (?:call|read|reads|store call) as ([^.]+)\./g;
+  const sentence = /Same (?:[a-z]+ )+as ([^.]+)\./g;
   let sm;
   while ((sm = sentence.exec(description))) {
     const pair = /([A-Z]+)\s+([^\s,;]+)/g;
@@ -173,6 +180,9 @@ const ALLOW = {
     stricter: {
       wakeUrl: "Tool: 'hostId and wakeUrl are required.' API: 'optional for wakeable hosts (must be https)'. Deliberate: a wakeable host with no URL cannot be woken over MCP; the REST route also serves poll-only hosts.",
     },
+    narrowed: {
+      workWakes: "The pointer-only work-signal preference is owned by heartbeat_set ('Optional workWakes opts this host into pull-only work signals'); this fixed-mode registration body omits it, and the route retains the current setting when it is omitted.",
+    },
   },
   wake_clear: {
     // "Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }."
@@ -182,6 +192,7 @@ const ALLOW = {
       wakeUrl: "Clearing the wake URL is the point of the tool; the fixed mode pull-only forbids it route-side.",
       cadenceSeconds: "'Cadence is cleared because this body omits cadenceSeconds, matching that route.'",
       pushNotification: "'An existing push subscription row is left in place' — the tool never sends one.",
+      workWakes: "The pointer-only work-signal preference is owned by heartbeat_set; this fixed pull-only body omits it, and the route retains the current setting when it is omitted.",
     },
   },
   wake_pause: {
@@ -202,6 +213,12 @@ const ALLOW = {
       memberId: "tool optional, API required",
       // "requestId is optional and is minted by the server when omitted."
       requestId: "tool optional, API required",
+    },
+  },
+  heartbeat_set: {
+    // "Same body and store call as POST /api/agent-heartbeats."
+    stricter: {
+      mode: "Tool: 'hostId and mode are required.' API: mode is optional and defaults to wakeable. Deliberate: heartbeat_set is the explicit presence report, so the caller states the mode instead of silently inheriting the route default.",
     },
   },
   public_work_recommend: {

@@ -44,7 +44,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archivedMatchingRecords, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -145,7 +145,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
@@ -1529,6 +1529,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
+      // Issue #2913: deployed wake-signal tables still carry the pre-room
+      // UNIQUE(agent_id, message_id); converge first (row-preserving
+      // rebuild), since IF NOT EXISTS cannot rewrite the stored DDL.
+      convergeWakeSignalRoomScope(this.db);
       this.db.exec(agentHeartbeatSchema);
       // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
       this.db.exec(workWakeSchema);
@@ -1858,6 +1862,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // MSG-2: replay events into messages. Idempotent. A mid-batch stop keeps
   // the committed prefix on messages_backfill_cursor.
+  // The current record of an archived message (no longer in the projection), else null.
+  archivedMessage(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    if (!row?.record_json) return null;
+    try { return JSON.parse(row.record_json); } catch { return null; }
+  }
+
   // [authorId, toMemberId] of an archived direct message, else null.
   archivedDmParties(roomId, messageId) {
     const row = archivedMessageRow(this.db, roomId, messageId);
@@ -4263,7 +4274,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // a cursor is resolved, so a cursor can only point at a match this
         // caller would see anyway.
         const matches = [];
-        for (const m of room.state.messages ?? []) {
+        // Archived messages are not in the projection; they are older than every
+        // projected message, so they come first.
+        for (const m of [...archivedMatchingRecords(this.db, roomId, needle), ...(room.state.messages ?? [])]) {
           if (m.body == null) continue; // tombstone (deleted or redacted)
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
@@ -4694,6 +4707,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
+    // #2951: a flood token spent below lives in an in-memory bucket that the
+    // command transaction cannot roll back, so remember the spend and refund
+    // it in the catch if anything after consume() fails — validation, the
+    // reducer, persistence, or the transaction commit itself.
+    let floodSpend = null;
+    try {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
@@ -4724,7 +4743,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
-      this.roomFlood.consume(roomId, auth.member.id, command.type);
+      if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
+        floodSpend = { memberId: auth.member.id, type: command.type };
+      }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       // bond.list is a read. It does not append a ledger event, so an archived
       // room can still answer it. Writes below still hit refuseArchivedWrite.
@@ -5104,6 +5125,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
+    } catch (error) {
+      // The test doubles that replace roomFlood expose only consume(), so a
+      // missing refund (or a spend consume() did not report) means no refund.
+      if (floodSpend && typeof this.roomFlood.refund === "function") {
+        try { this.roomFlood.refund(roomId, floodSpend.memberId, floodSpend.type); }
+        catch { /* a refund failure must never mask the command's own error */ }
+      }
+      throw error;
+    }
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
