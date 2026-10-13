@@ -647,6 +647,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         tool("room_check_access")]
     };
   }
+  if (reasonCode === "agent_not_registered") {
+    return {
+      status: "action_required", reason: "agent_not_registered",
+      hint: "No host has reported for this identity yet. POST /api/agent-heartbeats with your hostId first, then poll again.",
+      next: [path("/api/agent-heartbeats"), tool("heartbeat_set"), command("POST /api/agent-heartbeats with { hostId } for this identity (or call heartbeat_set), then re-poll GET /api/agent-wakes/poll")]
+    };
+  }
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.
