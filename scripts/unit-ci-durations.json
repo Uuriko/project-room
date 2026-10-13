@@ -929,6 +929,7 @@
   "machine/test/bot/bot.test.mjs": 7948.854,
   "machine/test/fake-relay.mjs": 63.064,
   "machine/test/machine.test.mjs": 5957.66,
+  "machine/test/mcp.test.mjs": 4347.185,
   "scripts/load-test.mjs": 1116.88,
   "tests/access-request-upgrade.test.mjs": 1038.93,
   "tests/entry-docs-start-here.test.mjs": 129.053,
