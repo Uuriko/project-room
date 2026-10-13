@@ -500,3 +500,17 @@ test("a message kept only because it was pinned is archived on a later run once 
   assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
   assert.ok(!ids().includes("p-0"), "once unpinned it is archived like any other old message");
 });
+
+test("archiveMessages keeps unanswered questions so the open-questions list does not shrink", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-open", body: "Who owns the invoice?" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-answered", body: "Is staging up?" });
+  f.send(f.agent, T.MESSAGE_POSTED, { messageId: "a-1", body: "yes", replyToId: "q-answered" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `pad-${i}`, body: `pad ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  const ids = f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(ids.includes("q-open"), "the unanswered question stays");
+  assert.ok(!ids.includes("q-answered"), "an answered old question can be archived");
+});
