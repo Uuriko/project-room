@@ -115,7 +115,7 @@ const AX_NAMED_RECOVERIES = {
   managed_agent: ["Replace this agent's key through its room connection, not here.", "Rotate the key through the agent's room connection."],
   member_inactive: ["This member's access has ended; its pause row is inert. Nothing to change here.", "Treat it as done; the member's access has ended."],
   membership_conflict: ["That Room member already exists. Use the existing membership; do not create a duplicate.", "Use the existing membership; do not create a duplicate."],
-  message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
+  message_archived: ["That message is archived and read-only — it cannot be changed or replied to. Do not retry; post a new message instead.", "Post a new message instead of editing, deleting, reacting to, pinning, or replying under the archived one."],
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
   ndjson_required: ["This route requires an NDJSON body. Resend with Content-Type application/x-ndjson.", "Resend the request as application/x-ndjson."],
   nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
