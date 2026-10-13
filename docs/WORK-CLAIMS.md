@@ -322,8 +322,10 @@ A real addition adds one history entry naming the URL and one existing
 `ci` and current completion `attestations`; historical `reviews` and their
 recorded bases remain visible. An old approval no longer qualifies for
 non-self manual completion. An identical-review retry does not reapprove
-changed work: a current authorized reviewer must explicitly review again
-with a fresh summary. A fresh duplicate PR URL returns the exact current
+changed work while CI is cleared: a current authorized reviewer must
+explicitly review again with a fresh summary, or resubmit the same review
+once CI has recorded the newly linked PR's head — that resubmission binds
+to the new head. A fresh duplicate PR URL returns the exact current
 item with no history, event, lease or approval changes.
 
 A stale basis, unclaimed/done/superseded item is **409**
@@ -393,10 +395,16 @@ proof of the artifact bytes, newly submitted `blobs`, or the version the
 reviewer actually inspected. Automatic PR-merge and live land/deploy
 settlement use separate paths and are not changed by this manual gate.
 
-Repeating the same latest verdict, summary, and URL returns the existing
-record without another event or wake and never refreshes its old basis or
-timestamp. To review changed context, submit a new explicit review summary.
-This only deduplicates consecutive identical reviews. A delayed old request
+Repeating the same latest verdict, summary, and URL while its basis is
+still current returns the existing record without another event or wake.
+When the basis has gone stale and there is a current basis to rebind to —
+for example CI recorded a new head — the same resubmission is a fresh
+re-review: it records a new review, timestamp, and attestation bound to
+the current basis, so a reviewer is never forced to invent new wording
+to re-approve a new head. The exception is a basis stale only because CI
+was cleared (a newly linked PR): with no current head, an identical
+replay still does not reapprove, as described above. This only
+deduplicates consecutive identical reviews on a current basis. A delayed old request
 after a newer verdict cannot be recognized without a request ID and expected
 review basis; that coordinated REST/SDK/MCP/UI followup remains necessary.
 

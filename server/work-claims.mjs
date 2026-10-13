@@ -1002,9 +1002,23 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
     reviewUrl = url;
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
-  // Replaying the latest identical content never refreshes its old binding.
-  // A request ID is still needed to distinguish delayed retries after a newer verdict.
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) return Object.freeze(item);
+  // #2966: identical content is a true replay only while its basis is
+  // still current — then it returns the stored record with no new event.
+  // When the basis has gone stale and there is a current basis to rebind
+  // to (e.g. recordCi moved the CI head from A to B), the resubmission is a
+  // fresh re-review of the current context: it must record a new review
+  // bound to the current basis, or a reviewer who always writes "LGTM"
+  // could never refresh their approval and reviewed completion would
+  // deadlock. The one exception is a basis stale only because CI was
+  // cleared (appendWorkPullRequest sets ci to null when a PR is linked):
+  // with no current head to bind to, an identical replay still cannot
+  // reapprove the changed work — a fresh summary, or a re-review once CI
+  // records the new head, is required there. A request ID is still needed
+  // to distinguish delayed retries after a newer verdict.
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl
+    && (currentReviewBasis(prior, item) || (prior.basis && prior.basis.headSha !== null && (item.ci?.headSha ?? null) === null))) {
+    return Object.freeze(item);
+  }
   const at = isoOf(atMs);
   const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);

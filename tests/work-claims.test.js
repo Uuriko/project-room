@@ -75,6 +75,49 @@ test("append PR keeps prior observations, invalidates approval, and needs a fres
   assert.equal(canCloseWork(fresh, "reviewer", policy), true);
 });
 
+// #2966: an identical re-review must be able to refresh a stale basis.
+// recordCi moves the CI head without touching reviews, so a reviewer who
+// approved head A with "LGTM" has to be able to re-approve head B with the
+// same text — otherwise the old approval fails the current-basis check and
+// reviewed completion is deadlocked. A replay on the still-current basis
+// stays a no-op, and a replay while CI is cleared (a newly linked PR has
+// no head yet) still cannot reapprove work that has no current head.
+test("identical re-review refreshes a stale basis when CI moves to a new head", async () => {
+  const { createWork, appendWorkPullRequest, recordReview, recordCi, canCloseWork } = await import("../server/work-claims.mjs");
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  let work = claimWork(createWork({ id: "re-review", reviewPolicy: "distinct_member" }, { now }), "quill", { now, leaseHours: 6 });
+  work = recordCi(work, { state: "success", headSha: "a".repeat(40) }, now).item;
+  work = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", now });
+  const policy = { reviewMembers: ["reviewer"] };
+  assert.equal(canCloseWork(work, "reviewer", policy), true);
+  // True replay: same content on the still-current basis changes nothing.
+  const replay = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 1 });
+  assert.equal(replay.history, work.history);
+  assert.deepEqual(replay.reviews, work.reviews);
+  // CI moves to a new head: the old approval is stale and cannot close.
+  work = recordCi(work, { state: "success", headSha: "b".repeat(40) }, now + 2).item;
+  assert.equal(canCloseWork(work, "reviewer", policy), false);
+  // The identical re-review is a fresh review bound to the new head.
+  const refreshed = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 3 });
+  assert.ok(refreshed.history.length > work.history.length);
+  assert.equal(refreshed.reviews.at(-1).basis.headSha, "b".repeat(40));
+  assert.equal(canCloseWork(refreshed, "reviewer", policy), true);
+  // Linking another PR clears CI: with no current head, the identical
+  // replay still does not reapprove (the append-PR contract above).
+  const basis = { expectedClaimedAt: refreshed.claimedAt, expectedHistoryLength: refreshed.history.length, now: now + 4 };
+  const added = appendWorkPullRequest(refreshed, "quill", { ...basis, pullRequest: "https://github.com/acme/repo/pull/2/" });
+  assert.equal(added.ci, null);
+  const clearedReplay = recordReview(added, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 5 });
+  assert.equal(clearedReplay.history, added.history);
+  assert.deepEqual(clearedReplay.reviews, added.reviews);
+  assert.equal(canCloseWork(clearedReplay, "reviewer", policy), false);
+  // Once CI records the new PR's head, the identical text refreshes again.
+  const withHead = recordCi(added, { state: "success", headSha: "c".repeat(40) }, now + 6).item;
+  const reapproved = recordReview(withHead, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 7 });
+  assert.equal(reapproved.reviews.at(-1).basis.headSha, "c".repeat(40));
+  assert.equal(canCloseWork(reapproved, "reviewer", policy), true);
+});
+
 test("append PR refuses stale rounds, unsafe input and stopped ownership without changing work", async () => {
   const { appendWorkPullRequest, createWork, renewWork } = await import("../server/work-claims.mjs");
   const now = Date.parse("2026-10-03T13:00:00Z");
