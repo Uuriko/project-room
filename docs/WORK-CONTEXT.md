@@ -197,7 +197,9 @@ node scripts/agent-work-preflight.mjs /absolute/private/connection-directory WOR
 
 The first run reads the task discussion and saves a private local checkpoint
 with its text. Later runs validate that retained content and fetch appended
-discussion, while rereading current task instructions and permissions. No model
+discussion, while rereading current task instructions, viewer permissions and
+outstanding task-linked request metadata. These current fields are returned
+fresh and are not persisted as authority. No model
 or always-on coordinator is required. This option requires the corresponding
 consistent-read server version; it fails explicitly against older servers.
 
