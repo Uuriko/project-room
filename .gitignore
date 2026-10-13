@@ -37,3 +37,6 @@ results/
 docs/SERVER-COVERAGE.md
 docs/OPENAPI-CONTRACT-REPORT.md
 docs/room-health.html
+# Agent pages — built by scripts/build-agent-docs.mjs at CF deploy time
+# (decision #36 / #3254 Option A: never committed, never in the runtime package)
+docs/agents/*.html
