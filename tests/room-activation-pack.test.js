@@ -148,7 +148,10 @@ test("pack surfaces unclaimed board claims as openClaims (#3020)", async t => {
   const origin = await serve(t, f.store);
   const pack = await (await getPack(origin, ROOM, f.workerKey)).json();
   assert.deepEqual(pack.openClaims, [
-    { id: "board-open-1", title: "Pick me up", state: "unclaimed", owner: null, untrusted: true }
+    { id: "board-open-1", title: "Pick me up", source: "board", roomId: ROOM, state: "unclaimed",
+      owner: null, leaseExpiresAt: null, untrusted: true,
+      claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/board-open-1/claim`,
+        params: { requestId: "<uuid>" } } }
   ]);
   // The embedded orient agrees: the same claim is the worker's available
   // work, while its own-claims list stays scoped to the viewer (the seeded

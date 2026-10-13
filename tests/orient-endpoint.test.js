@@ -142,7 +142,10 @@ test("orient surfaces unclaimed board claims as availableClaims, separate from o
   // it must be visible as available, or pack-style orientation reads as
   // "no work here" (the #3020 stall).
   assert.deepEqual(payload.availableClaims, [
-    { id: "board-open-1", title: "Pick me up", state: "unclaimed", owner: null, untrusted: true }
+    { id: "board-open-1", title: "Pick me up", source: "board", roomId: ROOM, state: "unclaimed",
+      owner: null, leaseExpiresAt: null, untrusted: true,
+      claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/board-open-1/claim`,
+        params: { requestId: "<uuid>" } } }
   ]);
   // Own claims keep their existing meaning: the viewer's claims, any state,
   // and never somebody else's available work.

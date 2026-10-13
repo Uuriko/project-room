@@ -21,6 +21,7 @@ import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
+import { availableClaimsFromBoard } from "./available-work.mjs";
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -128,22 +129,11 @@ function fleetSelfOrNull(store, roomSlug, room, viewerId) {
   } catch { return {}; }
 }
 
-// Board claims an arriving member can pick up right now (#3020): state
-// "unclaimed" and not invalidated — no premise flag, not superseded. This
-// is the same "usable" test needs-me's openWork applies (openWorkOf in
-// server/needs-me.mjs). The orient/pack `claims` list is the viewer's own
-// claims only, and `work`/`openWork` derive from Work Items, so without
-// this projection a fresh agent sees no claimable work in a room whose
-// board has open claims.
-const projectAvailableClaims = board => board
-  .filter(item => item && item.state === "unclaimed" && !item.premiseFlag && !item.supersededBy)
-  .slice(0, MAX_WORK)
-  .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, owner: null, untrusted: true }));
-
-export function availableClaimsOf(store, roomSlug) {
-  try { return projectAvailableClaims(store.workClaims?.list?.(roomSlug) ?? []); }
-  catch { return []; }
-}
+// Board claims an arriving member can pick up right now (#3020) come from
+// the AvailableWork projection (server/available-work.mjs) — the ONE
+// availability definition every discovery surface consumes, so orient and
+// the activation pack cannot diverge. The `claims` list below stays the
+// viewer's own claims; `work`/`openWork` still derive from Work Items.
 
 export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
@@ -166,7 +156,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
     claims = board
       .filter(item => item?.owner === viewerId)
       .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, untrusted: true }));
-    availableClaims = projectAvailableClaims(board);
+    availableClaims = availableClaimsFromBoard(board, roomSlug, { viewerId, state }).slice(0, MAX_WORK);
   } catch { claims = []; availableClaims = []; }
   let nextActions = [];
   if (options.token && store.nextActions?.list) {
