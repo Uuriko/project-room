@@ -21,7 +21,7 @@ export class OutsideAgents {
     });
   }
   #view(roomId, room) {
-    const verifiers = this.#verifiers(room);
+    const verifiers = this.#verifiers(roomId, room);
     const agents = assembleOutsideAgents(room.state.messages ?? [], room.state.members ?? {}, { verifiers });
     // Human approve/deny surface (1e hs2-outside-agent-approval): links
     // waiting on a decision, plus the verify step for each. Mirrors the
@@ -43,7 +43,7 @@ export class OutsideAgents {
   // manage_members, and agent identities holding an active membership-
   // administration grant. The same set gates assembly (forgery protection)
   // and the verify() write path below.
-  #verifiers(room) {
+  #verifiers(roomId, room) {
     const verifiers = new Set();
     const ownerId = room.state?.room?.ownerId;
     if (typeof ownerId === "string" && ownerId) verifiers.add(ownerId);
@@ -53,7 +53,7 @@ export class OutsideAgents {
       catch { /* not a manager */ }
       const identityId = member.identityId;
       if (typeof identityId === "string" && identityId
-        && this.store.delegation?.hasGrant?.(room.id, identityId)) verifiers.add(memberId);
+        && this.store.delegation?.hasGrant?.(roomId, identityId)) verifiers.add(memberId);
     }
     return verifiers;
   }
@@ -116,7 +116,7 @@ export class OutsideAgents {
   verify(token, roomId, input, expectedSessionBinding = null) {
     const { auth, room } = this.#open(token, roomId, expectedSessionBinding);
     this.#refuse(auth, roomId, room);
-    const verifiers = this.#verifiers(room);
+    const verifiers = this.#verifiers(roomId, room);
     if (!verifiers.has(auth.member.id))
       fail(403, "outside_agent_forbidden", "Only the room owner or a membership administrator may decide on outside-agent links");
     const plan = planOutsideAgentVerify(room.state.messages ?? [], room.state.members ?? {}, roomId, auth.member.id, input, { verifiers });
