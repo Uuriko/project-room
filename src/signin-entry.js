@@ -2,7 +2,7 @@ import { AccountClient } from "./account-client.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { applyStoredTheme } from "./account-settings-ui.js";
-import { rememberAccountHint, rememberLastRoom } from "./browser-session.js";
+import { rememberAccountHint } from "./browser-session.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { uiText } from "./strings.js";
 
@@ -36,7 +36,9 @@ export function mountSigninEntry({ openWorkspace }) {
   });
   const agent = createAgentSigninUI({
     onSignedIn: async session => {
-      rememberLastRoom(session.roomId);
+      const target = new URL(location.href);
+      target.searchParams.set("room", session.roomId);
+      history.replaceState(history.state, "", target.href);
       await openWorkspace();
     },
     firstRunActions: {
