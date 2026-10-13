@@ -118,6 +118,7 @@ optional.push("server/claim-validate.mjs"); // RC-2026-09-24-204: synchronous pr
 optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("src/mcp-server-card.mjs"); // one MCP server card rendered from the live tool lists
+optional.push("src/mcp-tool-registry.js"); // one MCP tool registry: selection metadata (core/blurb/alias/focus) for every catalog tool (imported by src/room-mcp-join.js and server/mcp-discovery.mjs)
 optional.push("server/mcp-hosted-tools.mjs"); // hosted MCP tool definitions (imported by server/mcp-room-profile.mjs and server/mcp-discovery.mjs)
 optional.push("server/mcp-discovery.mjs"); // binds the server card to those live lists (imported by server/mcp-http.mjs and deploy/room-entry.mjs)
 optional.push("server/mcp-arg-errors.mjs"); // structured MCP tools/call errors (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
