@@ -4,6 +4,7 @@ import { anonymousIdentityMintMcpTools } from './mcp-identity-mint.mjs';
 import { MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { ROOM_ORIGIN, ROOM_SOURCE, bindLiveMcpServerCard } from "../deploy/agent-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, ROOM_MCP_SERVER_VERSION, CORE_MCP_TOOLS, CORE_MCP_BLURBS, mcpToolAlias } from "../src/room-mcp-join.js";
+import { MCP_TOOL_META } from "../src/mcp-tool-registry.js";
 import { renderMcpServerCardJson } from "../src/mcp-server-card.mjs";
 import { MCP_JOIN_TOOLS } from "./mcp-http.mjs";
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
@@ -25,26 +26,20 @@ export function livePublicMcpTools() {
 // agent's grants/tiers do not admit is ABSENT from the returned catalog —
 // never present-but-denying. Omit it for the public/unfiltered lists
 // (server card, join surface), which stay full by design.
-const FOCUS_COMMON_TOOLS = [
-  "room_assistant_context", "room_check_access", "room_needs_me", "get_room_context", "room_read_request",
-  "room_list_requests", "room_reply", "room_respond_to_request", "room_request_reply", "room_post_message"
-];
+// Focus membership is a registry tag (src/mcp-tool-registry.js); the lists
+// below are derived views of it. Listing order always comes from the defs,
+// never from these tags — membership is consumed as a set.
+const focusMembers = tag => MCP_TOOL_META.filter(entry => entry.focus?.includes(tag)).map(entry => entry.name);
+const FOCUS_COMMON_TOOLS = focusMembers("common");
 
 // Actor-selected discovery views, not permission or execution profiles. Include
 // advanced tools from the full catalog without changing direct-call availability.
 export const MCP_TOOL_FOCUSES = Object.freeze({
   public_work: [],
-  conversation: ["room_read_inbox", "room_read_messages", "room_react", "room_request_history", "room_cancel_request", "bond_list", "bond_accept", "bond_decline", "bond_revoke", "room_list_peer_dms", "dm_posted"],
-  work: ["room_assistant_action", "room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
-    "room_propose_work", "room_begin_work", "room_accept_work", "room_start_work", "room_block_work",
-    "room_resolve_blocker", "room_post_draft", "room_submit_text_result", "room_record_completion",
-    "room_record_handoff", "room_acquire_claim", "room_renew_claim", "room_release_claim", "room_link_work_claim_pr",
-    "room_work_claim_provenance",
-    "room_list_files", "room_get_file", "room_put_file", "room_commit_file"],
-  review: ["room_list_work", "room_read_work", "room_read_work_discussion", "room_read_result",
-    "room_record_verification", "room_list_files", "room_get_file", "list_land_queue"],
-  automation: ["wake_register", "wake_clear", "wake_pause", "wake_resume", "heartbeat_set",
-    "heartbeat_get", "heartbeat_ack", "webhook_subscribe", "webhook_list", "webhook_unsubscribe"]
+  conversation: focusMembers("conversation"),
+  work: focusMembers("work"),
+  review: focusMembers("review"),
+  automation: focusMembers("automation")
 });
 
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
