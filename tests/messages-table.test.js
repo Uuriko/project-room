@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { messageVisibleTo, syncMessageRows } from "../server/messages-store.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
 
 // Message rows are written in the same transaction as the message event.
 // Reads still use the projection. A direct message stays visible to the
@@ -465,4 +466,37 @@ test("unpinning or reacting to an archived DM as a non-party confirms nothing an
     assert.notEqual(code, "message_archived", `${type} does not confirm the archived DM`);
   }
   assert.equal(f.store.room("commons").sequence, before);
+});
+
+test("the recovery audit accepts a room whose old messages are archived and still rejects a tampered marker", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 8; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `r-${i}`, body: `recovery ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.doesNotThrow(() => auditRecovery(f.store), "audit passes before archival");
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
+  assert.doesNotThrow(() => auditRecovery(f.store), "audit passes after archival");
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "after", body: "posted after the archive" });
+  assert.doesNotThrow(() => auditRecovery(f.store), "audit passes after a later post");
+  const projection = JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+  projection.messagesArchive.count += 1;
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  assert.throws(() => auditRecovery(f.store), /operator reconciliation/);
+});
+
+test("a message kept only because it was pinned is archived on a later run once it is unpinned", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 8; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `p-${i}`, body: `pin ${i}` });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "p-0" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
+  const ids = () => f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(ids().includes("p-0"), "the pinned message stays");
+  f.send(f.human, T.MESSAGE_UNPINNED, { messageId: "p-0" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `q-${i}`, body: `later ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
+  assert.ok(!ids().includes("p-0"), "once unpinned it is archived like any other old message");
 });
