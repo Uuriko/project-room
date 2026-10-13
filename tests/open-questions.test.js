@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findOpenQuestions, openQuestionRetention } from '../server/open-questions.mjs';
+import { closeKeepSet } from '../server/messages-store.mjs';
 import { listOpenQuestions } from '../server/open-questions.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
@@ -179,33 +180,90 @@ test('listOpenQuestions rejects a bad limit', t => {
 });
 
 // Archive retention: whatever an archive drops, no viewer's open-questions list changes.
-test('openQuestionRetention keeps what every viewer needs (randomized, with DMs, replies and deletions)', () => {
-  let seed = 7;
-  const rand = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+// mulberry32 is 32-bit safe (an LCG multiply overflows 2^53 and degenerates). The
+// seed is logged and can be replayed with OPEN_QUESTIONS_FUZZ_SEED.
+function mulberry32(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('closeKeepSet keeps what every viewer needs (randomized, with DMs, replies, deletions, pins and a tail)', () => {
+  const seed = Number(process.env.OPEN_QUESTIONS_FUZZ_SEED) || 20261013;
+  const rounds = Number(process.env.OPEN_QUESTIONS_FUZZ_ROUNDS) || 3000;
+  console.log(`# open-questions fuzz seed ${seed}, ${rounds} rounds`);
+  const random = mulberry32(seed);
+  const rand = n => Math.floor(random() * n);
   const authors = ['a', 'b', 'c', 'd'];
-  for (let round = 0; round < 1500; round++) {
+  const seen = { messages: 0, questions: 0, publicReplies: 0, dms: 0, closedQuestions: 0, archivedSome: 0 };
+  for (let round = 0; round < rounds; round++) {
     const messages = [];
     const size = 6 + rand(30);
     for (let i = 0; i < size; i++) {
       const authorId = authors[rand(4)];
       const message = { id: `m${i}`, authorId, body: rand(2) ? `q${i}?` : `s${i}`, createdAt: new Date(1e12 + i * 1000).toISOString() };
       if (i > 0 && rand(3) === 0) message.replyToId = `m${rand(i)}`;
-      if (rand(4) === 0) message.toMemberId = authors[(authors.indexOf(authorId) + 1 + rand(3)) % 4];
-      if (rand(10) === 0) message.deletedAt = message.createdAt;
+      if (rand(5) === 0) message.toMemberId = authors[(authors.indexOf(authorId) + 1 + rand(3)) % 4];
+      if (rand(12) === 0) message.deletedAt = message.createdAt;
       messages.push(message);
     }
-    const pinned = new Set([`m${rand(size)}`, `m${rand(size)}`]);
-    const keep = openQuestionRetention(messages, pinned);
-    for (const id of pinned) keep.add(id);
-    // The archive also keeps every reply ancestor of a kept message and the newest few.
-    for (const message of messages.slice(-3)) keep.add(message.id);
-    const byId = new Map(messages.map(message => [message.id, message]));
-    for (const id of [...keep]) for (let parent = byId.get(byId.get(id)?.replyToId); parent && !keep.has(parent.id); parent = byId.get(parent.replyToId)) keep.add(parent.id);
+    seen.messages += messages.length;
+    seen.questions += messages.filter(m => m.body.includes('?')).length;
+    seen.publicReplies += messages.filter(m => m.replyToId && !m.toMemberId).length;
+    seen.dms += messages.filter(m => m.toMemberId).length;
+    // What the archive keeps before closing: pins and the newest few.
+    const keep = new Set([`m${rand(size)}`, `m${rand(size)}`]);
+    for (const message of messages.slice(-(1 + rand(4)))) keep.add(message.id);
+    closeKeepSet(messages, keep);
     const remaining = messages.filter(message => keep.has(message.id));
+    if (remaining.length < messages.length) seen.archivedSome += 1;
     for (const viewerId of [null, ...authors]) {
-      assert.deepEqual(findOpenQuestions({ messages: remaining, viewerId }).map(row => row.messageId),
-        findOpenQuestions({ messages, viewerId }).map(row => row.messageId), `round ${round} viewer ${viewerId}`);
+      const before = findOpenQuestions({ messages, viewerId }).map(row => row.messageId);
+      seen.closedQuestions += messages.filter(m => m.body.includes('?')).length - before.length;
+      assert.deepEqual(findOpenQuestions({ messages: remaining, viewerId }).map(row => row.messageId), before,
+        `seed ${seed} round ${round} viewer ${viewerId}`);
     }
+  }
+  // The generator really produces the cases the property is about.
+  assert.ok(seen.questions > seen.messages * 0.3, `questions generated: ${JSON.stringify(seen)}`);
+  assert.ok(seen.publicReplies > seen.messages * 0.15, `public replies generated: ${JSON.stringify(seen)}`);
+  assert.ok(seen.dms > seen.messages * 0.1 && seen.dms < seen.messages * 0.3, `DMs are a minority: ${JSON.stringify(seen)}`);
+  assert.ok(seen.closedQuestions > rounds, `answered questions generated: ${JSON.stringify(seen)}`);
+  assert.ok(seen.archivedSome > rounds * 0.3, `rounds that really archive something: ${JSON.stringify(seen)}`);
+});
+
+test('closeKeepSet keeps a direct reply whose timestamp is older than its question', () => {
+  const messages = [
+    msg('q', 'a', 'ready?', { createdAt: '2026-09-23T20:05:00.000Z' }),
+    msg('skew', 'b', 'yes', { replyToId: 'q', createdAt: '2026-09-23T20:01:00.000Z' }),
+    msg('pad', 'c', 'noise', { createdAt: '2026-09-23T20:06:00.000Z' }),
+  ];
+  const keep = closeKeepSet(messages, new Set(['q']));
+  assert.ok(keep.has('skew'), 'a direct reply closes the question whatever its clock says');
+  const remaining = messages.filter(message => keep.has(message.id));
+  assert.deepEqual(ids(findOpenQuestions({ messages: remaining, viewerId: null })), ids(findOpenQuestions({ messages, viewerId: null })));
+});
+
+test('closeKeepSet keeps the answer of a question that is only kept as a reply ancestor', () => {
+  // q (asked), ans (answers q), k (a follow-up reply to q). k stays (newest), so its
+  // ancestor q stays, and q must bring ans along or it reopens.
+  const messages = [
+    msg('q', 'a', 'ready?', { createdAt: '2026-09-23T20:00:00.000Z' }),
+    msg('ans', 'b', 'yes', { replyToId: 'q', createdAt: '2026-09-23T20:01:00.000Z' }),
+    msg('k', 'a', 'thanks', { replyToId: 'q', createdAt: '2026-09-23T20:02:00.000Z' }),
+    msg('pad', 'c', 'noise', { createdAt: '2026-09-23T20:03:00.000Z' }),
+  ];
+  const keep = closeKeepSet(messages, new Set(['k']));
+  assert.ok(keep.has('q') && keep.has('ans'), 'the ancestor question keeps its answer');
+  assert.ok(!keep.has('pad'));
+  const remaining = messages.filter(message => keep.has(message.id));
+  for (const viewerId of [null, 'a', 'b']) {
+    assert.deepEqual(ids(findOpenQuestions({ messages: remaining, viewerId })), ids(findOpenQuestions({ messages, viewerId })));
   }
 });
 
@@ -232,4 +290,14 @@ test('openQuestionRetention keeps a thread answer that is not a direct reply, an
   assert.ok(keep.has('q') && keep.has('r2'), 'the pinned question keeps the later answer in its thread');
   assert.ok(keep.has('pq') && keep.has('dm'), 'a public question closed only by a DM to its asker stays open for the public, so both stay');
   assert.ok(!keep.has('noise'));
+});
+
+test('openQuestionRetention does not scan every DM per open question', () => {
+  const messages = [];
+  for (let i = 0; i < 5000; i++) messages.push({ id: `q${i}`, authorId: 'u0', body: `open ${i}?`, createdAt: new Date(1e12 + i * 1000).toISOString(), replyToId: 'root' });
+  messages.unshift({ id: 'root', authorId: 'u0', body: 'thread', createdAt: new Date(1e12 - 1000).toISOString() });
+  for (let i = 0; i < 10000; i++) messages.push({ id: `d${i}`, authorId: `u${i % 997}`, toMemberId: `u${(i % 3) ? (i * 7) % 997 + 40 : 0}`, body: `dm ${i}`, replyToId: 'root', createdAt: new Date(1e12 + 6e6 + i * 1000).toISOString() });
+  const started = Date.now();
+  openQuestionRetention(messages);
+  assert.ok(Date.now() - started < 1000, `5k open questions over 10k DMs took ${Date.now() - started} ms`);
 });
