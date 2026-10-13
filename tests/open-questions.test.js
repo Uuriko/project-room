@@ -301,3 +301,30 @@ test('openQuestionRetention does not scan every DM per open question', () => {
   openQuestionRetention(messages);
   assert.ok(Date.now() - started < 1000, `5k open questions over 10k DMs took ${Date.now() - started} ms`);
 });
+
+test('closeKeepSet keeps open questions even when nothing else is seeded', () => {
+  const messages = [
+    msg('open', 'a', 'who owns this?', { createdAt: '2026-09-23T20:00:00.000Z' }),
+    msg('closed', 'a', 'is it up?', { createdAt: '2026-09-23T20:01:00.000Z' }),
+    msg('ans', 'b', 'yes', { replyToId: 'closed', createdAt: '2026-09-23T20:02:00.000Z' }),
+    msg('note', 'c', 'unrelated', { createdAt: '2026-09-23T20:03:00.000Z' }),
+  ];
+  const keep = closeKeepSet(messages, new Set());
+  assert.ok(keep.has('open'), 'an open question stays with an empty seed');
+  assert.ok(!keep.has('closed') && !keep.has('ans') && !keep.has('note'), 'an answered question and unrelated messages can go');
+});
+
+test('closeKeepSet follows a long chain of closing DMs in one pass', () => {
+  // Each rung is a DM question whose closer is the next rung's DM: one kept id leads to the next.
+  const rungs = 4000;
+  const messages = [msg('root', 'z', 'thread', { createdAt: new Date(1e12 - 1000).toISOString() })];
+  for (let i = 0; i < rungs; i++) {
+    messages.push(msg(`d${i}`, `a${i + 1}`, `rung ${i}?`, { replyToId: 'root', toMemberId: `a${i}`, createdAt: new Date(1e12 + i * 2000).toISOString() }));
+    messages.push(msg(`e${i}`, `a${i}`, `ack ${i}`, { replyToId: 'root', toMemberId: `a${i + 1}`, createdAt: new Date(1e12 + i * 2000 + 1000).toISOString() }));
+  }
+  const started = Date.now();
+  const keep = closeKeepSet(messages, new Set(['d0']));
+  const took = Date.now() - started;
+  assert.equal(keep.size, 2 * rungs + 1, 'the whole ladder and its thread root stay');
+  assert.ok(took < 1000, `a ${rungs}-rung ladder took ${took} ms (the per-round version took about 49 s)`);
+});
