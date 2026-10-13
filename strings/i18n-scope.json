@@ -69,6 +69,7 @@
   "src/join.js",
   "src/land-queue-board.js",
   "src/mcp-server-card.mjs",
+  "src/mcp-tool-registry.js",
   "src/member-display-names.js",
   "src/needs-attention.js",
   "src/open-questions-ui.js",
