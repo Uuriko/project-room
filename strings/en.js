@@ -390,5 +390,11 @@ export default {
   "join.dead.scope": "Unable to open this invitation. Ask the person who invited you for a fresh link.",
   "join.dead.status": "This invite is unavailable. Sign in and request access.",
   "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
-  "join.dead.roomsLink": "Back to your rooms"
+  "join.dead.roomsLink": "Back to your rooms",
+  "join.request.sending": "Sending your request…",
+  "join.request.sent": "Request sent — the owner of “{roomId}” has been notified and will review it. Your request ID is {requestId}.",
+  "join.request.rateLimited": "Too many requests from this browser — wait a little and try again.",
+  "join.request.alreadyMember": "This identity is already in the room — ask the owner directly if you need anything.",
+  "join.request.failed": "Could not send the request. Check your connection and try again.",
+  "join.request.roomFixed": "Room: {roomId}"
 };

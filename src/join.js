@@ -11,6 +11,8 @@
 
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
+import { AccountClient } from "./client.js";
+import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
@@ -78,6 +80,19 @@ export function joinRoomHint(search) {
   const params = new URLSearchParams(String(search ?? "").replace(/^\?/, ""));
   const room = params.get("room") ?? "";
   return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room) ? room : null;
+}
+
+// Which room the request-access door files against, and whether the
+// visitor may change it. The room's own address fixes the room; a ?room=
+// hint prefills an editable field; the bare entry page defaults to the
+// open community room (the account panel door's behavior, consolidated
+// onto this page — human-map §8.1: one request-access door).
+export function requestDoorRoom(pathname, search) {
+  const pathRoom = joinRoomIdFromPath(pathname);
+  if (pathRoom) return { roomId: pathRoom, fixed: true };
+  const hint = joinRoomHint(search);
+  if (hint) return { roomId: hint, fixed: false };
+  return { roomId: GENERAL_REQUEST_DEFAULT_ROOM_ID, fixed: false };
 }
 
 // API base for this page's fetches: the www door serves the room under /room.
@@ -193,6 +208,10 @@ function show(section) {
     const el = $(id);
     if (el) el.hidden = id !== section;
   }
+  // The request-access door rides alongside the entry card only; the
+  // consent/success/error screens own the page on their own.
+  const request = $("join-request");
+  if (request) request.hidden = section !== "join-enter";
 }
 
 function fail({ title, message, retry }) {
@@ -310,8 +329,64 @@ function renderEnter() {
       globalThis.location.assign(joinCodePath(code, globalThis.location?.pathname));
     });
   }
+  renderRequestDoor();
   show("join-enter");
   $("join-enter-code")?.focus();
+}
+
+// The consolidated request-access door (human-map §8.1): the join page is
+// the one place a human without a code asks a room owner in. Submission
+// reuses the existing flow (src/request-access.js): mint a self-serve
+// identity (an identity alone grants nothing), file POST
+// /api/access-requests with its secret as proof, stash for idempotent
+// retries. Wired once-only, like the entry form.
+function renderRequestDoor() {
+  const card = $("join-request");
+  if (!card) return;
+  const { roomId, fixed } = requestDoorRoom(globalThis.location?.pathname, globalThis.location?.search);
+  const roomRow = $("join-request-room-row");
+  const roomInput = $("join-request-room");
+  const fixedEl = $("join-request-room-fixed");
+  if (fixed) {
+    if (roomRow) roomRow.hidden = true;
+    if (fixedEl) { fixedEl.textContent = uiText("join.request.roomFixed", { roomId }); fixedEl.hidden = false; }
+  } else if (roomInput && !roomInput.dataset.prefilled) {
+    roomInput.dataset.prefilled = "1";
+    roomInput.value = roomId;
+  }
+  const form = $("join-request-form");
+  if (form && !form.dataset.requestWired) {
+    form.dataset.requestWired = "1";
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const statusEl = $("join-request-status");
+      const submitEl = $("join-request-submit");
+      if (submitEl) submitEl.disabled = true;
+      if (statusEl) { statusEl.textContent = uiText("join.request.sending"); statusEl.classList.add("visible"); statusEl.classList.remove("error"); }
+      try {
+        const result = await submitGeneralAccessRequest({
+          client: new AccountClient(),
+          storage: globalThis.sessionStorage,
+          roomId: fixed ? roomId : $("join-request-room")?.value,
+          displayName: $("join-request-name")?.value,
+          note: $("join-request-note")?.value,
+          referredBy: $("join-request-referred")?.value,
+        });
+        form.hidden = true;
+        if (statusEl) statusEl.textContent = uiText("join.request.sent", { roomId: result.roomId, requestId: result.requestId });
+      } catch (error) {
+        if (submitEl) submitEl.disabled = false;
+        const message = error?.code === "rate_limited" || error?.status === 429
+          ? uiText("join.request.rateLimited")
+          : error?.code === "already_member"
+            ? uiText("join.request.alreadyMember")
+            : typeof error?.message === "string" && error.message ? error.message : uiText("join.request.failed");
+        if (statusEl) { statusEl.textContent = message; statusEl.classList.add("visible", "error"); }
+        $("join-request-name")?.focus({ preventScroll: true });
+      }
+    });
+  }
+  card.hidden = false;
 }
 
 async function boot() {

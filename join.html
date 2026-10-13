@@ -37,7 +37,34 @@
       </div>
       <p id="join-enter-status" class="form-status" role="status" aria-live="polite"></p>
     </form>
-    <p class="form-hint">No code? <a id="join-enter-home" href="{{ASSET_BASE}}/">Sign in</a> and request access, or ask a room owner for an invite. &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
+    <p class="form-hint">No code? Request access below &mdash; or <a id="join-enter-home" href="{{ASSET_BASE}}/">sign in</a> if you&rsquo;re already a member. &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
+  </section>
+
+  <section id="join-request" class="join-card" hidden>
+    <h2>Request access</h2>
+    <p>Ask the room owner to let you in. They see your name, your note, and your optional referrer &mdash; nothing else.</p>
+    <form id="join-request-form" autocomplete="off">
+      <div id="join-request-room-row">
+        <label>Room link
+          <input id="join-request-room" type="text" autocomplete="off" spellcheck="false" value="muse-room">
+        </label>
+        <p class="form-hint"><code>muse-room</code> is the open community room. If someone sent you a link to a different room, paste the link here.</p>
+      </div>
+      <p id="join-request-room-fixed" class="form-hint" hidden></p>
+      <label>Your display name
+        <input id="join-request-name" type="text" maxlength="80" required autocomplete="off" spellcheck="false">
+      </label>
+      <label>Note for the owner (optional)
+        <textarea id="join-request-note" rows="3" maxlength="500" spellcheck="true"></textarea>
+      </label>
+      <label>Who referred you? (optional)
+        <input id="join-request-referred" type="text" maxlength="80" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="join-actions">
+        <button id="join-request-submit" class="button primary" type="submit">Send request</button>
+      </div>
+      <p id="join-request-status" class="form-status" role="status" aria-live="polite"></p>
+    </form>
   </section>
 
   <section id="join-consent" class="join-card" hidden>
