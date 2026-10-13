@@ -662,3 +662,22 @@ test("activity, saved list and read horizon resolve archived messages", async t 
   const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
   assert.equal(code(() => setSaved(f.store, f.stranger, "commons", { messageId: "old-dm", saved: true })), code(() => setSaved(f.store, f.stranger, "commons", { messageId: "no-such", saved: true })));
 });
+
+test("the archived-reply thread lookup ignores a same-id message in another room", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "s-root", body: "root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "s-reply", body: "reply", replyToId: "s-root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "s-deep", body: "deep", replyToId: "s-reply" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "s-pinned", body: "pinned sibling", replyToId: "s-root" });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "s-pinned" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `pad-${i}`, body: `pad ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  // Another room holds a message with the same id under a different thread. It gets the lowest rowid so an
+  // unscoped lookup (message_id only) would read it first.
+  f.store.db.exec("PRAGMA foreign_keys=OFF");
+  f.store.db.prepare("INSERT INTO messages (rowid, room_id, message_id, seq, thread_root_id, author_id, created_at) VALUES (-1, 'other-room', 's-reply', 1, 'other-root', 'x', '2026-01-01T00:00:00Z')").run();
+  const ids = f.store.messageThread(f.human, "commons", "s-reply").thread.replies.map(r => r.id);
+  assert.deepEqual(ids, ["s-deep"]);
+});
