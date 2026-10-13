@@ -37,7 +37,7 @@ export async function prepareWork(client, workItemId, { includeSource = false, i
 class WorkBatchTooLarge extends Error {}
 export function workReadRefusal(error) {
   return error instanceof WorkBatchTooLarge ? { type: "work_read_refused", code: "batch_too_large",
-    message: "Read fewer tasks or omit source/discussion. Batch output is limited to 128 KiB; no partial content was returned." } : null;
+    message: "Read fewer tasks or omit source/discussion. The structured task payload is limited to 128 KiB; no partial content was returned." } : null;
 }
 
 // A single selection keeps its existing response. Batches reuse the same reads,
