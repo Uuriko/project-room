@@ -640,3 +640,25 @@ test("the thread view of an archived reply still lists its own archived replies,
   // A stranger still learns nothing about an archived DM reply by asking for it.
   assert.throws(() => f.store.messageThread(f.stranger, "commons", "t-dm"), /not found|Message not found/i);
 });
+
+test("activity, saved list and read horizon resolve archived messages", async t => {
+  const { listActivity, listSaved, setSaved, setReadHorizon } = await import("../server/activity.mjs");
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "private ping" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "old public" });
+  setSaved(f.store, f.human, "commons", { messageId: "old-pub", saved: true });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  const gone = id => !f.store.room("commons").state.messages.some(m => m.id === id);
+  assert.ok(gone("old-dm") && gone("old-pub"));
+  const items = token => listActivity(f.store, token, "commons", {}).items ?? listActivity(f.store, token, "commons", {}).events;
+  assert.ok(items(f.agent).some(item => item.messageId === "old-dm" && item.messageBody === "private ping"), "the archived DM mention is still listed to its party");
+  assert.equal(listSaved(f.store, f.human, "commons").items.some(item => item.messageId === "old-pub" && item.body === "old public"), true);
+  assert.doesNotThrow(() => setSaved(f.store, f.human, "commons", { messageId: "old-pub", saved: false }));
+  assert.doesNotThrow(() => setReadHorizon(f.store, f.human, "commons", { threadId: "", lastReadMessageId: "old-pub" }));
+  // A stranger still gets the same 404 for an archived DM as for an unknown id.
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  assert.equal(code(() => setSaved(f.store, f.stranger, "commons", { messageId: "old-dm", saved: true })), code(() => setSaved(f.store, f.stranger, "commons", { messageId: "no-such", saved: true })));
+});
