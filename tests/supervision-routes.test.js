@@ -304,6 +304,31 @@ test("pick on a confirm-gated suggestion returns a challenge; confirm requires {
   assert.equal(late.rejected.at(-1)?.code, "illegal_transition");
 });
 
+test("refetch {fired:true} from acting is refused — an unconfirmed confirm-class write cannot be reported fired (#2960)", async () => {
+  const store = makeMemoryStore();
+  const sources = sourcesFor({ claims: [blockedClaim()] });
+  const confirmSuggestion = {
+    id: "s1", index: 1, kind: "release_grant", title: "Release the grant",
+    reason: "confirm-class action: cannot be undone", gate: "confirm",
+    api: { method: "POST", path: `/api/rooms/${ROOM}/grants/g1/release`, body: {} },
+    deepLink: null, draft: null, badge: "⚠ confirm — cannot be undone",
+  };
+  const h = harness({ store, sources, decide: () => [confirmSuggestion] });
+  const card = await deriveOne(h);
+  const challenged = await h.call({
+    method: "POST", route: "pick", cardId: card.id,
+    bodyData: { suggestionIndex: 1 },
+  });
+  assert.equal(challenged.sent.at(-1).obj.card.state, "acting");
+  // No /confirm ever happened. A bare {fired:true} report must not dispatch.
+  const refused = await h.call({
+    method: "POST", route: "refetch", cardId: card.id, bodyData: { fired: true },
+  });
+  assert.equal(refused.rejected.at(-1).status, 409);
+  assert.equal(refused.rejected.at(-1).code, "illegal_transition");
+  assert.equal(store.getCard(ROOM, OP, card.id).state, "acting");
+});
+
 // ---------------------------------------------------------------------------
 // dismiss / snooze — audit, never delete
 // ---------------------------------------------------------------------------
