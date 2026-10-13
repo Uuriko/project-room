@@ -28,10 +28,23 @@ function mapInput(input) {
 export function createAnthropicProvider({ key, model, fetchImpl }) {
   const messages = [];
   const pendingIds = [];
+  let currentTask = null;
   return {
     name: "anthropic",
     computerUse: true,
+    reset() {
+      messages.length = 0;
+      pendingIds.length = 0;
+      currentTask = null;
+    },
     async next({ task, observations }) {
+      // A different task starts a fresh conversation: the cached provider
+      // must not resend the previous task's history or drop the new task.
+      if (task !== currentTask) {
+        messages.length = 0;
+        pendingIds.length = 0;
+        currentTask = task;
+      }
       if (messages.length === 0) messages.push({ role: "user", content: task });
       else if (observations.length > 0) {
         messages.push({
