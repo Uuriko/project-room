@@ -1,4 +1,5 @@
 import { hydrateProjection, storedProjection } from "./projection-at-rest.mjs";
+import { findOpenQuestions } from "./open-questions.mjs";
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
 // same transaction as the event insert. MSG-2 replays events that landed
@@ -519,6 +520,13 @@ function retainedByState(state) {
   }
   for (const id of Object.keys(state.replyRequests ?? {})) keep.add(id);
   for (const message of state.messages ?? []) if (typeof message?.workItemId === "string" && message.workItemId) keep.add(message.id);
+  // Open questions: the list a reader gets is derived from state.messages, so an
+  // archived unanswered question would silently leave it. Keep every question
+  // that is open for any author's view (and for the public view).
+  const authors = new Set((state.messages ?? []).map(message => message?.authorId).filter(id => typeof id === "string"));
+  for (const viewerId of [null, ...authors]) {
+    for (const question of findOpenQuestions({ messages: state.messages ?? [], viewerId })) keep.add(question.messageId);
+  }
   return keep;
 }
 
