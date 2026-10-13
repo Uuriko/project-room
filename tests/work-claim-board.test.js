@@ -403,6 +403,26 @@ test("an unchanged latest review retry preserves its timestamp, basis, events, a
   assert.deepEqual(stripTrust((await f.call(f.ownerKey, "/work-claims/retry-review")).value.reviews), first.value.reviews);
 });
 
+test("a comment supersedes an approval, and a released round cannot reuse it", async t => {
+  const f = await fixture(t);
+  await startReviewedClaim(f, "review-supersession", "distinct_member");
+  const reviewPath = "/work-claims/review-supersession/review";
+  assert.equal((await f.call(f.coordKey, reviewPath, { verdict: "approve", summary: "Approved this round" })).status, 200);
+  assert.equal((await f.call(f.coordKey, reviewPath, { verdict: "comment", summary: "One more thought" })).status, 200);
+  await refusedCompletion(f, "review-supersession", "coord");
+
+  assert.equal((await f.call(f.coordKey, reviewPath, { verdict: "approve", summary: "Reapproved after comment" })).status, 200);
+  const beforeRelease = (await f.call(f.ownerKey, "/work-claims/review-supersession")).value;
+  assert.equal((await f.call(f.ownerKey, "/work-claims/review-supersession/release", {
+    expectedClaimedAt: beforeRelease.claimedAt,
+    expectedHistoryLength: beforeRelease.history.length + (Number(beforeRelease.historyOmitted) || 0),
+    reason: "Fresh claim round",
+  })).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/review-supersession/claim", {})).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/review-supersession/update", { state: "in_progress" })).status, 200);
+  await refusedCompletion(f, "review-supersession", "coord");
+});
+
 test("approval remains bound to the reviewed revision and observed pull-request head", async t => {
   for (const changed of ["revision", "headSha"]) {
     await t.test(changed, async t => {
