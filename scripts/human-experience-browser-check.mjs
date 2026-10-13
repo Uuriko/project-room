@@ -765,3 +765,46 @@ test('Add to this ask wires the composer into the run and names the ask', { time
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('keep it simple'));
   assert.deepEqual(errors,[]);
 });
+
+for (const width of [1280, 390]) {
+  test(`Stop rejected because the host claimed after the card rendered: Review then Retry stops the new attempt (${width}px)`, { timeout: 60000 }, async t => {
+    const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+    t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+    const api = async (actor, input) => {
+      const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: 'POST', headers: { authorization: `Bearer ${f.keys[actor]}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) });
+      const value = await response.json(); assert.equal(response.status, 200, JSON.stringify(value)); return value.result;
+    };
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'race-ask', body: 'Plan the offsite' } });
+    await api('owner', { action: 'invoke', runId: 'race-run', sourceMessageId: 'race-ask' });
+    const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 } });
+    await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor({ state: 'visible' });
+    await page.locator('#assistant-face [data-cancel]').waitFor();
+    // The human still sees the unclaimed card while the host claims it.
+    const snapshot = await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json();
+    let frozen = true; const stops = [];
+    await page.route('**/api/rooms/commons/assistant', async route => {
+      if (route.request().method() === 'GET' && frozen) { await route.fulfill({ json: snapshot }); return; }
+      if (route.request().method() === 'POST' && route.request().postDataJSON()?.action === 'cancel') stops.push(route.request().postDataJSON());
+      await route.continue();
+    });
+    await api('producer', { action: 'claim', runId: 'race-run', attemptId: 'race-host', expectedRevision: 0 });
+    await page.locator('#assistant-face [data-cancel]').click();
+    await page.locator('#assistant-review').waitFor({ state: 'visible' });
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0].expectedAttemptId, null, 'the first Stop carried the attempt the human saw');
+    frozen = false;
+    await page.locator('#assistant-review').click();
+    await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+    await page.locator('#assistant-retry').click();
+    await page.waitForFunction(() => document.querySelector('#assistant-error')?.textContent === '' );
+    assert.equal(stops.length, 2);
+    assert.equal(stops[1].expectedRevision, 1);
+    assert.equal(stops[1].expectedAttemptId, 'race-host', 'Review rebinds Stop to the attempt it just showed, still as an exact id');
+    const run = (await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json()).runs.find(r => r.id === 'race-run');
+    assert.equal(run.status, 'cancel_requested');
+    await page.screenshot({ path: `/tmp/probe/race-${width}.png` });
+  });
+}
