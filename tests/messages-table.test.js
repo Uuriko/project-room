@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { messageVisibleTo, syncMessageRows } from "../server/messages-store.mjs";
+import { auditRecovery } from "../server/recovery.mjs";
 
 // Message rows are written in the same transaction as the message event.
 // Reads still use the projection. A direct message stays visible to the
@@ -388,4 +389,114 @@ test("a new post cannot reuse the id of an archived message, public or DM, and r
   assert.equal(attempt(f.human, { body: "event id reuse" }, "old-pub"), duplicate, "the event id doubles as the message id when none is given");
   assert.equal(attempt(f.human, { messageId: "brand-new", body: "fine" }), "posted");
   assert.equal(f.store.room("commons").state.messages.filter(m => m.id === "old-pub" || m.id === "old-dm").length, 0);
+});
+
+test("the archive marker survives later commands and room reloads", t => {
+  const f = fixture(t);
+  seedAndCatchUp(f, 4);
+  archiveOldest(f, 2);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "after-1", body: "after" });
+  const marker = () => JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection).messagesArchive;
+  assert.equal(marker()?.count, 2);
+  assert.equal(f.store.room("commons").state.messagesArchive?.count, 2);
+});
+
+test("archiveMessages: dry run reports, a real run moves old unpinned messages, and parity, search and pins stay correct", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 10; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `m-${i}`, body: `zebra ${i}` });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "m-1" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  const before = f.store.room("commons").state.messages.length;
+  assert.deepEqual(f.store.archiveMessages("commons", { keepNewest: 4 }).dryRun, true);
+  assert.equal(f.store.room("commons").state.messages.length, before, "dry run changes nothing");
+  const plan = f.store.archiveMessages("commons", { keepNewest: 4 });
+  assert.ok(plan.archived > 0 && plan.freedBytes > 0);
+  // Parity runs per room per call; certify the room at its head first.
+  const done = f.store.archiveMessages("commons", { keepNewest: 4, dryRun: false });
+  assert.equal(done.archived, plan.archived);
+  const state = f.store.room("commons").state;
+  assert.equal(state.messages.length, before - plan.archived);
+  assert.ok(state.messages.some(m => m.id === "m-1"), "the pinned message stays");
+  assert.equal(state.messagesArchive.count, plan.archived);
+  assert.ok(state.messagesArchive.retainedIds.includes("m-1"));
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons'").get().n, before, "no row leaves the table");
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.search(f.human, "commons", "zebra", "messages").total, 10);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 4, dryRun: false }).archived, 0, "a second run has nothing to move");
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "later", body: "zebra later" });
+  assert.equal(f.store.room("commons").state.messagesArchive.count, plan.archived);
+});
+
+test("archiveMessages refuses a room whose messages table is not certified", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `n-${i}`, body: `b ${i}` });
+  assert.deepEqual(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }), { ok: false, reason: "messages_table_not_certified" });
+  assert.equal(f.store.room("commons").state.messagesArchive, undefined);
+});
+
+test("archiveMessages keeps the reply ancestors of recent messages in the projection", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "root", body: "thread root" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `filler-${i}`, body: `filler ${i}` });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "recent-reply", body: "late reply", replyToId: "root" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  const done = f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false });
+  assert.ok(done.archived > 0);
+  const ids = f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(ids.includes("root"), "the thread root of a recent reply stays");
+  assert.ok(!ids.includes("filler-0"), "unrelated old messages are archived");
+  assert.equal(f.store.checkMessagesParity().ok, true);
+});
+
+test("unpinning or reacting to an archived DM as a non-party confirms nothing and writes nothing", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "private" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-dm"), false);
+  const before = f.store.room("commons").sequence;
+  for (const type of [T.MESSAGE_UNPINNED, T.MESSAGE_PINNED, T.MESSAGE_REACTION_SET]) {
+    let code = null;
+    try { f.send(f.stranger, type, { messageId: "old-dm", reaction: "like", active: true }); } catch (error) { code = error.code ?? error.message; }
+    assert.ok(code, `${type} is refused`);
+    assert.notEqual(code, "message_archived", `${type} does not confirm the archived DM`);
+  }
+  assert.equal(f.store.room("commons").sequence, before);
+});
+
+test("the recovery audit accepts a room whose old messages are archived and still rejects a tampered marker", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 8; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `r-${i}`, body: `recovery ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.doesNotThrow(() => auditRecovery(f.store), "audit passes before archival");
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
+  assert.doesNotThrow(() => auditRecovery(f.store), "audit passes after archival");
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "after", body: "posted after the archive" });
+  assert.doesNotThrow(() => auditRecovery(f.store), "audit passes after a later post");
+  const projection = JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+  projection.messagesArchive.count += 1;
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  assert.throws(() => auditRecovery(f.store), /operator reconciliation/);
+});
+
+test("a message kept only because it was pinned is archived on a later run once it is unpinned", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 8; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `p-${i}`, body: `pin ${i}` });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "p-0" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
+  const ids = () => f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(ids().includes("p-0"), "the pinned message stays");
+  f.send(f.human, T.MESSAGE_UNPINNED, { messageId: "p-0" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `q-${i}`, body: `later ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0);
+  assert.ok(!ids().includes("p-0"), "once unpinned it is archived like any other old message");
 });
