@@ -14606,8 +14606,8 @@ paths:
           schema: { type: string }
         - name: consistent
           in: query
-          description: Opt into versioned content-validated discussion windows; cannot be combined with numeric since.
-          schema: { type: boolean }
+          description: Supply true to opt into content-validated discussion windows; omit for legacy reads. Cannot be combined with numeric since.
+          schema: { type: boolean, enum: [true] }
         - name: resumeToken
           in: query
           description: Completed consistent-read token. Mutually exclusive with cursor and since; never an access grant.
