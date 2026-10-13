@@ -145,7 +145,7 @@ export function createSenderReputation({ store } = {}) {
     const total = rec.clean + rec.flagged + rec.quarantined + rec.spamConfirmed;
     const score = Math.min(100, rec.quarantined * 20 + rec.flagged * 8 + rec.spamConfirmed * 60);
     const label = total === 0 ? "unknown"
-      : rec.clean >= 10 && rec.flagged === 0 && rec.quarantined === 0 ? "trusted"
+      : rec.clean >= 10 && rec.flagged === 0 && rec.quarantined === 0 && rec.spamConfirmed === 0 ? "trusted"
       : score >= 60 ? "bad"
       : score >= 30 ? "watch" : "neutral";
     return Object.freeze({ senderKey: key, total, clean: rec.clean, flagged: rec.flagged,
