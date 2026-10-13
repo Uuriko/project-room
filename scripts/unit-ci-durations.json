@@ -404,6 +404,7 @@
   "tests/identity-link-code.test.js": 40706,
   "tests/identity-mint-adaptive-pow.test.js": 2000,
   "tests/identity-mint-capacity.test.js": 51164,
+  "tests/identity-mint-pow-escalation.test.js": 16066,
   "tests/identity-ratelimit.test.js": 4895,
   "tests/identity-verification.test.js": 54149,
   "tests/inbox-adoption.test.js": 56770,
