@@ -223,3 +223,52 @@ test("syncMessageRows resolves touched messages without indexing a large state",
   // Unknown message id writes nothing.
   assert.equal(syncMessageRows(f.store.db, { roomId: "commons", sequence: 9003, event: posted("nope"), state }), 0);
 });
+
+// Archive marker (design: certified-prefix tail). Messages with a posting seq
+// at or below rooms.projection.messagesArchive.throughSeq live only in the
+// messages table. Backfill pruning and parity must treat them as archived, not
+// as stale rows or mismatches.
+function archiveOldest(f, count) {
+  const all = f.store.db.prepare("SELECT message_id, seq FROM messages WHERE room_id='commons' ORDER BY seq").all();
+  const old = all.slice(0, count);
+  const projection = JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
+  const drop = new Set(old.map(row => row.message_id));
+  projection.messages = projection.messages.filter(message => !drop.has(message.id));
+  projection.messagesArchive = { throughSeq: old[old.length - 1].seq, count: old.length };
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  return old;
+}
+
+function seedAndCatchUp(f, n) {
+  for (let i = 0; i < n; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `arc-${i}`, body: `body ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+}
+
+test("backfill pruning keeps archived rows that are no longer in the projection", t => {
+  const f = fixture(t);
+  seedAndCatchUp(f, 6);
+  const old = archiveOldest(f, 3);
+  f.store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id='commons'").run();
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const ids = new Set(f.store.db.prepare("SELECT message_id FROM messages WHERE room_id='commons'").all().map(row => row.message_id));
+  for (const row of old) assert.ok(ids.has(row.message_id), `${row.message_id} still archived in the table`);
+});
+
+test("parity certifies a room whose old messages are archived and rejects a missing archived row", t => {
+  const f = fixture(t);
+  seedAndCatchUp(f, 6);
+  const old = archiveOldest(f, 3);
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  f.store.db.prepare("DELETE FROM messages WHERE room_id='commons' AND message_id=?").run(old[0].message_id);
+  assert.throws(() => { for (let i = 0; i < 5; i++) f.store.checkMessagesParity(); }, /messages parity failed/);
+});
+
+test("parity accepts a tail reply whose thread root was archived", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "root", body: "root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "mid", body: "mid", replyToId: "root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "leaf", body: "leaf", replyToId: "mid" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  archiveOldest(f, 2);
+  assert.equal(f.store.checkMessagesParity().ok, true);
+});
