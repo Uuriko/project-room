@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, messageAction } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 A4: when the room owner makes review or approval mandatory, the new-work
 // form shows the requirement locked on with the reason, and the recorded item carries it.
@@ -158,9 +158,7 @@ for(const scenario of [
   {name:'multiplayer',solo:false,viewport:{width:1440,height:1000}}
 ]) test(`initial work defaults ${scenario.name}: eligibility and review stay honest`,{timeout:60000},async t=>{
   const f=await setup(t,scenario.viewport,scenario),{page}=f;
-  const row=page.locator('[data-message-record-id="test-welcome"]');
-  await row.locator('.message-more > summary').click();
-  await row.getByRole('button',{name:'Make this work',exact:true}).click();
+  await messageAction(page,'test-welcome','work');
   await page.locator('#work-dialog').waitFor({state:'visible'});
   assert.equal(await page.locator('#assignee-select').inputValue(),scenario.solo?'owner':'');
   assert.equal(await f.review.isChecked(),!scenario.solo || scenario.mandatory===true);
@@ -176,7 +174,7 @@ for(const scenario of [
     const saved=Object.values(f.items()).find(i=>i.title===`Solo outcome ${scenario.name}`);
     assert.ok(saved);assert.equal(saved.accountableMemberId,'owner');assert.equal(saved.independentVerificationRequired,false);
     assert.equal(saved.ownerDecisionRequired,true);assert.equal(saved.state,'proposed','creating your own work does not accept it');
-    await row.locator('.message-more > summary').click();await row.getByRole('button',{name:'Make this work',exact:true}).click();
+    await messageAction(page,'test-welcome','work');
     await page.locator('#work-options-summary').click();await f.review.check();
     assert.equal(await page.locator('#verifier-field').isVisible(),true,'optional review remains available');
     assert.equal(await page.locator('#reviewer-unavailable').isVisible(),true,'opting in explains the missing independent reviewer');
