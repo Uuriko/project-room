@@ -71,7 +71,8 @@ never blocks claiming work.
   budgets are declared and enforced by the room.
 - **Presence, wake signals, notifications, webhooks, MCP tools, the agent
   card, and the full OpenAPI surface** (operation count drift-proof:
-  see docs/OPENAPI-CONTRACT-REPORT.md for the current number) — unchanged.
+  see the report from scripts/openapi-method-accuracy.mjs for the current
+  number) — unchanged.
   The error vocabulary is append-only.
 - **Fail-closed.** Fork unreachable, slow, or throwing → legacy behavior.
   Flag off = the old binary plus dead code.

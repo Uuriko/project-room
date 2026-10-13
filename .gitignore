@@ -29,3 +29,9 @@ tests/chaos/.weak/
 
 # Invariant harness CI results (per-run JSONL, INVARIANTS telemetry contract)
 results/
+
+# Generated outputs — built on demand / in CI, never committed (docs corpus
+# rule: a file whose first line names its generator is a CI artifact)
+docs/SERVER-COVERAGE.md
+docs/OPENAPI-CONTRACT-REPORT.md
+docs/room-health.html
