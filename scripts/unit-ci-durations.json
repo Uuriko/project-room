@@ -396,6 +396,7 @@
   "tests/inbox-collision.test.js": 5296,
   "tests/inbox-conversation-auth.test.js": 39646,
   "tests/inbox-digest-sla-routes.test.js": 23714,
+  "tests/inbox-direct-send-idempotency.test.js": 2962,
   "tests/inbox-handoff.test.js": 5259,
   "tests/inbox-import-guards.test.js": 54799,
   "tests/inbox-internal-notes.test.js": 4643,
