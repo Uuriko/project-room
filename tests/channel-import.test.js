@@ -313,3 +313,26 @@ test("webhook secrets need entropy, a retried sync must carry the same recording
   assert.equal(receive([f.telegram.updates[1]]).pending, 2);
   assert.deepEqual(f.store.connections.verify(), { connections: 1, folders: 1, sources: 4 });
 });
+test("a webhook sync does not acknowledge pending updates below the page's starting cursor", async t => {
+  const f = fixture(t); f.configure(f.telegram.connection);
+  const webhooks = new ChannelWebhookInbox(f.store), secret = "fixture-webhook-secret-0123456789", connectionId = f.telegram.connection.id;
+  f.apply({ action: "connection.webhook", requestId: "hook", connectionId, expectedRevision: 1, secretHash: ChannelWebhookInbox.hash(secret) });
+  const sync = (requestId, updates) => syncTelegramConnection({ store: f.store, token: f.auth.token, binding: f.auth.sessionBinding, connectionId, requestId, updates, webhooks });
+  // Advance the folder cursor to 900004 with a recording that holds only the
+  // 900003 update, so 900002 has never been imported when it is journaled.
+  const advanced = await sync("advance", [f.telegram.updates[2]]);
+  assert.equal(advanced.request.cursor, "900004"); assert.equal(advanced.receipt.imports.length, 1);
+  // Journal a never-imported update below the starting cursor (900002, message
+  // 42) together with one at/above it (900005, the edit of message 41).
+  webhooks.receive({ connectionId, secret, body: { updates: [f.telegram.updates[1], f.telegram.updates[4]] } });
+  assert.deepEqual(webhooks.pending(f.auth.account.id, connectionId).map(update => update.update_id), [900002, 900005]);
+  const drained = await sync("drain-below-cursor", null);
+  assert.equal(drained.source, "webhook"); assert.equal(drained.request.expectedCursor, "900004"); assert.equal(drained.request.cursor, "900006");
+  assert.equal(drained.receipt.imports.length, 1, "only the update the page actually read is imported");
+  // The below-cursor update stays pending instead of being acknowledged as
+  // imported, and its message never appears among the imported sources.
+  assert.deepEqual(webhooks.pending(f.auth.account.id, connectionId).map(update => update.update_id), [900002]);
+  assert.deepEqual(webhooks.journal(f.auth.account.id, connectionId), { pending: 1, imported: 1, failed: 0 });
+  assert.equal(f.list().some(row => row.id === f.sourceId("-1001000000001:42")), false, "message 42 was never imported");
+  assert.equal(f.list().filter(row => row.adapter === "telegram").length, 2);
+});
