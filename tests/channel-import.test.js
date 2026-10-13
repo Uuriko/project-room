@@ -359,3 +359,24 @@ test("a webhook delivery whose (connectionId, secret) verifies for two accounts 
   assert.deepEqual(webhooks.journal(f.auth.account.id, connectionId), { pending: 2, imported: 0, failed: 0 });
   assert.deepEqual(webhooks.journal(f.sessions.guest.account.id, connectionId), { pending: 0, imported: 0, failed: 0 });
 });
+test("a same-id connection on another account with a different secret does not make the webhook match ambiguous", async t => {
+  const f = fixture(t); f.configure(f.telegram.connection);
+  const webhooks = new ChannelWebhookInbox(f.store), connectionId = f.telegram.connection.id;
+  const ownerSecret = "fixture-webhook-secret-0123456789", guestSecret = "guest-webhook-secret-9876543210";
+  f.apply({ action: "connection.webhook", requestId: "hook-owner-diff", connectionId, expectedRevision: 1, secretHash: ChannelWebhookInbox.hash(ownerSecret) });
+  // The guest reuses the connection id (unique only per account) but chooses
+  // a different secret: #match iterates both candidate rows, exactly one
+  // verifies for each presented secret, so neither delivery is ambiguous.
+  const guestProfile = structuredClone(f.telegram.connection); guestProfile.accountId = f.sessions.guest.account.id;
+  f.apply({ action: "connection.configure", requestId: randomUUID(), connectionId, expectedRevision: 0, profile: guestProfile }, "guest");
+  f.apply({ action: "connection.webhook", requestId: "hook-guest-diff", connectionId, expectedRevision: 1, secretHash: ChannelWebhookInbox.hash(guestSecret) }, "guest");
+  const receive = (secret, updates) => webhooks.receive({ connectionId, secret, body: { updates } });
+  assert.equal(receive(ownerSecret, [f.telegram.updates[0]]).accountId, f.auth.account.id);
+  assert.equal(receive(guestSecret, [f.telegram.updates[0]]).accountId, f.sessions.guest.account.id);
+  assert.deepEqual(webhooks.journal(f.auth.account.id, connectionId), { pending: 1, imported: 0, failed: 0 });
+  assert.deepEqual(webhooks.journal(f.sessions.guest.account.id, connectionId), { pending: 1, imported: 0, failed: 0 });
+  // A secret that verifies for neither candidate is still refused outright.
+  assert.throws(() => receive("unknown-webhook-secret-5555555555", [f.telegram.updates[1]]), { status: 401, code: "channel_webhook_denied" });
+  assert.deepEqual(webhooks.journal(f.auth.account.id, connectionId), { pending: 1, imported: 0, failed: 0 });
+  assert.deepEqual(webhooks.journal(f.sessions.guest.account.id, connectionId), { pending: 1, imported: 0, failed: 0 });
+});
