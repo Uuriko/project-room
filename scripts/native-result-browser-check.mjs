@@ -64,6 +64,8 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-copy").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   await f.page.keyboard.press("Tab");
   assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
@@ -383,4 +385,119 @@ test("a room session that ends under a live account says so and points back to t
   await page.locator("#main").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.querySelector("#message-input").value === "A draft that must survive.");
   assert.deepEqual(errors, []);
+});
+
+async function resultClipboard(page, behavior = "resolve") {
+  await page.evaluate(behavior => {
+    window.resultCopies = []; window.resultCopyBehavior = behavior;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText(text) {
+      window.resultCopies.push(text);
+      if (window.resultCopyBehavior === "reject") return Promise.reject(Error("Clipboard refused"));
+      if (window.resultCopyBehavior === "hold") return new Promise(resolve => { window.finishResultCopy = resolve; });
+      return Promise.resolve();
+    } } });
+  }, behavior);
+}
+
+for (const mobile of [false, true]) for (const theme of ["light", "dark"]) {
+  test(`exact result copy ${mobile ? "phone" : "desktop"} ${theme}: displayed text, keyboard, draft and no requests`, { timeout: 30000 }, async t => {
+    const f = await setup(t, { mobile }); f.complete();
+    const { page } = f;
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+    await resultClipboard(page);
+    await page.locator("#message-input").fill("Keep my next question.");
+    await page.locator(`[data-read-result='${f.workItemId}']`).click();
+    await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+    const copy = page.locator("#result-copy");
+    const requests = [], track = request => { if (request.url().includes("/api/rooms/")) requests.push(request.url()); };
+    const before = structuredClone(f.item());
+    page.on("request", track);
+    await page.locator("#close-result").focus(); await page.keyboard.press("Tab");
+    assert.equal(await copy.evaluate(node => node === document.activeElement), true);
+    await page.keyboard.press("Enter");
+    await page.getByText("Result copied. Paste where you choose.", { exact: true }).waitFor();
+    assert.equal(await copy.evaluate(node => node === document.activeElement), true, "copy preserves keyboard position");
+    page.off("request", track);
+    assert.deepEqual(await page.evaluate(() => window.resultCopies), [f.body]);
+    assert.deepEqual(requests, [], "copy reuses the exact loaded result without a server request");
+    assert.deepEqual(f.item(), before, "copy does not approve or modify work");
+    assert.equal(await page.locator("#message-input").inputValue(), "Keep my next question.");
+    assert.ok((await copy.boundingBox()).height >= 44);
+    assert.equal(await page.locator("#result-dialog").evaluate(node => node.scrollWidth <= node.clientWidth + 1), true);
+    await f.capture(`copy-${mobile ? "phone" : "desktop"}-${theme}`);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#result-copy-notice").textContent(), "");
+    await page.reload(); await page.locator("#main").waitFor();
+    assert.equal(await page.locator("#message-input").inputValue(), "Keep my next question.");
+  });
+}
+
+test("exact result copy: refusal can retry; late clipboard completion belongs to its reader", { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete(); const { page } = f;
+  await resultClipboard(page, "reject");
+  const open = async () => {
+    await page.locator(`[data-read-result='${f.workItemId}']`).click();
+    await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  };
+  await open();
+  await page.locator("#result-copy").click();
+  await page.getByText("Could not copy. Try again or select the result text to copy it manually.", { exact: true }).waitFor();
+  assert.equal(await page.locator("#result-body").textContent(), f.body);
+  await page.evaluate(() => { window.resultCopyBehavior = "hold"; });
+  await page.locator("#result-copy").click();
+  await page.getByText("Copy not confirmed yet. You can select the result text to copy it manually.", { exact: true }).waitFor();
+  assert.equal(await page.locator("#result-copy").isDisabled(), true);
+  await page.locator("#result-copy").evaluate(node => node.click());
+  assert.equal(await page.evaluate(() => window.resultCopies.length), 2);
+  await page.keyboard.press("Escape"); await open();
+  assert.equal(await page.locator("#result-copy").isDisabled(), true);
+  await page.evaluate(() => window.finishResultCopy());
+  await page.waitForFunction(() => document.querySelector("#result-copy").getAttribute("aria-disabled") === "false");
+  assert.equal(await page.locator("#result-copy-notice").textContent(), "", "old success cannot label a newly opened reader");
+  await page.evaluate(() => { window.resultCopyBehavior = "resolve"; });
+  await page.locator("#result-copy").click();
+  await page.getByText("Result copied. Paste where you choose.", { exact: true }).waitFor();
+});
+
+test("exact result copy: an earlier displayed version remains exact after replacement", { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete(); const { page } = f;
+  await resultClipboard(page);
+  await page.locator(`[data-read-result='${f.workItemId}']`).click();
+  await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+  f.mutate(T.WORK_BLOCKED, { reason: "Correction", nextAction: "Revise" });
+  f.mutate(T.WORK_BLOCKER_RESOLVED, { resolution: "Ready" });
+  const body = "A newer result", posted = f.send(T.MESSAGE_POSTED, { messageId: "copy-newer", workItemId: f.workItemId,
+    packetId: "replacement", basisRevision: f.item().revision, body });
+  f.mutate(T.WORK_COMPLETED, { evidenceKind: "room_text", evidenceMessageId: "copy-newer", evidenceMessageEventId: posted.event.id,
+    evidenceVersion: textVersion(body), previousCompletionEventId: f.item().receipt.eventId, producerId: "owner", summary: "Newer", nextAction: "Review" });
+  await page.waitForFunction(() => document.querySelector("#result-status").textContent.startsWith("Earlier result"));
+  await page.locator("#result-copy").click();
+  await page.getByText("Result copied. Paste where you choose.", { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.resultCopies), [f.body]);
+  assert.equal(await page.locator("#result-body").textContent(), f.body);
+});
+
+for (const boundary of ["loading", "withdrawn", "revoked"]) test(`exact result copy unavailable when ${boundary}`, { timeout: 30000 }, async t => {
+  const f = await setup(t); f.complete(); const { page } = f;
+  await resultClipboard(page, "hold");
+  if (boundary === "loading") await page.route("**/work-result?**", route => route.fulfill({ status: 503, json: { error: "Unavailable" } }));
+  if (boundary === "withdrawn") {
+    f.send(T.MESSAGE_DELETED, { messageId: "native-draft", expectedMessageRevision: 0, reason: "Withdraw test result" });
+  }
+  await page.locator(`[data-read-result='${f.workItemId}']`).click();
+  if (boundary === "revoked") {
+    await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
+    await page.locator("#result-copy").click();
+    f.store.issueAccessKey("commons", "owner");
+    await page.locator("#auth-panel").waitFor();
+    await page.evaluate(() => window.finishResultCopy());
+    assert.equal(await page.locator("#result-dialog").isVisible(), false);
+    assert.equal(await page.locator("#result-body").textContent(), "");
+    assert.equal(await page.locator("#result-copy-notice").textContent(), "");
+  } else {
+    await page.waitForFunction(() => /unavailable|withdrawn/.test(document.querySelector("#result-status").textContent));
+    assert.equal(await page.locator("#result-copy").isVisible(), false);
+    await page.locator("#result-copy").evaluate(node => node.click());
+    assert.deepEqual(await page.evaluate(() => window.resultCopies), []);
+  }
 });

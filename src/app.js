@@ -6115,6 +6115,7 @@ const actionSpecs = {
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
 let resultView = null;
+let resultCopyPending = false;
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
 // stays as a seam for callers: "results" opens Settings at Results.
@@ -6243,6 +6244,9 @@ function resultStatus() {
   const retry = $("#result-retry");
   $("#result-discuss").hidden = !resultDiscussionMessage(view);
   $("#result-discuss").disabled = busy || requestReading || composerFiles.some(file => file.status === "uploading");
+  $("#result-copy").hidden = !view.loaded || Boolean(view.withdrawn) || Boolean(view.error);
+  $("#result-copy").disabled = !copyableResult(view);
+  $("#result-copy").setAttribute("aria-disabled", String(resultCopyPending || !copyableResult(view)));
   retry.hidden = !view.error && !view.retrying;
   retry.disabled = !view.error;
 }
@@ -6252,6 +6256,8 @@ function closeResult(restore = true) {
   $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
   $("#result-original").hidden = true; $("#result-retry").hidden = true; $("#result-retry").disabled = true;
   $("#result-discuss").hidden = true;
+  $("#result-copy").hidden = true; $("#result-copy").disabled = true;
+  $("#result-copy-notice").textContent = "";
   clearResultComparison($("#result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
@@ -6263,6 +6269,30 @@ function closeResult(restore = true) {
   }
 }
 $("#close-result").addEventListener("click", () => closeResult());
+function copyableResult(view) {
+  return view?.loaded && !view.withdrawn && !view.error && typeof view.body === "string"
+    && sameSession(view.generation, view.roomId, view.memberId) && client.ownsAccountSession()
+    && !state.messages.some(message => message.id === view.discussionId && message.deletedAt);
+}
+$("#result-copy").textContent = uiText("result.copy");
+$("#result-copy").addEventListener("click", async () => {
+  const view = resultView;
+  if (resultCopyPending || !copyableResult(view)) return;
+  const owns = () => resultView === view && $("#result-dialog").open && copyableResult(view);
+  const feedback = key => { if (owns()) $("#result-copy-notice").textContent = uiText(key); };
+  resultCopyPending = true; resultStatus(); feedback("result.copying");
+  // A clipboard write cannot be cancelled. Keep retries disabled until it
+  // settles, including across reader openings, but leave manual copying usable.
+  const timer = setTimeout(() => feedback("result.copyPending"), 800);
+  try {
+    await navigator.clipboard.writeText(view.body);
+    feedback("result.copied");
+  } catch {
+    feedback("result.copyFailed");
+  } finally {
+    clearTimeout(timer); resultCopyPending = false; resultStatus();
+  }
+});
 $("#result-discuss").textContent = uiText("result.discuss");
 $("#result-discuss").addEventListener("click", () => {
   const message = resultDiscussionMessage(resultView);
@@ -6323,6 +6353,8 @@ function readResult(e) {
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
     $("#result-original").hidden = true;
     $("#result-discuss").hidden = true;
+    $("#result-copy").hidden = true; $("#result-copy").disabled = true;
+    $("#result-copy-notice").textContent = "";
     const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
     $("#result-retry").hidden = true; $("#result-retry").disabled = true;
     $("#result-dialog").showModal();
