@@ -1003,12 +1003,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             || (typeof member?.displayName === "string" ? member.displayName : "");
           const identity = resolvedIdentityId ? store.identities.get(resolvedIdentityId) : null;
           const ipHash = rateHash(String(remoteAddress ?? ""));
+          // Scoring runs after the join, so the member list already contains
+          // the joiner. Exclude the joiner's own membership from the
+          // comparison set: sybilName measures similarity to the OTHER
+          // members, so an exact match must mean someone else's name (and a
+          // name nobody else holds must not self-match at similarity 1.0).
+          const isSelf = m => Boolean(m) && ((memberId && m.id === memberId)
+            || (resolvedIdentityId && m.identityId === resolvedIdentityId));
+          let droppedSelf = members.some(isSelf);
+          const existingDisplayNames = [];
+          for (const m of members) {
+            if (!m || m.active === false || typeof m.displayName !== "string") continue;
+            if (isSelf(m)) continue;
+            if (!droppedSelf && resolvedDisplayName
+              && m.displayName.toLowerCase().trim() === resolvedDisplayName.toLowerCase().trim()) {
+              // The joiner's own just-added membership, not identified by id
+              // on this path: drop exactly one occurrence, so any identical
+              // name left in the set belongs to another member.
+              droppedSelf = true;
+              continue;
+            }
+            existingDisplayNames.push(m.displayName);
+          }
           const decision = evaluateAdmission({
             identityId: resolvedIdentityId, displayName: resolvedDisplayName, path,
             identityAgeMs: identity && Number.isFinite(identity.createdAt) ? Math.max(0, now - identity.createdAt) : null,
-            existingDisplayNames: members
-              .filter(m => m && m.active !== false && typeof m.displayName === "string")
-              .map(m => m.displayName),
+            existingDisplayNames,
             recentJoins: {
               byIdentity: resolvedIdentityId ? store.jevShadow.recentJoinCount({ identityId: resolvedIdentityId, windowMs: jevVelocityWindowMs }) : 0,
               byIp: store.jevShadow.recentJoinCount({ ipHash, windowMs: jevVelocityWindowMs }),
