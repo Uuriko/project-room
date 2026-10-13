@@ -222,10 +222,14 @@ export async function syncTelegramConnection({ store, token, binding, connection
   try {
     // The page and its acknowledgement commit together: exactly the slice rows
     // this page consumed (cursor is the next update id) turn imported, never
-    // updates still waiting behind the reader's page.
+    // updates still waiting behind the reader's page. The reader started at
+    // the page's starting cursor and dropped every update below it, so an
+    // update below that cursor was never in the page and must stay pending
+    // rather than be acknowledged as imported without ever being imported.
     result = store.transaction(() => {
       const applied = store.email.apply(token, request, binding);
-      const consumed = updates.filter(update => update.update_id < Number(request.cursor)).map(update => update.update_id);
+      const pageStart = request.reset || request.expectedCursor === null ? 0 : Number(request.expectedCursor);
+      const consumed = updates.filter(update => update.update_id >= pageStart && update.update_id < Number(request.cursor)).map(update => update.update_id);
       if (source === "webhook" && consumed.length) webhooks.acknowledge(accountId, connectionId, consumed);
       return applied;
     });
