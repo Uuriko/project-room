@@ -11,7 +11,7 @@ import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { signInFixture } from '../scripts/auth-signin.mjs';
+import { signInFixture, fillJoinName } from '../scripts/auth-signin.mjs';
 
 for (const touch of [false, true]) test(`release pause/resume preserves exact sends and privacy: ${touch ? 'touch' : 'desktop'}`, { timeout: 90000 }, async () => {
   const socket = createServer();
@@ -60,7 +60,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
     await ensureSidebarClosed(page);
     const guestContext = await browser.newContext({ ignoreHTTPSErrors: true, extraHTTPHeaders: { 'CF-Connecting-IP': '192.0.2.2' } });
     const guest = await guestContext.newPage();
-    await guest.goto(invitation); await guest.locator('#join-link-name').fill('Recovery guest');
+    await guest.goto(invitation); await fillJoinName(guest, 'Recovery guest');
     await guest.locator('#join-link-submit').click(); await guest.locator('#main').waitFor({ state: 'visible' });
     await guestContext.close();
     // Consent-bound DMs: the owner’s request-reply to the guest needs approval.
