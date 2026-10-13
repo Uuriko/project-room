@@ -430,6 +430,48 @@ test("heartbeat detects new clarification and signals the running host to stop",
   assert.equal((await f.client.replyContext(requestMessageId)).request.status, "open");
 });
 
+test("transient heartbeat failures do not abort the running host", { timeout: 10000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("heartbeat-transient").command.data.messageId;
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  // The first three "working" reports fail transiently — a network drop, a
+  // 5xx, then throttling — while every other call (claim, later heartbeats,
+  // delivery) reaches the real service.
+  let workingReports = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs")
+      && JSON.parse(options.body).action === "working" && ++workingReports <= 3) {
+      if (workingReports === 1) throw new TypeError("network drop");
+      if (workingReports === 2) return new Response(JSON.stringify({ error: { code: "unavailable", message: "Try later" } }), { status: 503 });
+      return new Response(JSON.stringify({ error: { code: "rate_limited", message: "Try later" } }), { status: 429, headers: { "Retry-After": "1" } });
+    }
+    return fetch(url, options);
+  } };
+  let entered, release, hostSignal;
+  const started = new Promise(resolve => { entered = resolve; });
+  const finish = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  const execute = ({ signal }) => { calls++; hostSignal = signal; entered(); return finish.then(() => ({ body: "Finished despite heartbeat failures" })); };
+  const pending = runRequestOnce({ ...a, connection, requestMessageId, execute });
+  let settled = false; pending.then(() => { settled = true; }, () => { settled = true; });
+  await started;
+  const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 5)); };
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(workingReports, 1);
+  assert.equal(hostSignal.aborted, false, "a dropped heartbeat report must not abort the host");
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(workingReports, 2);
+  assert.equal(hostSignal.aborted, false, "a 5xx heartbeat report must not abort the host");
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(workingReports, 3);
+  assert.equal(hostSignal.aborted, false, "a throttled heartbeat report must not abort the host");
+  assert.equal(settled, false);
+  release();
+  const result = await pending;
+  assert.equal(result.hostExecuted, true);
+  assert.equal(calls, 1);
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "delivered");
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+});
 
 test("rate-limited reservation is a definite refusal, not an uncertain execution", async t => {
   const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("throttled-host").command.data.messageId;
