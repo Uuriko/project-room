@@ -35,7 +35,12 @@ function* walk(dir) {
 function liveCodes() {
   const codes = new Set();
   const callRe = /(?:fail|reject)\(\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|(\d{3}))\s*(?:,\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|(\d{3})))?/g;
-  const svcRe = /throw new ServiceError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
+  // Match `new ServiceError(...)` in ANY context, not only `throw new ...`:
+  // sites that construct the error in a variable first (then attach detail
+  // and throw it later), pass it to a reject callback, or return it are live
+  // emit sites too — a throw-only pattern made them invisible to this guard
+  // (#2897: transfer_ownership_required, github_rate_limited, aborted).
+  const svcRe = /new ServiceError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
   const apRe = /new AgentPluginError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
   const adhocRe = /error:\s*\{\s*code:\s*"([a-z][a-z0-9_]*)"/g;
   for (const f of walk(SERVER)) {
@@ -107,6 +112,18 @@ test("every server-emitted code is in the catalog", () => {
   const rows = catalogRows();
   const missing = [...live].filter(c => !rows.has(c));
   assert.deepEqual(missing, [], `codes emitted by the server but missing from the catalog: ${missing.join(", ")}`);
+});
+
+test("ServiceError codes constructed before throwing are extracted (#2897)", () => {
+  // Regression pin: these sites do NOT write `throw new ServiceError(...)`
+  // in one expression — they construct the error in a variable (or hand it
+  // to a reject callback) and throw/emit it separately. A throw-only
+  // extractor misses all three, so they must be asserted directly against
+  // the extraction, not only against the catalog.
+  const live = liveCodes();
+  for (const code of ["transfer_ownership_required", "github_rate_limited", "aborted"]) {
+    assert.ok(live.has(code), `construct-then-throw code '${code}' was not extracted from server/`);
+  }
 });
 
 test("variable-passed codes resolve to live definitions and are catalogued", () => {
