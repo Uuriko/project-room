@@ -210,13 +210,13 @@ export class MachineBot {
     // the board and consumed the wake, so nobody picked it up after resume.
     if (this.isHalted()) return { signalId, halted: true };
     if (await this.isPaused(roomId)) return { signalId, paused: true };
-    // A public thread reply is a notification, not a fresh machine task.
+    // An implicitly addressed public reply is a notification, not a new task.
     // tryGo alone admits approval replies after checking sender and plan.
     // Consume the observed notification without replying: two bots sending
     // automatic plans/refusals back to each other would create endless wakes.
-    // Directed messages, board work and new top-level mentions retain their
+    // Explicit mentions (including replies), directed messages and board work retain their
     // existing admission paths; other clients still receive the reply wake.
-    if (source.replyToId && !source.toMemberId) {
+    if (source.replyToId && !source.toMemberId && source.explicitlyMentioned === false) {
       if (source.updateId) {
         const marked = await this.api.markUpdate(roomId, source.updateId, "done", source.basisToken);
         if (!marked.ok) return { signalId, ignored: "unread" };
@@ -324,6 +324,7 @@ export class MachineBot {
       messageId: message.id ?? messageId,
       replyToId: message.replyToId ?? null,
       toMemberId: message.toMemberId ?? null,
+      explicitlyMentioned: page.value?.addressing?.explicitlyMentioned,
       updateId: queued.updateId ?? null,
       basisToken: queued.basisToken ?? null,
       text: message.body,
