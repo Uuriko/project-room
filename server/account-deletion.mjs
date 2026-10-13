@@ -260,6 +260,10 @@ function applyEventOnRoom(state, incoming) {
 function redactRoomMessages(store, roomId, actorId) {
   const room = store.room(roomId);
   const messages = room.state.messages ?? [];
+  // Archived messages live only in the messages table, so list those ids too.
+  const known = new Set(messages.map(message => message.id));
+  const archived = store.db.prepare("SELECT message_id AS id FROM messages WHERE room_id=?").all(roomId)
+    .filter(row => !known.has(row.id));
   const ids = [];
   for (const message of messages) {
     if (typeof message.id !== "string") continue;
@@ -278,6 +282,13 @@ function redactRoomMessages(store, roomId, actorId) {
     removed += result.rewritten;
   }
   removed += redactRemainingMessageBodies(store.db, roomId);
+  // An archived message is not in the projection, so the reducer cannot redact
+  // it; its event bodies are cleared above, clear its table row here.
+  if (archived.length) {
+    const archivedAt = at;
+    const clear = store.db.prepare("UPDATE messages SET body=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
+    for (const row of archived) removed += clear.run(archivedAt, roomId, row.id).changes;
+  }
   let files = 0;
   try {
     files = store.db.prepare(
