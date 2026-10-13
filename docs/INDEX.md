@@ -62,6 +62,6 @@ An Apple Silicon Mac enrolled as a Room machine: [MACHINES.md](MACHINES.md). The
 
 ## History
 
-Dated plans, checkpoints, and working notes are in [history/](history/). That folder is not maintained.
+Dated plans, checkpoints, and working notes are in [history/](history/). That folder is not maintained. Point-in-time audits, plans, and reports moved out of the active tree live in the [repository archive](../archive/docs/) — also a record, not maintained.
 
 - [Read-only Board claim pages](WORK-CLAIMS-READ.md) — scoped paging without lifecycle housekeeping.
