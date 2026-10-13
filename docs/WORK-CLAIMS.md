@@ -373,7 +373,7 @@ gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
 owner with reason `review`. Reviews are listed on the claim. The event `reason` is `reviewed`.
 The older `{ "note" }` body still records a caller-bound note. It does not
 approve completion. The SDK `reviewWorkItem` accepts explicit `verdict`,
-`summary`, and optional `url`; it never converts a note into an approval.
+`summary`, optional `url`, and optional `evidence`; it never converts a note into an approval.
 
 ### Manual reviewed completion
 
@@ -390,7 +390,17 @@ owner, `claimedAt`, `revision`, and available `ci.headSha` at review time.
 Those fields must still match at completion; superseded claims cannot use
 reviewed completion. This is a binding to available server metadata, not
 proof of the artifact bytes, newly submitted `blobs`, or the version the
-reviewer actually inspected. Automatic PR-merge and live land/deploy
+reviewer actually inspected. A verdict review may also carry
+`evidence`, an object naming any of `tags`, `blobs`, `evidenceRefs` and
+`deliveryMode`. Every new review also records a snapshot of those four values
+on the claim. At completion the final `tags`, `blobs`, `evidenceRefs` and
+`deliveryMode` (what the update supplies, else the claim's current value) must
+equal, as exact sets, what the approval covers: the keys it named, else the
+snapshot. Adding, removing, swapping or clearing any of them is refused with
+**403** `work_review_rejected` until the reviewer approves again, naming the
+new values; order does not matter. A reviewed done that changes nothing still
+closes. An approval stored before snapshots existed covers only the claim's
+current values. Pointers are still not verified against stored bytes. Automatic PR-merge and live land/deploy
 settlement use separate paths and are not changed by this manual gate.
 
 Repeating the same latest verdict, summary, and URL returns the existing
