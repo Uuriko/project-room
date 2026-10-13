@@ -18,7 +18,7 @@
 import { uiText } from "./strings.js";
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
-import { solveIdentityMintProof } from "./client.js";
+import { submitIdentityMint } from "./client.js";
 
 export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
@@ -297,15 +297,29 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       const name = (data.createName || "").trim();
       if (!name) { setError("Give your agent a display name."); return; }
       await withBusy(async () => {
-        const proof = await solveIdentityMintProof(name);
-        const res = await fetch("/api/agent-identities", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName: name, proof }),
-          credentials: "same-origin"
+        // The server escalates the mint proof difficulty under load; a 428
+        // proof_required names the required difficulty in its proof object,
+        // and submitIdentityMint re-solves at that difficulty and resubmits.
+        const created = await submitIdentityMint(name, async proof => {
+          const res = await fetch("/api/agent-identities", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ displayName: name, proof }),
+            credentials: "same-origin"
+          });
+          if (res.status === 428 && typeof res.clone === "function") {
+            const challenge = await res.clone().json().catch(() => null);
+            if (challenge?.error?.code === "proof_required") {
+              const error = new Error(challenge.error.message || uiText("agentSignIn.proofRequired"));
+              error.code = "proof_required";
+              error.status = 428;
+              error.proof = challenge.proof;
+              throw error;
+            }
+          }
+          if (!res.ok) throw await apiError(res, "Couldn't create the identity");
+          return res.json();
         });
-        if (!res.ok) throw await apiError(res, "Couldn't create the identity");
-        const created = await res.json();
         // Held in memory only until rendered once; cleared on session start.
         createdIdentity = { identityId: created.identityId, secret: created.secret, privateKey: created.privateKey };
         displayName = created.displayName || name;

@@ -77,7 +77,7 @@
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
     "src/human-experience.css": "sha256:a77c325e3a2fd4104f40cc8d0b342ac1d6b7e19b2bc2f3e39d3e050bc6c4f118",
-    "src/human-experience.js": "sha256:e1a398455eea872cea1e301ddbc83a8ef80ed16b115a6f5015ffaeffd9a7d436",
+    "src/human-experience.js": "sha256:1c56fa7fdb48f05fd43193be53047e53282584d3c0c224805f7d656efa5d9095",
     "src/human-push-display.js": "sha256:7badd5c3f093ee2dcf3c28cf8b257e94742bc898dc4b7c87ccc46367a049b995",
     "src/human-push.js": "sha256:5299bc0185cd44dabccce67c2dbb8d120f3a96a60a6c72ab37a05a9f82355389",
     "src/inbox-client.js": "sha256:49c5a629886ab5fb6a304be3a5194a2e8b629a2f4a49ca4757522a186514fcdd",
@@ -137,7 +137,7 @@
     "cloudflare/room.mjs": "sha256:2a3db6a8e4d6fa5b575a42a87d77fec5129f5ee6201373a616ab5acc861b25ef",
     "cloudflare/storage.mjs": "sha256:be2b6df013b31be289f48bd795ab929c02e6997eb1470a2beb31ddfc9f3bdc9a",
     "cloudflare/wrangler.jsonc": "sha256:27f2cbf5acc501574f22dd7b96833b4f4d78b3406179edb13bb21a1a69357d51",
-    "scripts/deploy-recovery.mjs": "sha256:0fa0bf8675abdfff1ffe6fc97c8ad091e0445320adf0dc2a492121c3a1d439fa"
+    "scripts/deploy-recovery.mjs": "sha256:58df9eed890ae69b0bd0fa87a6355ecd44d73889dae23ed638068a36ba6b48ef"
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",

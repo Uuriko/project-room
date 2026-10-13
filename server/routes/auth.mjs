@@ -311,6 +311,12 @@ export async function handleAuthGroup(ctx) {
     if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
       reject(401, "invalid_credentials", "Invalid email or password");
     }
+    // A pass against the dummy is not authentication: with no real account
+    // or no real verifier there is nothing to sign in to. Answer exactly
+    // like a wrong password so the response never reveals which case it was.
+    if (!accountId || !verifier) {
+      reject(401, "invalid_credentials", "Invalid email or password");
+    }
     const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
     store.accountLogins.touchMethod(accountId, passwordMethod.id);
     const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
@@ -339,6 +345,11 @@ export async function handleAuthGroup(ctx) {
     verifyChangeSession();
     const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
     if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+      reject(401, "invalid_credentials", "The current password is incorrect");
+    }
+    // An account with no password set has no current password to match; the
+    // dummy verifier must never stand in for one.
+    if (!verifier) {
       reject(401, "invalid_credentials", "The current password is incorrect");
     }
     const policy = checkPasswordPolicy(data.newPassword);
@@ -508,10 +519,32 @@ async function postGuestUpgradeConfirm(ctx) {
   const accountId = session.account.id;
   // Someone took the address since the code went out: same answer as a bad code.
   if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
-  store.accountLogins.consumeEmailVerifyCode({ accountId, email, code: data.code.trim() });
-  const method = store.accountLogins.linkPasswordMethod(accountId, { email, verifier: hashPassword(data.password) });
-  store.accountLogins.markEmailVerified(accountId, email);
-  store.accountLogins.touchMethod(accountId, method.id);
+  const verifier = hashPassword(data.password);
+  // #2956: burn the code, link the magic method (consume does both), link
+  // the password, and mark verified in ONE transaction. Previously each
+  // step committed on its own, so a linkPasswordMethod failure after the
+  // consume (e.g. a racing tab set a password first) left the code spent
+  // and a magic method behind, and guestSession then refused any retry.
+  // An invalid code is the one failure that must COMMIT: consume counts
+  // the miss before throwing, and rolling that back would let an attacker
+  // retry forever — so return it and throw only after the transaction,
+  // exactly like the password-reset consume above.
+  const consumeFailure = store.transaction(() => {
+    // Recheck inside the writer fence so an address taken, or a password
+    // set, between the checks above and this transaction is seen here.
+    if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
+    try {
+      store.accountLogins.consumeEmailVerifyCode({ accountId, email, code: data.code.trim() });
+    } catch (error) {
+      if (error instanceof ServiceError && error.code === "invalid_email_code") return error;
+      throw error;
+    }
+    const method = store.accountLogins.linkPasswordMethod(accountId, { email, verifier });
+    store.accountLogins.markEmailVerified(accountId, email);
+    store.accountLogins.touchMethod(accountId, method.id);
+    return null;
+  });
+  if (consumeFailure) throw consumeFailure;
   return json(res, 200, { status: "upgraded", email });
 }
 

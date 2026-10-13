@@ -94,13 +94,14 @@ above, not JSON-RPC.
 
 ## Full code index
 
-901 rows (860 distinct codes).
+904 rows (863 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
 
 | Code | HTTP | What it means | Retry | Recovery |
 | --- | --- | --- | --- | --- |
+| `aborted` | 400 | Request ended early | yes | The request body never fully arrived, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload. |
 | `accept_not_buyer` | 403 | Only the named buyer may accept or decline this offer | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_denied` | 403 | manage_members required | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `access_ended` | 403 | Membership is no longer active | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
@@ -252,6 +253,7 @@ response's own `hint`/`next` when it names something more specific.
 | `dispute_cost_capped` | internal | cost ${next} exceeds cap ${current.maxDisputeCost} (25% of bounty) | n/a | rethrown as EscrowError invalid_input (422) inside escrow; original code never reaches the wire (Note: rethrown as EscrowError invalid_input (422) inside escrow; original code never reaches the wire.) |
 | `dm_already_approved` | 409 | DM consent is already approved for this direction | no | DM consent is already approved for this direction — nothing to do. |
 | `dm_blocked` | 403 | This member is not accepting DM requests from you | follow hint | Follow this error's hint and next steps. |
+| `invalid_side_table_event` | 422 | The side-table event payload failed validation (type, actor or fields) | fix+resend | Fix the refused fields named in the message, then resend with a fresh id. |
 | `dm_consent_required` | 403 | This member declined direct messages from you — ask in the room or have them unblock you | follow hint | Follow this error's hint and next steps. |
 | `dm_no_pending_request` | 409 | There is no pending DM request in this direction | no | There is no pending DM request in this direction. |
 | `dm_not_blocked` | 409 | This member is not blocked | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -292,6 +294,7 @@ response's own `hint`/`next` when it names something more specific.
 | `github_configuration_invalid` | 502 | GitHub sign-in could not be completed | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. (Note: http.mjs GitHubOAuthError map (default 502).) |
 | `github_not_configured` | 503 | error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } }); } rate(`github-start:${remoteAddress}`, 10); / | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `github_provider_unavailable` | 503 | GitHub could not be reached; try again | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. (Note: http.mjs GitHubOAuthError map (default 502).) |
+| `github_rate_limited` | 503 | GitHub refused the pull request read | wait | GitHub rate-limited the read. Wait for the rate-limit window to pass, then retry; the land queue backs off on this code. |
 | `github_session_required` | 502 | GitHub sign-in could not be completed | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. (Note: http.mjs GitHubOAuthError map (default 502).) |
 | `github_state_expired` | 401 | This GitHub sign-in attempt expired; start again | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. (Note: http.mjs GitHubOAuthError map (default 502).) |
 | `github_state_invalid` | 401 | This GitHub sign-in attempt is not valid; start again | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. (Note: http.mjs GitHubOAuthError map (default 502).) |
@@ -742,8 +745,10 @@ response's own `hint`/`next` when it names something more specific.
 | `membership_conflict` | 409 | That Room member already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `membership_ended` | 409 | This guest membership ended; use a new requestId | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `membership_ended` | 410 | This guest membership ended; ask the owner for a new invite. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `membership_removed` | 403 | Your access to this room was ended by its owner. Ask the owner to restore it; an invitation link can't bring you back. | no | Do not retry. Ask the room owner to restore your access. |
 | `mention_forbidden` | 403 | You can only list your own mentions | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `mention_not_found` | 404 | No mention found for this message | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `message_archived` | 409 | That message is archived and cannot be changed or replied to | no | Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it. |
 | `message_deleted` | 409 | A deleted message cannot be saved | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `message_not_found` | 404 | No such message in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `message_too_large` | 422 | message attachments total ${messageTotal} bytes exceeds limit ${cap} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -779,6 +784,7 @@ response's own `hint`/`next` when it names something more specific.
 | `offer_exists` | 409 | Offer ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_limit` | 409 | This room has reached its offer limit | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_not_found` | 404 | Offer not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `opening_not_owner` | 403 | Opening "${opening.openingId}" was declared by another member — only its declarer can change or close its terms | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `operator_unconfigured` | 403 | The operator account is not configured | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `opportunities_store_missing` | 500 | Opportunity feed requires a store with a db handle | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `origin_denied` | 403 | reject(403, "origin_denied", required ? "Origin header is required" : "Request origin is not allowed"); } } // The public Join-with-code door (getdash | follow hint | Follow this error's hint and next steps. |
@@ -863,6 +869,7 @@ response's own `hint`/`next` when it names something more specific.
 | `request_run_not_delivered` | 409 | The original request has no recorded answer | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `request_run_owned` | 409 | Another host owns this request; reconcile that host | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `request_run_terminal` | 409 | An uncertain attempt cannot silently resume execution | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `reserved_room_id` | 422 | Room id is reserved and cannot be used; choose a different room id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `reset_account_mismatch` | 409 | This reset is for another account. Sign out before continuing. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `restore_failed` | 500 | Restore failed during replay | no | Operator only. The replay ran in one transaction and was rolled back, so the store is still empty. Check the Durable Object logs, then retry once with the same file. |
 | `restore_refused_nonempty` | 409 | Restore refuses a store that already holds rooms | no | Operator only. Restore never overwrites live data. Restore into a fresh, empty Durable Object. |
@@ -958,6 +965,7 @@ response's own `hint`/`next` when it names something more specific.
 | `timeout` | 504 | Fetching the page exceeded the 15 second limit | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `token_conflict` | 409 | Generate a new key | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `too_large` | 413 | Request is too large | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `transfer_ownership_required` | 409 | Transfer ownership of these shared rooms before deleting this account: … (the message lists them; `detail.rooms` carries each room's id/title/kind) | no | Transfer ownership of each listed room to another member first, then retry the account deletion. |
 | `too_many_link_codes` | 429 | Too many outstanding link codes; use one or let it expire | wait | Wait for the Retry-After interval; retry the exact same request. |
 | `too_many_open_claims` | 409 | ${row.claimant_member_id} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `too_many_requests` | 409 | At most ${MAX_PENDING_PER_IDENTITY_ROOM} pending requests per room | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

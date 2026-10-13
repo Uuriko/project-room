@@ -136,7 +136,7 @@ test("QAJ-006: a new access request appends an access.requested timeline event",
     requestedPermissions: ["accept_work"],
     note: "I can triage.",
     requestId: "p2s-req-1",
-  });
+  }, identity.secret);
   assert.equal(created.status, "pending");
   const events = requestEvents(store);
   assert.equal(events.length, 1, "exactly one access.requested event");
@@ -165,7 +165,7 @@ test("QAJ-006: the room owner gets an access_request notification; nobody else d
     requestedPermissions: ["accept_work"],
     note: "Let me in.",
     requestId: "p2s-req-2",
-  });
+  }, identity.secret);
   const feed = store.notifications.list(ownerToken, "commons");
   const items = feed.notifications.filter(item => item.kind === "access_request");
   assert.equal(items.length, 1, "owner sees one access_request item");
@@ -209,11 +209,11 @@ test("QAJ-006: idempotent retry of a request emits no duplicate event", async t 
   const first = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "p2s-req-3",
-  });
+  }, identity.secret);
   const retry = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "p2s-req-3",
-  });
+  }, identity.secret);
   assert.equal(retry.requestId, first.requestId);
   assert.equal(requestEvents(store).length, 1, "retry reuses the original, emits nothing new");
 });
@@ -224,7 +224,7 @@ test("QAJ-006: archived rooms record the request without a timeline event", asyn
   const created = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "p2s-req-4",
-  });
+  }, identity.secret);
   assert.equal(created.status, "pending", "request still records (unchanged behavior)");
   assert.equal(requestEvents(store).length, 0, "no timeline event for an archived room");
 });

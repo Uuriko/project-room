@@ -82,21 +82,52 @@ function prepared(db) {
 const slimmable = message => message && typeof message.body === "string"
   && message.body.length >= BODY_AT_REST_MIN_CHARS && !("bodyRef" in message);
 
+// Phase 1b: the reducer writes workItemId, replyToId and toMemberId as three
+// adjacent nulls on almost every message (~53 bytes of 231). At rest they
+// become one marker key in the position of the first of them. The inverse is
+// exact: key order and values come back byte for byte, and a message that does
+// not carry exactly that run (or that already has the marker) is left alone.
+export const NULL_ENVELOPE_KEY = "_nul";
+const NULL_RUN = ["workItemId", "replyToId", "toMemberId"];
+const nullRunAt = keys => keys.findIndex((key, index) => key === NULL_RUN[0] && NULL_RUN.every((name, offset) => keys[index + offset] === name));
+const nullEnvelope = message => {
+  if (!message || typeof message !== "object" || Array.isArray(message) || NULL_ENVELOPE_KEY in message) return false;
+  return NULL_RUN.every(name => message[name] === null) && nullRunAt(Object.keys(message)) >= 0;
+};
+const hasMarker = message => message && typeof message === "object" && message[NULL_ENVELOPE_KEY] === 1;
+function slimEnvelope(message) {
+  const out = {};
+  for (const [key, value] of Object.entries(message)) {
+    if (key === NULL_RUN[0]) out[NULL_ENVELOPE_KEY] = 1;
+    else if (!NULL_RUN.includes(key)) out[key] = value;
+  }
+  return out;
+}
+function restoreEnvelope(message) {
+  const out = {};
+  for (const [key, value] of Object.entries(message)) {
+    if (key === NULL_ENVELOPE_KEY && value === 1) for (const name of NULL_RUN) out[name] = null;
+    else out[key] = value;
+  }
+  return out;
+}
+
 // The only way a room projection is turned into the text stored in
 // rooms.projection. With enabled=false the output is JSON.stringify(state),
 // byte for byte, apart from rehydrating any bodyRef a raw-read state carries.
 export function storedProjection(db, roomId, state, { enabled = false } = {}) {
   const messages = Array.isArray(state?.messages) ? state.messages : null;
   if (!messages) return JSON.stringify(state);
-  const carriesRefs = messages.some(message => message && typeof message.bodyRef === "string");
+  const carriesRefs = messages.some(message => message && typeof message.bodyRef === "string" || hasMarker(message));
   if (!enabled && !carriesRefs) return JSON.stringify(state);
   if (!enabled) return JSON.stringify(hydrateProjection(db, roomId, structuredClone(state)).state);
-  if (!messages.some(slimmable)) return JSON.stringify(state);
+  if (!messages.some(message => slimmable(message) || nullEnvelope(message))) return JSON.stringify(state);
   const { known, insert } = prepared(db);
   const present = new Set(known.all(roomId).map(row => row.sha));
   const memo = memoFor(db, roomId), seen = new Map();
-  const slim = messages.map(message => {
-    if (!slimmable(message)) return message;
+  const slim = messages.map(original => {
+    const message = nullEnvelope(original) ? slimEnvelope(original) : original;
+    if (!slimmable(original)) return message;
     const cached = memo.get(message.id);
     const sha = cached && cached.body === message.body ? cached.sha : shaOf(message.body);
     seen.set(message.id, { body: message.body, sha });
@@ -112,11 +143,14 @@ export function storedProjection(db, roomId, state, { enabled = false } = {}) {
 // only an out-of-band write could cause; the caller rebuilds from the log.
 export function hydrateProjection(db, roomId, state) {
   const messages = Array.isArray(state?.messages) ? state.messages : [];
-  if (!messages.some(message => message && typeof message.bodyRef === "string")) return { state, missing: [] };
-  const bodies = new Map(prepared(db).read.all(roomId).map(row => [row.sha, row.body]));
+  const refs = messages.some(message => message && typeof message.bodyRef === "string");
+  if (!refs && !messages.some(hasMarker)) return { state, missing: [] };
+  const bodies = refs ? new Map(prepared(db).read.all(roomId).map(row => [row.sha, row.body])) : new Map();
   const missing = [];
   messages.forEach((message, index) => {
-    if (!message || typeof message.bodyRef !== "string") return;
+    if (!message) return;
+    if (hasMarker(message)) message = messages[index] = restoreEnvelope(message);
+    if (typeof message.bodyRef !== "string") return;
     const body = bodies.get(message.bodyRef);
     if (typeof body !== "string" || shaOf(body) !== message.bodyRef) { missing.push(message.id); return; }
     messages[index] = renameKey(message, "bodyRef", "body", body);
@@ -134,12 +168,34 @@ export function atRestBodyBytes(db, roomId) {
 // A missing row falls back to `recover(messageId)` (the store's hydrated
 // room, which replays the event log), the same path store.room() uses.
 export function hydrateRecordText(db, roomId, text, recover = null) {
-  if (typeof text !== "string" || !text.includes('"bodyRef"')) return text;
-  const record = JSON.parse(text);
-  if (typeof record?.bodyRef !== "string") return text;
+  if (typeof text !== "string" || !text.includes('"bodyRef"') && !text.includes(`"${NULL_ENVELOPE_KEY}"`)) return text;
+  let record = JSON.parse(text);
+  if (hasMarker(record)) record = restoreEnvelope(record);
+  if (typeof record?.bodyRef !== "string") return JSON.stringify(record);
   const row = db.prepare("SELECT body FROM projection_bodies WHERE room_id=? AND sha=?").get(roomId, record.bodyRef);
   let body = typeof row?.body === "string" && shaOf(row.body) === record.bodyRef ? row.body : null;
   if (body === null && recover) body = recover(record.id);
   if (typeof body !== "string") throw new Error("projection_corrupt: stored message body missing");
   return JSON.stringify(renameKey(record, "bodyRef", "body", body));
+}
+
+// Size breakdown of one stored room row, for the next capacity read. Bytes are
+// UTF-8 bytes of the stored JSON (so after slimming), per top-level key and per
+// message key, with how many messages carry each key.
+export function projectionBreakdown(db, roomId) {
+  const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+  if (!row) return null;
+  const bytes = value => Buffer.byteLength(JSON.stringify(value));
+  const state = JSON.parse(row.projection);
+  const topLevel = Object.entries(state).map(([key, value]) => ({ key, bytes: bytes(value) })).sort((a, b) => b.bytes - a.bytes);
+  const messages = Array.isArray(state.messages) ? state.messages : [];
+  const perKey = new Map();
+  for (const message of messages) for (const [key, value] of Object.entries(message ?? {})) {
+    const entry = perKey.get(key) ?? { key, messages: 0, bytes: 0 };
+    entry.messages += 1; entry.bytes += Buffer.byteLength(key) + 4 + bytes(value);
+    perKey.set(key, entry);
+  }
+  return { totalBytes: Buffer.byteLength(row.projection), topLevel, messageCount: messages.length,
+    averageMessageBytes: messages.length ? Math.round(bytes(messages) / messages.length) : 0,
+    messageKeys: [...perKey.values()].sort((a, b) => b.bytes - a.bytes) };
 }

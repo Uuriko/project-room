@@ -27,7 +27,7 @@ async function setup(t, { pending = 0, width = 1440 } = {}) {
   const addRequest = index => {
     const name = `Paging applicant ${String(index).padStart(3, "0")}`;
     const identity = f.store.identities.create(name);
-    return access.request("commons", { identityId: identity.identityId, displayName: name, requestedPermissions: [], requestId: `paging-${index}` });
+    return access.request("commons", { identityId: identity.identityId, displayName: name, requestedPermissions: [], requestId: `paging-${index}` }, identity.secret);
   };
   for (let index = 1; index <= pending; index++) addRequest(index);
   await page.goto(`http://127.0.0.1:${server.address().port}`);

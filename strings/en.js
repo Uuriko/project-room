@@ -12,6 +12,7 @@ export default {
   "email.row.fallback_head": "An update is waiting in Room",
   "human.workNoReview": "No review · Advanced options",
   "agentSignIn.credentialMismatch": "That agent ID and secret don’t match. Check both and try again.",
+  "agentSignIn.proofRequired": "Identity mint proof required",
   "human.copy.001": "<div class=\"assistant-heading\"><strong>Room</strong><span id=\"room-assistant-status\"></span><button type=\"button\" id=\"assistant-setup\" class=\"text-button\">Connect</button><button type=\"button\" id=\"human-project-open\" class=\"text-button\">Project</button></div><details id=\"assistant-activity\"><summary>Activity</summary><div id=\"assistant-runs\"></div></details><p id=\"assistant-error\" class=\"form-hint\" role=\"status\"></p><button type=\"button\" id=\"assistant-retry\" class=\"text-button\" hidden>Retry request</button><button type=\"button\" id=\"assistant-review\" class=\"text-button\" hidden>Review current request</button><button type=\"button\" id=\"assistant-discard\" class=\"text-button\" hidden>Dismiss</button>",
   "human.copy.002": "Ask the room assistant in this shared conversation",
   "human.copy.003": "<input id=\"human-advanced\" type=\"checkbox\"> Show advanced agent controls",
@@ -151,6 +152,8 @@ export default {
   "directory.card.copy.001": "<p class=\"form-hint\">No directory card available.</p>",
   "directory.card.copy.002": "No live wake/bond data",
   "join.alreadyJoined": "You already joined this room. Go back to sign-in and open the room, or use your saved agent credential.",
+  "join.timedOut.title": "Join timed out",
+  "join.timedOut.message": "The room didn't answer in time, so the join may or may not have gone through. Try again — if it says the invite was already used, ask the inviter for a fresh link.",
   "profile.title": "Profile",
   "profile.form": "<form data-form=\"account-profile\" class=\"settings-form\"><label>Account display name <input name=\"displayName\" autocomplete=\"nickname\" maxlength=\"80\" value=\"{name}\"></label><p class=\"form-hint\">Your account name. Names you use in rooms stay the same.</p><button type=\"submit\" class=\"button primary\">Save</button></form>",
   "deletion.plain.intro": "This permanently deletes your account and its sign-in methods, and signs you out on every device.",
@@ -172,6 +175,8 @@ export default {
   "connection.connecting": "Connecting to room service…",
   "room.session_ended": "Your session in that room ended. Open the room again from your room list to continue.",
   "profile.editing": "editing your profile",
+  "file.attach.blockedType": "That file type isn’t allowed.",
+  "file.attach.failed": "Couldn’t attach that file.",
   "file.download.action": "Download {filename}",
   "file.download.pending": "Downloading…",
   "file.download.started": "Download started",
@@ -382,5 +387,10 @@ export default {
   "human.face.openResult": "Open result",
   "human.assistantChange": "Change",
   "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
-  "chat.typingStatus": "{name} is typing"
+  "chat.typingStatus": "{name} is typing",
+  "join.dead.title": "This invite has ended",
+  "join.dead.scope": "Unable to open this invitation. Ask the person who invited you for a fresh link.",
+  "join.dead.status": "This invite is unavailable. Sign in and request access.",
+  "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
+  "join.dead.roomsLink": "Back to your rooms"
 };

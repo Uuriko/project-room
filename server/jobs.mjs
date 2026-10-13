@@ -454,7 +454,12 @@ export function startNodeScheduler({
       ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0 }
       : { ...prior, lastRunAt: at, lastErrorAt: at, consecutiveFailures: prior.consecutiveFailures + 1 });
   };
-  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, retentionIndex: 0 };
+  // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
+  // store progress on it across ticks (runNodeRetention advances
+  // retentionIndex so each tick prunes the next table). It must therefore be
+  // passed to jobs as-is — a fresh spread copy per tick silently discarded
+  // the rotated retentionIndex and every tick pruned table index 0 again.
+  const ctxBase = { env, fetchImpl, dnsResolvers, now, gmailSync, drainer, growthTick, retentionIndex: 0 };
   let timer = null;
   let running = false;
   async function runOnce() {
@@ -471,7 +476,10 @@ export function startNodeScheduler({
         if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
         const deadline = at + (job.budgetMs ?? JOB_BUDGET_MS);
         try {
-          const result = await job.run(store, { ...ctxBase, deadline, growthTick });
+          // Jobs run sequentially under the `running` guard, so sharing
+          // ctxBase is safe; only the per-job deadline changes between runs.
+          ctxBase.deadline = deadline;
+          const result = await job.run(store, ctxBase);
           lastRan.set(job.name, at);
           record(job.name, at, !summaryFailed(result));
           outcomes.push({ job: job.name, ok: true, result });

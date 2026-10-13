@@ -125,9 +125,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     const issued = typeof membership.mcpToken?.credential === "string" && membership.mcpToken.credential.startsWith("rak_")
       ? membership.mcpToken.credential : null;
     const rooms = privateDirectory(join(journal.root, "rooms")), configDirectory = privateDirectory(join(rooms, step.roomId));
-    let kept = null;
+    let kept = null, previous = null;
     try {
-      const previous = readAgentConnection(configDirectory);
+      previous = readAgentConnection(configDirectory);
       if (previous.origin === saved.origin && previous.roomId === step.roomId && previous.memberId === membership.memberId
         && previous.token.startsWith("rak_")) kept = previous.token;
     } catch (error) {
@@ -135,6 +135,13 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
     }
     let token = kept ?? issued;
     if (!token) {
+      // A saved connection that was not kept (a different origin, room or
+      // member, or a non-rak_ token) can never equal the config this run
+      // would write, so the run fails at the comparison below either way.
+      // Fail before minting: createAgentKey issues a real server-side
+      // credential, and one minted here would be orphaned — written
+      // nowhere, never used, never revoked — on every retry.
+      if (previous) throw new Error("Existing connection differs; nothing was replaced");
       const issuerFields = {
         origin: saved.origin, roomId: step.roomId, memberId: membership.memberId, fetchImpl
       };

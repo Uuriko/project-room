@@ -229,7 +229,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation) return;
       const run = latest.runs.find(r => r.id === original.runId);
       if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
-      operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
+      operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in original ? { expectedAttemptId: run.attemptId || null } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
       error = uiText("human.copy.016"); paint();
     } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
   };

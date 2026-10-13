@@ -201,7 +201,19 @@ export class InboxCollabStore {
       policies: new Map(),
     };
     this.#rooms.set(roomId, entry);
-    this.#replayRoom(roomId, entry);
+    // #2933: the entry is cached before replay so replay-time access sees
+    // it, but a failed replay (record mismatch, corrupt JSON) must not
+    // leave the partially-replayed journal set cached for the life of the
+    // process — every later access would serve incomplete
+    // assignments/approvals/locks as if healthy. Evict on failure, like
+    // #transact does for write failures, so the next access replays from
+    // the database again (and throws again while the rows stay corrupt).
+    try {
+      this.#replayRoom(roomId, entry);
+    } catch (err) {
+      this.#rooms.delete(roomId);
+      throw err;
+    }
     return entry;
   }
 

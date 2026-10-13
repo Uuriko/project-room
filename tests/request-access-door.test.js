@@ -6,6 +6,9 @@
 //  2. The submit orchestration reuses the browser-stashed identity per room
 //     instead of minting a fresh identity per click (the mint endpoint is
 //     rate-limited; a per-click mint burns it).
+//  3. A retry reuses the stashed requestId — the server's idempotency key —
+//     instead of minting a fresh one per attempt, so a retry after a lost
+//     response returns the original request instead of filing a duplicate.
 // Neither is covered elsewhere: server tests own the POST route, join-p2s
 // owns the invite-context helpers, and the dead-invite flow in app.js is
 // DOM-wired without unit coverage at this boundary.
@@ -17,7 +20,7 @@ import {
   buildGeneralAccessRequest,
   submitGeneralAccessRequest,
 } from "../src/request-access.js";
-import { FALLBACK_REQUEST_PERMISSIONS, readAccessRequest } from "../src/invite-context.js";
+import { FALLBACK_REQUEST_PERMISSIONS, readAccessRequest, stashAccessRequest } from "../src/invite-context.js";
 
 function memStorage() {
   const m = new Map();
@@ -92,6 +95,7 @@ test("submit: mints once, submits with the minted identity, stashes the record",
   const sent = client.calls[0];
   assert.equal(sent.roomId, "muse-room");
   assert.equal(sent.identityId, "ai_test123");
+  assert.equal(sent.secret, "pri_test", "the minted identity's secret travels with the filing as proof (issue #2912)");
   assert.equal(sent.displayName, "Ada");
   assert.match(sent.requestId, /^ar_[0-9a-f]{16}$/);
   assert.equal(result.requestId, sent.requestId);
@@ -106,7 +110,22 @@ test("submit: retry reuses the stashed identity instead of minting again", async
   assert.equal(client.mintCount(), 1);
   assert.equal(client.calls.length, 2);
   assert.equal(client.calls[0].identityId, client.calls[1].identityId);
-  assert.notEqual(client.calls[0].requestId, client.calls[1].requestId);
+  // The requestId is the server's idempotency key: a retry that mints a
+  // fresh one files a duplicate request when the first response was lost.
+  assert.equal(client.calls[0].requestId, client.calls[1].requestId);
+});
+
+test("submit: a pre-stashed requestId is reused as the idempotency key", async () => {
+  const client = fakeClient();
+  const storage = memStorage();
+  stashAccessRequest(storage, "muse-room", {
+    identityId: "ai_test123", secret: "pri_test", requestId: "ar_0123456789abcdef", displayName: "Ada",
+  });
+  const result = await submitGeneralAccessRequest({ client, storage, roomId: "muse-room", displayName: "Ada" });
+  assert.equal(client.mintCount(), 0);
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].requestId, "ar_0123456789abcdef");
+  assert.equal(result.requestId, "ar_0123456789abcdef");
 });
 
 test("submit: a different room mints its own identity", async () => {
@@ -129,7 +148,9 @@ test("submit: a failed submit keeps the minted identity stashed for the retry (M
   let failSubmit = true;
   const client = fakeClient();
   const submit = client.submitAccessRequest;
+  const attempted = [];
   client.submitAccessRequest = async (body) => {
+    attempted.push(body);
     if (failSubmit) throw new Error("network down");
     return submit(body);
   };
@@ -145,4 +166,11 @@ test("submit: a failed submit keeps the minted identity stashed for the retry (M
   const result = await submitGeneralAccessRequest({ client, storage, roomId: "muse-room", displayName: "Ada" });
   assert.equal(client.mintCount(), 1, "the retry reuses the stashed identity instead of minting again");
   assert.equal(result.identityId, stashed.identityId);
+  // The failed attempt may still have reached the server (lost response), so
+  // the retry must carry the SAME requestId: it is the server's idempotency
+  // key and reusing it returns the original request instead of a duplicate.
+  assert.equal(attempted.length, 2);
+  assert.equal(attempted[1].requestId, attempted[0].requestId);
+  assert.equal(result.requestId, attempted[0].requestId);
+  assert.equal(result.requestId, stashed.requestId);
 });

@@ -151,6 +151,26 @@ test("topMentionedMovers orders by delta with new and dropped agents", () => {
   assert.equal(movers[2].agentId, "agent-9");
 });
 
+test("topMentionedMovers includes agents ranked outside both summaries' top-10", () => {
+  // Regression for #2975: movers were built only from the truncated
+  // top-10 lists, so an agent ranked 11th in both windows vanished.
+  const crowd = (prefix, day) => Array.from({ length: 10 }, (_, i) =>
+    ev("agent.mentioned", { roomId: "r1", messageId: `${prefix}-${i}`, mentionedAgentId: `agent-top-${i}`, mentionCount: 30 }, `${day}T10:00:00Z`));
+  const previous = summarize(buildCollector([
+    ...crowd("p", "2026-09-01"),
+    ev("agent.mentioned", { roomId: "r1", messageId: "p-watched", mentionedAgentId: "agent-watched", mentionCount: 5 }, "2026-09-01T11:00:00Z")
+  ]));
+  const current = summarize(buildCollector([
+    ...crowd("c", "2026-09-08"),
+    ev("agent.mentioned", { roomId: "r1", messageId: "c-watched", mentionedAgentId: "agent-watched", mentionCount: 25 }, "2026-09-08T11:00:00Z")
+  ]));
+  assert.equal(current.topMentionedAgents.some(entry => entry.agentId === "agent-watched"), false);
+  const comparison = compareSummaries(current, previous);
+  const mover = comparison.topMentionedMovers.find(entry => entry.agentId === "agent-watched");
+  assert.ok(mover, "agent-watched must appear in topMentionedMovers");
+  assert.deepEqual([mover.currentMentions, mover.previousMentions, mover.delta], [25, 5, 20]);
+});
+
 test("windows are echoed through and the output is frozen", () => {
   const current = currentSummary();
   const previous = previousSummary();

@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, messageAction } from "./room-chrome.mjs";
 
 async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
   const f = createAcceptanceFixture(), workItemId = "native-human";
@@ -37,11 +37,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
   const open = async () => {
     if (review) await page.locator(`[data-work-record-id='${workItemId}'] [data-action='verify']`).click();
     else {
-      // Per-message actions live in the "⋯" overflow menu (UI calming #2).
-      const draftRow = page.locator(`[data-message-record-id='native-draft']`);
-      const draftMenu = draftRow.locator('details.message-more');
-      if (!(await draftMenu.evaluate(node => node.open))) await draftMenu.locator('summary').click();
-      await page.locator("[data-message-id='native-draft'][data-message-action='result']").click();
+      await messageAction(page, "native-draft", "result");
     }
     await page.locator("#action-dialog").waitFor({ state: "visible" });
   };

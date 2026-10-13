@@ -311,7 +311,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .search-results { padding: .5rem 1rem; border-bottom: 1px solid var(--line-soft); max-height: 16rem; overflow-y: auto; }
 /* Keep several lines readable when enlarged controls consume the viewport.
    The room scrolls to its composer instead of squeezing the timeline away. */
-.timeline { flex: 1 1 auto; min-height: 10rem; overflow-y: auto; margin: 0; padding: .75rem 1.5rem 1rem; list-style: none; scrollbar-gutter: stable; }
+.timeline { overflow-anchor: none; flex: 1 1 auto; min-height: 10rem; overflow-y: auto; margin: 0; padding: .75rem 1.5rem 1rem; list-style: none; scrollbar-gutter: stable; }
 .timeline > .empty-note { color: var(--muted); }
 .tl-work { margin: .6rem 0; }
 .tl-work .work-card { border: 1px solid var(--line); border-radius: .65rem; background: var(--panel-raised); padding: .85rem 1rem; }
@@ -336,13 +336,13 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 }
 @keyframes typing-dot { 0%, 60%, 100% { opacity: .4; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-.15rem); } }
 .typing-indicator[hidden] { display: none; }
-.composer-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 40px; align-items: end; gap: .5rem; padding: .5rem; border: 1px solid #50515f; border-radius: .75rem; background: var(--panel-raised); }
+.composer-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 44px; align-items: end; gap: .5rem; padding: .5rem; border: 1px solid #50515f; border-radius: .75rem; background: var(--panel-raised); }
 .composer-row:focus-within { border-color: var(--blue); }
 .composer-row textarea { grid-column: 2; min-height: 3rem; max-height: 25dvh; border: 0; border-radius: .35rem; background: transparent; padding: .45rem .25rem; }
 .composer-row textarea:focus { outline: 0; }
 .composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 32px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; }
 .composer-attach { grid-column: 3; grid-row: 1 / span 2; align-self: end; }
-.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; }
+.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; min-height: 44px; min-width: 44px; }
 .composer-attachments, .message-files { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
 .file-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: 100%; padding: .15rem .45rem; border: 1px solid var(--line); border-radius: 999px; font-size: .8rem; }
 .file-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; min-height: 1.5rem; }
@@ -373,6 +373,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
    (14 px text, 44 px row) inside the form steps. The welcome view and chat
    rows keep the compact size above. */
 #auth-signin-ui .text-button, #agent-auth-step .text-button { min-height: 44px; font-size: var(--text-sm); }
+#join-account-rooms-link { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); }
 /* UI calming #2: the "⋯" overflow menu holds Save as result / Pin / Make this
    work / Record decision / moderation; it fades in with the other actions.
    The fade targets the summary only, never the <details> itself: opacity < 1
@@ -744,7 +745,11 @@ button:disabled { cursor: wait; opacity: .6; }
 .new-messages-button { display: block; align-self: center; max-width: calc(100% - 2rem); margin: .35rem 1rem; padding: .45rem 1rem; border: 1px solid #66668b; border-radius: 99px; color: var(--text); background: #37374e; font-size: .8rem; }
 .count-chip { padding-inline: .6rem; white-space: nowrap; }
 @media (max-width: 500px) {
-  .thread-bar { flex-direction: column; align-items: stretch; gap: .5rem; }
+  /* One row: Back, the title and Mute, so a thread keeps room for its replies. */
+  .thread-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .5rem; padding: .4rem .75rem; }
+  .thread-bar h3 { margin: 0; font-size: var(--text-md); }
+  .thread-bar p { font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread-bar button { min-height: 44px; padding-inline: .6rem; }
   .conversation-header { flex-wrap: wrap; }
 }
 
@@ -1237,7 +1242,7 @@ summary { overflow-wrap: anywhere; }
 /* Issue #6 B2: pinned messages (chip styling consolidated above with .pinned-chip). */
 .pinned-panel { margin: 0 1rem .25rem; padding: 0 .75rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: rgb(255 255 255 / 2%); }
 .pinned-panel > .section-summary { min-height: 40px; }
-.pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; }
+.pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; max-height: min(30dvh, 16rem); overflow-y: auto; overscroll-behavior: contain; }
 .pinned-item { display: grid; grid-template-columns: 1fr auto; gap: .1rem .75rem; padding: .5rem .6rem; border: 1px solid var(--line-soft); border-radius: .6rem; }
 .pinned-item .pinned-link { grid-column: 1; font-size: .78rem; }
 .pinned-item .pinned-body { grid-column: 1; margin: 0; color: #dfe5ed; font-size: .9rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1420,7 +1425,7 @@ summary { overflow-wrap: anywhere; }
 }
 /* Popovers anchor to the action row, not to a trigger shifted by a thread link. */
 .message-links { position: relative; }
-.composer-row { grid-template-columns: auto minmax(0, 1fr) 36px 40px; }
+.composer-row { grid-template-columns: auto minmax(0, 1fr) 36px 44px; }
 .sidebar-head { margin: 0; padding: 0; }
 .sidebar-head .room-overview-open { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-width: 0; padding: .35rem; border: 0; border-radius: .4rem; background: transparent; color: var(--text); text-align: left; }
 .sidebar-head .room-overview-open:hover { background: var(--panel-raised); }
@@ -1435,7 +1440,7 @@ summary { overflow-wrap: anywhere; }
 .composer-row .composer-add { grid-column: 1; grid-row: 2; justify-self: start; }
 .composer-row #request-reply { grid-column: 2; grid-row: 2; }
 .composer-attach { grid-column: 3; grid-row: 2; }
-.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; }
+.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; min-height: 44px; min-width: 44px; }
 @media (max-width: 520px) {
   .composer-row #request-reply { padding-inline: .35rem; font-size: .68rem; }
 }

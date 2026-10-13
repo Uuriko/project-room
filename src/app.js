@@ -6,7 +6,7 @@ import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy,
 import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
 import { clipGraphemes } from "./emoji.js";
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
@@ -37,7 +37,7 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel } from "./composer-files.js";
+import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
@@ -251,6 +251,9 @@ function readAcquisition() {
 function clearAcquisition() {
   try { window.sessionStorage.removeItem(ACQUISITION_KEY); } catch { /* storage may be blocked */ }
 }
+function clearTemplateRoom() {
+  try { window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY); } catch { /* storage may be blocked */ }
+}
 // --- end GR2 ---
 function consumeStartRoomIntent() {
   const wanted = startRoomIntent;
@@ -329,6 +332,8 @@ const TIMELINE_PAGER_KEY = "pager:earlier";
 const timelineWindow = new Map();
 let timelineRevealing = false;
 const viewPositions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
+const timelinePin = createTimelinePin();
+let pinScrollTop = null; // Scroll position last moved by the timeline pin.
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, catchUpBoundary = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
@@ -369,6 +374,8 @@ try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
+  // Live refresh: a peer's consent decision arrives as dm.consent_changed.
+  onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
@@ -1278,6 +1285,14 @@ function setFormStatus(status, text, error = false) {
   status.classList.toggle("error", Boolean(text) && error);
 }
 function composerOverLimit() { return $("#message-input").value.length > MAX_MESSAGE_BODY_CHARS; }
+// The composer grows with its text up to the CSS max-height (25dvh), then scrolls.
+function autosizeComposer() {
+  const input = $("#message-input");
+  if (!input) return;
+  input.style.height = "auto";
+  if (input.value) input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
+  else input.style.removeProperty("height");
+}
 function renderComposerLength() {
   const input = $("#message-input"), over = composerOverLimit();
   const limit = new Intl.NumberFormat("en-US").format(MAX_MESSAGE_BODY_CHARS);
@@ -1736,6 +1751,7 @@ async function submitRequestAccessForm(event) {
     await accountClient.submitAccessRequest({
       roomId: door.roomId,
       identityId,
+      secret,
       displayName: checked.displayName,
       requestedPermissions: defaultRequestPermissions(invitation.preview),
       note: checked.note,
@@ -2215,7 +2231,12 @@ function renderChannels() {
       ? `<button type="button" class="icon-button channel-manage" data-channel-manage="${esc(c.id)}" aria-label="Channel settings, ${esc(c.name)}" title="Channel settings">⋯</button>` : "";
     return `<li class="channel-row"><button type="button" class="channel${active ? " is-active" : ""}" data-channel="${esc(c.id)}"${active ? ' aria-current="page"' : ""}><span aria-hidden="true">#</span><span class="channel-name">${esc(c.name)}</span></button>${manage}</li>`;
   }).join("");
-  if (list._html !== html) { list.innerHTML = html; list._html = html; }
+  if (list._html === html) return;
+  // The rebuild replaces the focused button; keep keyboard and screen-reader
+  // users on the channel they just picked.
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.channel ?? null : null;
+  list.innerHTML = html; list._html = html;
+  if (focused) list.querySelector(`[data-channel="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
 }
 // One-tap replies and a task nudge under the latest message in view
 // (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
@@ -2328,8 +2349,9 @@ function renderMessages() {
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
   const listTop = Math.max(0, list.getBoundingClientRect().top);
-  const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80
-    : list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const listNearBottom = !pageScroll && list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const pinOnly = !pageScroll && !listNearBottom && timelinePin.holds(view, list); // at the newest only by the pin
+  const nearBottom = pageScroll ? list.getBoundingClientRect().bottom <= innerHeight + 80 : pinOnly || listNearBottom;
   const anchor = [...list.children].find(e => {
     if (e.hasAttribute("data-claim-update") || e.dataset.key === TIMELINE_PAGER_KEY) return false; // removed and repainted below
     const bounds = e.getBoundingClientRect();
@@ -2348,7 +2370,7 @@ function renderMessages() {
   // node is in its final place.
   const focusedKey = focused?.dataset.focusKey ?? null;
   const focusedMessage = focused?.matches(".message");
-  const newMessages = sameView && !revealing ? messages.filter(m => !previous.has(`message:${m.id}`)) : [];
+  const newMessages = sameView && !revealing ? arrivalsAfterShown(messages, m => previous.has(`message:${m.id}`)) : [];
   const newCount = newMessages.length;
   // Your own message, sent from this browser, always comes into view: it is
   // not news to you, and a "jump to latest" pill for it hides what you just said.
@@ -2360,6 +2382,7 @@ function renderMessages() {
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
   newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
+  if (arrivalsNeedFileRefresh(newMessages, session?.member?.id)) scheduleRoomFilesRefresh();
   $("#thread-bar").hidden = !currentThreadId;
   syncThreadMuteButton();
   syncAlsoSend();
@@ -2501,8 +2524,14 @@ function renderMessages() {
   }
   restoreTimelineSelection(list, savedSelection);
   list.dataset.view = view;
-  if (!sameView) { list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0; }
-  else if ((nearBottom || ownArrival) && !focused) { list.scrollTop = list.scrollHeight; newVisibleMessages = 0; }
+  if (!sameView) {
+    list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0;
+    if (viewPositions.has(view)) timelinePin.clear(); else timelinePin.set(view, list);
+  } else if ((nearBottom || ownArrival) && !focused) {
+    if (pinOnly && !ownArrival) { stickPinnedTimeline(list); if (newCount > 0) scheduleHorizonAdvance(); }
+    else { list.scrollTop = list.scrollHeight; timelinePin.set(view, list); }
+    newVisibleMessages = 0;
+  }
   else {
     if (!pageScroll && anchor?.isConnected) list.scrollTop += anchor.getBoundingClientRect().top - anchorOffset;
     newVisibleMessages += newCount;
@@ -2639,6 +2668,13 @@ function renderComposerFiles() {
     host.append(chip);
   }
 }
+// Files commit onto a message after it posts and append no room event, so
+// another member's message triggers a couple of debounced file-list reads.
+let roomFilesRefreshTimers = [];
+function scheduleRoomFilesRefresh() {
+  roomFilesRefreshTimers.forEach(clearTimeout);
+  roomFilesRefreshTimers = ROOM_FILE_REFRESH_DELAYS_MS.map(delay => setTimeout(() => void refreshRoomFiles(), delay));
+}
 async function refreshRoomFiles() {
   if (!state || !session || !client.session) return;
   const generation = client.generation;
@@ -2677,7 +2713,7 @@ async function attachComposerFiles(fileList) {
     } catch (error) {
       const current = composerFiles.find(item => item.id === id);
       if (current) current.status = "error";
-      setComposerError(error?.code === "file_too_large" ? "That file is larger than 1 MB." : (error?.message || "Couldn’t attach that file."));
+      setComposerError(attachFailureCopy(error));
     }
     renderComposerFiles();
   }
@@ -2723,13 +2759,19 @@ function mentionsFilterOn() {
 function pinnedFilterOn() {
   return $("#search-pinned")?.getAttribute("aria-pressed") === "true";
 }
+// On a phone the results panel steps aside once a result opens, so the
+// conversation gets the screen; editing the query or focusing the field
+// brings it back with the same results.
+let searchCollapsed = false;
+const narrowSearch = matchMedia("(max-width: 40rem)");
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const parsed = parseSearchQuery(query);
   const only = mentionsFilterOn() || parsed.mentionsOnly, pinnedOnly = pinnedFilterOn();
   const active = Boolean(query.trim()) || only || pinnedOnly;
   $("#clear-search").hidden = !query && !mentionsFilterOn() && !pinnedOnly;
-  $("#search-results").hidden = !active;
+  if (!active) searchCollapsed = false;
+  $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
@@ -2760,6 +2802,7 @@ function restoreComposer(draft) {
   }
   select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
   syncComposerChrome();
+  autosizeComposer();
 }
 function requestRunLabel(id) {
   const run = requestRuns[id];
@@ -4085,7 +4128,7 @@ $("#message-form").addEventListener("submit", e => {
       // Navigation may have restored another destination's draft while the receipt was pending.
       if (drafts.get(draftKey)?.pending?.command?.id === command.id) drafts.clear(draftKey);
       if (composerKey() === draftKey && pendingMessage?.command?.id === command.id) {
-        $("#message-input").value = ""; pendingMessage = null; clearReply();
+        $("#message-input").value = ""; pendingMessage = null; clearReply(); autosizeComposer();
         $("#also-send-to-channel").checked = false;
       }
       persistDrafts();
@@ -4096,7 +4139,7 @@ $("#message-form").addEventListener("submit", e => {
     await commitComposerFiles(data.messageId);
     if (generation !== client.generation || !state) return;
     drafts.clear(draftKey);
-    $("#message-input").value = ""; pendingMessage = null; clearReply();
+    $("#message-input").value = ""; pendingMessage = null; clearReply(); autosizeComposer();
     $("#also-send-to-channel").checked = false;
     persistDrafts();
     if (assistantDraft) {
@@ -4165,7 +4208,15 @@ $("#channel-list").addEventListener("click", e => {
   const manage = e.target.closest("[data-channel-manage]");
   if (manage) { e.stopPropagation(); openChannelDialog("manage", manage.dataset.channelManage); return; }
   const button = e.target.closest("[data-channel]");
-  if (button) setActiveChannel(button.dataset.channel);
+  if (!button) return;
+  setActiveChannel(button.dataset.channel);
+  // On a phone the drawer closes once this click finishes dispatching (the
+  // document listener below) and takes the button with it: land on the
+  // channel heading instead of <body>.
+  setTimeout(() => {
+    const at = document.activeElement;
+    if (!at || at === document.body || !at.checkVisibility?.()) $("#conversation-title").focus({ preventScroll: true });
+  }, 0);
 });
 $("#channel-form").addEventListener("submit", async e => {
   e.preventDefault();
@@ -4454,7 +4505,7 @@ function applyMentionMember(member) {
   hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
+$("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
@@ -4710,15 +4761,16 @@ document.addEventListener("keydown", event => {
   }
 });
 $("#search-form").addEventListener("submit", e => { e.preventDefault(); if (state) renderSearch(); });
-$("#message-search").addEventListener("input", () => { if (state) renderSearch(); });
+$("#message-search").addEventListener("input", () => { searchCollapsed = false; if (state) renderSearch(); });
+$("#message-search").addEventListener("focus", () => { if (!searchCollapsed) return; searchCollapsed = false; if (state) renderSearch(); });
 $("#search-mentions").addEventListener("click", () => {
   const on = mentionsFilterOn();
-  $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true");
+  $("#search-mentions").setAttribute("aria-pressed", on ? "false" : "true"); searchCollapsed = false;
   if (state) renderSearch();
 });
 $("#search-pinned").addEventListener("click", () => {
   const on = pinnedFilterOn();
-  $("#search-pinned").setAttribute("aria-pressed", on ? "false" : "true");
+  $("#search-pinned").setAttribute("aria-pressed", on ? "false" : "true"); searchCollapsed = false;
   if (state) renderSearch();
 });
 $("#clear-search").addEventListener("click", () => {
@@ -4975,9 +5027,31 @@ new MutationObserver(() => { if (roomActionsContext && !ownsRoomActions()) close
 new MutationObserver(() => { if (resultView && $("#main").hidden) closeResult(false); })
   .observe($("#main"), { attributes: true, attributeFilter: ["hidden"] });
 // Attention: advancing the read horizon is scroll-driven (debounced). Both the
-// message list and the window can be the scroller depending on layout.
+// message list and the window can be the scroller depending on layout. Only a
+// reader's scroll counts: one that follows wheel, touch, a scroll key or a
+// pointer on the list's own scrollbar. The app's layout and programmatic
+// scrolls (chrome settling, menus closing, the pin) never mark anything read,
+// so Mark unread survives a reload. A reader scroll keeps the window open
+// while it runs, which covers touch momentum.
+const READER_SCROLL_MS = 1000;
+let readerScrollAt = -Infinity;
+const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+const noteReaderScroll = () => { readerScrollAt = performance.now(); };
+addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
+addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
+addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
+$("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
 for (const scroller of [$("#message-list"), window]) {
-  scroller.addEventListener("scroll", () => { if (nearBottomOfList()) scheduleHorizonAdvance(); }, { passive: true });
+  scroller.addEventListener("scroll", () => {
+    if (!readerScrolling()) return;
+    noteReaderScroll();
+    if (scroller !== window && pinScrollTop !== null) {
+      const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
+      if (pinned) return;
+    }
+    if (nearBottomOfList()) scheduleHorizonAdvance();
+  }, { passive: true });
 }
 $("#main").addEventListener("click", e => {
   const link = e.target.closest("[data-open-message], [data-open-work], [data-open-member], [data-open-event], [data-open-room]");
@@ -4988,6 +5062,7 @@ $("#main").addEventListener("click", e => {
   if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
   // JDOT-COH-NAV end
   if (link.dataset.openMessage) {
+    if (narrowSearch.matches && link.closest("#search-results")) { searchCollapsed = true; $("#search-results").hidden = true; }
     history.replaceState(null, "", recordHref("message", link.dataset.openMessage));
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
@@ -5070,6 +5145,23 @@ $("#pinned-list").addEventListener("click", e => {
   if (button && state && !busy) setPinned(button.dataset.messageId);
 });
 
+// Chrome that mounts or resizes around the timeline after it opened at the
+// newest message (assistant panel, pill, composer) keeps it there (R68-1).
+if (globalThis.ResizeObserver) new ResizeObserver(() => {
+  const list = $("#message-list");
+  if (timelinePin.holds(list.dataset.view, list)) stickPinnedTimeline(list);
+}).observe($("#message-list"));
+// The pin moving the list is not the reader scrolling, so it never marks
+// anything read: its scroll event is skipped, and where the move hid a layout
+// change that took the list off the bottom, a pending read-horizon advance is
+// dropped as it would have been without the pin.
+function stickPinnedTimeline(list) {
+  const before = list.scrollTop, offBottom = list.scrollHeight - before - list.clientHeight >= 80;
+  list.scrollTop = list.scrollHeight; timelinePin.set(list.dataset.view, list);
+  if (list.scrollTop === before) return;
+  pinScrollTop = list.scrollTop;
+  if (offBottom) { clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null; }
+}
 // Decision register (backlog F2): a human with decide promotes a message into
 // a source-backed decision; the room reads the register from the event feed.
 let decisionSourceId = null;
@@ -5557,7 +5649,7 @@ async function startRoomFromTemplate(slug) {
   });
   if (accountClient.session !== owned) return;
   await openAccountRoom(result.room.id);
-  window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY);
+  clearTemplateRoom();
 }
 async function showAgentInvitePicker(agentId) {
   inboxUI.showRoomList();
@@ -5625,6 +5717,17 @@ async function runAcquisitionIntent() {
     }
     if (intent.kind === "invite-agent") await showAgentInvitePicker(intent.agent);
   } catch {
+    if (intent.kind === "template") {
+      // #2971: a template intent is one attempt, not a standing order. It used
+      // to survive every failure, so each account-home render retried the same
+      // failing room-creation POST forever. Consume the intent and drop the
+      // stashed room id with it: that id was minted for this attempt, and a
+      // definitive failure (e.g. a 4xx for that id/payload) would poison every
+      // later attempt that reused it. A fresh start from the template gallery
+      // mints a fresh id.
+      clearAcquisition();
+      clearTemplateRoom();
+    }
     $("#account-rooms-status").textContent = "Couldn’t finish that. Refresh and try again.";
   }
 }
@@ -6416,7 +6519,7 @@ let notificationNote = "", notificationBefore = null, notificationLoading = fals
 // DM consent pairs for the signed-in member (PR #731).
 // Refreshed on room open, when the People panel opens, and after every
 // consent action. Never loaded for the public read-only face.
-let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0;
+let dmConsents = [], dmConsentBusy = false, dmConsentSeq = 0, dmConsentRefetchQueued = false;
 let friendBonds = [], friendBusy = false, friendSeq = 0, friendDmPeerId = null;
 // #660: server-derived presence states per member (memberId -> presence API
 // entry). Refreshed on room open and on an interval while visible; the rail
@@ -6922,22 +7025,30 @@ function stopPresencePoll() {
 // The signed-in member's consent pairs drive the People panel's Direct
 // messages sections and the composer's DM recipient hint. Load failures stay
 // silent (a stale list is worse than none); every action reports loudly.
+function dmConsentStale(seq, generation, room) {
+  // Compare the room, not the state object: every stream snapshot assigns a
+  // fresh state object, so an identity check discards a result that a
+  // mid-flight snapshot raced with even though nothing changed rooms.
+  return seq !== dmConsentSeq || generation !== client.generation || state?.room?.id !== room?.room?.id;
+}
 async function refreshDmConsents() {
-  if (!state || !session || $("#main").hidden || dmConsentBusy) return;
+  if (!state || !session || $("#main").hidden) { dmConsentRefetchQueued = false; return; }
+  if (dmConsentBusy) { dmConsentRefetchQueued = true; return; }
   const seq = ++dmConsentSeq, generation = client.generation, room = state;
   dmConsentBusy = true;
   try {
     const result = await fetchDmConsents(client);
-    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    if (dmConsentStale(seq, generation, room)) return;
     dmConsents = Array.isArray(result) ? result : [];
   } catch {
     // A failed refresh keeps the last known list: wiping it would flash the
     // whole People panel back to "no consent" while the failed action
     // already reported loudly through the notice banner.
-    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    if (dmConsentStale(seq, generation, room)) return;
   } finally {
     dmConsentBusy = false;
-    if (seq === dmConsentSeq && generation === client.generation && state === room) render();
+    if (!dmConsentStale(seq, generation, room)) render();
+    if (dmConsentRefetchQueued) { dmConsentRefetchQueued = false; void refreshDmConsents(); }
   }
 }
 async function runDmConsentAction(action, peerId, button) {
@@ -6963,7 +7074,7 @@ async function runDmConsentAction(action, peerId, button) {
     else if (action === "unblock") await unblockDmMember(client, peerId);
     else if (action === "revoke") await revokeDmConsent(client, peerId);
     else return;
-    if (seq !== dmConsentSeq || generation !== client.generation || state !== room) return;
+    if (dmConsentStale(seq, generation, room)) return;
     notice(action === "request" ? `DM request sent to ${peer.displayName}.`
       : action === "approve" ? `${peer.displayName} can now message you directly.`
       : action === "reject" ? `Declined ${peer.displayName}'s DM request.`
@@ -6971,14 +7082,18 @@ async function runDmConsentAction(action, peerId, button) {
       : action === "unblock" ? `${peer.displayName} unblocked — they can send a DM request again.`
       : `DM consent with ${peer.displayName} revoked.`);
   } catch (error) {
-    if (seq === dmConsentSeq && generation === client.generation && state === room) notice(dmConsentFailureMessage(error, peer.displayName), true);
+    if (!dmConsentStale(seq, generation, room)) notice(dmConsentFailureMessage(error, peer.displayName), true);
   } finally {
     dmConsentBusy = false;
     // Re-enable the clicked button: a failed action leaves the consent list
     // unchanged, so the post-action render skips the DOM (identical HTML) and
     // would otherwise leave the button dead until an unrelated re-render.
     if (button) button.disabled = false;
-    if (seq === dmConsentSeq && generation === client.generation && state === room) await refreshDmConsents();
+    const drained = dmConsentRefetchQueued;
+    dmConsentRefetchQueued = false;
+    // Drain even across a room switch: the queued request came from the old
+    // room, but the panel on the new room needs fresh consent data too.
+    if (!dmConsentStale(seq, generation, room) || drained) await refreshDmConsents();
   }
 }
 // ---- Friend / Bond ------------------------------------------------------------

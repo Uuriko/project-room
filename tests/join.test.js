@@ -10,6 +10,8 @@ import {
   formatInviteExpiry,
   joinErrorMessage,
   validateJoinName,
+  apiFetch,
+  API_TIMEOUT_MS,
 } from "../src/join.js";
 
 test("parse join code from the path, rejecting lookalikes", () => {
@@ -90,6 +92,74 @@ test("join errors name the problem and the next step", () => {
   const preview = joinErrorMessage({ status: 404, code: "invite_unavailable", action: "preview" });
   assert.equal(preview.retry, false);
   assert.match(joinErrorMessage({ status: 500 }).message, /hiccup|try again/i);
+});
+
+test("apiFetch bounds every call with a timeout, including the join POST (#2979)", async () => {
+  assert.equal(API_TIMEOUT_MS, 10_000);
+  // A fetch that stalls forever but, like a real fetch, rejects when its
+  // signal aborts. Pre-fix apiFetch passed no signal and had no deadline,
+  // so this call would never settle.
+  let seenSignal = null;
+  const stalledFetch = (url, init = {}) => {
+    seenSignal = init.signal ?? null;
+    return new Promise((_, reject) => {
+      init.signal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    });
+  };
+  const started = Date.now();
+  const result = await apiFetch("/api/join", {
+    method: "POST",
+    data: { displayName: "Stalled", inviteCode: "RM-ABC123" },
+    timeoutMs: 25,
+    fetchImpl: stalledFetch,
+  });
+  assert.ok(seenSignal instanceof AbortSignal, "apiFetch passes an AbortSignal to fetch");
+  assert.deepEqual(result, { ok: false, status: 0, error: { code: "request_timeout" } });
+  assert.ok(Date.now() - started < 5_000, "stalled join resolves at the timeout, not forever");
+});
+
+test("apiFetch distinguishes a network failure from a timeout (#2979)", async () => {
+  const result = await apiFetch("/api/join", {
+    method: "POST",
+    data: { displayName: "Offline", inviteCode: "RM-ABC123" },
+    timeoutMs: 5_000,
+    fetchImpl: async () => { throw new TypeError("fetch failed"); },
+  });
+  assert.deepEqual(result, { ok: false, status: 0, error: { code: "network_error" } });
+});
+
+test("apiFetch returns the parsed body on success and passes the request through (#2979)", async () => {
+  let seen = null;
+  const result = await apiFetch("/api/join", {
+    method: "POST",
+    data: { displayName: "Ada", inviteCode: "RM-ABC123" },
+    timeoutMs: 5_000,
+    fetchImpl: async (url, init) => {
+      seen = { url, init };
+      return { ok: true, status: 201, json: async () => ({ roomId: "commons" }) };
+    },
+  });
+  assert.deepEqual(result, { ok: true, status: 201, body: { roomId: "commons" } });
+  assert.equal(seen.url, "/api/join");
+  assert.equal(seen.init.method, "POST");
+  assert.equal(seen.init.headers["Content-Type"], "application/json");
+  assert.equal(JSON.parse(seen.init.body).displayName, "Ada");
+  assert.ok(seen.init.signal instanceof AbortSignal);
+});
+
+test("a join timeout names the burned-invite possibility (#2979)", () => {
+  const timedOut = joinErrorMessage({ status: 0, code: "request_timeout", action: "join" });
+  assert.equal(timedOut.retry, true);
+  assert.match(timedOut.title, /timed out/i);
+  assert.match(timedOut.message, /already used/i);
+  assert.match(timedOut.message, /fresh link/i);
+  const previewTimedOut = joinErrorMessage({ status: 0, code: "request_timeout", action: "preview" });
+  assert.equal(previewTimedOut.retry, true);
+  assert.match(previewTimedOut.title, /couldn't reach/i);
 });
 
 test("join names are 1–80 characters", () => {

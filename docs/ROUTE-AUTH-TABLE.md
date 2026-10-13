@@ -92,10 +92,12 @@ signed-in account session (see Account-level writes below).
 `POST /api/agent-invites/redeem` is unauthenticated by design (the one-time
 code in the body is the credential); it is rate limited per address before
 the body is read.
-`POST /api/access-requests` is unauthenticated by design (the identity is
-not a member yet, so there is no credential to check); it is rate limited
-per identity (5/hour) and creates only a pending request — nothing is
-auto-approved. `GET /api/access-requests/{id}` is identity-scoped: only the
+`POST /api/access-requests` requires the filing identity's current
+unrevoked secret as Bearer (the identity is not a member yet, but filing
+in its name must be proven — issue #2912); it is rate limited per identity
+(5/hour) and creates a pending request, which a room's standing
+auto-approve rule may admit inline. Unknown rooms and identities answer
+the same bare 404, before any credential is consulted. `GET /api/access-requests/{id}` is identity-scoped: only the
 requesting identity can poll its own request. `POST /api/access-requests/{id}`
 requires its current unrevoked identity secret as Bearer plus `{ identityId }` to withdraw that identity's pending request. Public request/identity IDs alone fail 401; an authenticated different identity receives 404. A direct identity link closes that identity's pending requests for the room. Approving a request for an identity that is already a member records the decision and leaves their existing grant unchanged.
 `POST /api/agent-rooms` is identity-authenticated by design (the pri_

@@ -322,8 +322,11 @@ A real addition adds one history entry naming the URL and one existing
 `ci` and current completion `attestations`; historical `reviews` and their
 recorded bases remain visible. An old approval no longer qualifies for
 non-self manual completion. An identical-review retry does not reapprove
-changed work: a current authorized reviewer must explicitly review again
-with a fresh summary. A fresh duplicate PR URL returns the exact current
+changed work while CI is cleared: a current authorized reviewer must
+explicitly review again with a fresh summary, or — once CI has recorded
+the newly linked PR's head — resubmit the same review as a deliberate
+re-review naming the current basis (`expectedBasis`); that resubmission
+binds to the new head. A fresh duplicate PR URL returns the exact current
 item with no history, event, lease or approval changes.
 
 A stale basis, unclaimed/done/superseded item is **409**
@@ -364,7 +367,7 @@ one `work_claim.updated` event with `reason: "ci_changed"` and `ciState`.
 Success or failure wakes the claim owner on the existing wake queue.
 The wake reason is `ci`.
 
-`POST .../review` with `{ "verdict", "summary", "url"? }` records a review
+`POST .../review` with `{ "verdict", "summary", "url"?, "expectedBasis"? }` records a review
 from a member other than the owner. `verdict` is `approve`,
 `changes_requested`, or `comment`. `summary` is 1..2000 characters. The
 caller needs the same contribute, review, or collaborate rights as a claim
@@ -373,7 +376,7 @@ gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
 owner with reason `review`. Reviews are listed on the claim. The event `reason` is `reviewed`.
 The older `{ "note" }` body still records a caller-bound note. It does not
 approve completion. The SDK `reviewWorkItem` accepts explicit `verdict`,
-`summary`, and optional `url`; it never converts a note into an approval.
+`summary`, and optional `url` and `expectedBasis`; it never converts a note into an approval.
 
 ### Manual reviewed completion
 
@@ -395,10 +398,25 @@ settlement use separate paths and are not changed by this manual gate.
 
 Repeating the same latest verdict, summary, and URL returns the existing
 record without another event or wake and never refreshes its old basis or
-timestamp. To review changed context, submit a new explicit review summary.
-This only deduplicates consecutive identical reviews. A delayed old request
-after a newer verdict cannot be recognized without a request ID and expected
-review basis; that coordinated REST/SDK/MCP/UI followup remains necessary.
+timestamp on its own: a blind retry cannot silently approve changed work.
+The deliberate way to re-review changed context with the same wording is
+to name the basis actually reviewed: submit the same verdict, summary,
+and URL with `expectedBasis` — the claim's current basis (`version`,
+`owner`, `claimedAt`, `revision`, `ci.headSha`) as read back from the
+claim. When CI has recorded a new head since the prior review (the head
+is the sole changed basis field and there is a current head to bind to),
+that resubmission records a new review, timestamp, and attestation bound
+to the current basis, so a reviewer is never forced to invent new wording
+to re-approve a new head; a legacy unbound review can be refreshed the
+same way. An `expectedBasis` that no longer matches the current basis is
+refused **409** `work_claim_conflict` — re-read the claim and review its
+current context. A basis stale because the revision, owner, or claim
+round changed, or only because CI was cleared (a newly linked PR, with no
+current head), still cannot be refreshed by identical content, with or
+without `expectedBasis`: submit a new explicit review summary instead.
+This only deduplicates consecutive identical reviews. A delayed old
+request after a newer verdict cannot be recognized without a request ID;
+that coordinated REST/SDK/MCP/UI followup remains necessary.
 
 Compatibility: legacy unbound reviews and note records remain readable but
 cannot satisfy non-self manual completion until a fresh explicit review is

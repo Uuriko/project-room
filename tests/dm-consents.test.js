@@ -12,6 +12,7 @@ function makeStore(states) {
   // The real RoomStore boot path creates the autonomy-tier table (the
   // request path now reads it — issue #995), so the stub carries it too.
   db.exec(AUTONOMY_TIERS_SCHEMA);
+  const events = [];
   return {
     db,
     transaction(fn) {
@@ -23,7 +24,16 @@ function makeStore(states) {
     room(id) {
       const state = states[id];
       return state ? { state } : null;
-    }
+    },
+    // The real RoomStore persists consent decisions as sequenced
+    // dm.consent_changed events (RC-2026-09-19-070). The stub records the
+    // append contract only; the full reducer path (envelope dedupe, state
+    // advance, visibility) is verified on a real RoomStore in
+    // dm-consent-events.test.js.
+    appendSideTableEvent(roomId, event) {
+      events.push(event);
+    },
+    events
   };
 }
 
@@ -51,6 +61,10 @@ test("request creates a pending pair; re-request updates the reason", () => {
   assert.equal(second.reason, "updated reason");
   const rows = store.db.prepare("SELECT COUNT(*) AS n FROM dm_consents").get();
   assert.equal(rows.n, 1);
+  // Append contract (RC-2026-09-19-070): a new pending request logs one
+  // dm.consent_changed event; a pending re-ask with an updated reason is a
+  // refresh of the same outreach and logs nothing.
+  assert.deepEqual(store.events.map(e => e.data.status), ["pending"]);
 });
 
 test("request rejects self, unknown members, inactive members", () => {
@@ -60,6 +74,20 @@ test("request rejects self, unknown members, inactive members", () => {
   assert.equal(errOf(() => dms.request("r1", "alice", "ghost")).code, "target_not_found");
   assert.equal(errOf(() => dms.request("r1", "alice", "zed")).code, "target_not_found");
   assert.equal(errOf(() => dms.request("nope", "alice", "bob")).code, "room_not_found");
+});
+
+test("request rejects Object.prototype names as members (issue #2842)", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  // Member projections are plain objects from JSON.parse, so ids like
+  // "toString" resolve to inherited functions under a raw members[id]
+  // index and used to pass the active-member check. They are not members.
+  for (const id of ["toString", "valueOf", "hasOwnProperty", "constructor", "__proto__"]) {
+    assert.equal(errOf(() => dms.request("r1", "alice", id))?.code, "target_not_found", `target ${id}`);
+    assert.equal(errOf(() => dms.request("r1", id, "bob"))?.code, "requester_not_found", `requester ${id}`);
+  }
+  const rows = store.db.prepare("SELECT COUNT(*) AS n FROM dm_consents").get();
+  assert.equal(rows.n, 0);
 });
 
 test("decide: only the recorded target's approval flips to approved", () => {

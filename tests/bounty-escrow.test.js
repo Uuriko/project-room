@@ -218,6 +218,28 @@ test("claim locks the 1-credit bond; double claim is rejected; only funded is cl
   expectConserved(escrow);
 });
 
+test("poster cannot claim their own bounty (#3008); a different member still can", () => {
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow);
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  // Self-claim is rejected: every later guard (accept distinct from claimant,
+  // claimant cannot dispute own submission) assumes poster != claimant, so a
+  // self-claimed bounty dead-ends in-review with escrow + bond locked.
+  expectCode(() => escrow.claimBounty(ROOM, bounty.bountyId, { claimant: JILL }), "not_authorized");
+  // The rejected claim changes nothing: bounty stays funded/unclaimed, no
+  // bond was locked for the poster, and conservation holds.
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "funded");
+  assert.equal(after.claimant, null);
+  assert.equal(bal(escrow, JILL).locked, 10); // only the funded amount
+  expectConserved(escrow);
+  // A different member can still claim it.
+  const { receipt } = escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  assert.equal(receipt.kind, "bond-lock");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).claimant, GROK);
+  expectConserved(escrow);
+});
+
 test("watch is sticky: claim expiry does not unfollow", () => {
   const { escrow } = makeEscrow();
   const bounty = post(escrow);
@@ -665,5 +687,28 @@ test("dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly
   assert.equal(bal(escrow, GROK).payable, 99 + 1 + 0.005);
   assert.equal(bal(escrow, "pool").payable, 0);
   assert.equal(bal(escrow, CODEX).payable, 100);
+  expectConserved(escrow);
+});
+
+test("dispute SPLIT of a 1-milli bounty: zero worker half vests nothing, whole milli refunds", () => {
+  const { escrow } = makeEscrow();
+  // Smallest postable award: 0.001 credits = 1 milli. floor(1/2) = 0, so the
+  // worker's vesting half is zero millis — the settlement must not attempt a
+  // zero-amount approve move (the journal rejects those), or the split throws
+  // after the verdict is recorded and the bounty wedges in `disputed`.
+  const bounty = runToSubmitted(escrow, { amount: 0.001, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
+  const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(settled.resolution.kind, "split");
+  assert.equal(settled.resolution.bondForfeited, false);
+  assert.equal(settled.state, "approved");
+  // The whole milli refunds to the poster; the worker vests zero.
+  assert.equal(bal(escrow, JILL).payable, 100, "poster: 99.999 + 0.001 refund");
+  assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
+  const lots = escrow.balances(ROOM, GROK);
+  assert.equal(lots.attributed, 0, "attribute-then-split leaves no attributed lot behind");
+  assert.equal(lots.approved, 0, "worker vested a zero half: nothing approved");
+  assert.equal(bal(escrow, "pool").payable, 0);
   expectConserved(escrow);
 });
