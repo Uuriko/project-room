@@ -87,7 +87,9 @@ export function mountSigninEntry({ openWorkspace }) {
     $("#agent-signin-button").focus();
   });
   on($("#skip-link"), "click", event => { event.preventDefault(); $("#auth-title").focus(); });
-  on($("#refresh-button"), "click", () => { if (signin.canLeave() && agent.canLeave()) location.reload(); });
+  on($("#refresh-button"), "click", () => {
+    if (signin.canLeave() && agent.canLeave()) void enterWorkspace({ restoreRoomSession: true }).catch(() => {});
+  });
   on(window, "hashchange", () => {
     if (!signin.canLeave() || !agent.canLeave()) return;
     void enterWorkspace().catch(() => {});

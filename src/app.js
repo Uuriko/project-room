@@ -47,7 +47,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
-export function startApp({ accountClient = new AccountClient(), signedIn = false } = {}) {
+export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
 // Keep a connector/native consent journey through password or provider login.
@@ -3885,6 +3885,7 @@ const setSessionMenuOpen = open => {
   sessionMenuButton.setAttribute("aria-expanded", String(open));
 };
 sessionMenuButton.addEventListener("click", () => setSessionMenuOpen(!sessionMenu.classList.contains("open")));
+sessionMenuButton.disabled = false;
 $("#clear-session-menu")?.addEventListener("click", () => { setSessionMenuOpen(false); void clearSavedBrowserSession(); });
 $("#create-account-button")?.addEventListener("click", () => {
   setSessionMenuOpen(false);
@@ -7862,6 +7863,7 @@ configureAuthPanel();
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 const ready = (async () => {
   const initialResult = await initialSignin;
+  if (restoreRoomSession) { await client.restore(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {
     resetJourneyPending = true;
