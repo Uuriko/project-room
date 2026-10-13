@@ -365,7 +365,9 @@ export class AccountClient {
 // Single source for the connected status line; app.js matches this exact text.
 const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
+    if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
+    this.auditView = auditView;
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange });
     this.session = null;
     this.sequence = 0;
@@ -385,13 +387,14 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false } = {}) {
+  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
+          ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
       const body = await response.json();
@@ -557,9 +560,14 @@ export class RoomClient {
           // With nothing held, read the newest window first (the background fill brings the rest).
           const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true });
+          const auditView = this.auditView;
+          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
+          // A mode change during this read must not display a partial Record.
+          if (auditView !== this.auditView) { flight.revisit = true; continue; }
+          if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
+            throw new Error(uiText("record.invalidView"));
           // A server without the recent view ignores the parameter and answers in full.
           const whole = full || !Object.hasOwn(read, "messagesWindow");
           let snapshot, partial = false, complete = whole;
@@ -592,6 +600,12 @@ export class RoomClient {
       }
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
+  }
+  setAuditView(view) {
+    if (!["full", "activity"].includes(view)) throw new RangeError(uiText("record.invalidView"));
+    if (this.auditView === view) return this.flight?.promise ?? Promise.resolve();
+    this.auditView = view;
+    return this.session ? this.refresh(null, { revalidate: true }) : Promise.resolve();
   }
   // Background full read after a windowed first read (or a failed read). It never
   // changes the status line: the page is already usable. A failure retries quietly
