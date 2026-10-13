@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AccountClient, RoomClient, RoomSessionClient } from "../src/client.js";
+import { AccountClient } from "../src/account-client.js";
+import { AccountClient as LegacyAccountClient, RoomClient, RoomSessionClient } from "../src/client.js";
+
+test("the legacy client entry preserves the account client constructor", () => {
+  assert.equal(LegacyAccountClient, AccountClient);
+});
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 const deferred = () => {

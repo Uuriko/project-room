@@ -8,6 +8,7 @@
   "operator.html",
   "server/email-envelope.mjs",
   "server/notify-email.mjs",
+  "src/account-client.js",
   "src/account-deletion.mjs",
   "src/account-settings-ui.js",
   "src/account-setup-ui.js",

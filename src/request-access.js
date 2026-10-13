@@ -8,7 +8,7 @@
 //
 // The pure orchestration (build/submit) is exported for tests; the DOM
 // wiring at the bottom only runs in a browser.
-import { AccountClient } from "./client.js";
+import { AccountClient } from "./account-client.js";
 import { roomIdFromNext } from "./room-deep-link.js";
 import {
   FALLBACK_REQUEST_PERMISSIONS,

@@ -18,7 +18,7 @@
 import { uiText } from "./strings.js";
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
-import { solveIdentityMintProof } from "./client.js";
+import { solveIdentityMintProof } from "./account-client.js";
 
 export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
