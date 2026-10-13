@@ -253,6 +253,46 @@ test("join page no-JS fallback gives working, host-correct agent instructions", 
   assert.match(block, /\/llms\.txt/, "points agents at the serving host's agent packet");
 });
 
+test("join page carries the code-entry card for humans holding a bare code (H-S3)", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/room/join"]) {
+    const html = await (await fetch(`${origin}${path}`)).text();
+    assert.match(html, /id="join-enter"/, `${path} has the code-entry card`);
+    assert.match(html, /id="join-enter-form"/, `${path} has the code-entry form`);
+    assert.match(html, /id="join-enter-code"/, `${path} has the code-entry input`);
+    assert.match(html, /id="join-enter-open"/, `${path} has the member open-room link for room mode`);
+  }
+});
+
+test("room address serves the join page to browsers, JSON 404 to API clients (H-S1)", async t => {
+  const { origin } = await serve(t);
+  // A browser opening /rooms/<id> gets the join page (room mode), on both doors.
+  for (const path of ["/rooms/commons", "/rooms/johns-project-room", "/room/rooms/commons"]) {
+    const response = await fetch(`${origin}${path}`, { headers: { Accept: "text/html,application/xhtml+xml" } });
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    const html = await response.text();
+    assert.match(html, /id="join-enter-form"/, `${path} serves the join entry`);
+    assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);
+  }
+  // The www door's page points its assets at /room.
+  const doorHtml = await (await fetch(`${origin}/room/rooms/commons`, { headers: { Accept: "text/html" } })).text();
+  assert.match(doorHtml, /src="\/room\/src\/join\.js"/);
+  // HEAD works like GET without a body.
+  const head = await fetch(`${origin}/rooms/commons`, { method: "HEAD", headers: { Accept: "text/html" } });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  // Non-HTML clients keep the JSON 404 — no API route lives at /rooms/<id>.
+  const api = await fetch(`${origin}/rooms/commons`, { headers: { Accept: "application/json" } });
+  assert.equal(api.status, 404);
+  assert.match(api.headers.get("content-type"), /application\/json/);
+  // Writes are refused; multi-segment and malformed ids fall through to 404.
+  const post = await fetch(`${origin}/rooms/commons`, { method: "POST", headers: { Accept: "text/html" } });
+  assert.equal(post.status, 405);
+  const extra = await fetch(`${origin}/rooms/commons/extra`, { headers: { Accept: "text/html" } });
+  assert.equal(extra.status, 404);
+});
+
 test("join page loader cannot stick forever: external watchdog ships a no-invite fallback (#1608)", async t => {
   // #1608: /join with no invite token sat on "Loading your invite…" forever
   // when src/join.js never executed (blocked, failed, or stalled module).
