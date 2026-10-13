@@ -10,6 +10,20 @@ const ACTIONS = Object.freeze({
   scroll: "desktop.scroll",
 });
 
+// loop.mjs hands screenshots over as observation.image, a data URL
+// (`data:<media-type>;base64,<data>`), while observation.result is only the
+// { image: true, bytes } summary. Anthropic takes the picture as an image
+// block inside the tool_result, so decode the data URL back into that shape.
+// Anything that is not a well-formed base64 data URL yields no block: the
+// observation still goes back as plain text rather than a broken image the
+// API would reject.
+function imageBlock(image) {
+  if (typeof image !== "string") return null;
+  const match = /^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/.exec(image);
+  if (!match) return null;
+  return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
+}
+
 function mapInput(input) {
   if (!input || typeof input !== "object") return null;
   const tool = ACTIONS[input.action];
@@ -49,11 +63,15 @@ export function createAnthropicProvider({ key, model, fetchImpl }) {
       else if (observations.length > 0) {
         messages.push({
           role: "user",
-          content: observations.map((observation, index) => ({
-            type: "tool_result",
-            tool_use_id: pendingIds[index] ?? observation.id ?? "tool",
-            content: JSON.stringify(observation.result ?? { ok: observation.ok === true }),
-          })),
+          content: observations.map((observation, index) => {
+            const text = JSON.stringify(observation.result ?? { ok: observation.ok === true });
+            const image = imageBlock(observation.image);
+            return {
+              type: "tool_result",
+              tool_use_id: pendingIds[index] ?? observation.id ?? "tool",
+              content: image ? [{ type: "text", text }, image] : text,
+            };
+          }),
         });
         pendingIds.length = 0;
       }
