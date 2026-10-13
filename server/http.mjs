@@ -843,9 +843,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // return events, the room projection, or an export show the tombstone for
   // a deleted message and only the current body after an edit. The log
   // itself is not rewritten.
-  function projectionMessages(id) {
-    return store.room(id).state.messages;
-  }
   // Bounded request reader shared by JSON and NDJSON routes. A declared
   // oversize is refused immediately while draining in the background: a stalled
   // sender must not hold a connection open until its request timeout. For
@@ -912,7 +909,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {
-        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), projectionMessages(roomId));
+        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
         for (const item of batch.events) {
           res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
@@ -4290,7 +4287,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), projectionMessages(roomId));
+          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), store.redactionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           recordRoomExport(store, selected.token, roomId, "html", fence); // PRIV-2
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
@@ -4312,7 +4309,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           visible.push(line);
         }
         let exportSequence = 0;
-        for (const line of redactEventRows(visible, projectionMessages(roomId))) {
+        for (const line of redactEventRows(visible, store.redactionMessages(roomId))) {
           exportSequence += 1;
           lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
         }
@@ -4935,11 +4932,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
           }
           const tail = Number(params.get("tail"));
-          return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), projectionMessages(roomId)));
+          return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), store.redactionMessages(roomId)));
         }
         return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), projectionMessages(roomId)));
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), store.redactionMessages(roomId)));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
@@ -4997,7 +4994,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
         const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
-        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, projectionMessages(roomId));
+        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, store.redactionMessages(roomId));
         return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {
