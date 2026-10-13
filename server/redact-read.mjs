@@ -34,9 +34,11 @@ function redactEvent(event, byId) {
   if (!event || typeof event !== "object" || !MESSAGE_BODY_TYPES.has(event.type)) return event;
   const data = event.data;
   if (!data || typeof data !== "object" || !Object.hasOwn(data, "body")) return event;
-  const message = byId.get(messageIdOf(event));
-  if (!message) return event;
-  const body = currentBody(message);
+  // Fail closed: the message window and the event window are trimmed
+  // independently, so an event can outlive its message entry. With no
+  // projection entry there is no current body to show; currentBody maps a
+  // missing message to the tombstone (null), never the logged text.
+  const body = currentBody(byId.get(messageIdOf(event)));
   if (data.body === body) return event;
   return { ...event, data: { ...data, body } };
 }
