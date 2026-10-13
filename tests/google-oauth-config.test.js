@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { googleConfig, GoogleSignIn, GOOGLE_CALLBACK_PATH } from "../server/google-oauth.mjs";
 
 const clientId = "1234567890-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com";
-const clientSecret = "GOCSPX-fixture-secret-never-real";
+const clientSecret = "GOCSPX-fixture-secret-never-real"; // secrets-allowlist (fixture value, not a credential)
 const env = { ROOM_GOOGLE_CLIENT_ID: clientId, ROOM_GOOGLE_CLIENT_SECRET: clientSecret };
 
 const loopbackOrigins = [
