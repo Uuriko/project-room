@@ -511,17 +511,31 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     remainingAfterCents: replayedReserved ? remainingNowCents() : intToCents(outcome.remainingAfter),
     ...(replayedReserved ? { replayed: "reserved" } : {}),
     settle() {
-      const moved = transition("settled", Date.now());
-      releaseRoomReservation();
-      // Single-use grants are consumed by their first settled call.
-      if (moved) {
-        const terms = rowToTerms(db.prepare(
-          `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
-        if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
-      }
-      return moved;
+      // #2959: the transition, the room-reservation release, and the
+      // single-use revocation are one atomic unit. Splitting them left a
+      // settled authorization whose room reservation stayed 'active'
+      // forever (the reaper only voids still-'reserved' rows) — or a
+      // settled single-use grant that was never revoked — if the process
+      // died or a write failed between the steps.
+      return transact(db, () => {
+        const moved = transition("settled", Date.now());
+        releaseRoomReservation();
+        // Single-use grants are consumed by their first settled call.
+        if (moved) {
+          const terms = rowToTerms(db.prepare(
+            `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
+          if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
+        }
+        return moved;
+      });
     },
-    void() { const moved = transition("voided", null); releaseRoomReservation(); return moved; },
+    void() {
+      return transact(db, () => {
+        const moved = transition("voided", null);
+        releaseRoomReservation();
+        return moved;
+      });
+    },
   });
 }
 
@@ -560,20 +574,28 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
   });
 }
 
+// #2959: the standalone forms share the handle forms' atomicity rule —
+// the authorization transition and the room-reservation release commit
+// together or not at all, so a failure between them cannot strand an
+// 'active' room reservation behind a settled/voided authorization.
 export function settleSpend(db, { roomId, agentId, nonce } = {}) {
-  const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
-    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-    .run(Date.now(), roomId, agentId, nonce);
-  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
-  return info.changes > 0;
+  return transact(db, () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
+      .run(Date.now(), roomId, agentId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
+    return info.changes > 0;
+  });
 }
 
 export function voidSpend(db, { roomId, agentId, nonce } = {}) {
-  const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
-    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-    .run(roomId, agentId, nonce);
-  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
-  return info.changes > 0;
+  return transact(db, () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
+      .run(roomId, agentId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
+    return info.changes > 0;
+  });
 }
 
 // The trust-boundary entry point for MCP dispatch. Returns null when no
