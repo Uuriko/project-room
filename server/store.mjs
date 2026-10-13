@@ -145,7 +145,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
@@ -1529,6 +1529,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
+      // Issue #2913: deployed wake-signal tables still carry the pre-room
+      // UNIQUE(agent_id, message_id); converge first (row-preserving
+      // rebuild), since IF NOT EXISTS cannot rewrite the stored DDL.
+      convergeWakeSignalRoomScope(this.db);
       this.db.exec(agentHeartbeatSchema);
       // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
       this.db.exec(workWakeSchema);
