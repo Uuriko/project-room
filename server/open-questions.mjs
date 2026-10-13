@@ -140,9 +140,11 @@ export function openQuestionRetention(messages, alsoKeep = new Set()) {
       thread.top.sort((x, y) => y.time - x.time);
       if (thread.top.length > 2) thread.top.length = 2;
     } else {
-      const key = `${message.toMemberId}\n${message.authorId}`;
-      const held = thread.dms.get(key);
-      if (!held || held.time <= entry.time) thread.dms.set(key, entry);
+      // Indexed by recipient, then author, so a question reads only DMs to its asker.
+      let toRecipient = thread.dms.get(message.toMemberId);
+      if (!toRecipient) thread.dms.set(message.toMemberId, toRecipient = new Map());
+      const held = toRecipient.get(message.authorId);
+      if (!held || held.time <= entry.time) toRecipient.set(message.authorId, entry);
     }
     if (typeof message.replyToId === "string") {
       if (!replies.has(message.replyToId)) replies.set(message.replyToId, []);
@@ -160,7 +162,7 @@ export function openQuestionRetention(messages, alsoKeep = new Set()) {
     const asked = at(question);
     // The weakest viewer: the public view, or the recipient of a DM question.
     const publicCloser = latestPublic(thread, question.authorId);
-    const recipientDm = viewerId ? thread?.dms.get(`${question.authorId}\n${viewerId}`) : null;
+    const recipientDm = viewerId ? thread?.dms.get(question.authorId)?.get(viewerId) : null;
     const answered = (publicCloser && publicCloser.time >= asked) || (recipientDm && recipientDm.time >= asked)
       || directReplies(question, viewerId).length > 0;
     if (answered && !alsoKeep.has(question.id)) continue;
@@ -168,12 +170,13 @@ export function openQuestionRetention(messages, alsoKeep = new Set()) {
     // Keep what closes it for any viewer: the latest public closer, the latest DM
     // to the asker per author, and direct replies the asker can read.
     if (publicCloser && publicCloser.time >= asked) keep.add(publicCloser.id);
-    for (const [key, entry] of thread?.dms ?? []) {
-      const [to, author] = key.split("\n");
-      if (to === question.authorId && author !== question.authorId && entry.time >= asked) keep.add(entry.id);
+    for (const [author, entry] of thread?.dms.get(question.authorId) ?? []) {
+      if (author !== question.authorId && entry.time >= asked) keep.add(entry.id);
     }
-    for (const reply of directReplies(question, undefined)) keep.add(reply.id);
-    for (const reply of replies.get(question.id) ?? []) if (reply.authorId !== question.authorId && reply.toMemberId === question.authorId) keep.add(reply.id);
+    // A direct reply closes a question whatever its timestamp (clock skew included).
+    for (const reply of replies.get(question.id) ?? []) {
+      if (reply.authorId !== question.authorId && (!reply.toMemberId || reply.toMemberId === question.authorId)) keep.add(reply.id);
+    }
   }
   return keep;
 }
