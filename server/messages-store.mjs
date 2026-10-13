@@ -553,7 +553,7 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       for (let parent = byId.get(message.replyToId), hops = 0; parent && hops < 1000; parent = byId.get(parent.replyToId), hops++) keep.add(parent.id);
     }
     const marker = archiveMarker(db, roomId);
-    const moving = ordered.filter(message => seqs.get(message.id) < cutoff && !keep.has(message.id) && !marker.retainedIds.includes(message.id));
+    const moving = ordered.filter(message => seqs.get(message.id) < cutoff && !keep.has(message.id));
     if (!moving.length) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: marker.throughSeq };
     // throughSeq only ever grows: the archived prefix is never shortened.
     const throughSeq = Math.max(marker.throughSeq, seqs.get(moving[moving.length - 1].id));
@@ -568,4 +568,17 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
     return result;
   });
+}
+
+// Apply a room's archive marker to a fully replayed state, so a replay can be
+// compared with the compacted stored projection. Messages at or below the
+// marker and not retained leave the state; the marker is rebuilt from the table.
+export function compactReplayLikeArchive(db, roomId, state) {
+  const marker = archiveMarker(db, roomId);
+  if (!marker.throughSeq) return state;
+  const archived = new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+    .all(roomId, marker.throughSeq, marker.retainedJson).map(row => row.message_id));
+  state.messages = (state.messages ?? []).filter(message => !archived.has(message.id));
+  state.messagesArchive = { throughSeq: marker.throughSeq, count: archived.size, retainedIds: marker.retainedIds };
+  return state;
 }
