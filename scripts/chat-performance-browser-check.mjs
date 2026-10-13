@@ -1,4 +1,4 @@
-import { openMemberProfile } from "./room-chrome.mjs";
+import { openMemberProfile, messageAction } from "./room-chrome.mjs";
 // Observable chat cost contract: ordinary arrivals leave historical DOM and
 // hidden logs untouched and do not poll unchanged request-run subscriptions.
 // Existing chat suites check focus/content, not redundant mutations or reads.
@@ -413,8 +413,7 @@ test('Mark unread survives a reload: layout scrolls never mark read; a reader wh
     await signInFixture(page, ownerKey);
     const newest = page.locator(`[data-message-record-id="${latest}"]`);
     await newest.locator('.message-body').waitFor({ state: 'attached' });
-    await newest.locator('.message-more > summary').click();
-    await newest.locator('[data-message-action="mark-unread"]').click();
+    await messageAction(page, latest, 'mark-unread');
     await newest.locator('.chat-divider.unread').waitFor({ state: 'attached' });
     for (let waited = 0; !reads.length && waited < 3000; waited += 100) await page.waitForTimeout(100);
     await page.waitForTimeout(3000);
