@@ -443,3 +443,48 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
   await f.client.refresh();
   assert.equal(f.reads(), before + 1, 'manual refresh');
 });
+
+
+test('receipt-only sends finish before a slow snapshot without duplicating stream refresh', async t => {
+  const pending = deferred();
+  const f = liveRefreshFixture(t, async sequence => { await pending.promise; return response(snapshot(sequence)); });
+  t.after(() => pending.resolve());
+  let settled = false;
+  const sent = f.client.send({ id: 'fast', type: 'message.posted', data: { body: 'hello' } }, { waitForRefresh: false }).then(value => { settled = true; return value; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, true, 'commit receipt must release caller while snapshot is still pending');
+  assert.equal((await sent).sequence, 9);
+  assert.deepEqual(f.seen, [], 'no invented authoritative snapshot');
+  f.notify();
+  pending.resolve(); await f.client.flight.promise;
+  assert.equal(f.reads(), 1);
+  assert.deepEqual(f.seen, [9]);
+});
+
+test('default sends still await reconciliation for state-dependent callers', async t => {
+  const pending = deferred();
+  const f = liveRefreshFixture(t, async sequence => { await pending.promise; return response(snapshot(sequence)); });
+  t.after(() => pending.resolve());
+  let settled = false;
+  const sent = f.client.send({ id: 'default', type: 'message.posted', data: { body: 'hello' } }).then(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  pending.resolve(); await sent;
+  assert.deepEqual(f.seen, [9]);
+});
+
+test('background refresh failure cannot reject committed send or affect a replacement session', async t => {
+  for (const changed of [false, true]) await t.test(String(changed), async t => {
+    const pending = deferred(), failures = [];
+    const f = liveRefreshFixture(t, async () => { await pending.promise; throw new Error('read failed'); });
+    f.client.handleFailure = error => failures.push(error.message);
+    const receipt = await f.client.send({ id: 'committed', type: 'message.posted', data: { body: 'hello' } }, { waitForRefresh: false });
+    assert.equal(receipt.sequence, 9);
+    const flight = f.client.flight.promise;
+    if (changed) { f.client.endAccess(); f.client.session = identity('replacement'); }
+    pending.resolve(); await flight.catch(() => {});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(failures, changed ? [] : ['read failed']);
+    assert.deepEqual(f.seen, []);
+  });
+});

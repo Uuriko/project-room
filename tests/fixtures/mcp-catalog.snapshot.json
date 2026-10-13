@@ -662,7 +662,7 @@
       }
     },
     "room_assistant_context": {
-      "inputSchema": "9c4dedb9bd1af453",
+      "inputSchema": "40dd1ec4b7ab2dbc",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1375,7 +1375,7 @@
       }
     },
     "room_assistant_context": {
-      "inputSchema": "9c4dedb9bd1af453",
+      "inputSchema": "40dd1ec4b7ab2dbc",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1737,7 +1737,7 @@
       }
     },
     "room_assistant_context": {
-      "inputSchema": "9c4dedb9bd1af453",
+      "inputSchema": "40dd1ec4b7ab2dbc",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1928,7 +1928,7 @@
       }
     },
     "room_assistant_context": {
-      "inputSchema": "9c4dedb9bd1af453",
+      "inputSchema": "40dd1ec4b7ab2dbc",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2146,7 +2146,7 @@
       }
     },
     "room_assistant_context": {
-      "inputSchema": "9c4dedb9bd1af453",
+      "inputSchema": "40dd1ec4b7ab2dbc",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

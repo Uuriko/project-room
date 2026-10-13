@@ -1182,6 +1182,11 @@
   "tests/typing-clears-on-post.test.js": 1155,
   "tests/work-claim-never-sweep.test.js": 548,
   "tests/work-claim-stale-sweep.test.js": 1039,
+  "tests/assistant-admission.test.js": 569,
+  "tests/assistant-work-discovery.test.js": 2516,
+  "tests/codex-supervisor.test.js": 10462,
+  "tests/codex-supervisor-retry-auth.test.js": 5800,
+  "tests/opaque-read-cursor.test.js": 81,
   "tests/access-request-identity-proof.test.js": 27908
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
@@ -1220,6 +1225,18 @@
  },
  "qa8UnmeasuredRefreshMeasurement": "43 unmeasured files (42 on main 4c11f4b9 plus tests/work-claim-conflict-hint.test.js): solo wall-clock ms of `node --test <file>` on Linux Node v24.21.0, 2026-10-08, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
  "pr2463UnmeasuredRefreshMeasurement": "42 unmeasured files (40 on main 80846d7c plus tests/email-gate-no-mailer.test.js and tests/email-verification-health.test.js from #2463): solo wall-clock ms of `node --test <file>` on Linux Node v24.19.0, 2026-10-10, one file at a time; all passed. Brings the unmeasured set back under UNMEASURED_CAP. Timing allocates files only, not membership.",
+ "pr2805Measurements": {
+  "date": "2026-10-11",
+  "runtime": "Node v26.8.2 macOS ARM64",
+  "method": "Solo node --test wall-clock measurements; all passed. Allocation only; discovery and limits unchanged.",
+  "milliseconds": {
+   "tests/assistant-admission.test.js": 569,
+   "tests/assistant-work-discovery.test.js": 2516,
+   "tests/codex-supervisor.test.js": 10462,
+   "tests/codex-supervisor-retry-auth.test.js": 5800,
+   "tests/opaque-read-cursor.test.js": 81
+  }
+ },
  "fix2854Measurement": {
   "date": "2026-10-13",
   "runtime": "Node v24.20.0 Linux local",

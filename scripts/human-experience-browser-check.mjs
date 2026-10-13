@@ -72,12 +72,34 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
+  assert.equal(await owner.locator('#room-assistant').isVisible(), false, 'unconfigured assistant stays out of the conversation');
+  await owner.locator('#ask-room').click();
+  await owner.locator('#room-assistant').waitFor({ state: 'visible' });
+  await owner.locator('#ask-room').click();
+  await owner.locator('#room-assistant').waitFor({ state: 'hidden' });
+  await owner.locator('#ask-room').click();
   await owner.locator('#assistant-setup').click(); await owner.locator('#room-assistant-setup select').selectOption('producer');
   await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await owner.locator('#ask-room').click();
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send(peer,'Hey friends, good to see you!'); assert.equal((await api('owner')).runs.length,0);
+  // Assistant dispatch must not wait behind a slow chat-history refresh.
+  const snapshotGate = deferredResultResponse(); t.after(() => snapshotGate.resolve());
+  const holdSnapshot = async route => { await snapshotGate.promise; await route.continue(); };
+  await owner.route(/\/api\/rooms\/commons(?:\?.*)?$/, holdSnapshot);
+  await owner.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() === 'GET') await snapshotGate.promise;
+    await route.continue();
+  });
+  const invoked = owner.waitForResponse(response => response.url().endsWith('/assistant') && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'invoke');
   await owner.locator('#ask-room').click(); await send(owner,'Compare our launch ideas.');
+  assert.equal((await invoked).ok(), true);
+  assert.equal((await api('owner')).runs.length, 1, 'durable assistant request exists while snapshot is blocked');
+  await owner.waitForFunction(() => document.querySelector('#assistant-face .assistant-face-status').dataset.faceStatus === 'asked');
+  assert.equal(await owner.locator('#assistant-face').isVisible(), true, 'admission is visible before either follow-up read');
+  await owner.waitForFunction(() => !document.querySelector('#message-input').disabled);
+  snapshotGate.resolve();
   await owner.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Compare our launch ideas.'));
   let run=(await api('producer')).runs[0]; assert.equal(run.status,'queued');
@@ -164,20 +186,29 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.ok(f.store.room('commons').state.workItems['human-result-task'].receipt.nativeText);
   // An invocation committed on the server but its response was lost. Reload + exact retry
   // must recover one run, while keeping the already-posted prompt in the transcript.
+  const admissionAttempts = [];
   await owner.route('**/api/rooms/commons/assistant', async route => {
     const payload = route.request().postDataJSON();
     if (route.request().method() === 'POST' && payload?.action === 'invoke') {
-      await route.fetch(); await route.abort(); await owner.unroute('**/api/rooms/commons/assistant');
+      admissionAttempts.push(payload);
+      if (admissionAttempts.length === 1) { await route.fetch(); await route.abort(); }
+      else await route.continue();
     } else await route.continue();
   });
-  await owner.locator('#ask-room').click(); await send(owner,'Recover this request exactly once.');
-  await owner.locator('#assistant-retry').waitFor({state:'visible'});
+  await owner.locator('#ask-room').click();
+  await owner.locator('#message-input').fill('Recover this request exactly once.');
+  await owner.locator('#message-input').press('Enter');
+  await owner.waitForFunction(()=>!document.querySelector('#message-input').disabled && document.querySelector('#message-input').value==='Recover this request exactly once.');
   const beforeRetry = (await api('owner')).runs;
   assert.equal(beforeRetry.length,2);
   await owner.reload(); await owner.locator('#main').waitFor({state:'visible'});
-  await owner.locator('#assistant-retry').waitFor({state:'visible'}); await owner.locator('#assistant-retry').click();
-  await owner.locator('#assistant-retry').waitFor({state:'hidden'});
+  assert.equal(await owner.locator('#message-input').inputValue(),'Recover this request exactly once.');
+  await send(owner,'Recover this request exactly once.');
   assert.equal((await api('owner')).runs.length,2);
+  assert.equal(admissionAttempts.length,2);
+  assert.deepEqual(admissionAttempts[1],admissionAttempts[0]);
+  await owner.unroute('**/api/rooms/commons/assistant');
+  assert.equal(f.store.room('commons').state.messages.filter(m=>m.body==='Recover this request exactly once.').length,1);
   // Select context at revision N; the host claims N+1 before the human sends.
   // A rejected stale write needs review and a new explicit confirmation, not an endless retry.
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Recover this request exactly once.'));
@@ -509,8 +540,10 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   const roomOptions = () => page.locator('#mention-list .mention-option').evaluateAll(n => n.map(o => o.textContent.trim()).filter(t => /^Room(?! owner)/.test(t)).length);
   assert.equal(await roomOptions(), 0);
   await input.fill('');
+  await page.locator('#ask-room').click();
   await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
+  await page.locator('#ask-room').click();
   await input.fill('can you help? @Roo');
   await page.waitForFunction(() => [...document.querySelectorAll('#mention-list .mention-option')].some(o => /^Room(?! owner)/.test(o.textContent.trim())));
   assert.equal(await page.locator('#ask-room').getAttribute('aria-pressed'), 'false');
@@ -536,8 +569,10 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
+  await page.locator('#ask-room').click();
   await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await page.locator('#ask-room').click();
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What is the plan?');
   await page.locator('#message-form button[type=submit]').click();
@@ -698,8 +733,10 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
+  await page.locator('#ask-room').click();
   await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
+  await page.locator('#ask-room').click();
   const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send('First question for the room?');
   await send('Second question for the room?');
@@ -742,9 +779,9 @@ test('Add to this ask wires the composer into the run and names the ask', { time
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
+  await page.locator('#ask-room').click();
   await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
-  await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What should we prioritize?');
   await page.locator('#message-form button[type=submit]').click();
   await page.waitForFunction(()=>document.querySelector('#message-input').value==='');

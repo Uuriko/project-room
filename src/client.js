@@ -29,9 +29,10 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
   return summary;
 }
 
-// Room events that only append: they never change a message already held, so
+// Room events that append or only change non-message state: they never change a message already held, so
 // a live refresh for them can read `?messages=recent` and keep older history.
-const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated"]);
+const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated",
+  "member.status_updated", "capabilities.advertised", "claim.acquired", "claim.released", "claim.renewed"]);
 // Join held history with a `?messages=recent` window. The window must start on
 // a held message with exactly `omitted` messages before it; anything else
 // returns null and the caller reads the full snapshot.
@@ -616,7 +617,7 @@ export class RoomClient {
     const held = this.held;
     return held && held.generation === this.generation && held.session === this.session && Array.isArray(held.messages) ? held : null;
   }
-  async send(command) {
+  async send(command, { waitForRefresh = true } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
     const generation = this.generation;
     try {
@@ -625,7 +626,13 @@ export class RoomClient {
       if (generation === this.generation && this.session) {
         if (!this.ownsAccountSession()) this.endAccess();
         else {
-          try { await this.refresh(receipt); } catch (error) { if (generation === this.generation) this.handleFailure(error); }
+          // Ordinary chat can release the composer as soon as its write commits.
+          // Keep reconciliation coalesced with SSE, and always consume failures:
+          // a failed read cannot turn a committed write into a failed send.
+          const refreshed = this.refresh(receipt).catch(error => {
+            if (generation === this.generation) this.handleFailure(error);
+          });
+          if (waitForRefresh) await refreshed;
         }
       }
       return receipt;

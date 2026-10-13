@@ -604,8 +604,17 @@ export class RoomAgentClient {
     const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
-  async assistant(input, { signal } = {}) {
-    const value = await this.#request("/assistant", input, signal);
+  async assistant(input, { signal, runId, cursor, work = false, limit } = {}) {
+    const query = new URLSearchParams();
+    if (runId !== undefined) query.set("runId", runId);
+    if (work) query.set("view", "work");
+    if (cursor != null) query.set("cursor", cursor);
+    if (limit !== undefined) query.set("limit", limit);
+    const value = await this.#request("/assistant" + (query.size ? "?" + query : ""), input, signal);
+    if ((work || runId !== undefined) && (value.viewerId !== this.#memberId || !Array.isArray(value.runs)
+      || runId !== undefined && (value.runs.length !== 1 || value.runs[0].id !== runId)
+      || work && value.nextCursor !== null && typeof value.nextCursor !== "string"))
+      throw new RoomClientError(200, "invalid_response", "Shared work read does not match this request");
     if (value?.contractVersion !== 1 || value.roomId !== this.#roomId
       || input && (value.action !== input.action || value.result?.id !== input.runId || value.result?.attemptId !== input.attemptId))
       throw new RoomClientError(200, "invalid_response", "Shared assistant response does not match this request");

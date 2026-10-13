@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
+import { chromium } from 'playwright';
+import { createAcceptanceFixture } from './acceptance-fixture.mjs';
+import { createRoomServer } from '../server/http.mjs';
+import { signInFixture } from './auth-signin.mjs';
+import { openSettings } from './room-chrome.mjs';
+
+test('open questions navigate to the conversation and refresh after an answer', {timeout:60000}, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({store:f.store,streamInterval:40});
+  const post = (actor, data) => f.store.command(f.keys[actor], 'commons', {id:crypto.randomUUID(),type:'message.posted',data});
+  post('guest', {messageId:'question-navigation',body:'Which layout should we use?'});
+  await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+  const browser = await chromium.launch({headless:true});
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
+  const page = await browser.newPage({viewport:{width:1280,height:900}});
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page,f.keys.owner);
+  await openSettings(page, 'open-questions-panel');
+  const link = page.locator('#open-questions-panel a').filter({hasText:'Which layout should we use?'});
+  await link.waitFor({state:'visible'});
+  await link.click();
+  await page.waitForURL(/#pr-record\/message\/question-navigation/);
+  await page.locator('#settings-dialog').waitFor({state:'hidden'});
+  await page.locator('[data-message-id="question-navigation"]').first().waitFor({state:'visible'});
+  await openSettings(page, 'open-questions-panel');
+  await link.waitFor({state:'visible'});
+  post('owner', {messageId:'answer-navigation',body:'Use the compact layout.',replyToId:'question-navigation'});
+  await link.waitFor({state:'detached'});
+  assert.equal(await page.locator('#open-questions-status').textContent(),'');
+});

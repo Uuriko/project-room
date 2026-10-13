@@ -1,5 +1,5 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
+import { LEGACY_REACTIONS, foldedReactionMap } from "./emoji.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 // Legacy names remain the input aliases. Pills render the Unicode key.
 export const REACTIONS = LEGACY_REACTIONS;
@@ -17,9 +17,8 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
-export function escapeChatAction({ dialogOpen = false, mentionOpen = false, emojiOpen = false, replyOpen = false, inThread = false } = {}) {
+export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
   if (dialogOpen) return null;
-  if (emojiOpen) return "hide-emoji";
   if (mentionOpen) return "hide-mentions";
   if (replyOpen) return "clear-reply";
   if (inThread) return "leave-thread";
@@ -215,7 +214,7 @@ export function messageBodyHtml(body, members, esc, messageId) {
   const lines = text.split("\n");
   const full = mentionHtml(text, members, esc);
   if (text.length <= 1200 && lines.length <= 12) return full;
-  const preview = renderEmojiShortcodes([...lines.slice(0, 6).join("\n")].slice(0, 600).join(""));
+  const preview = [...lines.slice(0, 6).join("\n")].slice(0, 600).join("");
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
 }
 
@@ -247,7 +246,7 @@ export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
 }
 
 export function mentionHtml(body, members, esc) {
-  const text = renderEmojiShortcodes(body);
+  const text = String(body ?? "");
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
   if (!names.length) return markdownHtml(esc(text));
   const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
@@ -488,7 +487,8 @@ export class DraftRecovery {
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
-          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
+          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents,
+            ...(d.pending.assistant ? { assistant: d.pending.assistant } : {}) } : null }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -568,6 +568,13 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
+        if (d.pending?.assistant) {
+          const expected = { action: 'invoke', requestId: `ask-${messageId}`, runId: `run-${messageId}`, sourceMessageId: messageId,
+            message: { body: data.body, replyToId: data.replyToId, channelId: data.channelId ?? 'general' } };
+          // Corrupt/edited recovery cannot silently turn an ask into ordinary chat.
+          if (!pending || !messageId || data.toMemberId || JSON.stringify(d.pending.assistant) !== JSON.stringify(expected)) continue;
+          pending.assistant = expected;
+        }
         drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }

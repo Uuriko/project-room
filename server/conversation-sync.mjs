@@ -1,38 +1,14 @@
-import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { opaqueReadCursor } from "./opaque-read-cursor.mjs";
+import { createHash } from "node:crypto";
 import { hydrateRecordText } from "./projection-at-rest.mjs"; // Phase 1a
 import { ServiceError } from "./store.mjs";
 import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 
-const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("base64url");
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-function signer(store) {
-  // Continuations are hints, never authority. A store restart invalidates them
-  // explicitly instead of silently mixing pre-recovery and post-recovery pages.
-  if (!keys.has(store)) keys.set(store, randomBytes(32));
-  return {
-    encode(value) {
-      // Authenticated encryption also hides array offsets: readable offsets
-      // would reveal where filtered private messages occur in the room.
-      const nonce = randomBytes(12), cipher = createCipheriv("aes-256-gcm", keys.get(store), nonce);
-      const body = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
-      return Buffer.concat([nonce, cipher.getAuthTag(), body]).toString("base64url");
-    },
-    decode(token) {
-      try {
-        if (typeof token !== "string" || token.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(token)) return null;
-        const bytes = Buffer.from(token, "base64url");
-        if (bytes.length < 29 || bytes.toString("base64url") !== token) return null;
-        const decipher = createDecipheriv("aes-256-gcm", keys.get(store), bytes.subarray(0, 12));
-        decipher.setAuthTag(bytes.subarray(12, 28));
-        return JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)), decipher.final()]).toString("utf8"));
-      } catch { return null; }
-    }
-  };
-}
 
 // Current records, never raw event replay: edits, reactions and deletion
 // tombstones arrive together. SQLite filters DMs before paging; JS only parses
@@ -56,7 +32,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
       viewerSessionRevision: auth.sessionRevision ?? null };
     const scope = digest([identity, auth.credentialHash, limit, channelId]);
-    const signed = signer(store), saved = cursor !== null || since !== null ? signed.decode(cursor ?? since) : null;
+    const signed = opaqueReadCursor(store), saved = cursor !== null || since !== null ? signed.decode(cursor ?? since) : null;
     const base = { ...identity, conversationVersion: 1, sequence: head.sequence, limit, messageId,
       ...(channelId !== null ? { channelId } : {}) };
     const reset = () => ({ ...base, mode: "reset", messages: [], nextCursor: null, checkpoint: null });

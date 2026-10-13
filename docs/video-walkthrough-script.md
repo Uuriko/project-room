@@ -87,11 +87,9 @@ guessing.
 > ground: index.html :: Enter to send · Shift + Enter for a new line
 > ground: index.html :: aria-controls="mention-list"
 
-- **S5** — B-roll: the typing indicator appears, a message lands, a reaction
-  is added via the reaction sheet.
+- **S5** — B-roll: the typing indicator appears and a message lands in the shared conversation.
 
 > ground: index.html :: id="typing-indicator"
-> ground: index.html :: id="reaction-sheet"
 
 ---
 

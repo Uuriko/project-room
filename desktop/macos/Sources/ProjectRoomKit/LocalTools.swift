@@ -13,6 +13,7 @@ public final class LocalTools {
     private var enabled = false
     private var revision = 0
     private var active: [String: pid_t] = [:]
+    private var activeTaskNames: [String: String] = [:]
     private var stopReasons: [String: String] = [:]
     private var reserved = Set<String>()
     private let fixtureRoot: URL?
@@ -30,7 +31,7 @@ public final class LocalTools {
     }
     public func status() -> [String: Any] {
         lock.lock(); defer { lock.unlock() }
-        return ["enabled": enabled, "grantRevision": revision, "runningProcesses": active.count,
+        return ["enabled": enabled, "grantRevision": revision, "runningProcesses": active.count, "activeRequests": active.keys.sorted(), "activeTaskNames": activeTaskNames,
                 "accessibility": AXIsProcessTrusted(), "screenCapture": CGPreflightScreenCaptureAccess(),
                 "fullDiskAccess": "not_detected_check_system_settings", "automation": "per_application",
                 "scope": "local_owner_tools", "remoteDeviceConnection": false]
@@ -169,8 +170,8 @@ public final class LocalTools {
             posix_spawn(&pid, executable, &actions, &attributes, UnsafeMutablePointer(mutating: a.baseAddress!), UnsafeMutablePointer(mutating: e.baseAddress!))
         } }
         guard started == 0 else { lock.unlock(); throw LocalToolFailure("process_could_not_start") }
-        active[id] = pid; lock.unlock()
-        defer { lock.lock(); active.removeValue(forKey: id); stopReasons.removeValue(forKey:id); lock.unlock() }
+        active[id] = pid; activeTaskNames[id] = URL(fileURLWithPath: executable).lastPathComponent; lock.unlock()
+        defer { lock.lock(); active.removeValue(forKey: id); activeTaskNames.removeValue(forKey: id); stopReasons.removeValue(forKey:id); lock.unlock() }
         let deadline = Date().addingTimeInterval(Double(timeout) / 1000)
         var status: Int32 = 0, stopped: String? = nil
         while true {

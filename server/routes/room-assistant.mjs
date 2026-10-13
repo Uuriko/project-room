@@ -4,6 +4,7 @@ const id={type:'string',minLength:1,maxLength:128};
 const params={type:'object',required:['roomId'],properties:{roomId:id}};
 const body={type:'object',required:['action','requestId'],additionalProperties:false,properties:{
   action:{type:'string',enum:['configure','invoke','contribute','resolve','claim','report','publish','draft','pause','cancel','resume']},requestId:id,runId:id,sourceMessageId:id,attemptId:id,resultMessageId:id,
+  message:{type:'object',required:['body'],additionalProperties:false,properties:{body:{type:'string',minLength:1,maxLength:65536},channelId:id,replyToId:{...id,type:['string','null']}}},
   body:{type:'string',maxLength:65536},sequence:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER},
   expectedAttemptId:{...id,type:['string','null']},expectedRevision:{type:'integer',minimum:0},name:{type:'string',minLength:1,maxLength:64},coordinatorMemberId:{type:['string','null']},conflict:{type:'boolean'},state:{type:'string',enum:['working','needs_input','paused','cancelled','done','failed']},summary:{type:'string',minLength:1,maxLength:2000},appliedInputMessageIds:{type:'array',items:id,maxItems:100}
 }};
@@ -29,9 +30,12 @@ export async function roomAssistantRoute(ctx) {
   const input=write ? await ctx.body(ctx.req) : null;
   if(write) ctx.rate(`${input?.action==='draft'?'assistant-draft':'write'}:${auth.credentialHash}`,input?.action==='draft'?120:60);
   const assistant=new RoomAssistant(ctx.store);
-  // publish posts the run's answer as the coordinator; thread the caller's
-  // own credential so the fenced post authenticates as the reserved host.
-  const value=write ? assistant.apply(roomId,input,authorize,selected.token) : assistant.list(roomId,authorize);
+  // Atomic invoke and publish post as the caller; retain the authenticated
+  // credential for ordinary message validation inside the shared transaction.
+  const machineRead = ctx.url.searchParams.has('runId') || ctx.url.searchParams.get('view') === 'work';
+  const value=write ? assistant.apply(roomId,input,authorize,selected.token) : machineRead
+    ? assistant.readWork(roomId,authorize,{runId:ctx.url.searchParams.get('runId'),cursor:ctx.url.searchParams.get('cursor'),limit:Number(ctx.url.searchParams.get('limit') ?? 50)})
+    : assistant.list(roomId,authorize);
   return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
 }
 export const ROOM_ASSISTANT_ROUTES=Object.freeze(['GET','HEAD','POST'].map(method=>Object.freeze({id:`room-assistant-${method.toLowerCase()}`,method,path:'/api/rooms/{roomId}/assistant',auth:'room',capability:null,scope:'room',handler:roomAssistantRoute,schema:{params,...(method==='POST'?{body}:{}),response:{type:'object'}},events:[]})));

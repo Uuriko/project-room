@@ -409,3 +409,24 @@ test("a message overflow menu opens upward only when it does not fit below and f
   assert.equal(menuOpensUp({ ...box, triggerTop: 440, triggerBottom: 460 }), true, "newest message by the composer flips up");
   assert.equal(menuOpensUp({ ...box, triggerTop: 40, triggerBottom: 60, limitBottom: 200 }), false, "no better room above stays downward");
 });
+
+test('atomic asks retain exact admission across reload and reject tampered recovery', () => {
+  const state = { members: { owner: {} }, messages: [] };
+  const memory = new Map(), recovery = new DraftRecovery({ getItem: k => memory.get(k), setItem: (k,v) => memory.set(k,v), removeItem: k => memory.delete(k) }, () => 1000);
+  const drafts = new ConversationDrafts();
+  const data = { messageId: 'atomic-message', body: 'Help us ship', toMemberId: null, replyToId: null, channelId: 'general' };
+  const pending = draftCommand(null, 'message.posted', data);
+  pending.assistant = { action: 'invoke', requestId: 'ask-atomic-message', runId: 'run-atomic-message', sourceMessageId: 'atomic-message', message: { body: data.body, replyToId: null, channelId: 'general' } };
+  drafts.save(null, { ...data, toMemberId: '', pending });
+  recovery.write('scope', drafts, null);
+  const saved = memory.get(recovery.key);
+  const restored = [...recovery.read('scope', state).drafts.entries.values()];
+  assert.equal(restored.length, 1);
+  assert.deepEqual(restored[0].pending, pending);
+  for (const patch of [{runId:'other'}, {sourceMessageId:'other'}, {message:{...pending.assistant.message,body:'Changed'}}]) {
+    const changed = JSON.parse(saved);
+    Object.assign(changed.entries[0][1].pending.assistant, patch);
+    memory.set(recovery.key, JSON.stringify(changed));
+    assert.equal(recovery.read('scope', state).drafts.entries.size, 0);
+  }
+});

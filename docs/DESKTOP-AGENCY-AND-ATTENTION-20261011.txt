@@ -1,0 +1,203 @@
+PROJECT ROOM: COMPUTER ACCESS, AUTOMATION AND HUMAN ATTENTION
+2026-10-11 — implementation design, not a claim of shipped capability
+
+PRODUCT CONTRACT
+A person chats with one Room assistant, optionally alongside friends. Agents
+use the person's connected tools and devices within authority the owner chose.
+The normal interaction is chat -> visible work -> useful result. Questions,
+permission gaps and failures interrupt only the work that depends on them.
+Recommended setup is deeply connected, while each actual macOS permission is
+requested honestly. No wizard can manufacture Full Disk Access or Accessibility.
+Device authority and permission to publish private content into a shared room
+are separate choices. Broad autonomous access can be selected explicitly.
+
+AUDITED BASELINE
+- Swift/AppKit/WKWebView desktop, LocalTools, LocalToolConnection and stdio MCP
+  executable already exist. Keep them; do not create a second execution broker.
+- Tools: status, small text read/write with version checks, bounded process run,
+  cancellation, native owner enablement, grant revision and operation journal.
+- Unix socket uses same-UID checks, owner-only files and a nonce. This is a local
+  trust boundary, not distinct cryptographic identity for every same-user agent.
+- Status reports Accessibility and screen capture, but dedicated screenshot,
+  accessibility-tree, keyboard and mouse MCP tools do not yet exist.
+- Remote account/room device connection explicitly reports false. Copying MCP
+  config is not a remote-device pairing or a verified agent connection.
+- Existing Codex runtime/shared-assistant/supervisor, room assistant, jobs,
+  attention rollups and inbox approvals should be extended, not duplicated.
+- open-questions-ui is a read-only unanswered-message radar, not a structured
+  answer protocol. It cannot be relabeled as a working decision form.
+- Demigod foot-v893.js contains WIZ: one active question, keyboard choices,
+  back/review, answer preservation. It also contains Webflow DOM ownership and
+  MutationObserver fixes: reuse the interaction specification, not this bundle.
+
+IMPLEMENTED IN THIS CHECKPOINT
+Replace LocalToolsWindow's four-button permission alert with MacPermissionSetup:
+Accessibility -> screen capture -> protected files -> local agent connection.
+Back, Next, Finish, Escape/Done for now; retain place while the window lives;
+poll actual permission status only while shown; never request access on Next.
+Full Disk Access stays explicitly unverified. No new tool grants or remote
+execution are enabled. Native acceptance test skips all real permission requests.
+
+1. DEVICE SETUP AND AUTHORITY
+After login, offer one optional 'Connect this Mac' action in conversation/settings.
+Do not add computer permissions to the sign-in page.
+Step 1: Work on this Mac / Choose access / Later. Work on this Mac explains broad
+file, app and process access in one sentence; preference selection is not approval.
+Step 2: OS access only for chosen capabilities; already granted steps compress.
+Step 3: choose background availability (while open or continue in background).
+Step 4: connect verified local agent(s), run a synthetic health check, report
+ready/partial with the precise unavailable tool. Do not say 'fully connected'
+merely because a config was copied. Finish remains available with partial access.
+Advanced settings: allowed rooms/agents, applications/folders, sharing destination,
+expiry, execution/concurrency budget, notifications, startup behavior and revoke.
+Provide broad owner-authorized autonomous mode; scoped profiles are available.
+Neither private room text nor a web page can change device grants.
+OS limits: TCC, locked sessions, secure input, Keychain prompts and protected
+system areas remain real limits. Do not label a broad grant 'unrestricted macOS'.
+Keep signing identity stable; signed/notarized updates and permission continuity
+are release requirements. Full Disk Access is not reliably a public boolean API.
+
+2. ONE NATIVE BROKER, MULTIPLE TRANSPORTS
+Keep owner-only local IPC for local clients. Add an account-bound device identity
+with its private key in Keychain. Pair from a logged-in native owner session with
+short-lived, one-use challenge and an explicit room/device binding. Remote work
+travels through an outbound authenticated connection; no public localhost listener.
+Each invocation has protocolVersion, requestId, deviceId, roomId, principalId,
+runId, tool, arguments, deadline and grantRevision. The native broker verifies
+current device binding and grant, not a client-supplied 'approved' flag.
+Use stable IDs and durable acceptance/result records. Delivery is retryable;
+side effects cannot universally promise exactly-once. Uncertain outcomes are
+reconciled before replay; late results cannot revive a cancelled run.
+Expose the same semantics to MCP, CLI and provider adapters. Version/negotiate
+capabilities so older clients fail intelligibly. Schema descriptions state bounds.
+Never expose the local socket nonce or a device credential in a room transcript.
+Web parity: browser UI may direct a paired Mac while it is connected. Without a
+paired device, web capabilities are cloud/API/browser-sandbox capabilities only.
+Remote control of the owner's visible desktop and an isolated remote browser are
+separate execution targets; show which target is being used.
+
+3. COMPUTER TOOLS, IN PRIORITY ORDER
+A. Structured filesystem: list/stat/search, bounded reads, conditional writes,
+   moves and trash with operation receipts. Streaming transfer for large files.
+B. Processes: asynchronous start/read/wait/cancel, incremental stdout/stderr,
+   bounded output artifacts, command environment profiles and terminal sessions.
+   Extend current journal and cancellation rather than bypassing them.
+C. Apps: list/open/focus/windows, Accessibility snapshot with bounded depth and
+   stable observation-scoped element references, element actions/set value.
+D. Browser: tab/page/form tools using an explicitly connected browser. Prefer
+   DOM/accessibility and application APIs over pixel interactions.
+E. Visual fallback: ScreenCaptureKit screenshot/crop, display/window coordinates,
+   scale and timestamp; click/drag/scroll/key/text tools tied to observation IDs.
+   Refresh after layout change; reject stale targets and locked sessions.
+F. App integrations: Apple Events/Shortcuts and authenticated connectors for mail,
+   calendars and documents. Use existing integration code where present. Reading
+   mail, drafting and sending remain distinct capabilities in the tool catalog.
+G. Batch execution: bounded steps with stop-on-error and per-step results. Batch
+   independent reads; avoid calling a sequence of GUI writes atomic.
+A model should receive compact structured observations, not a screenshot for
+something a direct API can answer. Return changed fields and references by default.
+
+4. MULTI-AGENT DEVICE SCHEDULING
+One foreground GUI owner per interactive desktop; this is a scarce shared device,
+not a reason to serialize independent file reads or jobs in isolated directories.
+Use expiring execution leases with fencing, revalidate at each side effect, and
+release on stop/disconnect. Human keyboard/mouse takeover pauses queued GUI work;
+resume checks the target again. Other agents may continue independent work.
+Keep process/file concurrency bounded and avoid conflicting writes with versions.
+Expose status, available capabilities, queue and busy reason in a single machine
+response. Route work to an available authorized device automatically.
+Owner global pause stops admission immediately and cancels supported active work.
+Report requested stop versus observed stop; do not claim undo for completed effects.
+Sleeping/offline/revoked devices have distinct states and actionable recovery.
+
+5. AUTOMATION WITHOUT A SECOND JOB SYSTEM
+Extend existing jobs with trigger -> scoped execution -> result -> notification.
+Triggers: schedule, file/app event, webhook, room request and completion dependency.
+Persist timezone, DST behavior, next fire, dedupe key and missed-run policy.
+Coalesce bursts; bound retry/backoff and concurrent runs; expose last success and
+next run. Use a dead-letter/recovery state instead of infinite invisible retries.
+A question suspends its dependent branch; independent authorized work continues.
+Revalidate authority when waking, not only when scheduling. Idempotency is scoped
+to the automation occurrence. Provide run now, pause, edit and execution history.
+Register background helper via SMAppService for the chosen availability mode.
+Respect user disabling it in System Settings. Provide menu-bar pause/quit/status.
+Candidate automations: inbox triage/drafts, download organization, project checks,
+meeting preparation, file changes, recurring research, and failed-job recovery.
+These are templates requiring actual connected capabilities, not fake ready buttons.
+Notifications default to meaningful completion, blockers and required decisions;
+quiet successful housekeeping should not spam chat.
+
+6. ONE ATTENTION PROTOCOL AND PROJECTION
+Normalize existing sources through adapters, retaining their own authoritative
+stores and permission checks. Do not build a competing approvals database.
+Types: preference question, missing access, consequential approval, recovery issue.
+Fields: stable id, source/ref, room/run, author, intended respondent/authority,
+revision, createdAt, expiresAt, status, question schema and relevant context.
+States: pending, answered, cancelled, expired, superseded. A displayed card/read
+acknowledgement is not an answer or a grant. Server atomically checks revision,
+current authority, status and expiry with the answer. Duplicate retry returns the
+same receipt; conflicting second answers show who resolved it, if visible.
+Bind questions and answers to the originating run. Provider adapters translate
+Codex requestUserInput/approval and Claude tool callbacks into the existing source
+workflow. Provider timeouts/cancellation resolve the card; no dangling question.
+Question data is untrusted text. No HTML interpolation, embedded executable action
+URLs, authority granted by prompt contents, or arbitrary schema code execution.
+Badge counts equal the currently visible actionable list. One notification per
+revision; resolved elsewhere updates all tabs. Private content remains private.
+
+7. TYPEFORM-STYLE PRESENTATION, QUIET BY DEFAULT
+One short question inline for one decision; two or more related questions open an
+anchored stepper, never a mandatory full-screen takeover. Preserve chat visibility.
+Show question, optional one-line rationale, 2–4 concise choices and free text where
+appropriate. Keyboard numbers only outside text entry; arrows between choices;
+Enter confirms current choice, Shift+Enter adds a newline, Escape saves and closes.
+No automatic submission of a recommended default. Multi-select requires explicit
+Next. Preference auto-advance may be offered after intentional selection; granting
+access or approving an external effect requires explicit labelled confirmation.
+Back preserves answers. Review only when multiple answers or significant effects
+justify it. Optional skips are explicit; required unanswered questions remain open.
+Persist drafts by account + question + revision. A changed schema cannot silently
+reuse stale answers. Avoid storing sensitive answers outside necessary scope.
+Screen-reader labels, visible focus, reduced motion, mobile keyboard/viewport and
+200% zoom are acceptance criteria. Do not announce every streamed token.
+In the conversation: a compact 'Room needs your input' item, expandable form and
+an unobtrusive sidebar badge. No modal storm when several workers ask at once.
+Group equivalent questions; surface conflicts rather than let workers ask again.
+User may answer in chat when the mapping is unambiguous; ask confirmation for
+ambiguous/high-impact interpretations instead of accepting a guessed answer.
+
+8. RELIABILITY AND OBSERVABILITY
+Correlate human message -> response -> worker -> device invocation -> receipt.
+Measure acceptance, queue delay, observation/action duration, first useful response,
+question resolution and resume latency. Redact secrets from logs. Screen and file
+contents do not automatically become room-wide evidence; share a scoped result.
+Keep bounded local diagnostics and user-visible action history with retention.
+Verify recovery after sleep, app crash, provider disconnect, auth expiry, revoked
+permissions, schema upgrade, locked screen, multiple displays and app restart.
+Cached screenshots or Accessibility references must not be reused after takeover.
+Keep signing/update qualification distinct from local Swift build success.
+
+IMPLEMENTATION PACKAGES / DONE CONDITIONS
+1. Guided native permissions (this checkpoint): builds; navigation/skip/resume
+   acceptance; actual OS prompt paths and signed-build QA remain manual checks.
+2. Structured attention: inventory existing approval/question source APIs, add
+   adapters plus one UI, then prove answer -> paused agent resumes end to end.
+3. Native observation/action: Accessibility and screenshot tools, one GUI lease,
+   test in a disposable fixture app; prove stale observation and pause behavior.
+4. Device enrollment and host bridge: native owner pair -> remote room request ->
+   bounded fixture action -> private receipt; prove revocation and replay behavior.
+5. Background automation: reuse jobs, SMAppService helper and quiet notifications;
+   sleep/restart/missed schedule and duplicate delivery tests.
+6. Integrated acceptance: two humans and three agents, one desktop, simultaneous
+   work, one question, takeover, stop and reconnect. No duplicated external effects,
+   hidden questions, lost drafts, fabricated success or leaked private tool output.
+Do not ship a broad 'fully connected' label before the enrolled-device loop passes.
+
+SOURCES
+https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos
+https://developer.apple.com/documentation/servicemanagement/smappservice
+https://support.apple.com/guide/mac-help/allow-accessibility-apps-to-access-your-mac-mh43185/mac
+https://learn.chatgpt.com/docs/app-server
+https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool
+https://platform.claude.com/docs/en/agents-and-tools/tool-use/browser-use-tool
+Local reuse reference: /Users/johnpotter/src/demigod-site-cdn/foot-v893.js, WIZ runtime.

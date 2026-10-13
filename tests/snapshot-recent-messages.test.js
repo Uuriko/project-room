@@ -42,6 +42,7 @@ test("the recent snapshot carries only the newest 100 visible messages and count
 
   const response = await f.get("?messages=recent");
   assert.equal(response.status, 200);
+  assert.match(response.headers.get("server-timing"), /^room-read;dur=\d+\.\d{2}$/);
   const recent = await response.json();
   assert.equal(recent.state.messages.length, WINDOW);
   assert.deepEqual(recent.state.messages.map(message => message.id), visible.slice(-WINDOW).map(message => message.id),

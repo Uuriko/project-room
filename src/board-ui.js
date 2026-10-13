@@ -189,7 +189,8 @@ export function collapseClaimUpdates(events) {
 export function paintClaimChat(state, list) {
   if (!list) return;
   list.querySelectorAll("[data-claim-update]").forEach(node => node.remove());
-  if (!state) return;
+  // Room-wide claim activity does not belong inside a conversation thread.
+  if (!state || list.dataset.view?.startsWith("thread:")) return;
   const groups = collapseClaimUpdates(state.eventLog);
   if (!groups.length) return;
   // One pass over the room's messages: a find() per rendered message was
