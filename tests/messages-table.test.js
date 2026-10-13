@@ -323,3 +323,69 @@ test("REST search resolves archived hits instead of dropping them, and still hid
   assert.deepEqual(await searchIds(f.human), ["old-pub", "old-dm", "new-pub"]);
   assert.deepEqual(await searchIds(f.stranger), ["old-pub", "new-pub"]);
 });
+
+test("changing or replying to an archived message is refused with a clear error, a stranger's DM probe is not confirmed", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "old public" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "old private" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "new-pub", body: "new" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const dmSeq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  archiveOldest(f, f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n);
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  const before = f.store.room("commons").sequence;
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_EDITED, { messageId: "old-pub", body: "x", expectedMessageRevision: 0 })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_DELETED, { messageId: "old-pub", expectedMessageRevision: 0, reason: "x" })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: "old-pub", reaction: "like", active: true })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_PINNED, { messageId: "old-pub" })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-1", body: "r", replyToId: "old-pub" })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-2", body: "r", replyToId: "old-dm" })), "message_archived");
+  assert.notEqual(code(() => f.send(f.stranger, T.MESSAGE_POSTED, { messageId: "probe", body: "r", replyToId: "old-dm" })), "message_archived");
+  assert.equal(f.store.room("commons").sequence, before, "a refused command appends nothing");
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "fine", body: "ordinary posts still work" });
+});
+
+test("an archived pinned DM can be unpinned by its parties and not by anyone else", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "private" });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "old-dm" });
+  for (let i = 0; i < 4; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  // Pins are retained by the compaction, so build the legacy shape directly: the
+  // pinned DM is out of the projection and covered by the marker.
+  const row = f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
+  const projection = JSON.parse(row.projection);
+  const seq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  const others = projection.messages.filter(m => m.id !== "old-dm" && f.store.db.prepare("SELECT seq FROM messages WHERE message_id=?").get(m.id).seq <= seq).map(m => m.id);
+  projection.messages = projection.messages.filter(m => m.id !== "old-dm");
+  projection.messagesArchive = { throughSeq: seq, count: 1, retainedIds: others };
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  f.store.rooms?.clear?.();
+  assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), true);
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  const before = f.store.room("commons").sequence;
+  assert.ok(code(() => f.send(f.stranger, T.MESSAGE_UNPINNED, { messageId: "old-dm" })), "a stranger is refused");
+  assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), true, "the pin is still there");
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.equal(code(() => f.send(f.agent, T.MESSAGE_UNPINNED, { messageId: "old-dm" })), null, "the recipient can unpin");
+  assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), false);
+});
+
+test("a new post cannot reuse the id of an archived message, public or DM, and reads like a live duplicate", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "old public" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "old private" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "new-pub", body: "new" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const dmSeq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  archiveOldest(f, f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n);
+  const attempt = (token, data, id) => { try { f.send(token, T.MESSAGE_POSTED, data, id); return "posted"; } catch (error) { return `${error.status}:${error.code}:${error.message}`; } };
+  const duplicate = attempt(f.human, { messageId: "new-pub", body: "again" });
+  assert.match(duplicate, /^409:command_rejected:/);
+  assert.equal(attempt(f.stranger, { messageId: "old-dm", body: "reuse" }), duplicate, "a stranger gets the live-duplicate answer");
+  assert.equal(attempt(f.human, { messageId: "old-pub", body: "reuse" }), duplicate);
+  assert.equal(attempt(f.human, { body: "event id reuse" }, "old-pub"), duplicate, "the event id doubles as the message id when none is given");
+  assert.equal(attempt(f.human, { messageId: "brand-new", body: "fine" }), "posted");
+  assert.equal(f.store.room("commons").state.messages.filter(m => m.id === "old-pub" || m.id === "old-dm").length, 0);
+});

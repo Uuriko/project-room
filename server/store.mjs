@@ -686,6 +686,13 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
+// Commands that name an existing message, and which field names it.
+const ARCHIVED_REF_FIELDS = Object.freeze({
+  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
+  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
+  [T.MESSAGE_POSTED]: "replyToId"
+});
+
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
@@ -4822,6 +4829,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const actor = room.state.members?.[auth.member.id];
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
+        }
+      }
+      // Archived messages are not in the projection, so the reducer cannot change
+      // them or thread under them. Refuse with a clear error. A DM the actor is
+      // not a party to reads like an unknown id, so nothing about it is confirmed.
+      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
+      if (archivedRef) {
+        const refId = command.data?.[archivedRef];
+        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
+          const archivedRow = archivedMessageRow(this.db, roomId, refId);
+          const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
+          // An archived message can still hold a pin (older archives did not retain pins).
+          // Unpinning is allowed for anyone who may see the message and refused, like a
+          // live DM, for a non-party; the reducer cannot check it without the message.
+          const stillPinned = command.type === T.MESSAGE_UNPINNED && (room.state.pins ?? []).some(pin => pin.messageId === refId);
+          if (archivedRow && stillPinned) {
+            if (!party) fail(422, "command_rejected", "Cannot unpin a direct message you are not a party to");
+          } else if (party) {
+            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
+          }
+        }
+      }
+      // A new post cannot reuse the id of an archived message: the reducer only
+      // sees the projection, so it would otherwise accept a second message under
+      // that id. Same refusal as a live duplicate; it reads the same for a DM.
+      if (command.type === T.MESSAGE_POSTED) {
+        const newId = command.data?.messageId || command.id;
+        if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
+            && archivedMessageRow(this.db, roomId, newId)) {
+          fail(409, "command_rejected", "Message already exists");
         }
       }
       // A reaction on a DM is shown to its parties and the answer would
