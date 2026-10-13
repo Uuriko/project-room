@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
+import { executeOnce } from "./run-once.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const attentionSchema = `
@@ -112,18 +113,31 @@ export class Attention {
       if (request.delivery === "digest" && request.digestHour === null) fail(422, "invalid_attention", "Digest delivery needs a digest hour.");
       if (request.delivery === "immediate" && request.digestHour !== null) fail(422, "invalid_attention", "Immediate delivery takes no digest hour.");
       const fingerprint = createHash("sha256").update(JSON.stringify(Object.fromEntries(fields.sort().map(field => [field, request[field]])))).digest("hex");
-      const prior = this.db.prepare("SELECT fingerprint,response FROM private_attention_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, auth.member.id, request.requestId);
-      if (prior) {
-        if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different attention settings");
-        return { ...this.list(token, roomId, binding), receipt: JSON.parse(prior.response), duplicate: true };
-      }
-      const now = this.store.now();
-      const receipt = { requestId: request.requestId, quietStart: request.quietStart, quietEnd: request.quietEnd, delivery: request.delivery, digestHour: request.digestHour };
-      this.db.prepare(`INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(room_id,member_id) DO UPDATE SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,delivery=excluded.delivery,digest_hour=excluded.digest_hour,updated_at=excluded.updated_at`)
-        .run(roomId, auth.member.id, request.quietStart, request.quietEnd, request.delivery, request.digestHour, now);
-      this.db.prepare("INSERT INTO private_attention_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
-      return { ...this.list(token, roomId, binding), receipt, duplicate: false };
+      // Idempotency via the shared runOnce flow (server/run-once.mjs); the
+      // retained private_attention_commands journal keeps its own storage,
+      // immutability triggers and error shape — only the flow is shared.
+      const { result: receipt, replayed } = executeOnce({
+        fingerprint,
+        conflictCode: "idempotency_conflict",
+        conflictMessage: "Request ID already used for different attention settings",
+        throwError: fail,
+        find: () => {
+          const prior = this.db.prepare("SELECT fingerprint,response FROM private_attention_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, auth.member.id, request.requestId);
+          return prior ? { fingerprint: prior.fingerprint, result: JSON.parse(prior.response) } : null;
+        },
+        execute: () => {
+          const now = this.store.now();
+          const fresh = { requestId: request.requestId, quietStart: request.quietStart, quietEnd: request.quietEnd, delivery: request.delivery, digestHour: request.digestHour };
+          this.db.prepare(`INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(room_id,member_id) DO UPDATE SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,delivery=excluded.delivery,digest_hour=excluded.digest_hour,updated_at=excluded.updated_at`)
+            .run(roomId, auth.member.id, request.quietStart, request.quietEnd, request.delivery, request.digestHour, now);
+          return fresh;
+        },
+        record: result => {
+          this.db.prepare("INSERT INTO private_attention_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(result));
+        },
+      });
+      return { ...this.list(token, roomId, binding), receipt, duplicate: replayed };
     });
   }
   // Due wakes filtered through the member's delivery preference. Held wakes
