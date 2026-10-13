@@ -563,3 +563,54 @@ test("reassign honors the room's per-member open-claim cap", async t => {
   assert.equal(f.store.room("commons").sequence, sequence, "a refused handoff writes nothing");
   assert.equal(f.store.workClaims.get("commons", "reassign-cap-2").owner, "owner");
 });
+
+test("an approval cannot be reused for receipt tags or blobs the reviewer never named", async t => {
+  const f = await fixture(t);
+  const id = "artifact-swap";
+  const blobs = [`sha256:${"a".repeat(64)}`];
+  await startReviewedClaim(f, id, "distinct_member", { revision: "r1" });
+  assert.equal((await f.call(f.coordKey, `/work-claims/${id}/review`, { verdict: "approve", summary: "Reviewed original evidence" })).status, 200);
+  const before = f.store.workClaims.get("commons", id);
+  const swap = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: "coord", blobs, tags: ["different-evidence"] });
+  assert.equal(swap.status, 403);
+  assert.equal(swap.value.error.code, "work_review_rejected");
+  assert.deepEqual(f.store.workClaims.get("commons", id), before, "a refused swap preserves the claim");
+  // The reviewer names the evidence they approved; the same evidence closes, a different set does not.
+  const named = await f.call(f.coordKey, `/work-claims/${id}/review`, { verdict: "approve", summary: "Reviewed the final evidence", evidence: { blobs, tags: ["different-evidence"] } });
+  assert.equal(named.status, 200);
+  const other = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: "coord", blobs, tags: ["other"] });
+  assert.equal(other.status, 403);
+  const ok = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: "coord", blobs, tags: ["different-evidence"] });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.value.blobs, blobs);
+});
+
+test("reviewed done requires the exact approved evidence sets, including clearing and unreviewed additions", async t => {
+  const f = await fixture(t);
+  const [b1, b2] = ["1", "2"].map(c => `sha256:${c.repeat(64)}`);
+  const done = (id, body) => f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: "coord", ...body });
+  const approve = (id, evidence) => f.call(f.coordKey, `/work-claims/${id}/review`, { verdict: "approve", summary: "Reviewed", ...(evidence ? { evidence } : {}) });
+  // Named non-empty evidence: clearing, removing, adding and swapping are all refused; reorder closes.
+  await startReviewedClaim(f, "exact", "distinct_member", { revision: "r1" });
+  assert.equal((await approve("exact", { tags: ["a", "b"], blobs: [b1, b2] })).status, 200);
+  for (const body of [{ tags: [], blobs: [b1, b2] }, { tags: ["a", "b"], blobs: [] }, { tags: ["a"], blobs: [b1, b2] },
+    { tags: ["a", "b", "c"], blobs: [b1, b2] }, { tags: ["a", "b"], blobs: [b1] }, { tags: ["a", "b"], blobs: [b1, b2, `sha256:${"3".repeat(64)}`] },
+    { tags: ["a", "x"], blobs: [b1, b2] }, { tags: ["a", "b"] }, { blobs: [b1, b2] }, { tags: ["a", "b"], blobs: [b1, b2], deliveryMode: "merged" }]) {
+    assert.equal((await done("exact", body)).status, 403, JSON.stringify(body));
+  }
+  assert.equal((await done("exact", { tags: ["b", "a"], blobs: [b2, b1] })).status, 200, "reordering the same sets closes");
+  // Claim already carrying tags at creation: approval covers them; clearing or changing them at done is refused.
+  await startReviewedClaim(f, "carried", "distinct_member", { revision: "r1", tags: ["keep"] });
+  assert.equal((await approve("carried")).status, 200);
+  assert.equal((await done("carried", { tags: [] })).status, 403);
+  assert.equal((await done("carried", { tags: ["keep", "extra"] })).status, 403);
+  assert.equal((await done("carried", { blobs: [b1] })).status, 403);
+  assert.equal((await done("carried", { tags: ["keep"] })).status, 200);
+  // Interim evidenceRefs change after approval invalidates it until re-approved.
+  await startReviewedClaim(f, "interim", "distinct_member", { revision: "r1" });
+  assert.equal((await approve("interim")).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/interim/update", { note: "swap", evidenceRefs: ["https://example.com/new"] })).status, 200);
+  assert.equal((await done("interim", {})).status, 403);
+  assert.equal((await approve("interim", { evidenceRefs: ["https://example.com/new"] })).status, 200);
+  assert.equal((await done("interim", { evidenceRefs: ["https://example.com/new"] })).status, 200);
+});
