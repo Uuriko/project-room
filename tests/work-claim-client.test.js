@@ -393,3 +393,36 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   release();
   assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
 });
+
+test('SDK reviewWorkItem forwards evidence, and reviewed completion needs the approval to name final evidence', async t => {
+  const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
+  const blobs = [`sha256:${'b'.repeat(64)}`];
+  const refs = ['https://example.com/evidence/1'];
+  await owner.workClaim('bound', { reviewPolicy: 'distinct_member' });
+  await owner.updateWorkItem('bound', { state: 'in_progress' });
+  await peer.reviewWorkItem('bound', { verdict: 'approve', summary: 'Approved without naming evidence' });
+  await assert.rejects(owner.workComplete('bound', { reviewedBy: 'reviewer', blobs, tags: ['final'] }),
+    error => error.status === 403 && error.code === 'work_review_rejected');
+  await assert.rejects(owner.workComplete('bound', { reviewedBy: 'reviewer', deliveryMode: 'merged' }),
+    error => error.status === 403 && error.code === 'work_review_rejected');
+  await assert.rejects(owner.workComplete('bound', { reviewedBy: 'reviewer', evidenceRefs: refs }),
+    error => error.status === 403 && error.code === 'work_review_rejected');
+  const approved = await peer.reviewWorkItem('bound', { verdict: 'approve', summary: 'Approved the final evidence',
+    evidence: { blobs, tags: ['final'], evidenceRefs: refs, deliveryMode: 'merged' } });
+  assert.deepEqual(approved.reviews[0].evidence.blobs, blobs);
+  const done = await owner.workComplete('bound', { reviewedBy: 'reviewer', blobs, tags: ['final'], evidenceRefs: refs, deliveryMode: 'merged' });
+  assert.equal(done.state, 'done');
+  assert.deepEqual(done.blobs, blobs);
+});
+
+test('a reviewed done with no new evidence still closes, and refs swapped before done invalidate the approval', async t => {
+  const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
+  await owner.workClaim('plain', { reviewPolicy: 'distinct_member' });
+  await owner.updateWorkItem('plain', { state: 'in_progress', evidenceRefs: ['https://example.com/evidence/a'] });
+  await peer.reviewWorkItem('plain', { verdict: 'approve', summary: 'Approved' });
+  await owner.updateWorkItem('plain', { note: 'refs b', evidenceRefs: ['https://example.com/evidence/b'] });
+  await assert.rejects(owner.workComplete('plain', { reviewedBy: 'reviewer' }),
+    error => error.status === 403 && error.code === 'work_review_rejected');
+  await owner.updateWorkItem('plain', { note: 'refs a', evidenceRefs: ['https://example.com/evidence/a'] });
+  assert.equal((await owner.workComplete('plain', { reviewedBy: 'reviewer' })).state, 'done');
+});
