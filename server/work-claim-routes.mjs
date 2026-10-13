@@ -1112,7 +1112,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
             `Review policy "${policy}" not satisfied for "${item.id}": no review attestation recorded by ${reviewer}`);
         }
         const verifiers = verifiersOf(store, roomId);
-        if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers, reviewMembers: reviewersOf(store, roomId) })) {
+        if (!canCloseWork(item, reviewer, { policy, verifyMembers: verifiers, reviewMembers: reviewersOf(store, roomId),
+          finalEvidence: { tags: data.tags, blobs: data.blobs, evidenceRefs: data.evidenceRefs, deliveryMode: data.deliveryMode } })) {
           reject(403, "work_review_rejected",
             `Review policy "${policy}" not satisfied for "${item.id}": a current affirmative review by an authorized reviewer is required`);
         }
@@ -1162,13 +1163,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "evidence"] })) invalidInput(reject, "{verdict, summary, url?, evidence?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
       const item = load(claimIdOf(reject, workClaimId));
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
-      const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
+      const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, evidence: data.evidence, now: nowMs }));
       const duplicate = reviewed.history === item.history;
       if (!duplicate) commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
       if (!duplicate && data.verdict === "changes_requested") {
