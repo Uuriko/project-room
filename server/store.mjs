@@ -2703,12 +2703,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     return sequence;
   }
-  // Phase 1a rollback: write every room back with full bodies in one
-  // transaction. The release trigger then empties projection_bodies.
+  // Phase 1a/1b rollback: write every room back with full bodies and full
+  // message envelopes in one transaction. The release trigger then empties projection_bodies.
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%'").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_nul\":1') > 0").all()) {
         const state = this.room(id).state;
         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
         this._projectionCache?.clear?.();
