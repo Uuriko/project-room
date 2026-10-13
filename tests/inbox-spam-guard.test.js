@@ -56,6 +56,17 @@ test("a single confirmed-spam outcome marks the sender bad", () => {
   const snap = rep.record("spam@example.com", "spam_confirmed");
   assert.equal(snap.label, "bad");
 });
+test("confirmed spam disqualifies a long clean history from the trusted label", () => {
+  const rep = createSenderReputation();
+  for (let i = 0; i < 10; i += 1) rep.record("mixed@example.com", "clean");
+  rep.record("mixed@example.com", "spam_confirmed");
+  rep.record("mixed@example.com", "spam_confirmed");
+  const snap = rep.get("mixed@example.com");
+  assert.equal(snap.clean, 10);
+  assert.equal(snap.spamConfirmed, 2);
+  assert.equal(snap.score, 100);
+  assert.equal(snap.label, "bad");
+});
 test("flagged-but-not-quarantined senders sit at watch, not bad", () => {
   const rep = createSenderReputation();
   rep.record("iffy@example.com", "flagged");
