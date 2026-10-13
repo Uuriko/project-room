@@ -8,7 +8,12 @@ How we declare, run, communicate, and learn from incidents. Companion docs:
 There is no external uptime monitor or paging integration: the monitoring we
 actually have is `GET /api/health` (thin liveness: `status: "ok"` means the
 process is up) and `GET /api/version` (source revision + build id). There is
-no per-check health table and no `/status` page. Anything below that assumes a
+no per-check health table and no `/status` page. The one extra signal is
+`GET /api/health/jobs` (schema `room.job-health/1`): the jobs canary. The Worker
+answers it with a 503 JSON `status: "unavailable"` when its Durable Object RPC
+fails, so it separates "Worker alive, DO failing" from a full outage. Job
+heartbeats emit through the DO they monitor, so silence is not health; see
+`docs/INCIDENT-1101-RUNBOOK.md`. Anything below that assumes a
 richer health surface is stale — fix the doc, not the assumption.
 
 Read this doc before you declare your first incident. During a live incident, use it
@@ -66,8 +71,8 @@ always cheaper than declaring late.
    every action with timestamps. This becomes the postmortem's timeline.
 4. **Snapshot first evidence:** run `GET /api/health` and `GET /api/version`
    and save both payloads. Record `status`, `mode`, `sourceRevision`, and
-   `buildId`. The health probe is thin liveness only — there is no per-check
-   table and no separate uptime monitor.
+   `buildId`. Also save `GET /api/health/jobs`. The health probe is thin
+   liveness only — there is no per-check table and no separate uptime monitor.
 5. **Set the first update time** (see §5) and start the clock.
 
 An incident is declared against **impact**, not against a person or a change.
@@ -108,6 +113,7 @@ go fix it. Do not run commands that mutate state until you've named a theory.
 | Signal | Meaning | First action |
 |--------|---------|--------------|
 | `GET /api/health` → 200, `status: "ok"` | Process up and answering | Look outward: proxy, DNS, client, dependencies the probe does not check |
+| `GET /api/health/jobs` → 503 `unavailable` while `/api/health` fails | Worker alive, Durable Object RPC failing (1101 class) | Follow `docs/INCIDENT-1101-RUNBOOK.md`; capture Worker and DO exceptions first |
 | `GET /api/health` → non-200 or unreachable | Process down or HTTP layer broken | Check the supervisor/host first, then server wiring |
 | `GET /api/version` → unexpected `sourceRevision` | Wrong revision deployed | Compare with the intended ship commit; roll back if needed |
 
