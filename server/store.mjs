@@ -1876,6 +1876,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { return JSON.parse(row.record_json); } catch { return null; }
   }
 
+  // The projection messages plus a lookup for archived ones, for event-log redaction.
+  redactionMessages(roomId) {
+    const messages = [...this.room(roomId).state.messages];
+    Object.defineProperty(messages, "archivedLookup", { value: id => this.archivedMessage(roomId, id) });
+    return messages;
+  }
+
   // [authorId, toMemberId] of an archived direct message, else null.
   archivedDmParties(roomId, messageId) {
     const row = archivedMessageRow(this.db, roomId, messageId);
