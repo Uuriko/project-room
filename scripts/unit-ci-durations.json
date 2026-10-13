@@ -937,6 +937,7 @@
   "tests/guest-invite-expiry-docs.test.mjs": 64.69,
   "tests/guest-token-expiry.test.mjs": 566.757,
   "tests/landing-hero.test.mjs": 274.09,
+  "tests/qa2-load-smoke.test.js": 6564,
   "tests/qa2/abuse-guards.test.js": 73.181,
   "tests/qa2/agent-journeys.test.js": 71.192,
   "tests/qa2/authz-matrix.test.js": 69.261,
