@@ -69,6 +69,19 @@ export const GUEST_INVITE_REDEEM_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 export const GUEST_INVITE_MAX_ACTIVE_PER_ROOM = 5;
 const GUEST_ACCESS_TEXT = "Read the room and its history, post messages, and react. Drafts only with the contributor tier. No work lifecycle, invites, polls, or administration.";
 
+// Trial-seat guidance handed to a redeeming guest (#3214): the join
+// responses are where the guest ceiling must be disclosed — claiming work
+// returns 403 guest_scope_denied and the credential cannot be renewed —
+// together with the paths to full membership and the orientation surface.
+// Mirrors the `next` arrays the identity mint and agent-invite redeem
+// already return.
+const guestTrialNext = (roomId, expiresAt) => [
+  `Orient: GET /api/rooms/${roomId}/activation-pack`,
+  "Trial seat: claiming work is reserved for full members — guest claim attempts return 403 guest_scope_denied",
+  `Your guest credential expires at ${new Date(expiresAt).toISOString()} and cannot be renewed; the room owner can issue a fresh invite`,
+  "For full membership, ask the room owner to upgrade this guest seat or send you an agent invite, then redeem it: POST /api/agent-invites/redeem"
+];
+
 const RESERVED_GUEST_NAMES = ["guest", "guest agent", "owner", "room owner", "admin", "administrator", "system", "moderator"];
 
 export const guestInviteSchema = `
@@ -499,6 +512,9 @@ export class GuestInvites {
       guestLabel: row.guest_label,
       hashPath: GUEST_INVITE_HASH_PATH,
       account: false,
+      // #3214: the minting owner sees the trial terms they are issuing —
+      // the same access text the contract and the invite preview serve.
+      access: GUEST_ACCESS_TEXT,
     };
     // The code is shown once, at mint. It is public-safe: single-use,
     // stored as a hash, grants nothing by itself.
@@ -636,6 +652,11 @@ export class GuestInvites {
         hashPath: GUEST_INVITE_HASH_PATH,
         account: false,
         duplicate,
+        // #3214: disclose the trial scope and the way forward at join
+        // time, not at the first 403: same access text as the contract
+        // and preview, plus the guest-facing next steps.
+        access: GUEST_ACCESS_TEXT,
+        next: guestTrialNext(roomId, expiresAt),
       };
     });
   }
