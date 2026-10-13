@@ -304,3 +304,22 @@ test("search still finds archived messages and keeps archived DMs private", t =>
   assert.deepEqual(ids(f.stranger), ["old-pub", "new-pub"]);
   assert.equal(f.store.search(f.stranger, "commons", "quartz", "messages").total, 2);
 });
+
+test("REST search resolves archived hits instead of dropping them, and still hides archived DMs", async t => {
+  const { createRoomServer } = await import("../server/http.mjs");
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "Quartz plan for the room" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "quartz private note" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "new-pub", body: "quartz follow-up" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const dmSeq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  archiveOldest(f, f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const get = async (path, token) => (await fetch(origin + path, { headers: { Authorization: `Bearer ${token}` } })).json();
+  const searchIds = async token => (await get("/api/rooms/commons/search?q=quartz&kind=messages", token)).messages.map(m => m.id);
+  assert.deepEqual(await searchIds(f.human), ["old-pub", "old-dm", "new-pub"]);
+  assert.deepEqual(await searchIds(f.stranger), ["old-pub", "new-pub"]);
+});
