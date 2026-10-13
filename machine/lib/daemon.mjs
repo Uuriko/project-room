@@ -54,6 +54,21 @@ export class MachineDaemon {
     this.connections = 0;
   }
 
+  // The daemon is long-lived, and other writers (CLI `provider set` /
+  // `bot enable` / `bot disable`, `enroll`, `prepare-golden`) update
+  // config.json while it runs, each reloading first. This daemon owns only
+  // halted / pausedUntil / haltEpoch, so persisting those fields must reload
+  // the on-disk config and apply just them: saving the construction-time
+  // snapshot would revert everyone else's changes (#3030, the same
+  // stale-snapshot class as #2836). Adopting the fresh config also means
+  // later reads in this process see the concurrent changes.
+  persistControlFields(fields) {
+    const fresh = loadConfig(this.home);
+    Object.assign(fresh, fields);
+    this.config = fresh;
+    saveConfig(this.config, this.home);
+  }
+
   featureOn() {
     return machineEnabled(this.env) && this.config.enabled === true;
   }
@@ -149,9 +164,10 @@ export class MachineDaemon {
     if (message.type === "halt") {
       this.state.halted = true;
       this.state.deadman = false;
-      this.config.halted = true;
-      this.config.haltEpoch = Number(message.epoch) || this.config.haltEpoch + 1;
-      saveConfig(this.config, this.home);
+      this.persistControlFields({
+        halted: true,
+        haltEpoch: Number(message.epoch) || this.config.haltEpoch + 1,
+      });
       await stopAllGuests(this.state);
       // The autonomous bot must stop too: its active execution is released
       // and it will not pick the work back up while halted.
@@ -168,9 +184,7 @@ export class MachineDaemon {
     if (message.type === "resume") {
       this.state.halted = false;
       this.state.pausedUntil = null;
-      this.config.halted = false;
-      this.config.pausedUntil = null;
-      saveConfig(this.config, this.home);
+      this.persistControlFields({ halted: false, pausedUntil: null });
       return;
     }
     if (message.type === "bye") return;
@@ -324,16 +338,13 @@ export class MachineDaemon {
   // (crash, reboot) mid-pause comes back paused instead of quietly resuming.
   holdPause(until) {
     this.state.pausedUntil = until;
-    this.config.pausedUntil = until;
-    saveConfig(this.config, this.home);
+    this.persistControlFields({ pausedUntil: until });
   }
 
   async resume() {
     this.state.halted = false;
     this.state.pausedUntil = null;
-    this.config.halted = false;
-    this.config.pausedUntil = null;
-    saveConfig(this.config, this.home);
+    this.persistControlFields({ halted: false, pausedUntil: null });
     return { halted: false };
   }
 
