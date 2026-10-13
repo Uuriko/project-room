@@ -15,7 +15,7 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
@@ -222,7 +222,7 @@ export class AgentRooms {
         if (prior) {
           const state = this.store.room(prior.room_id).state;
           const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-            && state.room.kind === kind && state.members[memberId]?.displayName === displayName
+            && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
             && hadStarter(prior.room_id) === wantStarter;
           if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
           return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId, displayName);
@@ -232,7 +232,7 @@ export class AgentRooms {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
         const state = created ? this.store.room(roomId).state : null;
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-          && state.room.kind === kind && state.members[memberId]?.displayName === displayName
+          && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
           && hadStarter(roomId) === wantStarter;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return this.#duplicateCreateResponse(roomId, memberId, identity.identityId, displayName);

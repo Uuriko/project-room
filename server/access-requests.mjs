@@ -38,7 +38,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // an owner notification. These imports follow the agent-invites.mjs
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
-import { event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
+import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -277,7 +277,7 @@ export class AccessRequests {
       const limit = this.rateLimiter.check(`access-request:${identityId}`);
       if (!limit.allowed) fail(429, "rate_limited", limit.message);
       const room = this.store.room(roomId);
-      const member = linked && Object.hasOwn(room.state.members, linked.memberId) ? room.state.members[linked.memberId] : null;
+      const member = linked ? ownMember(room.state.members, linked.memberId) ?? null : null;
       if (linked) {
         if (!member || member.active === false || member.identityId !== identityId || this.store.identities.secretRevoked(identityId)) {
           fail(409, "stale_membership", "Current active membership required; ask a room owner to review access");
@@ -702,7 +702,7 @@ export class AccessRequests {
         this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
           .run(now, auth.member.id, "already a member; request closed without a second grant", requestId);
         const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
-        const held = authority.members[existingLink.memberId]?.permissions ?? [];
+        const held = ownMember(authority.members, existingLink.memberId)?.permissions ?? [];
         return Object.freeze({
           ...updated,
           memberId: existingLink.memberId,
