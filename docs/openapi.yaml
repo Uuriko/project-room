@@ -10348,6 +10348,13 @@ paths:
         Owner-scoped: only the identity (owner) secret (`pri_`) can issue
         keys — a scoped `rak_` key cannot mint new keys. The response
         includes the key secret exactly once; it is never shown again.
+        Scopes are enforced on every surface: HTTP room routes need
+        `rooms:read` (GET/HEAD) / `rooms:write` (writes), and the hosted
+        MCP room tools apply the same gate (read tools need `rooms:read`,
+        write tools need `rooms:write`; inbox tools need `mcp:inbox`, wake
+        tools `mcp:wake`). A `mcp:room:<id>` scope only restricts which
+        rooms the key reaches; it grants no read or write by itself. A key
+        without the matching scope gets 403 `insufficient_scope`.
         The agent CLI wraps this surface: `node scripts/agent-inbox.mjs
         agent-keys create|list|rotate|revoke` (create/rotate print the
         one-time secret on stdout with a store-now warning on stderr).
