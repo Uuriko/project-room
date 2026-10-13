@@ -98,6 +98,7 @@ test(`invite for a purpose ${width}/${theme}: link opens the invited work item a
 
   // 2. The guest joins from that link and lands on the invited item.
   const guestContext = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: theme, reducedMotion: "reduce" });
+  await guestContext.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const guest = await guestContext.newPage();
   guest.setDefaultTimeout(8000); guest.on("pageerror", error => errors.push(error.message));
   await guest.goto(url);
