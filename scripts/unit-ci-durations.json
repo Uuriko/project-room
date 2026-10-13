@@ -491,6 +491,7 @@
   "tests/machine-bot-board-stop.test.js": 1000,
   "tests/machine-bot-halt.test.js": 1921,
   "tests/machine-bot-provider-task-isolation.test.js": 5635,
+  "tests/machine-bot-updates-truncation.test.js": 2514,
   "tests/machine-control-during-call.test.js": 3012,
   "tests/machine-pause-restart.test.js": 1000,
   "tests/magic-account-switch.test.js": 36197,
