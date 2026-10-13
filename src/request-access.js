@@ -54,6 +54,12 @@ export function buildGeneralAccessRequest({ roomId, displayName, note, referredB
 export async function submitGeneralAccessRequest({ client, storage, roomId, displayName, note, referredBy }) {
   const body = buildGeneralAccessRequest({ roomId, displayName, note, referredBy });
   const stashed = readAccessRequest(storage, body.roomId);
+  // Reuse the stashed requestId, not just the identity: requestId is the
+  // server's idempotency key, so a retry after a lost response must carry
+  // the original id or the server files a duplicate request (and spends
+  // rate-limit quota) instead of returning the existing row. A fresh id is
+  // minted only when this browser has no stashed request for the room.
+  if (stashed?.requestId) body.requestId = stashed.requestId;
   let identityId = stashed?.identityId ?? null;
   let secret = stashed?.secret ?? null;
   if (!identityId) {
