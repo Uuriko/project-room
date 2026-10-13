@@ -210,6 +210,23 @@ export class MachineBot {
     // the board and consumed the wake, so nobody picked it up after resume.
     if (this.isHalted()) return { signalId, halted: true };
     if (await this.isPaused(roomId)) return { signalId, paused: true };
+    // A public thread reply is a notification, not a fresh machine task.
+    // tryGo alone admits approval replies after checking sender and plan.
+    // Consume the observed notification without replying: two bots sending
+    // automatic plans/refusals back to each other would create endless wakes.
+    // Directed messages, board work and new top-level mentions retain their
+    // existing admission paths; other clients still receive the reply wake.
+    if (source.replyToId && !source.toMemberId) {
+      if (source.updateId) {
+        const marked = await this.api.markUpdate(roomId, source.updateId, "done", source.basisToken);
+        if (!marked.ok) return { signalId, ignored: "unread" };
+      }
+      await this.api.ack([signalId]);
+      return { signalId, ignored: "reply_notification" };
+    }
+    // Keep unrelated work durable until this approval is resolved. This also
+    // prevents a second wake in the same page from overwriting the saved plan.
+    if (this.pending) return { signalId, deferred: "pending_approval" };
     const provider = await this.resolveProvider();
     if (provider.name === "none" || provider.missingKey === true) {
       await this.reply(roomId, provider.message, source.messageId, source.updateId, source.basisToken);
@@ -305,6 +322,8 @@ export class MachineBot {
       kind,
       roomId,
       messageId: message.id ?? messageId,
+      replyToId: message.replyToId ?? null,
+      toMemberId: message.toMemberId ?? null,
       updateId: queued.updateId ?? null,
       basisToken: queued.basisToken ?? null,
       text: message.body,

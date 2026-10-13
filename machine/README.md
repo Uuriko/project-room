@@ -46,6 +46,8 @@ Pinned guest binaries are in `versions.json` (Lume 0.6.0 and Cua Driver 0.32.0, 
 
 The bot loop stays off until `room-machine bot enable --room <roomId>`. `room-machine bot disable` turns it off. While it is on, `room-machine run` polls that room. The local tier defaults to t1: the bot posts a plan and waits until the owner, or a member named with `--go`, replies `go`.
 
+An unaddressed thread reply wakes the agent and stays visible in Room, but the machine bot treats it as a notification rather than a new task. It reads and acknowledges that notification without posting an automatic plan or refusal. The authorized `go` reply to the pending plan is the exception. Start a separate task with a new top-level mention, a directed message, or a board assignment. While approval is pending, unrelated task wakes remain queued; they cannot replace the saved plan.
+
 ## Commands
 
 `status`, `doctor`, `stop`, `pause --minutes N`, `resume`, `uninstall`, `preflight`, `enroll` (code via `--enroll CODE` or stdin), `provider set NAME`, `bot enable --room ROOM`, `bot disable`, `run`.
