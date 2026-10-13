@@ -11,6 +11,17 @@ const id = value => typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test
 function hostOptions(hostId, cadenceSeconds) {
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(hostId ?? '') || !Number.isFinite(cadenceSeconds) || cadenceSeconds <= 0) throw usage();
 }
+// Resume deliberately returns sanitized diagnostics instead of throwing. Preserve
+// the connection failure class so a transient authority read can reach the
+// listener's existing retry policy. No pointer is returned without fresh access.
+function requireConnection(value) {
+  if (value.connection.status === 'credential_accepted') return;
+  const failure = value.incompleteSources.find(row => row.source === 'connection');
+  if (failure?.code === 'request_timeout') throw new ConnectionError('request_timeout');
+  if (failure?.code === 'service_unavailable' && (failure.httpStatus === 0 || failure.httpStatus >= 500 && failure.httpStatus <= 599)) throw new RoomClientError(0, 'service_unavailable', 'Wake access not confirmed');
+  if (failure?.code === 'rate_limited') throw new RoomClientError(429, 'rate_limited', 'Wake access not confirmed', failure.retryAfterMs);
+  throw invalid();
+}
 function signals(value) {
   if (!Array.isArray(value) || value.length > 1000) throw invalid();
   return value.map(row => {
@@ -79,14 +90,14 @@ export class AgentWakeClient {
     hostOptions(hostId, cadenceSeconds);
     if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000) throw usage();
     const before = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
-    if (before.connection.status !== 'credential_accepted') throw invalid();
+    requireConnection(before);
     await this.setup({ hostId, cadenceSeconds });
     const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs, undefined, waitMs + 10000);
     if (!id(value.agentId) || typeof value.timedOut !== 'boolean' || !Number.isFinite(value.waitedMs)) throw invalid();
     const pendingWakes = signals(value.pendingWakes);
     const after = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch,
       attentionCursor: before.observedThroughBySource.attention?.cursor });
-    if (after.connection.status !== 'credential_accepted') throw invalid();
+    requireConnection(after);
     return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes,
       timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false,
       observations: { before, after }, sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed' };
