@@ -14,11 +14,26 @@
 //    Nothing exercises a successful tick.
 // 4. Production seams: none. Real loop process, real room server, real client
 //    modules; the only fixture is the repo's own acceptance fixture.
+//
+// Second test (issue #2878):
+// 1. Protects: a FAILED agent handoff (SHED_AGENT_CMD exits non-zero) is
+//    retried on a later tick instead of being recorded as handed and
+//    suppressed until the 30-day prune; once a retry succeeds, the item is
+//    deduped again and not handed repeatedly.
+// 2. Credible regression: tick() stored handed[key] unconditionally and the
+//    next tick skipped any key with an entry, ignoring ok:false — one
+//    transient agent failure silently lost the item. On that code this test
+//    times out waiting for a second attempt that never comes.
+// 3. Existing coverage: the first test never sets SHED_AGENT_CMD, so no
+//    handoff (successful or failed) was ever exercised.
+// 4. Production seams: none. The agent command is a real shell script the
+//    operator could have configured; it fails until a flag file appears,
+//    then succeeds, and counts its own invocations.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -69,4 +84,77 @@ test("shed loop polls attention against a real room (regression: watch directory
   assert.ok(heartbeat, "loop wrote a post-tick heartbeat within 45s");
   assert.equal(heartbeat.status, "ok", `first tick succeeded (got ${heartbeat.status}: ${JSON.stringify(heartbeat.detail)})`);
   assert.equal(typeof heartbeat.detail.items, "number", "heartbeat reports the polled item count");
+});
+
+test("shed loop retries a failed handoff on a later tick, then dedups the success (regression #2878)", { timeout: 120000 }, async t => {
+  const f = createAcceptanceFixture();
+  const server = createRoomServer({ store: f.store });
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  // Guarantee at least one pending attention item for the producer member.
+  f.store.command(f.keys.owner, "commons", { id: "instructions-0", type: "room.charter_updated",
+    data: { expectedRevision: 0, purpose: "Retry failed handoffs", outputs: null, boundaries: null, escalation: null } });
+
+  const dir = mkdtempSync(join(tmpdir(), "shed-loop-retry-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const configDirectory = join(dir, "config");
+  const stateDir = join(dir, "state");
+  saveAgentConnection(configDirectory, { version: 1, origin, roomId: "commons", memberId: "producer", token: f.keys.producer });
+
+  // Operator agent command: counts every invocation, fails until the test
+  // drops the flag file, then succeeds.
+  const countPath = join(dir, "attempts.txt");
+  const flagPath = join(dir, "succeed.flag");
+  const agentPath = join(dir, "agent.sh");
+  writeFileSync(agentPath, `#!/bin/sh\necho attempt >> '${countPath}'\nif [ -f '${flagPath}' ]; then exit 0; fi\nexit 1\n`);
+  chmodSync(agentPath, 0o755);
+
+  const child = spawn(process.execPath, [loop], {
+    env: { ...process.env, ROOM_AGENT_CONFIG: configDirectory, SHED_STATE_DIR: stateDir, SHED_POLL_SECS: "15", SHED_AGENT_CMD: agentPath },
+    stdio: "ignore",
+  });
+  t.after(() => child.kill("SIGKILL"));
+
+  const attempts = () => existsSync(countPath) ? readFileSync(countPath, "utf8").trim().split("\n").filter(Boolean).length : 0;
+  const handedPath = join(stateDir, "handed.json");
+  const handedOk = () => {
+    try { return Object.values(JSON.parse(readFileSync(handedPath, "utf8"))).some(e => e && e.ok === true); } catch { return false; }
+  };
+  async function waitFor(fn, timeoutMs, what) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (fn()) return;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  }
+
+  // First tick: the agent command runs and fails for every pending item.
+  await waitFor(() => attempts() >= 1, 45000, "the first (failing) handoff attempt");
+  // Wait for the tick to finish (post-tick heartbeat carries an item count)
+  // so the attempt count below is the complete first-tick count.
+  const heartbeatPath = join(stateDir, "heartbeat.json");
+  await waitFor(() => {
+    try { const h = JSON.parse(readFileSync(heartbeatPath, "utf8")); return typeof h?.detail?.items === "number"; } catch { return false; }
+  }, 45000, "the first tick to complete");
+  const failedAttempts = attempts();
+  assert.ok(failedAttempts >= 1, "first tick attempted at least one handoff");
+  assert.equal(handedOk(), false, "no handoff has succeeded yet");
+
+  // The agent recovers. A later tick must retry the failed item(s): on the
+  // old code the ok:false entry suppressed them and this wait timed out.
+  writeFileSync(flagPath, "ok\n");
+  await waitFor(() => attempts() > failedAttempts, 45000, "a retry of the failed handoff on a later tick");
+  await waitFor(handedOk, 45000, "the retried handoff to be recorded as successful");
+
+  // Once a retry succeeds, the item is deduped again: no further attempts
+  // across another full poll interval.
+  const successAttempts = attempts();
+  await new Promise(r => setTimeout(r, 20000));
+  assert.equal(attempts(), successAttempts, "successful handoff is not repeated on later ticks");
 });
