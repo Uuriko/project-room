@@ -57,11 +57,10 @@ const workOf = (item, now) => {
   };
 };
 
-// Opaque resume token for the event log: versioned, self-describing to the
-// server, meaningless to clients. Encodes the room event sequence the
-// payload was generated from.
-const cursorOf = sequence =>
-  Buffer.from(JSON.stringify({ v: 1, seq: sequence }), "utf8").toString("base64url");
+// eventCursor is the room's numeric event sequence — the value the event
+// log actually resumes from (GET …/events?after=<seq>, SSE Last-Event-ID).
+// It was previously an opaque base64url token that no endpoint parsed back
+// (#3222), so the cursor this payload handed out could not be used anywhere.
 
 const FOCUS = new Set(["conversation", "work", "review"]);
 const CONVERSATION = new Set(["request", "mention", "dm", "invite_pending", "access_request"]);
@@ -202,10 +201,10 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
       .slice(0, MAX_WORK).map(item => workOf(item, now)),
     uncertain: sections.uncertain,
     nextActions,
-    cursors: { eventCursor: cursorOf(sequence), evaluatedThrough: sequence, updates: updates.length },
+    cursors: { eventCursor: sequence, evaluatedThrough: sequence, updates: updates.length },
     ...(query.q ? { matched: rankLines(lines, query.q, query.maxTokens) } : {}),
     evaluatedThrough: sequence,
-    eventCursor: cursorOf(sequence),
+    eventCursor: sequence,
     orientation: annotateOrientation(roomOrientation(state)),
     work: openWork.slice(0, MAX_WORK).map(item => workOf(item, now)),
     workTotal: openWork.length,

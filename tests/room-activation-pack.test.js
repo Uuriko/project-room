@@ -96,11 +96,44 @@ test("pack shape: every documented field is present", async t => {
   assert.equal(pack.orientation.activeWorkTotal, 2);
   assert.equal(pack.orientation.activeWork.length, 2);
   assert.equal(pack.repoHead, null);
-  assert.ok(typeof pack.eventCursor === "string" && pack.eventCursor.length > 0);
-  const cursor = JSON.parse(Buffer.from(pack.eventCursor, "base64url").toString("utf8"));
-  assert.equal(cursor.v, 1);
-  assert.ok(Number.isSafeInteger(cursor.seq) && cursor.seq > 0);
+  // #3222: eventCursor is the room's numeric event sequence — the value
+  // the events/SSE resume paths accept — not an opaque token.
+  assert.ok(Number.isSafeInteger(pack.eventCursor) && pack.eventCursor > 0);
+  assert.equal(pack.eventCursor, f.store.room(ROOM).sequence);
+  assert.equal(pack.orient.eventCursor, pack.eventCursor);
   assert.ok(!Number.isNaN(Date.parse(pack.generatedAt)));
+});
+
+test("pack eventCursor round-trips through events + SSE resume (#3222)", async t => {
+  const f = fixture(t);
+  const origin = await serve(t, f.store);
+  const pack = await (await getPack(origin, ROOM, f.ownerKey)).json();
+  const cursor = pack.eventCursor;
+  assert.ok(Number.isSafeInteger(cursor) && cursor > 0);
+  const getEvents = async after => {
+    const res = await fetch(`${origin}/api/rooms/${ROOM}/events?after=${after}`,
+      { headers: { Authorization: `Bearer ${f.ownerKey}` } });
+    assert.equal(res.status, 200);
+    return (await res.json()).events;
+  };
+  // At the head: resuming from the emitted cursor yields nothing new.
+  assert.deepEqual(await getEvents(cursor), []);
+  // Post one event, then resume two ways with the same emitted cursor.
+  const posted = f.store.command(f.ownerKey, ROOM, { id: "pack-cursor-post", type: T.MESSAGE_POSTED,
+    data: { messageId: "pack-cursor-msg", body: "posted after the pack" } });
+  const events = await getEvents(cursor);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event.data?.messageId, "pack-cursor-msg");
+  // SSE: Last-Event-ID set to the emitted cursor replays only that event.
+  const stream = await fetch(`${origin}/api/rooms/${ROOM}/stream`,
+    { headers: { Authorization: `Bearer ${f.ownerKey}`, "Last-Event-ID": String(cursor) } });
+  assert.equal(stream.status, 200);
+  const reader = stream.body.getReader();
+  t.after(() => reader.cancel().catch(() => {}));
+  const first = new TextDecoder().decode((await reader.read()).value);
+  assert.match(first, /posted after the pack/);
+  assert.match(first, new RegExp(`id: ${posted.sequence}`));
+  await reader.cancel().catch(() => {});
 });
 
 test("unknown room answers 404 room_not_found", () => {
