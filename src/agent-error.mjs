@@ -647,6 +647,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         tool("room_check_access")]
     };
   }
+  // 2026-10-12 F5 QA (live): agent_not_registered on GET /api/agent-wakes/poll
+  // fell through to the unmapped-code branch — the hint said "Unknown error ...
+  // no known recovery" while the message named the fix (POST heartbeats first).
+  // Name the one-call recovery here, pointing the agent at the heartbeat route.
+  if (reasonCode === "agent_not_registered") {
+    return {
+      status: "action_required", reason: "agent_not_registered",
+      hint: "This identity has never reported a heartbeat on this host — nothing was changed. POST /api/agent-heartbeats with your hostId first, then poll again.",
+      next: [command("POST /api/agent-heartbeats with your hostId, then re-poll GET /api/agent-wakes/poll")]
+    };
+  }
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.

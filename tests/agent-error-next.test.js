@@ -129,6 +129,15 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.match(unknownId.hint, /do not guess/i);
   assert.doesNotMatch(unknownId.hint, /Unknown error/);
   assert.ok(unknownId.next.some(step => step.command?.includes("/api/public-work/tasks")));
+  // QA 2026-10-12 (F5 live): agent_not_registered named its own recovery in
+  // the message, but the hint and next said "no known recovery". Point the
+  // caller at the heartbeat route it must POST before polling.
+  const notRegistered = agentErrorAx({ httpStatus: 404, code: "agent_not_registered", message: "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll." });
+  assertAx(notRegistered, { reason: "agent_not_registered" });
+  assert.match(notRegistered.hint, /POST \/api\/agent-heartbeats/);
+  assert.doesNotMatch(notRegistered.hint, /Unknown error|no known recovery/);
+  assert.ok(notRegistered.next.some(step => step.command?.includes("/api/agent-heartbeats")));
+  assert.ok(notRegistered.next.every(step => !/no known recovery/.test(step.command ?? "")));
   // QA 2026-10-07: identity_already_linked is idempotent success (the link is
   // live), not a failure — the hint must say so instead of "check access",
   // or agents mint duplicate identities retrying the link create.
