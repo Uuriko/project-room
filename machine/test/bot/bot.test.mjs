@@ -481,7 +481,8 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(rejected.results?.[0]?.ignored, "reply_notification", JSON.stringify(rejected));
     assert.equal((await claims(room.origin, secret)).length, 0);
     assert.equal(JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8")).pending.planMessageId, planMessage.id);
-    await mention(room, "@Room machine inspect another task later");
+    const topic = await mention(room, "A human discussion topic");
+    await reply(room.ownerKey, "@Room machine inspect another task later", topic.event.data.messageId);
     const deferred = await step(room, bot);
     assert.equal(deferred.results.some(result => result.deferred === "pending_approval"), true);
     const waiting = await get(room.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
@@ -542,7 +543,11 @@ test.describe("room-machine bot", { concurrency: false }, () => {
       assert.equal(page.json.pendingWakes.length, 0);
     }
     saveBot(first.home, { tier: "t1" });
-    await mention(first);
+    const topic = await mention(first, "A human discussion topic");
+    const addressed = await post(first.origin, "/api/rooms/commons/commands", {
+      id: randomUUID(), type: "message.posted", data: { messageId: randomUUID(), body: MENTION, replyToId: topic.event.data.messageId },
+    }, first.ownerKey);
+    assert.equal(addressed.status, 201);
     const planned = await step(first, firstBot);
     assert.equal(planned.results[0].planned, true);
     assert.equal((await claims(first.origin, firstSecret)).length, 0);
