@@ -825,6 +825,7 @@
   "tests/telegram-live.test.js": 39505,
   "tests/telegram-property.test.js": 25092,
   "tests/telegram-token-leak.test.js": 13658,
+  "tests/telegram-webhook-rotation-source.test.js": 3129,
   "tests/telegram-webhook-rotation.test.js": 41662,
   "tests/test-factories.test.js": 5011,
   "tests/test-failures.test.js": 1902,

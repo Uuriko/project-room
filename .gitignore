@@ -17,7 +17,6 @@ runlogs-tmp/
 # Expanded at import time by scripts/acceptance-fixture.mjs
 scripts/.acceptance-fixture.*.generated.mjs
 tests/.webhook-dispatch-store.*.generated.mjs
-tests/.telegram-webhook-rotation.*.generated.mjs
 # Expanded at import time by browser-check loaders (flood-guard clock seeds)
 scripts/.browser-check.*.generated.mjs
 scripts/.native-result-browser-check.*.generated.mjs
