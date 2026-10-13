@@ -5884,6 +5884,7 @@ paths:
                 verdict: { type: string, enum: [approve, changes_requested, comment] }
                 summary: { type: string, maxLength: 2000 }
                 url: { type: string }
+                evidence: { type: object, description: "Optional. The final receipt evidence this approval covers. The final tags, blobs, evidenceRefs and deliveryMode at done must equal the named values, else the claim's values when the approval was recorded; any change, including clearing, is refused with work_review_rejected.", properties: { tags: { type: array, items: { type: string } }, blobs: { type: array, items: { type: string } }, evidenceRefs: { type: array, items: { type: string } }, deliveryMode: { type: string, enum: [result, merged, production] } } }
       responses:
         '200':
           description: The updated item with the review or note recorded; identical latest retries return the existing record
