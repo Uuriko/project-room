@@ -288,3 +288,19 @@ test("follow-up events of an archived direct message stay hidden from non-partie
   assert.ok(types(f.agent).includes("message.edited:dm-1"), "the addressee still sees the edit");
   assert.equal(types(f.stranger).includes("message.edited:dm-1"), false, "a non-party must not see the edit");
 });
+
+test("search still finds archived messages and keeps archived DMs private", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "Quartz plan for the room" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "quartz private note" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "new-pub", body: "quartz follow-up" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  const dmSeq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  archiveOldest(f, f.store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id='commons' AND seq<=?").get(dmSeq).n);
+  assert.deepEqual(f.store.room("commons").state.messages.map(m => m.id), ["new-pub"]);
+  const ids = token => f.store.search(token, "commons", "QUARTZ", "messages").messages.map(m => m.id);
+  assert.deepEqual(ids(f.human), ["old-pub", "old-dm", "new-pub"]);
+  assert.deepEqual(ids(f.agent), ["old-pub", "old-dm", "new-pub"]);
+  assert.deepEqual(ids(f.stranger), ["old-pub", "new-pub"]);
+  assert.equal(f.store.search(f.stranger, "commons", "quartz", "messages").total, 2);
+});
