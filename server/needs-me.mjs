@@ -18,6 +18,7 @@ import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 
@@ -329,10 +330,12 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
   if (!member || !mayWriteWorkClaims({ member: { ...member, id: memberId }, ownerId })) return null;
   const list = claims ?? claimBoardOf(store, roomId);
   if (!list) return null;
-  // Invalidated work keeps its original state for the audit trail. Neither
-  // that state nor a retired scope proves a usable dependency or ready work.
-  const usable = item => item && !item.premiseFlag && !item.supersededBy;
-  const done = new Set(list.filter(item => usable(item) && item.state === "done").map(item => item.id));
+  // Ready = the AvailableWork projection's board rule (available-work.mjs):
+  // usable (not invalidated — invalidated work keeps its original state for
+  // the audit trail, and neither that state nor a retired scope proves a
+  // usable dependency), unclaimed, kind "work", every dependency done.
+  // This section used to keep a private copy of that filter; it now
+  // consumes the one definition the pack/orient/public surfaces share.
   const updatedMs = item => {
     const ms = Date.parse(claimUpdatedAt(item));
     return Number.isFinite(ms) ? ms : null;
@@ -340,8 +343,7 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
   // Sort on the exact timestamp; round to minutes only for display.
   const minutesSince = ms => (ms === null ? null : Math.max(0, Math.round((nowMs - ms) / 60000)));
   // Board order (updatedAt desc, then id) within each group, as the Board shows.
-  const ready = list.filter(item => usable(item) && item.state === "unclaimed" && (item.kind ?? "work") === "work"
-    && (item.dependsOn ?? []).every(dep => done.has(dep)))
+  const ready = availableBoardRows(list)
     .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed"),
       hard: isHardWork(item) }))
     // Hard items (tag hard / hard-problem) first: they are the ones that stall
