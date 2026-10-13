@@ -389,5 +389,7 @@
   "join.dead.scope": "Unable to open this invitation. Ask the person who invited you for a fresh link.",
   "join.dead.status": "This invite is unavailable. Sign in and request access.",
   "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
-  "join.dead.roomsLink": "Back to your rooms"
+  "join.dead.roomsLink": "Back to your rooms",
+  "invite.toWork": "Invite to this work",
+  "invite.roomHistory": "Joining gives access to the room and its history."
 }
