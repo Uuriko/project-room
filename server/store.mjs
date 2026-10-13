@@ -1862,6 +1862,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // MSG-2: replay events into messages. Idempotent. A mid-batch stop keeps
   // the committed prefix on messages_backfill_cursor.
+  // The current record of an archived message (no longer in the projection), else null.
+  archivedMessage(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    if (!row?.record_json) return null;
+    try { return JSON.parse(row.record_json); } catch { return null; }
+  }
+
   // [authorId, toMemberId] of an archived direct message, else null.
   archivedDmParties(roomId, messageId) {
     const row = archivedMessageRow(this.db, roomId, messageId);
