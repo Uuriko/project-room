@@ -1676,6 +1676,14 @@ export class BountyEscrow {
       const act = this._actorFor(roomId, actor, lane);
       const bounty = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId)
         ?? fail("unknown_bounty", `unknown bounty "${bountyId}"`));
+      // #3008: the poster may not claim their own bounty. Every later guard
+      // assumes poster != claimant (acceptance must come from an identity
+      // distinct from the claimant; the claimant cannot dispute their own
+      // submission), so a self-claim dead-ends in-review with the escrowed
+      // amount and the anti-flake bond locked until deadline expiry — and,
+      // if a second member accepted, would farm reputation/earnings from the
+      // poster's own escrowed credits.
+      check(lane !== bounty.poster, "not_authorized", "the poster cannot claim their own bounty");
       check(bounty.state === "funded" || bounty.state === "claimed", "invalid_state",
         `bounty is ${bounty.state}, not open for claims — only funded bounties are claimable`);
       if (bounty.state === "claimed") fail("already_claimed", "this bounty is already claimed");
