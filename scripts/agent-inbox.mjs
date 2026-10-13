@@ -407,8 +407,12 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
       || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
+      || (action === "find" && !validWorkSearchQuery(checkpoint))
+      || (action === "apply-template" && checkpoint === undefined)
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers", "--brief"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
+        : action === "find" ? extra.length > 1 || (extra.length === 1 && !["messages", "work", "all"].includes(extra[0]))
+        : action === "apply-template" ? extra.length > 1
         : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants", "outside-agents"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
