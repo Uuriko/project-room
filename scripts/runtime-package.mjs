@@ -96,6 +96,7 @@ optional.push("server/jev-receipts.mjs"); // Jev-harness receipt gate (imported 
 optional.push("server/required-reading.mjs"); // W012: per-lane required reading (imported by server/work-claim-routes.mjs; pure, imports server/work-claims.mjs)
 optional.push("server/jev-shadow-journal.mjs"); // Jev shadow-decision journal (imported by server/store.mjs; imports ServiceError from server/service-error.mjs)
 optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/jev-shadow-journal.mjs; pure, no imports of its own)
+optional.push("server/run-once.mjs"); // runOnce idempotency primitive (imported by server/attention.mjs and server/buyer-signoff.mjs; imports ServiceError and src/events.js validId)
 optional.push("server/csv-export.mjs"); // structured CSV/JSON export (imported by server/inbox-outbox.mjs for the send-journal audit export; pure, no imports of its own)
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
