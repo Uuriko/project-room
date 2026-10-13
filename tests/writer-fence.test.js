@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions } from "../server/writer-fence.mjs";
+import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions, STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
 test("Node read transactions reject nested and direct writes, retain outer writes and restore mode after failures", t => {
@@ -88,7 +88,8 @@ test("failure after fence installation rolls back its schema marker and all trig
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try {
     assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5);
-    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'writer_v27_%'").get().n, 0);
+    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE ?").get(`writer_v${STORE_SCHEMA_VERSION}_%`).n, 0,
+      "rollback must remove every trigger installed for the current schema version");
     assert.equal(inspected.prepare("SELECT count(*) n FROM accounts").get().n, 1);
   } finally { inspected.close(); }
   const retry = new RoomStore(filename);
