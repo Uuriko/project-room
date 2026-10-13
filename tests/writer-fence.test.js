@@ -120,6 +120,46 @@ test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", 
   } finally { current.close(); earlier.close(); }
 });
 
+test("verifyWriterFence(28) requires deployed-lineage triggers when their tables are present, but not when absent", () => {
+  // The deployed v28 lineage fenced agent_invite_codes + room_attachments.
+  // Build those definitions from a literal template, not fenceDefinitions(28),
+  // so this test does not silently track whatever that function returns.
+  const deployedTables = ["agent_invite_codes", "room_attachments"];
+  const deployedDefs = deployedTables.flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
+    const name = `writer_v28_${table}_${operation.toLowerCase()}`;
+    return { name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v28() IS NOT 28 THEN RAISE(ABORT,'unsupported database writer') END; END` };
+  }));
+  const baseDefs = fenceDefinitions(28).filter(def => !deployedDefs.some(deployed => deployed.name === def.name));
+  const baseTables = [...new Set(baseDefs.map(def => def.name.replace(/^writer_v28_/, "").replace(/_(insert|update|delete)$/, "")))];
+  const build = ({ withDeployedTables, withDeployedTriggers }) => {
+    const db = new DatabaseSync(":memory:");
+    for (const table of baseTables) db.exec(`CREATE TABLE ${table}(id INTEGER PRIMARY KEY)`);
+    if (withDeployedTables) for (const table of deployedTables) db.exec(`CREATE TABLE ${table}(id INTEGER PRIMARY KEY)`);
+    for (const { sql } of baseDefs) db.exec(sql);
+    if (withDeployedTriggers) for (const { sql } of deployedDefs) db.exec(sql);
+    return db;
+  };
+  // Deployed tables present with no writer triggers at all: must be rejected.
+  const missing = build({ withDeployedTables: true, withDeployedTriggers: false });
+  try { assert.throws(() => verifyWriterFence(missing, 28), /operator reconciliation/); }
+  finally { missing.close(); }
+  // Deployed tables present with only part of their trigger set: also rejected.
+  const partial = build({ withDeployedTables: true, withDeployedTriggers: true });
+  try {
+    partial.exec("DROP TRIGGER writer_v28_room_attachments_delete");
+    assert.throws(() => verifyWriterFence(partial, 28), /operator reconciliation/);
+  } finally { partial.close(); }
+  // Deployed tables present with their exact trigger set: accepted.
+  const exact = build({ withDeployedTables: true, withDeployedTriggers: true });
+  try { assert.doesNotThrow(() => verifyWriterFence(exact, 28)); }
+  finally { exact.close(); }
+  // Rebuilt v28 lineage: the deployed tables were never created, so their
+  // triggers are not required.
+  const rebuilt = build({ withDeployedTables: false, withDeployedTriggers: false });
+  try { assert.doesNotThrow(() => verifyWriterFence(rebuilt, 28)); }
+  finally { rebuilt.close(); }
+});
+
 test("v7 to v9 preserves every existing table row and retires a pre-open v7 connection", t => {
   const filename = legacyFixture(t), old = new DatabaseSync(filename);
   old.function("project_room_writer_v7", () => 7);
