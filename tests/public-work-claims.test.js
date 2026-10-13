@@ -36,7 +36,7 @@ const code = expected => error => error.code === expected;
 
 test('cold public index and strict shared repository path locks work without private membership', t => {
   const f = fixture(t), [a, b] = f.identities;
-  assert.deepEqual(f.service().list(), { tasks: [], nextCursor: null });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
   const first = f.enable('first:task', ['src']); f.enable('second.task', ['src/file.js']); f.enable('third-task', ['docs/readme.md']);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links').get().n, 0);
   assert.equal(f.service().list({ limit: 1 }).nextCursor, 'first:task');
@@ -70,7 +70,7 @@ test('lease expiry/reclaim rejects prior generations and exact retries survive w
   assert.deepEqual(f.service().act('lease-task', a.secret, 'claim', claim('a', { leaseHours: 1 })), first);
   assert.deepEqual(f.service().act('lease-task', b.secret, 'claim', claim('b')), second);
   assert.equal(f.service().act('lease-task', b.secret, 'release', owned('release', 2)).task.claim.state, 'unclaimed');
-  assert.deepEqual(f.service().list(), { tasks: [], nextCursor: null });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
 });
 
 test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks without asserting acceptance', t => {

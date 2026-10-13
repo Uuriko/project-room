@@ -89,10 +89,12 @@ export class PublicWorkClaims {
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
     const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    const state = receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed';
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
-      claim: { state: receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed', generation: row.generation,
+      claimable: state === 'unclaimed',
+      claim: { state, generation: row.generation,
         identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
   }
   read(offerId) {
@@ -101,15 +103,44 @@ export class PublicWorkClaims {
       return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer);
     });
   }
-  list({ limit = 20, after = '' } = {}) {
+  // claimableFirst defaults to claimable-first for browse callers (#2988).
+  // match() opts out: its `after` cursor is an offer_id-order scan position
+  // with its own documented continuation semantics, so it passes
+  // claimableFirst: false and keeps scanning in offer_id order.
+  list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
+    check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
     return this.store.readTransaction(() => {
-      if (!this.available()) return { tasks: [], nextCursor: null };
+      if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
-        JOIN rooms r ON r.id=t.room_id WHERE t.offer_id>? AND o.status='published' AND r.archived_at IS NULL
-        AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id LIMIT ?`).all(after, limit + 1);
-      return { tasks: rows.slice(0, limit).map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row))),
-        nextCursor: rows.length > limit ? rows[limit - 1].offer_id : null };
+        JOIN rooms r ON r.id=t.room_id WHERE o.status='published' AND r.archived_at IS NULL
+        AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id`).all();
+      // Claim state lives in the work-claims store and receipts, not in a
+      // column SQL can order by, so packets are materialized before ordering.
+      let tasks = rows.map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
+      const claimableCount = tasks.filter(task => task.claimable).length;
+      if (claimable) tasks = tasks.filter(task => task.claimable);
+      if (claimableFirst) {
+        // Stable claimable-first order; rows arrive in offer_id order, which
+        // is the deterministic tiebreak inside each claimability group.
+        tasks = [...tasks.filter(task => task.claimable), ...tasks.filter(task => !task.claimable)];
+      }
+      // The cursor is the last returned task's offer_id; resuming finds that
+      // id in the (recomputed) ordering, so a page walk over a stable set
+      // visits each task exactly once, claimable tasks first. An unknown
+      // cursor falls back to the old offer_id boundary.
+      let start = 0;
+      if (after !== '') {
+        const index = tasks.findIndex(task => task.taskId === after);
+        if (index >= 0) start = index + 1;
+        else {
+          const fallback = tasks.findIndex(task => task.taskId > after);
+          start = fallback < 0 ? tasks.length : fallback;
+        }
+      }
+      const page = tasks.slice(start, start + limit);
+      return { tasks: page, claimableCount,
+        nextCursor: start + limit < tasks.length ? page.at(-1).taskId : null };
     });
   }
   enable(roomId, actorId, offerId, input) {
@@ -242,7 +273,7 @@ export class PublicWorkClaims {
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
         if (reward !== 'volunteer') return outcome;
-        const page = this.list({ limit: 100, after: input.after ?? '' });
+        const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
         const candidates = page.tasks.filter(task => {
@@ -255,6 +286,11 @@ export class PublicWorkClaims {
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
+        // Machine-readable complement to a bare empty list (#2988): tasks
+        // were inspected but none of them is claimable. Deliberately named
+        // reasonCode, not reason/guidance — those are human-readable fields
+        // used by other (stale) proposals for this same outcome object.
+        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)) outcome.reasonCode = 'no_claimable_tasks';
         if (input.autoClaim === true && candidates.length) {
           const selected = candidates[0].task;
           const claimInput = { expectedTermsVersion: selected.termsVersion };
