@@ -307,6 +307,104 @@ test("void releases the reservation; settle/void are idempotent", async t => {
   assert.equal(settleSpend(f.store.db, { roomId, agentId, nonce: "v1" }), false, "voided rows cannot be settled");
 });
 
+// #2959: settle()/void() (and standalone settleSpend/voidSpend) performed
+// the authorization transition, the room-reservation release, and (for
+// single-use grants) the revocation as separate non-atomic writes. A
+// failure between them left the authorization settled/voided with its
+// spend_room_reservations row still 'active' forever — the reaper only
+// voids rows whose authorization is still 'reserved', so the room
+// allowance leaked permanently. A trigger that aborts every release
+// UPDATE simulates that mid-sequence failure: on the pre-fix code the
+// transition is already committed when the release fails; with the fix
+// all writes share one transaction, so the whole settle/void rolls back
+// and the authorization stays retryable as 'reserved'.
+test("settle/void are atomic: a failed room-reservation release rolls back the transition (#2959)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  const db = f.store.db;
+  issueSpendGrant(db, roomId, agentId, { grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: now });
+  const reserve = nonce => authorizeSpend(db, {
+    roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce, nowMs: now,
+    roomAllowanceCents: 1000, roomCommittedCents: 0,
+  });
+  const statusOf = nonce => db.prepare(`SELECT status FROM spend_authorizations
+    WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, nonce).status;
+  const roomStatusOf = nonce => db.prepare(`SELECT status FROM spend_room_reservations
+    WHERE room_id = ? AND nonce = ?`).get(roomId, nonce).status;
+  const handleSettle = reserve("atomic-handle-settle");
+  const handleVoid = reserve("atomic-handle-void");
+  reserve("atomic-standalone-settle");
+  reserve("atomic-standalone-void");
+  db.exec(`CREATE TRIGGER fail_room_release_2959
+    BEFORE UPDATE ON spend_room_reservations
+    BEGIN SELECT RAISE(ABORT, 'simulated failure between transition and release'); END`);
+  try {
+    assert.throws(() => handleSettle.settle(), /simulated failure/);
+    assert.throws(() => handleVoid.void(), /simulated failure/);
+    assert.throws(() => settleSpend(db, { roomId, agentId, nonce: "atomic-standalone-settle" }), /simulated failure/);
+    assert.throws(() => voidSpend(db, { roomId, agentId, nonce: "atomic-standalone-void" }), /simulated failure/);
+    for (const nonce of ["atomic-handle-settle", "atomic-handle-void", "atomic-standalone-settle", "atomic-standalone-void"]) {
+      assert.equal(statusOf(nonce), "reserved", `${nonce}: a failed settle/void must not commit the transition`);
+      assert.equal(roomStatusOf(nonce), "active", `${nonce}: the room reservation stays with the still-reserved authorization`);
+    }
+  } finally {
+    db.exec("DROP TRIGGER IF EXISTS fail_room_release_2959");
+  }
+  // Once the failure clears, every authorization is still live and its
+  // settle/void completes both writes together.
+  assert.equal(handleSettle.settle(), true);
+  assert.equal(handleVoid.void(), true);
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "atomic-standalone-settle" }), true);
+  assert.equal(voidSpend(db, { roomId, agentId, nonce: "atomic-standalone-void" }), true);
+  assert.equal(statusOf("atomic-handle-settle"), "settled");
+  assert.equal(statusOf("atomic-handle-void"), "voided");
+  assert.equal(statusOf("atomic-standalone-settle"), "settled");
+  assert.equal(statusOf("atomic-standalone-void"), "voided");
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations
+    WHERE room_id = ? AND status = 'active'`).get(roomId).n, 0, "no room reservation leaks after the retried settle/void");
+  assert.equal(spendGrantSummary(db, roomId, agentId, { nowMs: now }).remainingCents, "90",
+    "exactly the two settled 5c charges consume the cap");
+});
+
+// #2959, single-use arm: settle() also revokes the grant as a third
+// separate write. A failure at the revocation left a settled charge
+// whose single-use grant stayed live and could be spent again. The
+// revocation must share the settle transaction.
+test("single-use settle is atomic: a failed revocation rolls back settle and release (#2959)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  const db = f.store.db;
+  issueSpendGrant(db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", singleUse: true, nowMs: now,
+  });
+  const handle = authorizeSpend(db, {
+    roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce: "atomic-single-use", nowMs: now,
+    roomAllowanceCents: 1000, roomCommittedCents: 0,
+  });
+  db.exec(`CREATE TRIGGER fail_grant_revoke_2959
+    BEFORE UPDATE ON agent_capability_grants
+    BEGIN SELECT RAISE(ABORT, 'simulated failure at single-use revocation'); END`);
+  try {
+    assert.throws(() => handle.settle(), /simulated failure/);
+    assert.equal(db.prepare(`SELECT status FROM spend_authorizations
+      WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, "atomic-single-use").status,
+    "reserved", "a failed revocation must not leave the authorization settled");
+    assert.equal(db.prepare(`SELECT status FROM spend_room_reservations
+      WHERE room_id = ? AND nonce = ?`).get(roomId, "atomic-single-use").status,
+    "active", "a failed revocation must not leave the room reservation released");
+    assert.ok(resolveSpendGrant(db, roomId, agentId, { nowMs: now }), "the single-use grant is still live after the rolled-back settle");
+  } finally {
+    db.exec("DROP TRIGGER IF EXISTS fail_grant_revoke_2959");
+  }
+  assert.equal(handle.settle(), true, "the settle retries cleanly once the failure clears");
+  assert.equal(resolveSpendGrant(db, roomId, agentId, { nowMs: now }), null,
+    "the retried settle consumes the single-use grant");
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations
+    WHERE room_id = ? AND status = 'active'`).get(roomId).n, 0, "the retried settle releases the room reservation");
+});
+
 // A retry of the expired nonce is refused, but the recovery must stay
 // committed. Otherwise a client that retries only its own request leaves the
 // grant cap and room allowance reserved until an unrelated call succeeds.
