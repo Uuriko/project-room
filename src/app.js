@@ -6226,6 +6226,12 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
     box.hidden = false;
   });
 }
+function resultDiscussionMessage(view) {
+  if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
+    || isRoomArchived(state)) return null;
+  return state.messages.find(message => message.id === view.discussionId && message.workItemId === view.workItemId
+    && !message.deletedAt && message.body === view.body && !state.channels?.[messageChannelId(message)]?.archivedAt);
+}
 function resultStatus() {
   const view = resultView;
   if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
@@ -6235,6 +6241,8 @@ function resultStatus() {
     : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
   const retry = $("#result-retry");
+  $("#result-discuss").hidden = !resultDiscussionMessage(view);
+  $("#result-discuss").disabled = busy || requestReading || composerFiles.some(file => file.status === "uploading");
   retry.hidden = !view.error && !view.retrying;
   retry.disabled = !view.error;
 }
@@ -6243,6 +6251,7 @@ function closeResult(restore = true) {
   resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
   $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
   $("#result-original").hidden = true; $("#result-retry").hidden = true; $("#result-retry").disabled = true;
+  $("#result-discuss").hidden = true;
   clearResultComparison($("#result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
@@ -6254,6 +6263,16 @@ function closeResult(restore = true) {
   }
 }
 $("#close-result").addEventListener("click", () => closeResult());
+$("#result-discuss").textContent = uiText("result.discuss");
+$("#result-discuss").addEventListener("click", () => {
+  const message = resultDiscussionMessage(resultView);
+  if (!message || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  closeResult(false);
+  revealMessage(message.id);
+  switchThread(conversation.rootById.get(message.id), true);
+  replyToId = message.id;
+  updateReply(); saveComposer(); persistDrafts();
+});
 $("#result-original").addEventListener("click", () => {
   const view = resultView;
   if (!view?.loaded || busy || !sameSession(view.generation, view.roomId, view.memberId)
@@ -6275,6 +6294,7 @@ function loadExactResult(view) {
     $("#result-body").hidden = Boolean(view.withdrawn);
     const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
       && message.body === value.result.text.body);
+    view.discussionId = message?.id; view.body = value.result.text.body;
     const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
     view.originalId = original?.id; $("#result-original").hidden = !original;
     view.loaded = true; view.retrying = false;
@@ -6301,6 +6321,7 @@ function readResult(e) {
       fromResults, previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
     $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
     $("#result-original").hidden = true;
+    $("#result-discuss").hidden = true;
     const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
     $("#result-retry").hidden = true; $("#result-retry").disabled = true;
     $("#result-dialog").showModal();
