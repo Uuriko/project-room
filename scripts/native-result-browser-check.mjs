@@ -451,6 +451,7 @@ test("exact result copy: refusal can retry; late clipboard completion belongs to
   assert.equal(await page.evaluate(() => window.resultCopies.length), 2);
   await page.keyboard.press("Escape"); await open();
   assert.equal(await page.locator("#result-copy").isDisabled(), true);
+  assert.match(await page.locator("#result-copy-notice").textContent(), /Copy not confirmed yet/);
   await page.evaluate(() => window.finishResultCopy());
   await page.waitForFunction(() => document.querySelector("#result-copy").getAttribute("aria-disabled") === "false");
   assert.equal(await page.locator("#result-copy-notice").textContent(), "", "old success cannot label a newly opened reader");

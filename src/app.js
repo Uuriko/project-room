@@ -6247,6 +6247,9 @@ function resultStatus() {
   $("#result-copy").hidden = !view.loaded || Boolean(view.withdrawn) || Boolean(view.error);
   $("#result-copy").disabled = !copyableResult(view);
   $("#result-copy").setAttribute("aria-disabled", String(resultCopyPending || !copyableResult(view)));
+  const copyNotice = $("#result-copy-notice"), pendingCopyText = uiText("result.copyPending");
+  if (resultCopyPending && !copyNotice.textContent) copyNotice.textContent = pendingCopyText;
+  else if (!resultCopyPending && copyNotice.textContent === pendingCopyText) copyNotice.textContent = "";
   retry.hidden = !view.error && !view.retrying;
   retry.disabled = !view.error;
 }
