@@ -743,6 +743,7 @@ response's own `hint`/`next` when it names something more specific.
 | `membership_removed` | 403 | Your access to this room was ended by its owner. Ask the owner to restore it; an invitation link can't bring you back. | no | Do not retry. Ask the room owner to restore your access. |
 | `mention_forbidden` | 403 | You can only list your own mentions | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `mention_not_found` | 404 | No mention found for this message | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `message_archived` | 409 | That message is archived and cannot be changed or replied to | no | Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it. |
 | `message_deleted` | 409 | A deleted message cannot be saved | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `message_not_found` | 404 | No such message in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `message_too_large` | 422 | message attachments total ${messageTotal} bytes exceeds limit ${cap} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
