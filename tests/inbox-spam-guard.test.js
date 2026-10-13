@@ -192,6 +192,20 @@ test("reviews are final and unknown ids fail loudly", () => {
   throwsQz(() => q.review("qz-999", { decision: "release", reviewer: "owner-1" }), "invalid_quarantine");
   throwsQz(() => q.review(rec.id, { decision: "maybe", reviewer: "owner-1" }), "invalid_quarantine");
 });
+test("pre-populated store: new ids continue past existing qz ids instead of overwriting (#2935)", () => {
+  const existing = { id: "qz-1", messageId: "msg-old", channel: "email", connectionId: null,
+    score: 90, signals: [], at: 1000, status: "pending", reviewedBy: null, reviewedAt: null,
+    decision: null, note: null };
+  const store = new Map([["qz-1", existing], ["qz-3", { ...existing, id: "qz-3", messageId: "msg-older" }]]);
+  const q = createQuarantineQueue({ store });
+  const rec = q.quarantine({ messageId: "msg-new", flag: sampleFlag(), channel: "email" });
+  assert.equal(rec.id, "qz-4");
+  // the pre-existing records are untouched, not overwritten by the new filing
+  assert.equal(q.get("qz-1").messageId, "msg-old");
+  assert.equal(q.get("qz-3").messageId, "msg-older");
+  assert.equal(q.size(), 3);
+  assert.deepEqual(q.pending().map(r => r.id), ["qz-1", "qz-3", "qz-4"]);
+});
 test("scannableMessage shape still validates normally", () => {
   const m = scannableMessage({ body: "hi" });
   assert.equal(m.body, "hi");
