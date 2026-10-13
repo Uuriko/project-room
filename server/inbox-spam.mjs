@@ -192,7 +192,13 @@ export function createQuarantineQueue({ store, now = Date.now } = {}) {
   qcheck(store === undefined || store instanceof Map, "store must be a Map if given");
   qcheck(typeof now === "function", "now must be a function returning ms epoch");
   const records = store ?? new Map();
+  // Seed the id counter from any records already in a caller-supplied store:
+  // restarting at 0 would mint qz-1 again and overwrite an existing record.
   let counter = 0;
+  for (const key of records.keys()) {
+    const match = typeof key === "string" ? /^qz-(\d+)$/.exec(key) : null;
+    if (match) counter = Math.max(counter, Number(match[1]));
+  }
   const snap = rec => Object.freeze({ id: rec.id, messageId: rec.messageId, channel: rec.channel,
     connectionId: rec.connectionId, score: rec.score, signals: Object.freeze(rec.signals.map(s => Object.freeze({ ...s }))),
     at: rec.at, status: rec.status, reviewedBy: rec.reviewedBy, reviewedAt: rec.reviewedAt,
@@ -206,7 +212,11 @@ export function createQuarantineQueue({ store, now = Date.now } = {}) {
     qcheck(connectionId === undefined || connectionId === null || (typeof connectionId === "string" && connectionId.length > 0 && connectionId.length <= 256),
       "connectionId must be a short string when given");
     qcheck(typeof at === "number" && Number.isFinite(at) && at >= 0, "at must be a finite ms-epoch time");
-    const rec = { id: `qz-${++counter}`, messageId, channel, connectionId: connectionId ?? null,
+    // Never reuse an id already present (e.g. added to the shared store after
+    // this queue was created): overwriting would silently drop a record.
+    let id;
+    do { id = `qz-${++counter}`; } while (records.has(id));
+    const rec = { id, messageId, channel, connectionId: connectionId ?? null,
       score: flag.score, signals: flag.signals.map(s => ({ key: s.key, weight: s.weight, detail: s.detail })),
       at, status: "pending", reviewedBy: null, reviewedAt: null, decision: null, note: null };
     records.set(rec.id, rec);
