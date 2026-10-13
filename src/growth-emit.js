@@ -208,7 +208,7 @@ export function applyEventWithGrowth(current, incoming, collector) {
   // emission would double-count an event the room applied once. Conflicting
   // reuse of an id or key still throws inside applyEvent, before this check.
   if (current?.seenEvents?.[incoming.id] || current?.seenIdempotencyKeys?.[incoming.idempotencyKey]) {
-    return { state, growthOk: false, growthReason: "duplicate room event" };
+    return { state, growthOk: false, growthReason: "duplicate-event" };
   }
   try {
     if (!collector || typeof collector.record !== "function") {

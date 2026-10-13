@@ -239,7 +239,7 @@ test("C3 duplicate room events are not re-recorded, re-notified, or re-projected
     // a second time (no record, no fan-out, no mention projection).
     const replayed = applyEventWithGrowth(first.state, posted, collector);
     assert.equal(replayed.growthOk, false);
-    assert.equal(replayed.growthReason, "duplicate room event");
+    assert.equal(replayed.growthReason, "duplicate-event");
     assert.deepEqual(replayed.state, first.state);
     assert.equal(collector.stats().total, 2);
     assert.deepEqual(notified, ["message.sent", "agent.mentioned"]);
