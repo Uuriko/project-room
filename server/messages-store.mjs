@@ -520,12 +520,30 @@ function retainedByState(state) {
   }
   for (const id of Object.keys(state.replyRequests ?? {})) keep.add(id);
   for (const message of state.messages ?? []) if (typeof message?.workItemId === "string" && message.workItemId) keep.add(message.id);
-  // Open questions: the list a reader gets is derived from state.messages, so an
-  // archived open question would silently leave it, and an archived answer would
-  // reopen a kept one. One uncapped pass keeps every question that is open for
-  // some viewer, and every message that could close a kept question (including
-  // pinned and work-linked questions already kept above).
-  for (const id of openQuestionRetention(state.messages ?? [], keep)) keep.add(id);
+  return keep;
+}
+
+// Grow `keep` (the ids already staying: retained by state plus the newest tail)
+// until nothing new is kept: every reply ancestor of a kept message stays, and
+// every question that is open for some viewer or already kept stays together with
+// the messages that close it. The two rules feed each other (an ancestor can be an
+// answered question whose answer must then stay), so they repeat to a fixed point.
+// The open-questions list a reader gets is derived from state.messages, so an
+// archived open question would leave it and an archived answer would reopen one.
+export function closeKeepSet(messages, keep) {
+  const byId = new Map(messages.map(message => [message.id, message]));
+  let frontier = [...keep];
+  while (frontier.length) {
+    const added = [];
+    for (const id of frontier) {
+      for (let parent = byId.get(byId.get(id)?.replyToId), hops = 0; parent && !keep.has(parent.id) && hops < 1000; parent = byId.get(parent.replyToId), hops++) {
+        keep.add(parent.id);
+        added.push(parent.id);
+      }
+    }
+    for (const id of openQuestionRetention(messages, keep)) if (!keep.has(id)) { keep.add(id); added.push(id); }
+    frontier = added;
+  }
   return keep;
 }
 
@@ -552,13 +570,9 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     const tail = ordered.slice(ordered.length - keepNewest);
     const cutoff = seqs.get(tail[0].id);
     const keep = retainedByState(state);
-    // Keep whole active threads: every reply ancestor of a message that stays in
-    // the tail or is retained stays too, so replying under a recent message never
-    // lands on an archived parent.
-    const byId = new Map(ordered.map(message => [message.id, message]));
-    for (const message of [...tail, ...ordered.filter(entry => keep.has(entry.id))]) {
-      for (let parent = byId.get(message.replyToId), hops = 0; parent && hops < 1000; parent = byId.get(parent.replyToId), hops++) keep.add(parent.id);
-    }
+    // Keep whole active threads and open questions: see closeKeepSet.
+    for (const message of tail) keep.add(message.id);
+    closeKeepSet(ordered, keep);
     const marker = archiveMarker(db, roomId);
     const moving = ordered.filter(message => seqs.get(message.id) < cutoff && !keep.has(message.id));
     if (!moving.length) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: marker.throughSeq };
