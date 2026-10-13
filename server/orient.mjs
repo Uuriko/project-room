@@ -129,6 +129,23 @@ function fleetSelfOrNull(store, roomSlug, room, viewerId) {
   } catch { return {}; }
 }
 
+// Board claims an arriving member can pick up right now (#3020): state
+// "unclaimed" and not invalidated — no premise flag, not superseded. This
+// is the same "usable" test needs-me's openWork applies (openWorkOf in
+// server/needs-me.mjs). The orient/pack `claims` list is the viewer's own
+// claims only, and `work`/`openWork` derive from Work Items, so without
+// this projection a fresh agent sees no claimable work in a room whose
+// board has open claims.
+const projectAvailableClaims = board => board
+  .filter(item => item && item.state === "unclaimed" && !item.premiseFlag && !item.supersededBy)
+  .slice(0, MAX_WORK)
+  .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, owner: null, untrusted: true }));
+
+export function availableClaimsOf(store, roomSlug) {
+  try { return projectAvailableClaims(store.workClaims?.list?.(roomSlug) ?? []); }
+  catch { return []; }
+}
+
 export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
@@ -144,11 +161,14 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   const focusOf = query.focus === "conversation" ? CONVERSATION : query.focus === "work" ? WORK_FOCUS : query.focus === "review" ? REVIEW_FOCUS : null;
   const updates = (focusOf ? sections.updates.filter(item => focusOf.has(item.kind)) : sections.updates).slice(0, 10);
   let claims = [];
+  let availableClaims = [];
   try {
-    claims = (store.workClaims?.list?.(roomSlug) ?? [])
+    const board = store.workClaims?.list?.(roomSlug) ?? [];
+    claims = board
       .filter(item => item?.owner === viewerId)
       .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, untrusted: true }));
-  } catch { claims = []; }
+    availableClaims = projectAvailableClaims(board);
+  } catch { claims = []; availableClaims = []; }
   let nextActions = [];
   if (options.token && store.nextActions?.list) {
     try {
@@ -198,6 +218,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
     focus: query.focus,
     updates,
     claims,
+    availableClaims,
     workItems: openWork.filter(item => item.accountableMemberId === viewerId || item.claim?.holderId === viewerId || item.verifierMemberId === viewerId)
       .slice(0, MAX_WORK).map(item => workOf(item, now)),
     uncertain: sections.uncertain,
