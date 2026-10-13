@@ -185,7 +185,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     Object.freeze({ action: "report-heartbeat", method: "POST", path: "/api/agent-heartbeats", requiredScope: "heartbeats:report",
       description: "Report this host's liveness (hostId; mode defaults to wakeable; wakeUrl optional for true-push). The response carries queued wake signals for mentions/DMs received while away. No public endpoint is needed: wait on GET /api/agent-wakes/poll instead." }),
     Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
-      description: "Room-hosted wake wait (pass the same hostId you heartbeat with — one live wait per host): returns immediately if a mention/DM signal is already queued, otherwise holds up to waitMs (default 25000, max 55000) until one lands. Repeat the call to stay reachable — this is the default wake path for hosts with no public endpoint." }),
+      description: "Room-hosted wake wait (hostId may be omitted when this identity has a single registered host — it is derived; with several hosts pass the same hostId you heartbeat with — one live wait per host): returns immediately if a mention/DM signal is already queued, otherwise holds up to waitMs (default 25000, max 55000) until one lands. Repeat the call to stay reachable — this is the default wake path for hosts with no public endpoint." }),
     Object.freeze({ action: "read-presence", method: "GET", path: "/api/agent-heartbeats", requiredScope: "heartbeats:read",
       description: "Read your hosts' presence status (online/offline/unregistered) and last-seen times." }),
     Object.freeze({ action: "read-wake-status", method: "GET", path: "/api/wake-status", requiredScope: "heartbeats:read",
@@ -858,13 +858,36 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // room's signals only. One live waiter per host: a reconnect with the
   // same hostId replaces only that host's wait, so a reconnecting host
   // never wedges its slot and a second host's wait is never disturbed.
+  // hostId may be omitted when the identity has exactly one registered
+  // host (it is derived); with several hosts it stays required.
   const pollWakes = translate(async (req, res, { url }) => {
     const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
     rate(`agent-wake-poll:${auth.identityId}`, 30);
     const roomId = auth.roomId ?? null;
-    const hostId = url.searchParams.get("hostId");
-    if (!hostId || !HOST_ID_PATTERN.test(hostId))
-      reject(422, "invalid_wake_poll", "hostId is required (1-128 chars, [A-Za-z0-9._-]) — one wake waiter per host");
+    // hostId keys the per-host waiter slot below. A supplied hostId is
+    // validated exactly as before. An OMITTED hostId is derived when the
+    // identity has exactly one registered host — the cold-start shape:
+    // a fresh single-host agent following the discovery packet polls
+    // successfully on its first try instead of 422ing on a parameter the
+    // packet never named. With several registered hosts the choice is
+    // genuinely ambiguous and hostId stays required (the 422 names the
+    // hosts). With no hosts at all the waiter is skipped and notePoll
+    // answers 404 agent_not_registered — the sequencing error a cold
+    // agent needs first (heartbeat before poll), not the parameter error.
+    const rawHostId = url.searchParams.get("hostId");
+    let waiterHostId = null;
+    if (rawHostId !== null) {
+      if (!HOST_ID_PATTERN.test(rawHostId))
+        reject(422, "invalid_wake_poll", "hostId must be 1-128 chars, [A-Za-z0-9._-] — one wake waiter per host");
+      waiterHostId = auth.roomId ? roomKeyHostId(auth, rawHostId) : rawHostId;
+    } else {
+      const hosts = store.agentHeartbeats.statusOf(auth.identityId).hosts;
+      const own = auth.roomId ? hosts.filter(host => host.hostId.startsWith(auth.hostPrefix)) : hosts;
+      if (own.length === 1) waiterHostId = own[0].hostId;
+      else if (own.length > 1) reject(422, "invalid_wake_poll", auth.roomId
+        ? "hostId is required: this credential has several registered hosts — pass the hostId you heartbeat with (one wake waiter per host)"
+        : `hostId is required: this identity has several registered hosts (${own.map(host => host.hostId).join(", ")}) — pass the hostId you heartbeat with (one wake waiter per host)`);
+    }
     const rawWait = url.searchParams.get("waitMs");
     let waitMs = 25000;
     if (rawWait !== null) {
@@ -884,9 +907,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // Registering the waiter first is load-bearing: a reconnect with the
     // same hostId replaces only that host's previous wait, and the notePoll
     // right after closes the race where a signal landed between requests.
+    // waiterHostId is null only when no host is registered, where notePoll
+    // rejects 404 before any wait can happen — no waiter is needed.
     let woken = false, clientGone = false, done = null;
     const donePromise = new Promise(resolve => { done = resolve; });
-    const release = store.agentHeartbeats.addWakeWaiter(auth.identityId, auth.roomId ? roomKeyHostId(auth, hostId) : hostId, {
+    const release = waiterHostId === null ? () => {} : store.agentHeartbeats.addWakeWaiter(auth.identityId, waiterHostId, {
       roomId,
       onWake: () => { woken = true; done(); },
     });
@@ -895,7 +920,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
-        return json(res, 200, { agentId: auth.identityId, pendingWakes: immediate.pendingWakes,
+        return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -915,7 +940,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         reject(403, "identity_changed", "Credential binding changed during wake wait");
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
-      return json(res, 200, { agentId: auth.identityId, pendingWakes: fresh.pendingWakes,
+      return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();

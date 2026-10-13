@@ -39,6 +39,13 @@
 // 9. aborted poll — contract: a client that disconnects mid-wait releases
 //    its host slot. Regression: dead connections wedging the slot so the
 //    next poll misbehaves.
+// 10. hostId derivation — contract: an omitted hostId is derived when the
+//     identity has exactly one registered host, so a cold single-host
+//     agent polls successfully on its first try; with no hosts the poll
+//     answers agent_not_registered (heartbeat-first sequencing), and with
+//     several hosts it 422s naming them. Regression: re-imposing the
+//     parameter the discovery packet never names (first-poll 422), or
+//     deriving across hosts and wedging the wrong host's waiter slot.
 //
 // Synthetic fixtures only — loopback HTTP, no external calls or real credentials.
 import test from "node:test";
@@ -198,6 +205,9 @@ test("poll route: auth, scope, registration, and waitMs validation", async t => 
   assert.equal((await get(origin, "/api/agent-wakes/poll")).status, 401);
   assert.equal((await get(origin, "/api/agent-wakes/poll", wrongScope.credential)).status, 403);
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h", credential)), "agent_not_registered");
+  // No hostId and no hosts: the sequencing error surfaces, not the
+  // parameter error — heartbeat first is what a cold agent must learn.
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)), "agent_not_registered");
 
   // Register with no wakeUrl at all — the wakeable-by-default shape.
   const reported = await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
@@ -207,8 +217,12 @@ test("poll route: auth, scope, registration, and waitMs validation", async t => 
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=nope", credential)), "invalid_wake_poll");
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=-5", credential)), "invalid_wake_poll");
 
-  // hostId is required: one waiter per host.
-  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)), "invalid_wake_poll");
+  // hostId omitted with exactly one registered host ("h", above): the
+  // host is derived — one waiter per host still holds, keyed by it.
+  const derived = await (await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)).json();
+  assert.equal(derived.hostId, "h");
+  assert.deepEqual(derived.pendingWakes, []);
+  // A supplied hostId is still validated exactly as before.
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=nope!&waitMs=0", credential)), "invalid_wake_poll");
 
   // waitMs=0 short-poll with nothing queued: immediate empty return.
@@ -216,6 +230,62 @@ test("poll route: auth, scope, registration, and waitMs validation", async t => 
   assert.deepEqual(empty.pendingWakes, []);
   assert.equal(empty.timedOut, false);
   assert.equal(empty.waitedMs, 0);
+});
+
+test("poll without hostId derives the single host and its held wait is released by a signal", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { identity, credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "only-host" }, credential);
+  // A queued signal is returned immediately, addressed to the derived host.
+  f.store.agentHeartbeats.enqueueWake({ agentId: identity.identityId, kind: "mention", roomId: "commons", messageId: "m-queued" });
+  const immediate = await (await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)).json();
+  assert.equal(immediate.hostId, "only-host");
+  assert.deepEqual(immediate.pendingWakes.map(w => w.messageId), ["m-queued"]);
+  f.store.agentHeartbeats.ackWakes({ agentId: identity.identityId, signalIds: [immediate.pendingWakes[0].signalId] });
+  // The held wait is registered under the derived host: a new signal
+  // releases it exactly as an explicit-hostId wait.
+  const held = get(origin, "/api/agent-wakes/poll?waitMs=5000", credential).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.agentHeartbeats.enqueueWake({ agentId: identity.identityId, kind: "dm", roomId: "commons", messageId: "m-held" });
+  const doc = await held;
+  assert.equal(doc.hostId, "only-host");
+  assert.equal(doc.timedOut, false);
+  assert.deepEqual(doc.pendingWakes.map(w => w.messageId), ["m-held"]);
+});
+
+test("poll without hostId is ambiguous with two registered hosts: 422 naming them", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h-a" }, credential);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h-b" }, credential);
+  const res = await get(origin, "/api/agent-wakes/poll?waitMs=0", credential);
+  assert.equal(res.status, 422);
+  const error = (await res.json()).error;
+  assert.equal(error.code, "invalid_wake_poll");
+  assert.ok(error.message.includes("h-a") && error.message.includes("h-b"),
+    `422 names the registered hosts so the agent can pick: ${error.message}`);
+  // Either host still polls fine when named explicitly.
+  assert.equal((await get(origin, "/api/agent-wakes/poll?hostId=h-b&waitMs=0", credential)).status, 200);
+});
+
+test("room-key poll without hostId derives its credential host", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("rk-derive-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: identity.identityId,
+    displayName: "RK derive agent", permissions: ["accept_work"],
+  });
+  const roomKey = f.store.issueAccessKey("commons", identity.identityId);
+  assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h", mode: "pull-only" }, roomKey)).status, 200);
+  const res = await get(origin, "/api/agent-wakes/poll?waitMs=0", roomKey);
+  assert.equal(res.status, 200);
+  const doc = await res.json();
+  assert.deepEqual(doc.pendingWakes, []);
+  assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("rk_"),
+    "derived room-key host is the credential-derived host id");
 });
 
 test("poll times out cleanly when nothing arrives", async t => {
