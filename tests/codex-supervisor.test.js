@@ -84,6 +84,30 @@ test("supervisor picks multiple queued public asks and restart never reruns comp
   assert.equal(f.runtime().starts, 3);
 });
 
+test("settlement rescans before yielding to a polling timer and starts the queued successor", async t => {
+  const f = await fixture(t); await f.invoke("first"); await f.invoke("second");
+  const controller = new AbortController();
+  let settled = 0, awaitingRescan = false, rescannedImmediately = false;
+  const connection = { ...f.connection, fetchImpl: (url, options) => {
+    if (awaitingRescan && options.method === "GET") awaitingRescan = false;
+    return fetch(url, options);
+  } };
+  await f.run({ connection, signal: controller.signal, emit: event => {
+    if (event.status !== "settled") return;
+    if (++settled === 2) { controller.abort(); return; }
+    awaitingRescan = true;
+    // Check scheduling order, not a wall-clock threshold that varies with load.
+    // A polling sleep yields before the rescan's identity preflight can begin.
+    queueMicrotask(() => {
+      rescannedImmediately = !awaitingRescan;
+      if (!rescannedImmediately) controller.abort();
+    });
+  } });
+  assert.equal(rescannedImmediately, true);
+  assert.equal(f.runtime().starts, 2);
+  assert.equal(settled, 2);
+});
+
 test("watcher ownership excludes a second supervisor and durable stop exits idle without a runtime", async t => {
   const f = await fixture(t); let connections = 0;
   const running = f.run({ connect: async () => { connections++; throw Error("must stay idle"); } });

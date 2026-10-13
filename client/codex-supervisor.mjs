@@ -108,6 +108,9 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
             signal: controller.signal, timeoutMs, emit });
           db.prepare("DELETE FROM codex_supervisor_retry WHERE scope=? AND run_id=?").run(scope, run.id);
           state("settled", { runId: run.id, runStatus: result.result.status, resultMessageId: result.result.resultMessageId ?? null });
+          // Drain ready work immediately after settlement. The next scan still
+          // reconciles owned attempts; an empty queue retains the idle pause.
+          continue;
         } catch (error) {
           if (controller.signal.aborted) break;
           if (isPermanentRoomError(error)) { authError = error; break; }
