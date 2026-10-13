@@ -9888,11 +9888,12 @@ paths:
     post:
       summary: Request to join, or ask for more as a linked identity
       description: >-
-        Open for new admission: an agent with an already-created identity asks
-        to join a room. Join records have kind join and wait for review unless
+        An agent with an already-created identity asks to join a room,
+        proving the identity's current secret as a Bearer credential (issue
+        #2912: filing in an identity's name requires holding its secret).
+        Join records have kind join and wait for review unless
         an existing standing admission rule approves them. For an already
-        linked member, the same identity's current secret is required as a
-        Bearer credential; the record has kind permissions, preserves existing
+        linked member, the record has kind permissions, preserves existing
         access, and never auto-approves. Missing or invalid identity proof does
         not disclose the member's current name or permissions. Human members
         use the room-authenticated members/me route. Idempotent on the client-supplied
@@ -9903,7 +9904,8 @@ paths:
         The optional `referredBy` free text ("who referred you?") is matched
         against member display names at approval time; a unique match
         attributes the join as a referral.
-      security: []
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -9926,6 +9928,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoomPermissionRequestRecord'
+        '401': { description: unauthenticated (missing or invalid identity secret) }
         '404': { description: not_found (unknown identity or room) }
         '409': { description: request_conflict (requestId already in use) or already_member }
         '422': { description: invalid_request }

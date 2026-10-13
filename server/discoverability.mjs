@@ -162,7 +162,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
           properties: { inviteId: { type: "string", pattern: "^[a-f0-9]{8}$" } },
         } } } },
       } }),
-  route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess",
+  route("/api/access-requests", ["POST"], "identity-secret", "Request access to a room with your identity secret as Bearer (owner decides).", "requestAccess",
     { requestBodies: { POST: ACCESS_REQUEST_BODY } }),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink",

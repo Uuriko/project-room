@@ -597,7 +597,8 @@ test("CLI: account-link requests autonomy perms into a human-owned room", async 
   const { origin } = await httpFixture(t);
   const minted = await cli(origin, ["identity-create", "Visitor"]);
   assert.equal(minted.status, 0, minted.stderr);
-  const asked = await cli(origin, ["account-link", "commons", minted.json.identityId, "Visitor"]);
+  const asked = await cli(origin, ["account-link", "commons", minted.json.identityId, "Visitor"],
+    { ROOM_AGENT_TOKEN: minted.json.secret });
   assert.equal(asked.status, 0, asked.stderr);
   assert.equal(asked.json.type, "agent_account_link_request");
   assert.equal(asked.json.roomId, "commons");

@@ -1747,6 +1747,7 @@ async function submitRequestAccessForm(event) {
     await accountClient.submitAccessRequest({
       roomId: door.roomId,
       identityId,
+      secret,
       displayName: checked.displayName,
       requestedPermissions: defaultRequestPermissions(invitation.preview),
       note: checked.note,

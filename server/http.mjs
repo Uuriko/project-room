@@ -3113,8 +3113,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, store.invites.preview(code));
       }
       // Self-serve access requests: an identity without membership asks to
-      // join. Unauthenticated (the identity is not a member yet); the
-      // module rate-limits per identity and never reveals more than 404.
+      // join. The caller proves the identity's secret as Bearer (issue
+      // #2912 — the identity is not a member yet, but filing in its name
+      // requires holding its secret); the module rate-limits per identity
+      // and never reveals more than 404 for unknown rooms/identities.
       if (url.pathname === "/api/access-requests" && req.method === "POST") {
         // The other three open POST routes all bound themselves per address
         // before reading a body; this one did not, so the only limit it had was

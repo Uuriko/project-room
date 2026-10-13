@@ -487,7 +487,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
           roomId: checkpoint, identityId: extra[0], displayName: extra[1],
           requestedPermissions: extra[2].split(",").map(p => p.trim()).filter(Boolean),
           ...(extra[3] === undefined ? {} : { note: extra[3] })
-        })
+        }, { identitySecret: process.env.ROOM_AGENT_TOKEN })
       : action === "access-requests" ? await client.accessRequests(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "access-decide" ? await client.decideAccessRequest(checkpoint, {
           decision: extra[0],
