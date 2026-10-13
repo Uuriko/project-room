@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkClaims, publicWorkClaimsSchema } from '../server/public-work-claims.mjs';
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from '../server/public-work-claim-fence.mjs';
+import { unpublishPublic } from '../server/legal-store.mjs';
 
 // Real store/identity/offer/lease boundary; registration/HTTP/workerd keepers
 // independently own transport and old-writer fencing. No registry doubles.
@@ -91,6 +92,25 @@ test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks wi
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_receipts').get().n, 1);
   f.store.projectOffers.transition('commons', 'owner', 'receipt-task', 'withdraw', { requestId: 'withdraw', expectedRevision: 2 });
   assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
+});
+
+test('operator unpublish hides a public-work receipt and its full artifact at the public-work door', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('unpublish-receipt-task');
+  f.service().act('unpublish-receipt-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('unpublish-receipt-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Secret submitted work', checksReported: [] }));
+  assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
+  // Receipt-level takedown: both the receipt and its artifact must 404, like the sibling receipts door.
+  unpublishPublic(f.store.db, { kind: 'receipt', id: result.receipt.receiptId, byAccount: 'operator', now: f.store.now() });
+  assert.throws(() => f.service().receipt(result.receipt.receiptId), code('public_receipt_not_found'));
+  assert.throws(() => f.service().artifact(result.receipt.receiptId), code('public_receipt_not_found'));
+  // Room-level takedown hides a different receipt from the same room too.
+  f.enable('unpublish-room-task', ['room-task.js']);
+  f.service().act('unpublish-room-task', a.secret, 'claim', claim('claim-room'));
+  const roomResult = f.service().act('unpublish-room-task', a.secret, 'finish', owned('finish-room', 1, { artifactText: 'Room submitted work', checksReported: [] }));
+  assert.deepEqual(f.service().receipt(roomResult.receipt.receiptId), roomResult.receipt);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: f.store.now() });
+  assert.throws(() => f.service().receipt(roomResult.receipt.receiptId), code('public_receipt_not_found'));
+  assert.throws(() => f.service().artifact(roomResult.receipt.receiptId), code('public_receipt_not_found'));
 });
 
 test('a reused identity cannot submit an earlier generation after release and reclaim', t => {
