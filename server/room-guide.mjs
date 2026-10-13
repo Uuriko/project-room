@@ -55,9 +55,9 @@ export function flushRoomGuide(store) {
   const rooms = pending.get(store);
   if (!rooms || rooms.size === 0) return;
   for (const roomId of [...rooms]) {
-    rooms.delete(roomId);
     try {
       runGuideStep(store, roomId, typeof store.now === "function" ? store.now() : Date.now());
+      rooms.delete(roomId);
     } catch (error) {
       console.error("room guide flush failed:", error?.message ?? error);
     }
