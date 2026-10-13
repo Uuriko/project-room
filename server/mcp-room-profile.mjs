@@ -966,7 +966,9 @@ function enforceMcpApiKeyRoomScope(store, secret, name, roomId) {
   // A room-pinned key used on another room gets the same answer as REST and
   // the full profile (store.authenticate), not a missing-scope answer.
   const pinned = mcpRoomAllowlist(store, secret);
-  if (pinned && typeof roomId === "string" && !pinned.includes(roomId))
+  // room_create is the exception: a key can never create rooms, so it hears the
+  // real 401 room_token_not_identity from agentRooms.create, not a room limit.
+  if (pinned && name !== "room_create" && typeof roomId === "string" && !pinned.includes(roomId))
     throw new ServiceError(403, "insufficient_scope", "This key is limited to its room");
   const required = mcpRoomToolScope(name);
   if (!required) return;
