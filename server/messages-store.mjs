@@ -1,5 +1,6 @@
 import { hydrateProjection, storedProjection } from "./projection-at-rest.mjs";
-import { openQuestionRetention } from "./open-questions.mjs";
+import { closeKeepSet } from "./open-questions.mjs";
+export { closeKeepSet };
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
 // same transaction as the event insert. MSG-2 replays events that landed
@@ -520,30 +521,6 @@ function retainedByState(state) {
   }
   for (const id of Object.keys(state.replyRequests ?? {})) keep.add(id);
   for (const message of state.messages ?? []) if (typeof message?.workItemId === "string" && message.workItemId) keep.add(message.id);
-  return keep;
-}
-
-// Grow `keep` (the ids already staying: retained by state plus the newest tail)
-// until nothing new is kept: every reply ancestor of a kept message stays, and
-// every question that is open for some viewer or already kept stays together with
-// the messages that close it. The two rules feed each other (an ancestor can be an
-// answered question whose answer must then stay), so they repeat to a fixed point.
-// The open-questions list a reader gets is derived from state.messages, so an
-// archived open question would leave it and an archived answer would reopen one.
-export function closeKeepSet(messages, keep) {
-  const byId = new Map(messages.map(message => [message.id, message]));
-  let frontier = [...keep];
-  while (frontier.length) {
-    const added = [];
-    for (const id of frontier) {
-      for (let parent = byId.get(byId.get(id)?.replyToId), hops = 0; parent && !keep.has(parent.id) && hops < 1000; parent = byId.get(parent.replyToId), hops++) {
-        keep.add(parent.id);
-        added.push(parent.id);
-      }
-    }
-    for (const id of openQuestionRetention(messages, keep)) if (!keep.has(id)) { keep.add(id); added.push(id); }
-    frontier = added;
-  }
   return keep;
 }
 
