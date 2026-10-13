@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { AgentWakeClient } from './agent-wake.mjs';
+import { isTransientWakeError, wakeRetryDelayMs } from './wake-retry.mjs';
 import { RoomAgentClient } from './room-agent.mjs';
 import { ConnectionError, connectionDiagnostic } from './agent-connection.mjs';
 import { serveRoomMcp } from './mcp-stdio.mjs';
@@ -54,8 +55,25 @@ export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, inp
     if (!await transport.ready) return;
     try {
       let attentionChecked = false;
+      let failures = 0;
       while (!controller.signal.aborted) {
-        const result = await wake.wait({ hostId, cadenceSeconds, waitMs: attentionChecked ? 25000 : 0 });
+        let result;
+        try {
+          result = await wake.wait({ hostId, cadenceSeconds, waitMs: attentionChecked ? 25000 : 0 });
+          failures = 0;
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          // Same contract as the poll listener: transient failures (network
+          // blip, 429, 5xx during a redeploy) back off and retry instead of
+          // stopping the channel transport; fatal errors keep the
+          // report-and-stop behavior via the outer catch.
+          if (!isTransientWakeError(error)) throw error;
+          const backoff = wakeRetryDelayMs(failures, error);
+          failures += 1;
+          try { await delay(backoff, undefined, { signal: controller.signal }); }
+          catch { break; }
+          continue;
+        }
         const partial = ['before', 'after'].some(stage => result.observations[stage].incompleteSources.length > 0);
         if (!attentionChecked) {
           attentionChecked = true;
