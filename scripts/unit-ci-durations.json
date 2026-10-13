@@ -803,6 +803,7 @@
   "tests/spend-grant-races.test.js": 39618,
   "tests/spend-grants-attacks.test.js": 33261,
   "tests/spend-grants-property.test.js": 27140,
+  "tests/spend-grant-routes.test.js": 13264,
   "tests/spend-grants.test.js": 91066,
   "tests/spend-pricing.test.js": 35595,
   "tests/sse-sequenceof.test.js": 2580,
