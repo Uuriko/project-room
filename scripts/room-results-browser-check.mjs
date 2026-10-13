@@ -1,5 +1,5 @@
 import { openComposerOptions } from "./room-chrome.mjs";
-import { clickChrome, ensureSidebarOpen } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, messageAction } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -171,6 +171,31 @@ test("a withdrawn result loses its discussion action without disturbing a draft"
   await p.locator("#result-discuss").waitFor({ state: "hidden" });
   await p.locator("#close-result").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Keep this thought");
+});
+
+test("returning from a result preserves an uncertain send's exact target and retry", { timeout: 30000 }, async t => {
+  const f = await setup(t, { expectedWrites: 2 }), p = f.p;
+  const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "result-peer-reply", body: "Which part needs another look?", replyToId: resultId });
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await messageAction(p, "result-peer-reply", "reply");
+  await p.locator("#message-input").fill("Please expand the second point");
+  const attempts = [];
+  await p.route("**/rooms/commons/commands", route => {
+    attempts.push(route.request().postDataJSON());
+    return attempts.length === 1 ? route.fulfill({ status: 503, json: { error: "Unavailable" } }) : route.continue();
+  });
+  const send = p.locator('#message-form button[type="submit"]');
+  await send.click();
+  await p.locator("#composer-status").filter({ hasText: "Draft kept" }).waitFor();
+  await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
+  await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  assert.equal(await p.locator("#message-input").inputValue(), "Please expand the second point");
+  await send.click(); await p.waitForFunction(() => !document.querySelector("#message-input").value);
+  assert.equal(attempts.length, 2);
+  assert.deepEqual(attempts[1], attempts[0], "same command and reply target are retried");
+  assert.equal(attempts[1].data.replyToId, "result-peer-reply");
+  assert.equal(f.state().messages.filter(message => message.body === "Please expand the second point").length, 1);
 });
 
 test("creating new work from the composer requires explicit confirmed submission", { timeout: 30000 }, async t => {
