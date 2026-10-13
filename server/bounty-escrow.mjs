@@ -2468,9 +2468,15 @@ export class BountyEscrow {
             amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "split: attribute before split", actor,
             receipt: { type: "attributed", payload: { claimant: worker } } }));
         }
-        this._requireFinalityMove(bounty, "approve");
-        this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
-          amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
+        // A 1-milli award splits to a zero worker half (floor(1/2) = 0) and
+        // the journal rejects zero-amount movements: vest only a positive
+        // half. The poster half (amount - workerHalf) is always >= 1 milli,
+        // so the refund below always moves.
+        if (workerHalf > 0) {
+          this._requireFinalityMove(bounty, "approve");
+          this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
+            amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
+        }
         this._requireFinalityMove(bounty, "refund");
         collect(this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: bounty.poster, state: "payable" },
           amountMillis: posterHalf, kind: "refund", bountyId, lotId, memo: "split: poster half refunds", actor,

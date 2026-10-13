@@ -667,3 +667,26 @@ test("dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly
   assert.equal(bal(escrow, CODEX).payable, 100);
   expectConserved(escrow);
 });
+
+test("dispute SPLIT of a 1-milli bounty: zero worker half vests nothing, whole milli refunds", () => {
+  const { escrow } = makeEscrow();
+  // Smallest postable award: 0.001 credits = 1 milli. floor(1/2) = 0, so the
+  // worker's vesting half is zero millis — the settlement must not attempt a
+  // zero-amount approve move (the journal rejects those), or the split throws
+  // after the verdict is recorded and the bounty wedges in `disputed`.
+  const bounty = runToSubmitted(escrow, { amount: 0.001, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
+  const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(settled.resolution.kind, "split");
+  assert.equal(settled.resolution.bondForfeited, false);
+  assert.equal(settled.state, "approved");
+  // The whole milli refunds to the poster; the worker vests zero.
+  assert.equal(bal(escrow, JILL).payable, 100, "poster: 99.999 + 0.001 refund");
+  assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
+  const lots = escrow.balances(ROOM, GROK);
+  assert.equal(lots.attributed, 0, "attribute-then-split leaves no attributed lot behind");
+  assert.equal(lots.approved, 0, "worker vested a zero half: nothing approved");
+  assert.equal(bal(escrow, "pool").payable, 0);
+  expectConserved(escrow);
+});
