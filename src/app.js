@@ -251,6 +251,9 @@ function readAcquisition() {
 function clearAcquisition() {
   try { window.sessionStorage.removeItem(ACQUISITION_KEY); } catch { /* storage may be blocked */ }
 }
+function clearTemplateRoom() {
+  try { window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY); } catch { /* storage may be blocked */ }
+}
 // --- end GR2 ---
 function consumeStartRoomIntent() {
   const wanted = startRoomIntent;
@@ -5836,7 +5839,7 @@ async function startRoomFromTemplate(slug) {
   });
   if (accountClient.session !== owned) return;
   await openAccountRoom(result.room.id);
-  window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY);
+  clearTemplateRoom();
 }
 async function showAgentInvitePicker(agentId) {
   inboxUI.showRoomList();
@@ -5904,6 +5907,17 @@ async function runAcquisitionIntent() {
     }
     if (intent.kind === "invite-agent") await showAgentInvitePicker(intent.agent);
   } catch {
+    if (intent.kind === "template") {
+      // #2971: a template intent is one attempt, not a standing order. It used
+      // to survive every failure, so each account-home render retried the same
+      // failing room-creation POST forever. Consume the intent and drop the
+      // stashed room id with it: that id was minted for this attempt, and a
+      // definitive failure (e.g. a 4xx for that id/payload) would poison every
+      // later attempt that reused it. A fresh start from the template gallery
+      // mints a fresh id.
+      clearAcquisition();
+      clearTemplateRoom();
+    }
     $("#account-rooms-status").textContent = "Couldn’t finish that. Refresh and try again.";
   }
 }
