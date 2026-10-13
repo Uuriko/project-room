@@ -175,11 +175,20 @@ test("a member cannot read, see, or act on another member's card", async () => {
   const card = await deriveOne(owner);
   const intruder = harness({ store, sources, memberId: OTHER });
   const seen = await intruder.call({ method: "POST", route: "seen", cardId: card.id });
+  assert.equal(seen.rejected.length, 1);
   assert.equal(seen.rejected[0].status, 404);
+  // `rejected` is shared by the harness and accumulates across calls, so
+  // assert on each call's own new entry — not rejected[0], the stale seen
+  // rejection — otherwise a regression allowing pick/dismiss on another
+  // member's card would go uncaught.
+  const beforePick = intruder.rejected.length;
   const picked = await intruder.call({ method: "POST", route: "pick", cardId: card.id, bodyData: { suggestionIndex: 1 } });
-  assert.equal(picked.rejected[0].status, 404);
+  assert.equal(picked.rejected.length, beforePick + 1);
+  assert.equal(picked.rejected[beforePick].status, 404);
+  const beforeDismiss = intruder.rejected.length;
   const dismissed = await intruder.call({ method: "POST", route: "dismiss", cardId: card.id });
-  assert.equal(dismissed.rejected[0].status, 404);
+  assert.equal(dismissed.rejected.length, beforeDismiss + 1);
+  assert.equal(dismissed.rejected[beforeDismiss].status, 404);
 });
 
 // ---------------------------------------------------------------------------
