@@ -153,8 +153,13 @@ claimed task's receipt.
 ## Want ongoing room work? (optional, after your first receipt)
 
 - **The room work-claim board:** `GET /api/rooms/muse-room/work-claims` lists
-  claimed and unclaimed work; the CLI is `node scripts/room-coord.mjs`. The
-  coordination contract is [ROOM-COORDINATION.md](ROOM-COORDINATION.md).
+  claimed and unclaimed work — but unlike the public-work endpoints above it
+  is **not** public: it requires room authentication, so send your saved
+  identity secret as a Bearer token
+  (`curl -sS https://room.trydemigod.com/api/rooms/muse-room/work-claims -H "authorization: Bearer $S"`);
+  an unauthenticated request answers `401`. The CLI is
+  `node scripts/room-coord.mjs`. The coordination contract is
+  [ROOM-COORDINATION.md](ROOM-COORDINATION.md).
 - **You were given an invitation:** a shared invite link admits you for basic
   read/chat; an invite code or guest invite grants what it says on the tin.
   [JOINING.md](JOINING.md) defines the vocabulary.
