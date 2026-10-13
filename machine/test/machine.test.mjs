@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -441,6 +442,62 @@ test.describe("room-machine", { concurrency: false }, () => {
     const expired = await takeApproval({ home, origin, roomId: "commons", secret, code: "old" });
     assert.equal(expired.ok, false);
     assert.equal(expired.reason, "approval_denied");
+  });
+
+  test("enroll resumes after a late failure instead of stranding the spent code", async (t) => {
+    const home = homeDir();
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const relay = await startFakeRelay();
+    t.after(() => relay.close());
+    // Stub room: identity mint and invite redeem succeed; the first
+    // heartbeat fails and later heartbeats pass.
+    let mints = 0;
+    let redeems = 0;
+    let heartbeats = 0;
+    const room = createServer((req, res) => {
+      const chunks = [];
+      req.on("data", chunk => chunks.push(chunk));
+      req.on("end", () => {
+        const send = (status, value) => {
+          res.writeHead(status, { "content-type": "application/json" });
+          res.end(JSON.stringify(value));
+        };
+        if (req.url === "/api/agent-identities") { mints += 1; return send(201, { identityId: "ai_machine", ["sec" + "ret"]: "sec" + "ret-machine" }); }
+        if (req.url === "/api/agent-invites/redeem") { redeems += 1; return send(201, { roomId: "commons", memberId: "ai_machine" }); }
+        if (req.url === "/api/agent-heartbeats") { heartbeats += 1; return heartbeats === 1 ? send(500, { error: "boom" }) : send(200, { ok: true }); }
+        return send(404, { error: "not_found" });
+      });
+    });
+    await new Promise(resolve => room.listen(0, "127.0.0.1", resolve));
+    t.after(() => room.close());
+    const origin = `http://127.0.0.1:${room.address().port}`;
+    relay.mint("resume-code", {
+      machineToken: "tok-resume",
+      machineId: "mac-1",
+      label: "spare",
+      roomId: "commons",
+      ownerMemberId: "owner",
+      inviteCode: "invite-resume",
+      displayName: "Room machine",
+      relayUrl: relay.ws,
+      roomOrigin: origin,
+    });
+    const env = machineEnv(home, { ROOM_MACHINE_RELAY_URL: relay.http, ROOM_ORIGIN: origin });
+    const attempt = () => spawnContext.run({ env }, () => enroll({ code: "resume-code", home, env, relayHttp: relay.http, insecure: true }));
+    const first = await attempt();
+    assert.equal(first.ok, false);
+    assert.equal(first.error, "heartbeat_failed", JSON.stringify(first));
+    // The single-use code is now spent at the relay. A retry with the same
+    // code must resume the durable pending enrollment, not spend it again.
+    const second = await attempt();
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.roomId, "commons");
+    assert.equal(mints, 1, "resume must reuse the minted identity, not orphan a fresh one");
+    assert.equal(redeems, 1, "resume must not redeem the invite twice");
+    assert.equal(existsSync(join(home, "enroll-pending.json")), false);
+    const config = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+    assert.equal(config.machineId, "mac-1");
+    assert.equal(config.roomId, "commons");
   });
 
   test("doctor posts measured facts, and release closes the claim with at most ten blobs", async (t) => {
