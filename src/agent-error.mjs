@@ -213,7 +213,12 @@ function axFamilyRecovery(code) {
     return ["That state cannot make this transition. Re-read the current state; the action is not valid from here, and retrying it unchanged will fail again.",
       "Re-read the current state; do not retry this transition from it."];
   }
-  if (/_unavailable$/.test(code)) {
+  // service_unavailable is NOT a capability code: it is the shared
+  // fetch-failure/503 code (client connectionDiagnostic maps a failed
+  // fetch to it at status 0), whose recovery is the shared guidance —
+  // the >=500 branch at 503, room_check_access at status 0 — not
+  // "ask the operator to enable this capability".
+  if (/_unavailable$/.test(code) && code !== "service_unavailable") {
     return ["This capability is unavailable on this server or in this state. Do not retry unchanged; ask the operator if it should be enabled.",
       "Ask the operator whether this capability should be enabled; do not retry unchanged."];
   }
