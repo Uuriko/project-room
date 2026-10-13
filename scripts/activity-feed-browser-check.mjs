@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { createRoomServer } from "../server/http.mjs";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, messageAction } from "./room-chrome.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 for (const mobile of [false, true]) {
@@ -76,9 +76,7 @@ for (const mobile of [false, true]) {
 
     // Save from the message overflow menu; Later badge counts it.
     const target = page.locator('[data-message-record-id="test-request"]');
-    await target.locator(".message-more > summary").click();
-    const saveButton = target.locator('[data-message-action="save"]');
-    await saveButton.click();
+    await messageAction(page, "test-request", "save");
     const laterBadge = page.locator("#later-count");
     await page.waitForFunction(() => document.querySelector("#later-count").textContent === "1");
     assert.equal(await laterBadge.textContent(), "1");
