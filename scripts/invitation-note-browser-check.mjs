@@ -6,7 +6,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { signInFixture } from "./auth-signin.mjs";
+import { showGuestJoin, signInFixture } from "./auth-signin.mjs";
 
 async function setup(t, touch = false) {
   const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store, streamInterval: 60 });
@@ -212,7 +212,7 @@ for (const touch of [false, true]) test(`one invitation ${touch ? 'mobile' : 'de
   const url = await create(page);
   await page.locator('#share-link-close').click();
   await page.goto(url);
-  await page.locator('#join-link-form').waitFor({ state: 'visible' });
+  await showGuestJoin(page);
   assert.equal(await page.locator('#shared-agent-details').evaluate(el => el.open), false);
   assert.equal(await page.locator('#join-link-name').isVisible(), true);
   await page.locator('#shared-agent-details > summary').click();

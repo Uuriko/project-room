@@ -1,3 +1,4 @@
+import { fillJoinName } from "./auth-signin.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // W4-50 L2: first-result onboarding. A newcomer joins from an invite link,
 // contributes to a help-wanted work item, and sees the outcome of their own
@@ -39,7 +40,7 @@ test("first-result journey: join, offer help, contribute, see the outcome", { ti
   // 1. Join from the invite link only. No account, no setup screens.
   const page = await context.newPage();
   await page.goto(`${origin}/#join/${f.links.valid}`);
-  await page.locator("#join-link-name").fill("Newcomer"); await page.locator("#join-link-submit").click();
+  await fillJoinName(page, "Newcomer"); await page.locator("#join-link-submit").click();
   await page.locator("#main").waitFor({ state: "visible" });
   const member = Object.values(state().members).find(person => person.displayName === "Newcomer");
   assert.ok(member, "newcomer joined as a member");

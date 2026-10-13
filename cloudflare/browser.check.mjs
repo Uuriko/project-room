@@ -10,7 +10,7 @@ import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
 import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { signInFixture } from "../scripts/auth-signin.mjs";
+import { signInFixture, fillJoinName } from "../scripts/auth-signin.mjs";
 
 test('two real browsers use the shared UI on local Workers, including SSE and restart', { timeout: 90000 }, async () => {
   const socket = createServer();
@@ -55,7 +55,7 @@ test('two real browsers use the shared UI on local Workers, including SSE and re
     const invitation = await owner.locator('#share-link-url').inputValue();
     await owner.locator('#share-link-close').click();
     await guest.goto(invitation);
-    await guest.locator('#join-link-name').fill('Cloudflare guest');
+    await fillJoinName(guest, 'Cloudflare guest');
     await guest.locator('#join-link-submit').click();
     await guest.locator('#main').waitFor({ state: 'visible' });
     await guest.locator('#message-input').fill('Hello from the Cloudflare guest');

@@ -346,7 +346,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const messageField = $("#growth-invite-message");
     if (messageField) messageField.value = message;
     const rewardEl = $("#growth-reward");
-    if (rewardEl) rewardEl.textContent = rewardLine(data?.reward);
+    if (rewardEl) rewardEl.textContent = data ? rewardLine(data.reward) : "";
     const copyLink = $("#growth-copy-link");
     const copyMessage = $("#growth-copy-message");
     if (copyLink) copyLink.disabled = !url;
@@ -354,19 +354,30 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const kitStatus = $("#growth-kit-status");
     if (kitStatus && data?.inviteBlocked === "email_unverified") kitStatus.textContent = "Verify your email to invite people. Open Sign-in & security from the account menu.";
     else if (kitStatus && invite && invite.status && invite.status !== "active") kitStatus.textContent = "This link has ended.";
-    else if (kitStatus && !kitStatus.textContent) kitStatus.textContent = "";
+    else if (kitStatus) kitStatus.textContent = "";
   }
   async function loadKit() {
-    const roomId = getSession()?.roomId || getState()?.room?.id;
+    const session = getSession(), generation = client.generation, version = managementVersion;
+    const roomId = session?.roomId || getState()?.room?.id;
+    const current = () => manager.open && version === managementVersion && generation === client.generation
+      && session === getSession() && session === client.session && client.ownsAccountSession();
+    renderKit(null);
     if (!roomId || typeof client?.request !== "function" || typeof client?.path !== "function") return;
+    const kitStatus = $("#growth-kit-status");
+    if (kitStatus) kitStatus.textContent = uiText("invite.loadingLink");
     try {
       const data = await client.request(client.path("/referrals"), { method: "GET" });
+      if (!current()) return;
       renderKit(data);
-    } catch { /* The invite dialog still opens. */ }
+    } catch {
+      if (current() && kitStatus) kitStatus.textContent = uiText("invite.loadLinkFailed");
+    }
   }
   async function copyGrowth(value, done) {
     const kitStatus = $("#growth-kit-status");
-    if (!value) return;
+    const opener = invitationOpener;
+    if (!value || !manager.open || !opener || opener.session !== getSession()
+      || opener.generation !== client.generation || !client.ownsAccountSession()) return;
     try {
       await navigator.clipboard.writeText(value);
       if (kitStatus) kitStatus.textContent = done;
@@ -420,6 +431,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function resetManagement() {
     managementVersion++; listVersion++; pendingCreate = null;
+    renderKit(null);
     managementSession = null; managementGeneration = null; clearResult();
     $("#share-settings").open = false; $("#share-management").open = false;
     $("#share-link-list").replaceChildren(); status(""); listStatus("");
@@ -495,7 +507,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       await loadKit();
       return;
     }
-    resetManagement(); const version = ++managementVersion, generation = client.generation;
+    resetManagement(); managementVersion++;
+    const generation = client.generation;
     managementSession = getSession(); managementGeneration = generation;
     if (!ownsManagement()) return;
     kitOnly = false;
@@ -509,11 +522,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     if (accessLabel) accessLabel.hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
     if (access) access.value = "guest";
     manager.showModal(); $("#share-link-create").focus();
-    // Link-list feedback never owns the newer creation/clipboard status.
-    await Promise.all([list(version, generation).catch(() => {}), contextualInvitation ? Promise.resolve() : loadKit()]);
+    if (!contextualInvitation) await loadKit();
   }
   $("#invite-people-button").addEventListener("click", () => openInvitation());
   $("#share-link-history-note").textContent = uiText("invite.roomHistory");
+  $("#join-account-back").textContent = uiText("invite.joinTemporarily");
+  $("#join-account-guest-hint").textContent = uiText("invite.accountContinuity");
+  $("#share-management").addEventListener("toggle", () => {
+    if ($("#share-management").open && manager.open && ownsManagement()) {
+      return list(managementVersion, client.generation).catch(() => {});
+    }
+  });
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
   manager.addEventListener("close", () => {
@@ -569,7 +588,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       status("Link ready.");
       $("#share-link-copy").focus();
       creationBusy(false);
-      list(version, generation).catch(() => {});
+      if ($("#share-management").open) list(version, generation).catch(() => {});
       const clipboard = globalThis.navigator?.clipboard;
       if (!copying && inviteUrl && clipboard?.writeText) {
         try {
@@ -673,14 +692,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (account.authenticated && !resume && !fragment.reviewSession) await applyAccountDefaults(version);
       if (version !== joinVersion) return;
-      // Signed out: sign-in comes first, with "Continue as guest" below it.
+      // Signed out: show one form at a time. Temporary access is an explicit choice.
       // Member and co-admin links need an account, so they offer no guest path.
       const elevated = preview.link.access && preview.link.access !== "guest";
       $("#join-account-back").hidden = elevated;
       if (!account.authenticated && !resume && !fragment.reviewSession && !returning) {
-        $("#join-account-choices").hidden = true; $("#join-account-back").hidden = true;
+        $("#join-account-choices").hidden = true;
         $("#join-account-auth").hidden = false; onAccountSignin("magic");
-        $("#join-link-form").hidden = elevated;
+        $("#join-link-form").hidden = true;
         if (elevated) $("#join-link-scope").textContent = "Sign in or create an account to join. This invitation gives you room permissions.";
         $("#join-account-google").focus();
       }
@@ -760,7 +779,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-account-back").addEventListener("click", () => {
     if (joining || !canLeaveAccountSignin()) return;
     onAccountSignin(null); mirrorJoin(); $("#join-account-auth").hidden = true;
-    $("#join-account-choices").hidden = true; $("#join-link-form").hidden = false;
+    $("#join-account-choices").hidden = false; $("#join-link-form").hidden = false;
     $("#join-link-name").focus();
   });
   $("#shared-agent-copy").addEventListener("click", async () => {

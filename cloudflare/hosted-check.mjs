@@ -1,3 +1,4 @@
+import { fillJoinName } from "../scripts/auth-signin.mjs";
 import { clickChrome } from '../scripts/room-chrome.mjs';
 // Explicit operator-run acceptance for our staging app. Never runs in normal CI.
 // Credentials and browser sessions stay in the ignored, private .operator folder.
@@ -84,7 +85,7 @@ try {
       console.log('User-testing invite saved privately: cloudflare/.operator/user-test-invite.txt (24 hours, up to 10 new guests).');
     } else {
     await guest.goto(invitation);
-    await guest.locator('#join-link-name').fill(`Test guest ${Date.now().toString(36).slice(-4)}`);
+    await fillJoinName(guest, `Test guest ${Date.now().toString(36).slice(-4)}`);
     await guest.locator('#join-link-submit').click();
     await guest.locator('#main').waitFor({ state: 'visible' });
     const stamp = new Date().toISOString();

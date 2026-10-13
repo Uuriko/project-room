@@ -12,10 +12,12 @@ function setup(t) {
   const node = selector => { if (!nodes.has(selector)) nodes.set(selector, makeNode()); return nodes.get(selector); };
   doc = { querySelector: node, createElement: makeNode, body: {}, activeElement: null };
   const member = { id: "owner", kind: "human", active: true, revision: 1, permissions: ["manage_members"] };
-  let session = { roomId: "commons", member }, authorized = true, responder;
+  let session = { roomId: "commons", member }, authorized = true, responder, kitResponder;
   const client = { session, generation: 1, ownsAccountSession: () => authorized, path: suffix => suffix,
     async request(path, options) {
       requests.push({ path, options });
+      if (path === "/referrals" && options?.method === "GET") return kitResponder ? kitResponder() : {};
+      assert.equal(path, "/share-links");
       if (responder) return responder(path, options);
       return options?.method === "POST" ? { link: { id: `link-${requests.length}`, status: "active", expiresAt: options.data.expiresAt } } : { links: [] };
     } };
@@ -33,10 +35,30 @@ function setup(t) {
   node("#share-link-expiry").value = "24"; node("#share-link-limit").value = "10";
   return { node, ui, member, client, copies, requests,
     setSession(value) { session = value; }, revoke() { authorized = false; }, setResponder(value) { responder = value; },
+    setKitResponder(value) { kitResponder = value; },
     open: () => node("#invite-people-button").handlers.click(),
+    manage: () => { node("#share-management").open = true; return node("#share-management").handlers.toggle(); },
     create: () => node("#share-link-form").handlers.submit({ preventDefault() {} }),
     note(value) { node("#share-note").open = true; node("#share-note-text").value = value; node("#share-note-text").handlers.input(); },
   };
+}
+
+for (const boundary of ["closed", "generation", "visible session", "client session", "account ownership"]) {
+  test(`late generic invitation cannot appear after ${boundary} changes`, async t => {
+    const f = setup(t), response = Promise.withResolvers();
+    f.setKitResponder(() => response.promise);
+    const opening = f.open();
+    if (boundary === "closed") f.ui.resetManagement();
+    if (boundary === "generation") f.client.generation++;
+    if (boundary === "visible session") f.setSession({ ...f.client.session });
+    if (boundary === "client session") f.client.session = { ...f.client.session };
+    if (boundary === "account ownership") f.revoke();
+    response.resolve({ invite: { token: "a".repeat(43), message: "Join {url}", status: "active" } });
+    await opening;
+    assert.equal(f.node("#growth-invite-url").value, "");
+    assert.equal(f.node("#growth-invite-message").value, "");
+    assert.equal(f.node("#growth-copy-link").disabled, true);
+  });
 }
 
 for (const boundary of ["generation", "visible session", "client session", "account ownership", "member revision", "permissions", "inactive", "agent"]) {
@@ -70,7 +92,8 @@ for (const denial of [{ status: 401 }, { status: 403 }, { status: 422, code: "se
   test(`management denial ${denial.status}/${denial.code ?? "auth"} defeats an older successful creation`, async t => {
     const f = setup(t), listing = Promise.withResolvers(), creation = Promise.withResolvers();
     f.setResponder((path, options) => options?.method === "POST" ? creation.promise : listing.promise);
-    const opening = f.open(), creating = f.create();
+    await f.open();
+    const opening = f.manage(), creating = f.create();
     listing.reject(Object.assign(new Error("Synthetic access change"), denial));
     await opening;
     assert.equal(f.node("#share-link-dialog").open, false);
@@ -110,7 +133,7 @@ for (const status of ["full", "cancelled", "expired", "authority_changed"]) {
     f.setResponder((path, options) => options?.method === "POST"
       ? { link: { id: "link", status: "active", expiresAt: options.data.expiresAt } }
       : { links: [{ id: "link", status, joins: 0, maxJoins: 1, expiresAt: Date.now() + 3600000 }] });
-    await f.open(); await f.create();
+    await f.open(); await f.manage(); await f.create();
     // Creation copies the link itself now (#634), and the listing retiring it
     // races that copy, so the count here is not the thing to pin. What must
     // hold is that the retired result yields nothing further to the copy

@@ -1,3 +1,4 @@
+import { fillJoinName } from "./auth-signin.mjs";
 // Guest upgrade in a real browser (auth audit 2026-10-09, path 13), at desktop
 // and 390px phone sizes: a guest who joined from a link adds an email, enters
 // the mailed code with a password, and later signs in to the same account and
@@ -46,10 +47,7 @@ async function setup(t) {
 
 async function joinAsGuest(f, page, name) {
   await page.goto(`${f.origin}/#join/${f.links.valid}`);
-  const guestButton = page.getByRole("button", { name: "Continue as guest", exact: true });
-  await guestButton.waitFor();
-  if (!(await page.locator("#join-link-name").isVisible())) await guestButton.click();
-  await page.locator("#join-link-name").fill(name);
+  await fillJoinName(page, name);
   await page.locator("#join-link-submit").click();
   await page.locator("#join-link-dialog").waitFor({ state: "hidden" });
   await page.locator("#main").waitFor({ state: "visible" });

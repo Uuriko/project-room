@@ -1,3 +1,4 @@
+import { fillJoinName } from "./auth-signin.mjs";
 // Invite signup follow-ups to #2318 (auth audit 2026-10-09, A20), in a real
 // browser at desktop 1280 and phone 390. Someone opens a friend's invite,
 // creates an account from the join dialog, and must (a) see "Check your
@@ -107,7 +108,7 @@ test("a typed-in empty name gets a visible message, not only a browser bubble", 
   await signUpFromInvite(f, page, "blank-name@example.invalid");
   const dialog = page.locator("#join-link-dialog");
   await dialog.getByRole("button", { name: "Join room" }).waitFor({ state: "visible" });
-  await page.locator("#join-link-name").fill("");
+  await fillJoinName(page, "");
   await dialog.getByRole("button", { name: "Join room" }).click();
   await dialog.getByText("Enter the name to show in this room.").waitFor({ state: "visible" });
 });

@@ -391,5 +391,9 @@
   "join.dead.signedInStatus": "This invite is unavailable. Ask the person who invited you for a fresh link.",
   "join.dead.roomsLink": "Back to your rooms",
   "invite.toWork": "Invite to this work",
+  "invite.joinTemporarily": "Join temporarily as a guest",
+  "invite.accountContinuity": "Keep your rooms across visits and devices.",
+  "invite.loadingLink": "Loading invite link…",
+  "invite.loadLinkFailed": "Could not load your invite link. Close and reopen Invite to try again.",
   "invite.roomHistory": "Joining gives access to the room and its history."
 }
