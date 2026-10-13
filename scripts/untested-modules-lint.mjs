@@ -13,7 +13,6 @@ const GRANDFATHERED = [
   "agent-key-registry.mjs",
   "gmail-content.mjs",
   "inbox-collab-routes.mjs",
-  "inbox-collab-store.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
