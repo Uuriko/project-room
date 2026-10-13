@@ -573,11 +573,11 @@ below. Use [WORK-CLAIMS.md](WORK-CLAIMS.md) for current API/review semantics and
   are accepted only on the `done` transition; pointers do not upload evidence
   or verify its contents. Empty arrays explicitly clear completion metadata.
 
-- `reviewWorkItem(id, { verdict, summary, url? })` records an explicit review
+- `reviewWorkItem(id, { verdict, summary, url?, evidence? })` records an explicit review
   by the authenticated, authorized non-owner. The legacy `{ note }` form
   records a note, not approval. Manual non-self completion needs `reviewedBy`
   naming a current authorized reviewer whose latest `approve` matches the
-  claim basis; see [manual reviewed completion](WORK-CLAIMS.md#manual-reviewed-completion).
+  claim basis; any change to tags, blobs, deliveryMode or evidenceRefs at done (including clearing) needs an approval whose `evidence` names the new values; see [manual reviewed completion](WORK-CLAIMS.md#manual-reviewed-completion).
 - `renewWorkItem(id, { progressMessageId?, note?, leaseHours? })` renews the
   caller's active lease. When supplied, `progressMessageId` must identify their
   own public message posted after this lease started. The REST API also
