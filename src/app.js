@@ -3909,6 +3909,7 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
+$("#refresh-button").disabled = false;
 // A DM refused by the explicit-denial gate (blocked/rejected/revoked) names
 // the recipient and the next step, instead of surfacing the raw gate
 // message. Returns null when the error is not a DM denial.
