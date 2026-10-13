@@ -1,5 +1,5 @@
 import { openComposerOptions } from "./room-chrome.mjs";
-import { clickChrome, ensureSidebarOpen } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarOpen, messageAction } from "./room-chrome.mjs";
 // Simulated people, real local browser. Fictional rooms; no outside services.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,8 +8,9 @@ import { chromium } from "playwright";
 import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
 
-async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = {}) {
+async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0 } = {}) {
   const f = createResultsFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   let browser;
   t.after(async () => {
@@ -23,6 +24,7 @@ async function setup(t, { mobile = false, guest = false, expectedWrites = 0 } = 
   const p = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
     isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   p.setDefaultTimeout(8000);
+  await p.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [], outside = [], writes = [];
   p.on("pageerror", error => errors.push(error.message));
   await p.route("**/*", route => {
@@ -93,6 +95,7 @@ test("result read failure preserves the list and allows a deliberate retry", { t
   await p.route("**/work-result?**", route => route.fulfill({ status: 503, json: { error: "Unavailable" } }));
   await f.read(); await p.waitForFunction(() => document.querySelector("#result-status").textContent.includes("unavailable"));
   assert.equal(await p.locator("#result-body").textContent(), "");
+  assert.equal(await p.locator("#result-discuss").isVisible(), false);
   await p.locator("#close-result").click(); await p.unroute("**/work-result?**");
   await f.read(); await f.ready();
 });
@@ -110,6 +113,41 @@ test("late result reads cannot restore content after sign-out, and the Results v
   assert.equal(await p.locator("#settings-dialog").isVisible(), false);
   await p.unroute("**/work-result?**", { behavior: "wait" });
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-discuss").isVisible(), false);
+});
+
+for (const theme of ["dark", "light"]) for (const guest of [false, true]) test(`discuss exact result preserves drafts and authorship: ${theme} ${guest ? "guest phone" : "owner desktop"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { guest, mobile: guest, theme, expectedWrites: 1 }), p = f.p;
+  const before = structuredClone(f.state().workItems["native-result"]);
+  const resultId = before.receipt.nativeText.messageId;
+  const input = p.locator("#message-input");
+  await input.fill("Keep my channel draft");
+  await f.open(); await f.read(); await f.ready();
+  const discuss = p.getByRole("button", { name: "Discuss result", exact: true });
+  await discuss.focus(); await p.keyboard.press("Enter");
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false);
+  assert.equal(await input.evaluate(node => node === document.activeElement), true);
+  assert.equal(await input.inputValue(), "");
+  await input.fill("Keep my result follow-up");
+  await p.locator("#thread-back").click();
+  assert.equal(await input.inputValue(), "Keep my channel draft");
+  await clickChrome(p, "#room-actions-open");
+  await p.locator('[data-room-action="results"]').click();
+  await f.read(); await f.ready(); await discuss.click();
+  assert.equal(await input.inputValue(), "Keep my result follow-up");
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(`discuss-${theme}-${guest ? "phone" : "desktop"}`);
+  await p.locator('#message-form button[type="submit"]').click();
+  await p.waitForFunction(() => !document.querySelector("#message-input").value);
+  const posted = f.state().messages.filter(message => message.body === "Keep my result follow-up");
+  assert.equal(posted.length, 1);
+  assert.equal(posted[0].authorId, guest ? "guest" : "owner");
+  assert.equal(posted[0].replyToId, resultId, "the exact result, not another version, owns the reply context");
+  assert.equal(posted[0].toMemberId, null, "discussion stays public");
+  assert.deepEqual(f.state().workItems["native-result"], before, "discussion does not reopen, approve or reassign work");
+  await p.locator("#thread-back").click();
+  assert.equal(await input.inputValue(), "Keep my channel draft");
 });
 
 test("guest Results remain useful with large text and no creation controls", { timeout: 30000 }, async t => {
@@ -121,6 +159,43 @@ test("guest Results remain useful with large text and no creation controls", { t
   await f.read(); await f.ready();
   assert.equal(await p.locator("#result-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await f.capture("large-text");
+});
+
+test("a withdrawn result loses its discussion action without disturbing a draft", { timeout: 30000 }, async t => {
+  const f = await setup(t), p = f.p;
+  await p.locator("#message-input").fill("Keep this thought");
+  await f.open(); await f.read(); await f.ready();
+  await p.locator("#result-discuss").waitFor({ state: "visible" });
+  const messageId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_DELETED, { messageId, expectedMessageRevision: f.state().messages.find(message => message.id === messageId).revision ?? 0 });
+  await p.locator("#result-discuss").waitFor({ state: "hidden" });
+  await p.locator("#close-result").click();
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep this thought");
+});
+
+test("returning from a result preserves an uncertain send's exact target and retry", { timeout: 30000 }, async t => {
+  const f = await setup(t, { expectedWrites: 2 }), p = f.p;
+  const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
+  f.send("producer", T.MESSAGE_POSTED, { messageId: "result-peer-reply", body: "Which part needs another look?", replyToId: resultId });
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await messageAction(p, "result-peer-reply", "reply");
+  await p.locator("#message-input").fill("Please expand the second point");
+  const attempts = [];
+  await p.route("**/rooms/commons/commands", route => {
+    attempts.push(route.request().postDataJSON());
+    return attempts.length === 1 ? route.fulfill({ status: 503, json: { error: "Unavailable" } }) : route.continue();
+  });
+  const send = p.locator('#message-form button[type="submit"]');
+  await send.click();
+  await p.locator("#composer-status").filter({ hasText: "Draft kept" }).waitFor();
+  await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
+  await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  assert.equal(await p.locator("#message-input").inputValue(), "Please expand the second point");
+  await send.click(); await p.waitForFunction(() => !document.querySelector("#message-input").value);
+  assert.equal(attempts.length, 2);
+  assert.deepEqual(attempts[1], attempts[0], "same command and reply target are retried");
+  assert.equal(attempts[1].data.replyToId, "result-peer-reply");
+  assert.equal(f.state().messages.filter(message => message.body === "Please expand the second point").length, 1);
 });
 
 test("creating new work from the composer requires explicit confirmed submission", { timeout: 30000 }, async t => {
