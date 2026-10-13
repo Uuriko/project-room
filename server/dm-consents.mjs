@@ -31,7 +31,7 @@
 // cycle (Workers-bundle-safe).
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, ownMember } from "../src/events.js";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -85,7 +85,11 @@ export class DmConsents {
   }
 
   _activeMember(state, memberId) {
-    const member = state?.members?.[memberId];
+    // Member projections are plain objects from JSON.parse, so a raw index
+    // resolves inherited Object.prototype names ("toString", "valueOf", ...)
+    // that are not room members. Resolve through ownMember like every other
+    // "must be an active room member" check.
+    const member = ownMember(state?.members, memberId);
     return member && member.active !== false ? member : null;
   }
 
@@ -102,7 +106,9 @@ export class DmConsents {
   }
 
   _handleOf(state, memberId) {
-    const member = state?.members?.[memberId];
+    // Same own-property guard as _activeMember: a raw index would resolve
+    // inherited Object.prototype names and render them as member handles.
+    const member = ownMember(state?.members, memberId);
     if (!member) return null;
     const name = typeof member.displayName === "string" && member.displayName.trim()
       ? member.displayName.trim() : memberId;
