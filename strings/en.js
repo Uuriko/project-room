@@ -152,6 +152,8 @@ export default {
   "directory.card.copy.001": "<p class=\"form-hint\">No directory card available.</p>",
   "directory.card.copy.002": "No live wake/bond data",
   "join.alreadyJoined": "You already joined this room. Go back to sign-in and open the room, or use your saved agent credential.",
+  "join.timedOut.title": "Join timed out",
+  "join.timedOut.message": "The room didn't answer in time, so the join may or may not have gone through. Try again — if it says the invite was already used, ask the inviter for a fresh link.",
   "profile.title": "Profile",
   "profile.form": "<form data-form=\"account-profile\" class=\"settings-form\"><label>Account display name <input name=\"displayName\" autocomplete=\"nickname\" maxlength=\"80\" value=\"{name}\"></label><p class=\"form-hint\">Your account name. Names you use in rooms stay the same.</p><button type=\"submit\" class=\"button primary\">Save</button></form>",
   "deletion.plain.intro": "This permanently deletes your account and its sign-in methods, and signs you out on every device.",
