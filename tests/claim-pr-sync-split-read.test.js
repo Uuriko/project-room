@@ -111,6 +111,100 @@ test("a CI read split by the budget keeps the combined status for the resume", a
   assert.equal(stored2.pullRequest.ciStatus, null, "a completed read clears the persisted digest");
 });
 
+function respondError(status = 500) {
+  return {
+    status, ok: false, headers: { get: () => null },
+    text: async () => "upstream error",
+    json: async () => ({})
+  };
+}
+
+// Like scriptedFetch, but a route mapped to { error: <status> } fails.
+function scriptedFetchWithErrors(routes, calls) {
+  return async url => {
+    calls.push(url);
+    for (const [match, body] of routes) {
+      if (url.includes(match)) return body?.error ? respondError(body.error) : respond(body);
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+}
+
+test("a failed combined-status fetch does not advance the CI cursor or record a rollup (#2921)", async () => {
+  const registry = seededRegistry();
+  const calls = [];
+  const fetchImpl = scriptedFetchWithErrors([
+    ["/pulls/1600", { state: "open", merged: false, head: { sha: SHA } }],
+    [`/commits/${SHA}/status`, { error: 500 }],
+    [`/commits/${SHA}/check-runs`, CHECK_RUNS_BODY]
+  ], calls);
+  const item = { ...registry.get(ROOM, "split-1"), roomId: ROOM };
+  const batch = await collectPullRequestLookups([item], { fetchImpl, token: "t", nowMs: NOW });
+  assert.equal(calls.length, 2, "the tick stops at the failed status leg instead of reading check runs");
+  assert.equal(batch.results.length, 1);
+  const result = batch.results[0];
+  assert.equal(result.ciCursor, "status", "the cursor stays on the failed leg for a retry");
+  assert.equal(result.ci, undefined, "no rollup is built from the missing status");
+
+  commitPullRequestLookup({}, registry, ROOM, registry.get(ROOM, "split-1"), result, NOW);
+  const stored = registry.get(ROOM, "split-1");
+  assert.equal(stored.pullRequest.ciCursor, "status");
+  assert.equal(stored.ci.state, "success", "the previous CI value is not overwritten");
+  assert.equal(stored.ci.headSha, SHA);
+});
+
+test("a failed check-runs fetch does not finish the CI read or record a rollup (#2921)", async () => {
+  const registry = seededRegistry();
+  const calls = [];
+  const fetchImpl = scriptedFetchWithErrors([
+    ["/pulls/1600", { state: "open", merged: false, head: { sha: SHA } }],
+    [`/commits/${SHA}/status`, STATUS_BODY],
+    [`/commits/${SHA}/check-runs`, { error: 502 }]
+  ], calls);
+  const item = { ...registry.get(ROOM, "split-1"), roomId: ROOM };
+  const batch = await collectPullRequestLookups([item], { fetchImpl, token: "t", nowMs: NOW });
+  assert.equal(calls.length, 3);
+  assert.equal(batch.results.length, 1);
+  const result = batch.results[0];
+  assert.equal(result.ciCursor, "checks", "the cursor stays on the failed leg, not done");
+  assert.equal(result.ci, undefined, "no rollup is built from the status alone");
+  assert.equal(result.ciStatus?.state, "failure", "the fetched status still rides with the cursor");
+
+  commitPullRequestLookup({}, registry, ROOM, registry.get(ROOM, "split-1"), result, NOW);
+  const stored = registry.get(ROOM, "split-1");
+  assert.equal(stored.pullRequest.ciCursor, "checks");
+  assert.equal(stored.pullRequest.ciStatus?.state, "failure", "the status digest is persisted for the resume");
+  assert.equal(stored.ci.state, "success", "the previous CI value is not overwritten by a bogus rollup");
+});
+
+test("a failed check-runs fetch on a resumed read keeps the checks cursor and prior CI (#2921)", async () => {
+  const registry = seededRegistry();
+  const seeded = registry.get(ROOM, "split-1");
+  const digest = { state: "failure", totalCount: 1, targetUrl: STATUS_URL };
+  registry.set(ROOM, {
+    ...seeded,
+    pullRequest: { ...seeded.pullRequest, ciCursor: "checks", ciStatus: digest },
+    pullRequests: [{ ...seeded.pullRequest, ciCursor: "checks", ciStatus: digest }]
+  });
+  const calls = [];
+  const fetchImpl = scriptedFetchWithErrors([
+    [`/commits/${SHA}/check-runs`, { error: 500 }]
+  ], calls);
+  const item = { ...registry.get(ROOM, "split-1"), roomId: ROOM };
+  const batch = await collectPullRequestLookups([item], { fetchImpl, token: "t", nowMs: NOW + 1000 });
+  assert.equal(calls.length, 1, "the resume spent its only call on the check runs");
+  assert.equal(batch.results.length, 1);
+  const result = batch.results[0];
+  assert.equal(result.ciCursor, "checks", "the failed resume does not advance to done");
+  assert.equal(result.ci, undefined);
+  assert.equal(result.ciStatus?.state, "failure", "the persisted status digest survives the failed resume");
+
+  commitPullRequestLookup({}, registry, ROOM, registry.get(ROOM, "split-1"), result, NOW + 1000);
+  const stored = registry.get(ROOM, "split-1");
+  assert.equal(stored.pullRequest.ciCursor, "checks");
+  assert.equal(stored.ci.state, "success", "the previous CI value is not overwritten");
+});
+
 test("the persisted status digest survives a claim state-machine write between ticks", () => {
   const registry = seededRegistry();
   const item = registry.get(ROOM, "split-1");
