@@ -12,13 +12,23 @@ export function mountSigninEntry({ openWorkspace }) {
   const listeners = new AbortController();
   const on = (node, type, handler) => node.addEventListener(type, handler, { signal: listeners.signal });
   let restoreFlight = null, active = true;
+  const enterWorkspace = options => {
+    $("#auth-panel").inert = true;
+    $("#auth-panel").setAttribute("aria-busy", "true");
+    return openWorkspace(options).catch(error => {
+      $("#auth-panel").inert = false;
+      $("#auth-panel").removeAttribute("aria-busy");
+      throw error;
+    });
+  };
+
   const restore = () => restoreFlight ??= accountClient.restore().finally(() => { restoreFlight = null; });
   const navigation = createSigninNavigation({ getUI: () => signin, active: () => $("#auth-panel").contains($("#auth-signin-ui")) });
   const enterAccount = async () => {
     const session = await restore();
     if (!session?.authenticated) throw new Error(uiText("entry.sessionChanged"));
     rememberAccountHint();
-    await openWorkspace({ accountClient, signedIn: !location.search && !location.hash });
+    await enterWorkspace({ accountClient, signedIn: !location.search && !location.hash });
   };
   const signin = createAuthSigninUI({
     accountClient,
@@ -27,7 +37,7 @@ export function mountSigninEntry({ openWorkspace }) {
     onBack: navigation.back,
     onSignedIn: enterAccount,
     onBusyChange: value => {
-      if (!value && active && (location.search || location.hash)) void openWorkspace().catch(() => {});
+      if (!value && active && (location.search || location.hash)) void enterWorkspace().catch(() => {});
     },
     onSignInUncertain: async () => { await restore(); },
     onPasswordResetComplete: async () => { await restore(); signin.showPassword(); },
@@ -39,7 +49,7 @@ export function mountSigninEntry({ openWorkspace }) {
       const target = new URL(location.href);
       target.searchParams.set("room", session.roomId);
       history.replaceState(history.state, "", target.href);
-      await openWorkspace();
+      await enterWorkspace();
     },
     firstRunActions: {
       greet: () => $("#message-input")?.focus(),
@@ -89,10 +99,12 @@ export function mountSigninEntry({ openWorkspace }) {
   on($("#refresh-button"), "click", () => { if (signin.canLeave() && agent.canLeave()) location.reload(); });
   on(window, "hashchange", () => {
     if (!signin.canLeave() || !agent.canLeave()) return;
-    void openWorkspace().catch(() => {});
+    void enterWorkspace().catch(() => {});
   });
   return () => {
     active = false;
+    $("#auth-panel").inert = false;
+    $("#auth-panel").removeAttribute("aria-busy");
     listeners.abort(); navigation.dispose(); signin.unmount(); agent.unmount();
     $("#signin-controller").prepend($("#auth-signin-ui"));
     if ($("#agent-auth-step")) $("#agent-auth-step").hidden = true;

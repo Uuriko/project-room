@@ -220,3 +220,22 @@ test("cached HTML that names app.js directly still starts the existing workspace
   await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
   assert.equal(await page.locator("#auth-signin-ui").count(), 1);
 });
+
+test("an incoming room link owns navigation while its workspace module downloads", async t => {
+  const f = await setup(t), page = await f.open(), requests = [];
+  await page.goto(f.origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route("**/src/app.js", route => release(route));
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  await page.evaluate(() => { location.hash = "#room/commons"; });
+  const route = await held;
+  assert.equal(await page.locator("#auth-panel").evaluate(node => node.inert), true);
+  const button = await page.locator("#google-signin").boundingBox();
+  await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2);
+  assert.equal(requests.includes("/api/auth/google/start"), false, "old sign-in cannot replace pending entry");
+  await route.continue();
+  await page.waitForFunction(() => !document.querySelector("#auth-panel").inert);
+  assert.match(page.url(), /#room\/commons$/);
+});
