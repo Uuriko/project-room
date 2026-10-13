@@ -38,6 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
+  updateRequestDigest, requestReplayVerdict,
   openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
@@ -1051,14 +1052,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    // The note is normalized before the replay verdict below so the
+    // payload digest is computed over the exact text updateWork stores
+    // (a retry re-sends the same raw note and normalizes identically).
+    if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     // PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency. A requestId
     // that already landed on this claim replays the stored outcome (200,
     // the current item) with no new write, no history entry and no room
     // event — a timed-out retry cannot duplicate the update. It runs before
     // the stale-basis precondition: the client already got its 200 for this
     // request, so a retry carrying a now-stale basis is still a replay.
-    if (data.requestId !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, data.requestId)) {
-      return json(res, 200, item);
+    // #2965: the replay is bound to the payload digest — a seen requestId
+    // carrying a different update is refused 409, never silently swallowed.
+    if (data.requestId !== undefined) {
+      const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
+        updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
+          reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs }));
+      if (verdict === "replay") return json(res, 200, item);
+      if (verdict === "conflict") reject(409, "work_claim_conflict",
+        `requestId "${data.requestId}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
     }
     requireWriter();
     requireEventBudget();
@@ -1084,7 +1097,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         throw refusal;
       }
     }
-    if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     if (data.state === "done") {
       // QA-Sec 2026-09-19: the reviewer must be authenticated. For
       // self_attested the reviewer is the owner (the caller). For the
