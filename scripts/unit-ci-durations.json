@@ -1060,6 +1060,7 @@
   "tests/github-unconfigured-sweep.test.js": 475,
   "tests/herdr-bridge.test.js": 9706,
   "tests/herdr-bridge-unknown-socket-error.test.js": 7280,
+  "tests/herdr-bridge-write-retry-dedupe.test.js": 4076,
   "tests/inbox-stitch-fuzz.test.js": 179,
   "tests/machine-pause-duration.test.js": 152,
   "tests/maintenance-signals.test.js": 573,
