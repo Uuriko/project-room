@@ -6270,7 +6270,8 @@ $("#result-discuss").addEventListener("click", () => {
   closeResult(false);
   revealMessage(message.id);
   switchThread(conversation.rootById.get(message.id), true);
-  replyToId = message.id;
+  // An uncertain send already owns its exact reply target until it is resolved.
+  if (!pendingMessage) replyToId = message.id;
   updateReply(); saveComposer(); persistDrafts();
 });
 $("#result-original").addEventListener("click", () => {
