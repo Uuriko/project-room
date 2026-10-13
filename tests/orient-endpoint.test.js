@@ -117,6 +117,27 @@ test("orient rejects unauthenticated callers", async t => {
   assert.equal(response.status, 401);
 });
 
+test("orient ranked matches never exceed the maxTokens budget, even when the top line alone is oversized", t => {
+  const f = fixture(t);
+  // The long line repeats the query term, so BM25 ranks it first — but at
+  // 30 tokens it cannot fit a budget of 1 or 10. The one-token line ranks
+  // second and fits either budget.
+  const longBody = "zebra ".repeat(30).trim();
+  f.store.command(f.ownerKey, ROOM, { id: "orient-post-long", type: T.MESSAGE_POSTED, data: {
+    messageId: "orient-msg-long", body: longBody } });
+  f.store.command(f.ownerKey, ROOM, { id: "orient-post-short", type: T.MESSAGE_POSTED, data: {
+    messageId: "orient-msg-short", body: "zebra" } });
+  for (const maxTokens of [1, 10]) {
+    const payload = buildOrient(f.store, ROOM, "owner", { q: "zebra", maxTokens });
+    assert.ok(payload.matched.tokens <= maxTokens,
+      `matched.tokens ${payload.matched.tokens} exceeds maxTokens ${maxTokens}`);
+    assert.ok(payload.matched.lines.every(line => line.text !== longBody),
+      "an oversized line must not be returned whole against the budget");
+    assert.deepEqual(payload.matched.lines.map(line => line.id), ["orient-msg-short"]);
+    assert.equal(payload.matched.tokens, 1);
+  }
+});
+
 test("buildOrient matches the served payload", async t => {
   const f = fixture(t);
   const direct = buildOrient(f.store, ROOM, "worker");
