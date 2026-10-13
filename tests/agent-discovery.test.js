@@ -7,7 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../deploy/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
@@ -91,7 +91,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
   assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
   assert.match(text, /hosted-mcp \(live, no account\)/);
-  assert.match(text, /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(text, /https:\/\/room\.trydemigod\.com\/mcp/);
   assert.doesNotMatch(text, /human-join-code \(live\)/);
   assert.match(text, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
@@ -686,6 +686,96 @@ test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
 // and scripts/openapi-served-exclusions.json inventories the out-of-scope
 // routes with reasons. The packets must state that coverage rule honestly;
 // an "every route" sentence is docs/live drift the moment it ships.
+// #3022: the short packet's two Board-wakes paragraphs told agents to poll
+// GET /api/agent-wakes/poll with no parameters and no prerequisites; the
+// literal call returns 422 invalid_wake_poll (hostId is required) and then
+// 404 agent_not_registered (a heartbeat must come first). Both paragraphs
+// now interpolate the one WAKE_POLL_INSTRUCTION sentence from the generator,
+// and this test fails if any wake-poll mention in any packet loses the
+// heartbeat-first + hostId shape again — or if a bare poll URL reappears.
+test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
+    assert.ok(!text.includes("/api/agent-wakes/poll`"), `${name}: no bare poll URL presented as the instruction`);
+    assert.ok(!text.includes("/api/agent-wakes/poll\n"), `${name}: no bare poll URL at line end`);
+    for (const line of text.split("\n").filter(l => l.includes("Board wakes"))) {
+      assert.ok(line.includes("/api/agent-heartbeats"), `${name}: Board-wakes line names the heartbeat-first step`);
+      assert.ok(line.includes("agent-wakes/poll?hostId="), `${name}: Board-wakes line polls with ?hostId=`);
+      assert.ok(line.includes("invalid_wake_poll"), `${name}: Board-wakes line names the 422 for a missing hostId`);
+      assert.ok(line.includes("agent_not_registered"), `${name}: Board-wakes line names the 404 before any heartbeat`);
+    }
+  }
+  const wakesLines = llmsTxt().split("\n").filter(l => l.includes("Board wakes"));
+  assert.equal(wakesLines.length, 2, "llms.txt keeps exactly its two Board-wakes paragraphs");
+});
+
+// The packet golden path (PUBLIC_WORK_SECTION, shared by llms.txt and
+// llms-full.txt) hardcoded termsVersion 3 / generation 7-8 in its worked
+// example while live tasks are termsVersion 1 / generation 1 — a literal
+// follower's finish call failed as stale. PR #3026 fixed the same literals
+// in the docs; the packet now shows live-shaped response examples and
+// TERMS_VERSION/GENERATION placeholders in the finish request.
+test("packet golden path carries no stale termsVersion/generation literals", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!text.includes("\"termsVersion\":3"), `${name}: no termsVersion 3 literal`);
+    assert.ok(!text.includes("\"expectedTermsVersion\":3"), `${name}: finish example sends no literal expectedTermsVersion`);
+    assert.ok(!text.includes("\"generation\":8"), `${name}: no generation 8 literal`);
+    assert.ok(text.includes("\"expectedTermsVersion\":TERMS_VERSION"), `${name}: finish example uses the TERMS_VERSION placeholder`);
+    assert.ok(text.includes("\"generation\":GENERATION"), `${name}: finish example uses the GENERATION placeholder`);
+    assert.match(text, /copy both, never invent them/, `${name}: finish example says to copy both values from the claim response`);
+  }
+});
+
+// Canonical MCP origin (John's decision, 2026-10-13): room.trydemigod.com/mcp.
+// The packet used to point at the getdasha door for the MCP server card while
+// the code constant (src/room-mcp-join.js ROOM_MCP_PUBLIC_URL) named getdasha
+// as the pasteable URL — two origins for one endpoint (J1 finding C1). Every
+// generated discovery surface now advertises the one canonical origin.
+test("discovery surfaces advertise only the canonical MCP origin", () => {
+  for (const [name, text] of [["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()], ["kits.txt", kitsTxt()], ["agents.json", agentsJson()], ["ai-catalog", aiCatalog()]]) {
+    assert.ok(!text.includes("getdasha.com/room/mcp"), `${name}: no getdasha MCP pointer`);
+    assert.ok(!text.includes("getdasha.com/mcp"), `${name}: no getdasha MCP URL`);
+  }
+  // llms.txt may keep the www door documented as an alias (llms-accuracy
+  // pins that honesty), but the alias must never be the instructed URL:
+  // every getdasha MCP mention in the packet is the documented-alias line.
+  for (const line of llmsTxt().split("\n").filter(l => l.includes("getdasha.com/room/mcp") || l.includes("getdasha.com/mcp"))) {
+    assert.ok(line.includes("is an alias"), `llms.txt: getdasha MCP mention is documented-alias only: ${line.slice(0, 80)}`);
+  }
+  assert.ok(llmsTxt().includes(`One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp`), "llms.txt names the canonical MCP URL");
+  assert.ok(llmsTxt().includes(`Hosted MCP server card: ${ROOM_ORIGIN}/room/mcp/server-card`), "llms.txt server-card URL is on the canonical origin");
+});
+
+// llms.txt is the single front door (John's decision, 2026-10-13): its first
+// screen states the path and names the activation pack as the connected
+// proof + work menu an agent reads right after joining.
+test("llms.txt first screen routes to the activation pack as connected proof", () => {
+  const firstScreen = llmsTxt().split("\n").slice(0, 20).join("\n");
+  assert.match(firstScreen, /this packet is the front door/, "first screen names the single front door");
+  assert.ok(firstScreen.includes("/activation-pack"), "first screen names the activation pack");
+  assert.match(firstScreen, /proves you are connected/, "first screen frames the pack as connected proof");
+});
+
+// Guest door demotion (John's decision, 2026-10-13): the packet presents
+// guest access only as an owner-issued trial seat, never as a self-serve
+// signup path, and points at identity mint for ongoing access.
+test("packet presents guest access only as an owner-issued trial seat", () => {
+  const text = llmsTxt();
+  for (const line of text.split("\n").filter(l => l.includes("guest-agent-link"))) {
+    assert.match(line, /owner-issued/i, "guest bullet is framed owner-issued");
+    assert.match(line, /trial seat/i, "guest bullet is framed as a trial seat");
+    assert.match(line, /identity-mint/, "guest bullet points at full signup");
+  }
+  assert.match(agentCard().description, /trial seat is not membership/, "agent card frames the guest seat as trial-only");
+});
+
+// The packet names AGENT-START-HERE "the one agent doc"; the ARD catalog and
+// agents.json must not crown a second doc ("The one agent guide" for
+// SWARM-PLUG-IN) — two "one" guides is the entry-doc sprawl in miniature.
+test("discovery surfaces name only one 'one' guide", () => {
+  assert.ok(!aiCatalog().includes("one agent guide"), "ai-catalog: no second 'one' guide");
+  assert.ok(!agentsJson().includes("one agent guide"), "agents.json: no second 'one' guide");
+});
+
 test("llms packets describe /openapi.json as the curated machine surface, not every route", () => {
   for (const [name, text] of [["llms.txt", llmsTxt()], ["skill.md", skillMd()]]) {
     assert.ok(!text.includes("Every route is in"), `${name}: no 'Every route is in' overclaim`);

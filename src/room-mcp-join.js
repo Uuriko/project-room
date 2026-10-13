@@ -16,7 +16,11 @@ export const IDENTITY_MINT_MCP_TOOLS = Object.freeze([
   "room_identity_mint"
 ]);
 
-export const ROOM_MCP_PUBLIC_URL = "https://www.getdasha.com/room/mcp";
+// Canonical hosted-MCP URL (John's decision, 2026-10-13): the service
+// origin. The getdasha door serves the same catalog as an alias, but every
+// constant, snippet, and card advertises this one URL so agents are never
+// handed two origins for the same endpoint.
+export const ROOM_MCP_PUBLIC_URL = "https://room.trydemigod.com/mcp";
 export const ROOM_MCP_SERVER_NAME = "project-room";
 // initialize serverInfo.version. The server card copies this string.
 export const ROOM_MCP_SERVER_VERSION = "0.1.0";
@@ -212,8 +216,8 @@ export function isRoomMcpPath(pathname) {
 export function roomMcpUrlForHost(urlLike) {
   try {
     const url = urlLike instanceof URL ? urlLike : new URL(String(urlLike ?? ""));
-    // Edge doors and the Worker origin always advertise the pasteable public URL.
-    // Demigod GET /room/mcp is snippets-only; live POST tools/call is getdasha.
+    // Edge doors and staging Workers always advertise the one canonical
+    // public URL (ROOM_MCP_PUBLIC_URL, the service origin).
     if (EDGE_DOOR_HOSTS.includes(url.hostname) || url.hostname.endsWith(".getdasha.workers.dev")) {
       return ROOM_MCP_PUBLIC_URL;
     }
