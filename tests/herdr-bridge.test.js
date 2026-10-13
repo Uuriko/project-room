@@ -551,8 +551,8 @@ test('half-open probe failing with a non-transport error does not wedge the brea
     // answering normally, the very next call goes through instead of
     // failing fast as bridge_circuit_open forever.
     live.state.pingError = null;
-    const after = await call();
-    assert.equal(after.status, 200, `breaker must not stay wedged after a non-transport probe failure, got ${after.status} (${after.json.error?.code ?? ''})`);
+    const recovered = await call();
+    assert.equal(recovered.status, 200, `breaker must not stay wedged after a non-transport probe failure, got ${recovered.status} (${recovered.json.error?.code ?? ''})`);
     assert.equal(b2._internals.breaker.states.get(TENANT_A)?.halfOpenProbe, false, 'probe flag must not leak');
   } finally {
     live?.server.close();
