@@ -3146,6 +3146,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           additionalProperties: false,
         }, data);
         if (diagnosis) {
+          // Issue #2912 made this an identity-secret route: a caller who
+          // presents no credential at all gets the 401 before any field
+          // diagnosis, so anonymous probes learn nothing from validation
+          // (SEC-03 ordering, tests/anon-auth-before-validation.test.js).
+          // A caller who does present a credential keeps the field-level
+          // diagnosis below, and a shape-valid body still reaches the
+          // service, whose identical bare 404 for unknown rooms/identities
+          // (before proof is consulted) is unchanged.
+          if (!bearer(req)) reject(401, "unauthenticated", "Identity secret required: present the filing identity's current secret as Bearer");
           const parts = [];
           if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
           if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
@@ -3174,8 +3183,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         });
       }
       // POST-only route: a wrong method is 405 (Allow: POST), not a 404
-      // unknown-route, so a mistaken GET reads as a method error.
+      // unknown-route, so a mistaken GET reads as a method error. Anonymous
+      // callers get the 401 first (SEC-03 ordering, as above): the method
+      // error is only revealed to a caller presenting a credential.
       if (url.pathname === "/api/access-requests" && req.method !== "POST") {
+        if (!bearer(req)) reject(401, "unauthenticated", "Identity secret required: present the filing identity's current secret as Bearer");
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent room ownership, self-serve path: a self-minted identity

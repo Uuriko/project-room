@@ -106,7 +106,7 @@ test("access-requests 422 names the missing field (RC-2026-09-28-3410)", async t
   const res = await post(origin, "/api/access-requests", {
     identityId: friend.identityId, displayName: "Missing",
     requestedPermissions: ["accept_work"], requestId: "ar-missing-1",
-  });
+  }, friend.secret);
   assert.equal(res.status, 422);
   const json = await res.json();
   assert.ok(json.error.message.includes("missing required field: roomId"), "422 names the missing field");
@@ -122,7 +122,7 @@ test("access-requests 422 names the unexpected field (RC-2026-09-28-3410)", asyn
     roomId, identityId: friend.identityId, displayName: "Unexpected",
     requestedPermissions: ["accept_work"], requestId: "ar-unexpected-1",
     zzzUnknown: true,
-  });
+  }, friend.secret);
   assert.equal(res.status, 422);
   const json = await res.json();
   assert.ok(json.error.message.includes("unexpected field: zzzUnknown"), "422 names the unexpected field");
@@ -136,7 +136,7 @@ test("access-requests 422 names the invalid field (RC-2026-09-28-3410)", async t
   const res = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Invalid",
     requestedPermissions: "accept_work", requestId: "ar-invalid-1",
-  });
+  }, friend.secret);
   assert.equal(res.status, 422);
   const json = await res.json();
   assert.ok(json.error.message.includes("requestedPermissions: wrong type"), "422 names the invalid field and reason");

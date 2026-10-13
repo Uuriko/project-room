@@ -154,4 +154,22 @@ test("HTTP: POST /api/access-requests requires the identity secret as Bearer", a
   const filed = await post(identity.secret);
   assert.equal(filed.status, 201, "the holder's secret files the request");
   assert.equal((await filed.json()).status, "pending");
+  // SEC-03 ordering on this identity-secret route: an anonymous caller gets
+  // the 401 before field diagnosis or the method error, so validation and
+  // method details never leak pre-auth. A caller presenting a credential
+  // still gets the diagnosis (422) and the method error (405).
+  const malformed = secret => fetch(`${origin}/api/access-requests`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+    body: JSON.stringify({}),
+  });
+  assert.equal((await malformed(null)).status, 401, "anonymous malformed body is refused before diagnosis");
+  assert.equal((await malformed(identity.secret)).status, 422, "a credential presenter still gets the field diagnosis");
+  const wrongMethod = secret => fetch(`${origin}/api/access-requests`, {
+    headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+  });
+  assert.equal((await wrongMethod(null)).status, 401, "anonymous wrong method is refused before the method error");
+  const methodError = await wrongMethod(identity.secret);
+  assert.equal(methodError.status, 405, "a credential presenter still gets the method error");
+  assert.equal(methodError.headers.get("allow"), "POST");
 });

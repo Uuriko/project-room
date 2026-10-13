@@ -268,11 +268,23 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   assert.equal(missing.body?.error?.code, "not_found");
   for (const path of [
     "/api/agent-identities", "/api/identity-create", "/api/agent-invites/redeem",
-    "/api/share-links/join-agent", "/api/access-requests",
+    "/api/share-links/join-agent",
     "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem",
-    "/room/api/share-links/join-agent", "/room/api/access-requests"
+    "/room/api/share-links/join-agent"
   ]) {
     const got = await fetch(`${origin}${path}`);
+    assert.equal(got.status, 405, path);
+    assert.equal(got.headers.get("allow"), "POST", path);
+    assert.equal((await got.json()).error.code, "method_not_allowed", path);
+  }
+  // Issue #2912: /api/access-requests left the open POST-only set above —
+  // it is an identity-secret route now. A wrong method from an anonymous
+  // caller gets the 401 before the method error (SEC-03 ordering); a
+  // caller presenting a credential still gets the 405 + Allow: POST.
+  for (const path of ["/api/access-requests", "/room/api/access-requests"]) {
+    const anonymous = await fetch(`${origin}${path}`);
+    assert.equal(anonymous.status, 401, path);
+    const got = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${minted.body.secret}` } });
     assert.equal(got.status, 405, path);
     assert.equal(got.headers.get("allow"), "POST", path);
     assert.equal((await got.json()).error.code, "method_not_allowed", path);
