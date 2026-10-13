@@ -14,13 +14,13 @@ const SECRET_KEY_RE =
   /api[_-]?key|apikey|secret|token|password|passwd|pwd|credential|auth(entication|orization)?|bearer|private[_-]?key|client[_-]?secret|session[_-]?id|access[_-]?key|refresh[_-]?token/i;
 
 // JWT-shaped: three base64url segments.
-const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/;
+const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/;
 
 // PEM private key blocks.
 const PEM_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/;
 
 // Known vendor token prefixes.
-const TOKEN_PREFIX_RE = /\b(sk-|rk-|ghp_|gho_|ghu_|ghs_|xox[bap]-|AKIA|glpat-)[A-Za-z0-9_-]{8,}\b/;
+const TOKEN_PREFIX_RE = /\b(sk-|rk-|ghp_|gho_|ghu_|ghs_|xox[bap]-|AKIA|glpat-)[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/;
 
 // Whole-value high-entropy blob (a bare token pasted as the entire value).
 // 40+ chars of token alphabet. Deliberately does NOT match structured error
