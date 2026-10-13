@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, readdirSync, statSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { runCommand } from "./spawn.mjs";
-import { FRAME_INTERVAL_MS, KEYFRAME_MAX, RETENTION_DAYS_DEFAULT, ROOM_FILE_MAX_BYTES } from "./protocol.mjs";
+import { CLAIM_ID_PATTERN, FRAME_INTERVAL_MS, KEYFRAME_MAX, RETENTION_DAYS_DEFAULT, ROOM_FILE_MAX_BYTES } from "./protocol.mjs";
 
 export function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
@@ -11,7 +11,7 @@ export function sha256(bytes) {
 function claimDir(home, claimId) {
   // L10: claim IDs reach the filesystem — a Room-issued claimId with path
   // separators would escape the recordings dir. Enforce the tight shape.
-  if (typeof claimId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(claimId)) {
+  if (typeof claimId !== "string" || !CLAIM_ID_PATTERN.test(claimId)) {
     throw new Error("claimId must be 1-128 chars of [A-Za-z0-9_-]");
   }
   return join(home, "recordings", claimId);

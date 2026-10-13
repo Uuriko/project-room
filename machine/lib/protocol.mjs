@@ -22,6 +22,7 @@ export const RETENTION_DAYS_DEFAULT = 14;
 export const ENROLL_TTL_MS = 15 * 60 * 1000;
 export const TAG_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 export const CALL_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 export const ERROR = Object.freeze({
   LEASE_REQUIRED: "lease_required",
