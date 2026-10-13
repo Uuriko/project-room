@@ -5,6 +5,7 @@ import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -284,6 +285,12 @@ export class PublicWorkClaims {
        FROM public_work_receipts r LEFT JOIN public_work_tasks t ON t.offer_id = r.offer_id
        WHERE r.receipt_id = ?`).get(receiptId);
     if (!row) fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    // Operator unpublish overrides owner sharing on this public door, for the
+    // receipt itself and for its room — same predicate as public-read-model.
+    if (isUnpublished(this.db, 'receipt', receiptId)
+      || (row.roomId && isUnpublished(this.db, 'room', row.roomId))) {
+      fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    }
     return { receiptJson: row.receiptJson, roomId: row.roomId ?? null };
   }
   _requireReceiptVisible(roomId, memberId) {
