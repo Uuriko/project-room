@@ -940,6 +940,7 @@
   "tests/qa2/agent-journeys.test.js": 71.192,
   "tests/qa2/authz-matrix.test.js": 69.261,
   "tests/qa2/mcp-robustness.test.js": 66.222,
+  "tests/qa2/run-checker.test.js": 8666,
   "tests/quickstarts-docs.test.mjs": 147.068,
   "tests/room-attachments-autonomy-tier.test.mjs": 338.669,
   "tests/trace-entry.test.mjs": 159.234,
