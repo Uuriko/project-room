@@ -4688,6 +4688,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
+    // #2951: a flood token spent below lives in an in-memory bucket that the
+    // command transaction cannot roll back, so remember the spend and refund
+    // it in the catch if anything after consume() fails — validation, the
+    // reducer, persistence, or the transaction commit itself.
+    let floodSpend = null;
+    try {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
@@ -4718,7 +4724,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
-      this.roomFlood.consume(roomId, auth.member.id, command.type);
+      if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
+        floodSpend = { memberId: auth.member.id, type: command.type };
+      }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       // bond.list is a read. It does not append a ledger event, so an archived
       // room can still answer it. Writes below still hit refuseArchivedWrite.
@@ -5098,6 +5106,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
+    } catch (error) {
+      // The test doubles that replace roomFlood expose only consume(), so a
+      // missing refund (or a spend consume() did not report) means no refund.
+      if (floodSpend && typeof this.roomFlood.refund === "function") {
+        try { this.roomFlood.refund(roomId, floodSpend.memberId, floodSpend.type); }
+        catch { /* a refund failure must never mask the command's own error */ }
+      }
+      throw error;
+    }
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
