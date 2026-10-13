@@ -75,7 +75,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     incompleteSources: [], nextReads: [], metrics };
   if (focus === 'replies') Object.assign(out, { focus, openRequests: [], optionalConversations: [] });
   const safe = () => { if (JSON.stringify(out).includes(connection.token)) throw invalid(); return out; };
-  const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error) });
+  const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error), httpStatus: error instanceof RoomClientError ? error.status : 0 });
   const contextRead = async version => {
     const value = await client.roomContext({ sinceVersion: version, signal: stop });
     if (!value?.not_modified && value?.contractVersion !== 1 || !count(value?.evaluatedThrough) || !/^[a-f0-9]{64}$/.test(value.context_version)
