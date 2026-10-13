@@ -87,17 +87,22 @@ export class ChannelWebhookInbox {
   #match(connectionId, secret) {
     if (!validId(connectionId) || !validateWebhookSecret(secret)) return null;
     const presented = ChannelWebhookInbox.hash(secret);
-    let found = null;
+    let found = null, ambiguous = false;
     // Connection IDs are only unique per account; compare every candidate in constant time.
     // The account's current auth epoch decides the state (connectionState): a
     // connection whose owner must reconnect refuses deliveries like a disconnected one.
     // While a secret rotation is pending, the previous digest verifies too.
+    // If the same (connectionId, secret) verifies for more than one account,
+    // the delivery cannot be attributed: fail closed instead of letting a
+    // later row silently overwrite an earlier match.
     for (const row of this.#store.db.prepare("SELECT c.account_id,c.data_json,a.auth_epoch FROM private_email_connections c JOIN accounts a ON a.id=c.account_id WHERE c.id=?").all(connectionId)) {
       const connection = JSON.parse(row.data_json);
       const ok = webhookAcceptsHash(connection.webhook, presented, this.#store.now());
-      if (ok && connectionState(connection, row.auth_epoch) === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
+      if (ok && connectionState(connection, row.auth_epoch) === "active" && profileChannel(connection.profile) === "telegram") {
+        if (found) ambiguous = true; else found = { accountId: row.account_id, connectionId, profile: connection.profile };
+      }
     }
-    return found;
+    return ambiguous ? null : found;
   }
   // A message-kind update the Telegram adapter cannot normalize is journaled
   // straight into 'failed' with the contract code, never 'pending': it must not

@@ -417,7 +417,15 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: "add-guest", type: "member.added", data: { memberId: "guest", displayName: "Guest", kind: "agent", permissions: [] } });
   const guestKey = store.issueAccessKey("commons", "guest");
-  const server = createRoomServer({ store });
+  // The /work-claims/status read below must be hermetic: without an injected
+  // fetch it performs a live api.github.com commits/main request and reports
+  // stale:true whenever that request fails or is rate-limited (as in the
+  // coverage CI run for PR #3129), which is unrelated to what this test checks.
+  const fetchPullRequest = async () => ({
+    ok: true, status: 200, headers: { get: () => null },
+    text: async () => JSON.stringify({ sha: "c".repeat(40) }), json: async () => ({ sha: "c".repeat(40) }),
+  });
+  const server = createRoomServer({ store, fetchPullRequest, githubToken: "test-token" });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();
