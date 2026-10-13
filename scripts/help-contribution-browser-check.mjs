@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, messageAction } from "./room-chrome.mjs";
 // Simulated accountable human, actual scripted MCP helper and reviewer. No models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -223,10 +223,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await page.screenshot({ path: `${prefix}-return-draft.png` });
   assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'Returning and opening a draft do not change work or read markers');
   // UI calming #2 moved "Save as result" into the per-message "⋯" overflow menu.
-  const draftRow = page.locator(`[data-message-record-id="${draft.messageId}"]`);
-  const draftMenu = draftRow.locator('details.message-more');
-  if (!(await draftMenu.evaluate(node => node.open))) await draftMenu.locator('summary').click();
-  await page.locator(`[data-message-id="${draft.messageId}"][data-message-action="result"]`).click();
+  await messageAction(page, draft.messageId, "result");
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   await page.locator('#action-fields [name=producerId]').selectOption('producer');
   await page.locator('#action-fields [name=summary]').fill('A two-step contributor guide');
