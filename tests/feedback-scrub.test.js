@@ -43,8 +43,8 @@ test("every secret in a string is redacted, not just the first", () => {
   assert.ok(!outTok.includes("sk-abcdefghijklmnop"), "second token must not survive");
   assert.equal(outTok.match(/\[REDACTED:token\]/g).length, 2);
 
-  const pemA = "-----BEGIN PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQ\n-----END PRIVATE KEY-----";
-  const pemB = "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----";
+  const pemA = "-----BEGIN PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQ\n-----END PRIVATE KEY-----"; // secrets-allowlist (fixture value, not a credential)
+  const pemB = "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----"; // secrets-allowlist (fixture value, not a credential)
   const outPem = scrubString(`a ${pemA} b ${pemB}`);
   assert.ok(!outPem.includes("AAAAB3NzaC1yc2E"), "first PEM block must not survive");
   assert.ok(!outPem.includes("MIIEvQIBADAN"), "second PEM block must not survive");
