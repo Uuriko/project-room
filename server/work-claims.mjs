@@ -33,6 +33,7 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
@@ -431,6 +432,14 @@ const readingAcksOf = value => {
 // The map rides on the work item so it survives the durable registry
 // round-trip (restart/deploy); it is capped at MAX_REQUEST_OUTCOMES
 // entries, oldest first.
+//
+// #2965: each record also binds the requestId to a digest of the update
+// payload it carried. A retry re-sends the identical payload, so a seen
+// requestId whose digest differs is not a retry — it is a new update
+// riding an old id, and it is refused (work_claim_conflict) instead of
+// being silently swallowed behind a success response. Records written
+// before the binding existed are bare timestamp strings; their payload is
+// unknowable, so they keep replaying, but every new record is bound.
 export const MAX_REQUEST_OUTCOMES = 256;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 export const requestIdOf = value => {
@@ -438,16 +447,49 @@ export const requestIdOf = value => {
     "requestId must be 1..128 characters [A-Za-z0-9_-]");
   return value;
 };
+// Canonical serialization for the payload digest: object keys sorted and
+// undefined spelled out, so two sends of the same update digest alike
+// regardless of key order, while absent and null stay distinct (they mean
+// different things to updateWork for several fields).
+const canonicalPayload = value => {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(canonicalPayload).join(",")}]`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalPayload(value[key])}`).join(",")}}`;
+};
+// The digest binding a requestId to the update it carried: every field
+// updateWork can apply, and nothing else (now/requestId itself excluded —
+// a retry is stamped later and re-uses the id by definition).
+export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs } = {}) =>
+  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs }), "utf8").digest("hex");
+// How a stored replay record answers a new update under the same
+// requestId: "replay" when the record binds this payload (or predates the
+// binding), "conflict" when it binds a different payload, null when the
+// requestId has not landed on this claim.
+export const requestReplayVerdict = (outcomes, requestId, digest) => {
+  if (!outcomes || !Object.hasOwn(outcomes, requestId)) return null;
+  const record = outcomes[requestId];
+  if (typeof record === "string") return "replay";
+  return record.digest === digest ? "replay" : "conflict";
+};
+const requestOutcomeRecordOf = record => {
+  // Legacy records are bare ISO timestamps; bound records are { at, digest }.
+  if (typeof record === "string") return Number.isFinite(Date.parse(record)) ? record : undefined;
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
+  if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
+  if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
+  return Object.freeze({ at: record.at, digest: record.digest });
+};
 const requestOutcomesOf = value => {
   if (value === undefined || value === null) return null;
   check(typeof value === "object" && !Array.isArray(value), "requestOutcomes must be an object");
   const kept = Object.entries(value)
-    .filter(([key, at]) => REQUEST_ID_PATTERN.test(key)
-      && typeof at === "string" && Number.isFinite(Date.parse(at)));
+    .map(([key, record]) => [key, requestOutcomeRecordOf(record)])
+    .filter(([key, record]) => REQUEST_ID_PATTERN.test(key) && record !== undefined);
   // String-key insertion order is oldest-first: drop the oldest beyond the cap.
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
-const recordRequestOutcome = (current, key, at) => requestOutcomesOf({ ...(current ?? {}), [key]: at });
+const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({ ...(current ?? {}), [key]: { at, digest } });
 const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
@@ -796,8 +838,17 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
+  // #2965: the replay is bound to the payload digest — a seen requestId
+  // carrying a different update is refused, never silently swallowed.
   const key = requestId === undefined ? undefined : requestIdOf(requestId);
-  if (key !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, key)) return item;
+  const digest = key === undefined ? undefined
+    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs });
+  if (key !== undefined) {
+    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest);
+    if (verdict === "replay") return item;
+    if (verdict === "conflict") fail("work_claim_conflict",
+      `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
+  }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
@@ -852,7 +903,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
     : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
-      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs)) });
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest) });
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
