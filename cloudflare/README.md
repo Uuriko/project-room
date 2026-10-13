@@ -1,5 +1,7 @@
 > Current deployment topology and commands: [One Room service](../docs/ROOM-DEPLOYMENT.md). The records below the current deploy describe earlier staging checkpoints.
 
+> **Canonical runtime:** this Worker + Durable Object is the only production runtime. Node runs the same code for dev/test and the (parked) VPS pilot only — never as production or as a storage failover. See [ROOM-DEPLOYMENT.md § Canonical runtime](../docs/ROOM-DEPLOYMENT.md#canonical-runtime).
+
 ## Current production deploy
 
 Recorded 2026-10-01 ~17:45 PT. Source `60df170cb58b79fd1714ca5dfe3ef51da939b29d` (`main` `60df170c`). Canonical Worker first, then the entry Worker. Durable Object not reset. Gmail stays disabled.
