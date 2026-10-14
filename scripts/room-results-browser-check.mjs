@@ -333,3 +333,25 @@ test("inline private result across persisted wake and revoked session", { timeou
   assert.equal(await p.locator("#result-dialog").isVisible(), false);
   assert.equal(await p.locator("#result-body").textContent(), "", "revocation removes retained private exact text");
 });
+
+test("combined journey: sign in, read inline, continue once, reconnect with draft intact", { timeout: 30000 }, async t => {
+  const f = await setup(t, { expectedWrites: 1 }), p = f.p;
+  await f.open(); await f.row("native-result").locator("[data-result-work]").click();
+  await p.locator('[data-work-record-id="native-result"] [data-read-result]').click(); await f.ready();
+  assert.equal(await p.locator("dialog:modal").count(), 0);
+  await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill("Continue from this exact result");
+  await p.locator('#message-form button[type="submit"]').click();
+  await p.waitForFunction(() => !document.querySelector("#message-input").value);
+  const sent = f.state().messages.filter(message => message.body === "Continue from this exact result");
+  assert.equal(sent.length, 1);
+  assert.ok(sent[0].replyToId, "continuation retains the result discussion target");
+  assert.equal(sent[0].toMemberId ?? null, null);
+  await p.locator("#message-input").fill("Unsent next thought");
+  const restored = p.waitForResponse(response => new URL(response.url()).pathname === "/api/session" && response.ok());
+  await p.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await restored;
+  await p.waitForFunction(() => document.querySelector("#message-input").value === "Unsent next thought");
+  assert.equal(f.state().messages.filter(message => message.body === "Continue from this exact result").length, 1);
+  assert.equal(await p.locator("#main").isVisible(), true);
+});
