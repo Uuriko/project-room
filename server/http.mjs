@@ -1811,7 +1811,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
-        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
+        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
+        if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) reject(422, "invalid_public_work", "Unsupported query parameters");
         const action = publicWorkTaskMatch?.[2];
         if (action) {
           if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
@@ -1856,7 +1857,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
-          : store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "" }), req.method === "HEAD");
+          : store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "", claimable: ["1", "true"].includes(url.searchParams.get("claimable")) }), req.method === "HEAD");
       }
       const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
       if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {
