@@ -1696,6 +1696,41 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (revoked === 0) reject(404, "session_not_found", "No such active session");
         return json(res, 200, { revoked });
       }
+      // GET /api/account/sessions — list the signed-in account's live
+      // account sessions (CX4): every authenticated account-session slot
+      // the account holds, browser and native alike. The native desktop
+      // sign-in retires its OAuth grant at redemption, so its session
+      // exists ONLY here, never in /api/oauth/sessions above — that gap
+      // is what this surface closes. One entry per live slot: its public
+      // id, the login method recorded at sign-in (desktop sessions say
+      // "desktop"), lifetimes, and whether it is the caller's own current
+      // session. A caller only ever sees their own sessions.
+      if (url.pathname === "/api/account/sessions" && req.method === "GET") {
+        rate(`account-sessions-list:${remoteAddress}`, 60);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage your sessions");
+        const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
+        return json(res, 200, { sessions: store.listAccountSessions(auth.account.id, auth.credentialHash) });
+      }
+      // DELETE /api/account/sessions/:id — revoke ONE of the signed-in
+      // account's account sessions by its inventory id (CX4 targeted
+      // revocation). Only the named session dies: the account's other
+      // browser/native sessions and every OAuth session are untouched,
+      // and the OAuth revoke-all endpoint keeps its OAuth-only semantics
+      // (it never reached these slots). Unknown ids, already-dead
+      // sessions, and other accounts' sessions all answer 404, so a
+      // caller can't probe for them.
+      const accountSessionKill = /^\/api\/account\/sessions\/([^/]{1,128})$/.exec(url.pathname);
+      if (accountSessionKill && req.method === "DELETE") {
+        rate(`account-session-kill:${remoteAddress}`, 60);
+        const slotToken = cookie(req, accountCookieName);
+        if (!slotToken) reject(401, "account_session_required", "Sign in to manage your sessions");
+        const auth = store.authenticateAccountSession(slotToken, null, accountBinding(req));
+        protectWrite(req, auth, false);
+        const revoked = store.revokeAccountSession(auth.account.id, accountSessionKill[1]);
+        if (revoked === 0) reject(404, "session_not_found", "No such active session");
+        return json(res, 200, { revoked });
+      }
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
           if (store.storageStatus?.().unavailable) return json(res, 503, { status: "unavailable", reason: "storage_unavailable" }, req.method === "HEAD");
