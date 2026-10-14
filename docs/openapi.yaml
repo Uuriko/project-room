@@ -8996,6 +8996,7 @@ paths:
         '429': { description: rate_limited }
   /api/account/sessions/{id}:
     delete:
+      x-room-permission: self
       summary: Revoke one account session owned by the account
       description: |
         CX4 targeted revocation. Account-session write (X-CSRF-Token,

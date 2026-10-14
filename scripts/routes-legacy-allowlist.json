@@ -3960,14 +3960,6 @@
       "path": "/api/account-session"
     },
     {
-      "method": "GET",
-      "path": "/api/account/sessions"
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/account/sessions/{id}"
-    },
-    {
       "method": "POST",
       "path": "/api/account/delete"
     },
