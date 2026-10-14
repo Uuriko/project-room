@@ -9724,6 +9724,7 @@ paths:
         '429': { description: rate_limited }
   /api/agent-invites/preview:
     post:
+      x-room-permission: public
       summary: Preview an agent invite code
       description: >-
         Open: the invite code is the credential (same format and failure
