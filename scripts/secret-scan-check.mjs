@@ -156,6 +156,14 @@ export const SAFE_ENTROPY_TOKENS = [
   // nothing. Surfaced when E7 Phase 4 moved listings.json from docs/
   // (unscanned prose) into scripts/ (tree-scanned).
   "https://github.com/ARUNAGIRINATHAN-K/awesome-ai-agents-2026/pull/309",
+  // Repo-relative archive paths cited by maintained docs/code after the
+  // E7 Phase 2 history move (docs/history/ -> archive/docs/history/).
+  // File paths, not credentials; the dated filenames push the joined
+  // path token over the entropy threshold.
+  "archive/docs/history/DESIGN-2026-09-20.md", // DESIGN.md citation
+  "archive/docs/history/EXPORT-RETENTION-DELETION.md", // server/room-export-html.mjs header citation
+  "archive/docs/history/SAFE-DIAGNOSTICS.md", // docs/INCIDENT-RUNBOOK.md companion citation (also embedded in server/wiki-data.mjs)
+  "archive/docs/history/V8-RECOVERY-RUNBOOK.md", // docs/INCIDENT-RUNBOOK.md companion citation (also embedded in server/wiki-data.mjs)
 ];
 
 // Directories scanned: source code where a real secret could hide.
