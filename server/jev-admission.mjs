@@ -33,7 +33,6 @@ export const jevAdmissionPaths = Object.freeze([
   "join:first-room",      // POST /join (+ /room/join, /api/join), personal first room
   "agent-invite:redeem",  // POST /api/agent-invites/redeem
   "guest-invite:redeem",  // POST /api/guest-invites/redeem (signed card verified)
-  "guest-agent-link:join",// POST /api/guest-agent-links/join
   "share-link:join-agent",// POST /api/share-links/join-agent
   "access-request:approve", // access-request approval (POST .../access-requests/{id}/decide)
 ]);

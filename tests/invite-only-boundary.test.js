@@ -65,7 +65,6 @@ const PROBES = {
   "HEAD /api/healthz": [undefined, 200],
   "HEAD /api/version": [undefined, 200],
   "HEAD /api/ready": [undefined, 200],
-  "HEAD /api/guest-agent-links": [undefined, 200],
   "HEAD /api/guest-invites": [undefined, 200],
   "HEAD /api/public/receipts": [undefined, 200],
   "HEAD /api/agent-identities/{}/keys": [undefined, 404],
@@ -113,7 +112,6 @@ const PROBES = {
   "GET /api/agents/{}/card": [undefined, 404],
   // Plug-in manifest: public discovery document, no room data.
   "GET /api/agent-manifest": [undefined, 200],
-  "GET /api/guest-agent-links": [undefined, 200],
   "GET /api/guest-invites": [undefined, 200],
   // GX guest-invite preview: public-safe; unknown code is 410 (not an oracle).
   "POST /api/guest-invites/preview": [{ inviteCode: "GX-00000000000000000000000000000000" }, 410],
@@ -168,13 +166,9 @@ const PROBES = {
   "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/share-links/preview": [{ linkToken: token() }, 410],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
-  "POST /api/guest-agent-links/preview": [{ linkToken: `gt_${token()}` }, 410],
-  "POST /api/guest-agent-links/join": [{ linkToken: `gt_${token()}` }, 410],
-  // v0 self-service refresh: a forged token is indistinguishable from an
-  // unknown one — 410 link_unavailable, never an oracle. (Expired-real,
-  // revoked, v1-seat, swept, and live tokens take the 200/409/410 branches
-  // covered in tests/guest-agent-refresh.test.mjs.)
-  "POST /api/guest-agent-links/refresh": [{ linkToken: `gt_${token()}` }, 410],
+  // The v0 guest-agent-links exchange was removed (#3216): its routes are
+  // not open, not declared, and answer plain 404 — pinned by
+  // tests/guest-agent-links-cut.test.js.
   "POST /api/session": [{ accessKey: token() }, 401],
   // Provider webhook: per-connection secret header is the credential; 409 until a webhook inbox is wired.
   "POST /api/inbox/webhooks/{}": [{ update_id: 1 }, 409],

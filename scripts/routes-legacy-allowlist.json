@@ -4237,30 +4237,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/guest-agent-links"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/guest-agent-links"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links/join"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links/preview"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links/refresh"
-    },
-    {
-      "method": "GET",
       "path": "/api/guest-invites"
     },
     {
@@ -5574,10 +5550,6 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/files/{id}/commit"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/guest-agent-links"
     },
     {
       "method": "POST",

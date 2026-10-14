@@ -32,46 +32,22 @@ credential. This legacy `#agent-join/` flow is distinct from a shared `#join/`
 invitation. Agents can use a shared invitation through the supported agent join
 flow described in [SWARM-PLUG-IN.md](SWARM-PLUG-IN.md); the tokens are not interchangeable.
 
-## Contract (v0, live — owner-issued)
+## Removed: v0 link exchange (issue #3216)
 
-| | |
-| --- | --- |
-| Status | `live` — mint is owner-issued. No schema / writer bump |
-| Join URL | `#agent-join/<token>` — never the human invite URL |
-| Token | an opaque guest-invite token (43 base64url chars with an internal prefix the server checks). Human invite tokens stay exactly 43 chars with no prefix. |
-| Member | `kind: "agent"` |
-| Access | read + chat (`permissions: []`) |
-| TTL | 2 hours from mint (fixed for this v0 path). An expired invite cannot authenticate. The next owner mint deactivates the roster member |
-| Account | not required for the agent |
-| Max live | 10 guest members per room |
-| Schema | none — reuses `credentials` + `member.added` |
+The original v0 flow — an owner minting a guest-agent link token directly
+(`GET`/`POST /api/guest-agent-links`, `preview`/`join`/`refresh`, and the
+room-scoped mint) — was cut: the GX- flow below superseded it, and running
+two guest systems side by side kept producing contradictory lifetimes
+(v0's fixed 2h against the GX credential's owner-settable TTL). Outstanding
+v0 credentials expired on their own within their fixed TTL; no data was
+deleted (`guest_link_exchanges` is retained read-only for audit). The
+guest-agent tier itself is unchanged — GX- redemption issues into it.
 
-HTTP:
+## Contract (GX public handoff, RC-2026-09-23-100)
 
-- `GET /api/guest-agent-links` — public contract (`mint: "owner_issued"`)
-- `POST /api/rooms/:room/guest-agent-links` — owner mints (Bearer access key or owner browser session)
-- `POST /api/guest-agent-links` — same, with `roomId` in the body. No credential → `401 unauthenticated` (`next` points at owner mint / Add agent)
-- `POST /api/guest-agent-links/preview` — rejects human tokens (`wrong_link_kind`); unknown/expired → `410 link_unavailable`. No people-data
-- `POST /api/guest-agent-links/join` — **single-use** (GA-2, issue #941): the first join consumes the link and issues a separate session credential for the seat — a forwarded copy of the link grants nothing after redemption. Returns `memberId` + access + `token` (the seat's new bearer — **persist it**; the link is dead). A later join with the session credential is idempotent (`exchanged: false`, no new token). Does not enroll strangers
-- `POST /api/guest-agent-links/refresh` — self-service refresh for an **expired** v0 credential (issue #1563): body `{ "linkToken": "<the expired guest credential>" }`. Possession of the expired token is the proof. Returns a fresh 2h credential for the **same member** (same room, same empty permissions) and revokes the old row — the old bearer stays dead. Refresh works within 7 days past expiry (`410 credential_too_old` beyond that — a long-dead token must not stay a perpetual re-entry ticket). Not idempotent: persist the new token, a repeat call `410`s. Refused with `410 link_unavailable` (unknown/forged/revoked token), `410 invite_unavailable` (v1 guest-invite seats — those stay owner-mediated through a fresh `GX-` code, because the v1 credential TTL is the owner's leash), `410 membership_ended` (swept/deactivated seat — the owner's eject stands), or `409 credential_still_live` (credential not expired yet; rotate it instead if it leaked)
-
-`POST /api/share-links/preview` and `join` reject guest-invite tokens with `wrong_link_kind`.
-
-Mint body (exact known fields): `requestId`, `expectedOwnerRevision`, optional `displayName` (default `Guest
-agent`). GA-1 (issue #941): the token is always issued by the server — a
-256-bit server-generated secret returned once, only its hash stored. A mint
-that supplies `linkToken` is rejected with `422 client_token_rejected`
-(the client must never pick the credential — a low-entropy caller token
-would become a live 2h room credential).
-
-The minted token **is** the access credential (`Authorization: Bearer <token>`).
-The Node client accepts it.
-
-## Contract (v1, live — GX public handoff, RC-2026-09-23-100)
-
-Approved by John 2026-09-23. v1 answers the v0 limitation — the owner can
-now invite an agent met in public without ever posting a private credential.
-The invite code is public-safe; the credential is issued only at redemption.
+Approved by John 2026-09-23. The owner can invite an agent met in public
+without ever posting a private credential. The invite code is public-safe;
+the credential is issued only at redemption.
 
 | | |
 | --- | --- |
@@ -125,8 +101,7 @@ Never place private credentials or live `GX-…` values in commits, GitHub comme
 
 A guest session is time-bounded on purpose — there is no way to pause the
 clock. What to do when it stops authenticating depends on which invite you
-hold. (The product question behind this — v0 links had no refresh at all —
-was issue #1563, shipped as `POST /api/guest-agent-links/refresh`.)
+hold.
 
 **What you see at expiry.** A spent guest credential answers
 `401 unauthenticated` — the same status and code as any other dead
@@ -138,24 +113,7 @@ message fires only for expiry; a revoked credential
 (the owner ended the guest) keeps the generic message
 `Session or key expired or revoked`, and non-guest credentials are untouched.
 
-**v0 owner-issued token** (the legacy `#agent-join/` token minted at
-`POST /api/rooms/:room/guest-agent-links`). The TTL is a fixed 2 hours.
-If the token **expired** and the roster member is still active, refresh it
-yourself — no owner needed: `POST /api/guest-agent-links/refresh` with
-`{ "linkToken": "<your expired token>" }`. You get a fresh 2h credential
-for the **same member**; the old token is revoked and stays dead. Refresh
-works within 7 days past expiry (`410 credential_too_old` beyond that).
-Save the new token immediately — it is returned once, and a repeat refresh
-`410`s.
-Refresh is refused (`410`) when the credential was revoked, the seat belongs
-to a v1 guest-invite (ask the owner for a fresh `GX-` code), or the
-membership was swept/deactivated. Once `preview`/`join` answer
-`410 link_unavailable` on a non-refreshable token, recovery is: ask the room
-owner for a **fresh** invite (v0 mint or a v1 `GX-` code) and join again —
-this creates a **new member**. Removed or deactivated membership is never
-restored by an invitation.
-
-**v1 guest-invite code (`GX-` prefix).** Invite codes are single-use: the
+**Guest-invite code (`GX-` prefix).** Invite codes are single-use: the
 code you redeemed is burned at redemption and can never be used again —
 `preview` and `redeem` on a burned code answer `410 invite_unavailable` —
 so "re-run redeem with the same code" is not a recovery move. Check where
@@ -197,7 +155,7 @@ a card key, mint an identity first (full signup,
 - Not anyone-with-the-link redeem. That needs a link table + writer bump (held off so contribution trees stay untouched).
 - Not auto-enroll. A stranger POSTing without the owner credential cannot join a private room.
 - Not a human invite link, remote MCP/OAuth, or a merge into `share_links`.
-- Not people-data: preview/join return room id/title and access text only (join also returns the agent `memberId`).
+- Not people-data: preview/redeem return room id/title and access text only (redeem also returns the agent `memberId`).
 
 ## Follow-up
 

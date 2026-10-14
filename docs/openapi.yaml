@@ -11166,81 +11166,6 @@ paths:
         '404': { description: invitation_not_found }
         '422': { description: invalid_invitation }
         '429': { description: rate_limited }
-  /api/guest-agent-links/preview:
-    post:
-      summary: Preview a guest invite
-      description: Open; the guest invite token is the credential. Room title and access only. 30 per address per minute.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [linkToken]
-              properties:
-                linkToken: { type: string }
-      responses:
-        '200': { description: Link preview }
-        '410': { description: link_unavailable }
-        '422': { description: invalid_link or wrong_link_kind }
-        '429': { description: rate_limited }
-  /api/guest-agent-links/join:
-    post:
-      summary: Join with a guest invite
-      description: >-
-        Open; the guest invite token is presented once. Single-use (GA-2,
-        issue #941): the first join consumes the link and issues a separate
-        session credential for the seat — a forwarded copy of the link grants
-        nothing after redemption. Returns the guest member's read_chat access
-        plus `token` (the seat's new bearer — persist it; the link is dead)
-        and `exchanged: true`. Joining again with the session credential is
-        idempotent (`exchanged: false`, no new token). The session keeps the
-        link's expiry. 20 per address per minute.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [linkToken]
-              properties:
-                linkToken: { type: string }
-      responses:
-        '200': { description: "{ ...preview, memberId, access: read_chat, token?, exchanged }" }
-        '410': { description: link_unavailable }
-        '422': { description: invalid_link or wrong_link_kind }
-        '429': { description: rate_limited }
-  /api/guest-agent-links/refresh:
-    post:
-      x-room-permission: guest_credential
-      summary: Refresh an expired v0 guest credential
-      description: >-
-        Open; possession of the EXPIRED guest credential is the proof — no
-        owner round-trip. Issues a fresh 2h credential for the same guest
-        seat (same member, room, empty permissions) and revokes the old row;
-        the old bearer stays dead. The new bearer is returned once — a repeat
-        call 410s. Refused for revoked credentials, v1 guest-invite seats
-        (those refresh through a fresh owner GX- code), swept/deactivated
-        memberships, and still-live credentials (409; rotate a live one if it
-        leaked). 20 per address per minute.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [linkToken]
-              properties:
-                linkToken: { type: string, description: The expired guest credential }
-      responses:
-        '200': { description: "{ ...issued, refreshed: true } — fresh guest credential for the same member" }
-        '409': { description: credential_still_live }
-        '410': { description: link_unavailable, invite_unavailable (v1 seat), membership_ended, or credential_too_old (expired past the 7d refresh grace window) }
-        '422': { description: invalid_link or wrong_link_kind }
-        '429': { description: rate_limited }
   /api/guest-invites/preview:
     post:
       x-consumer: agent-api
@@ -13063,52 +12988,6 @@ paths:
         '409': { description: "Invitation revoked, expired or already accepted" }
         '422': { description: invalid_invitation_acceptance }
         '429': { description: rate_limited }
-  /api/guest-agent-links:
-    get:
-      summary: Guest invite contract document
-      description: >-
-        Open (also HEAD): the static contract for guest invites
-        (status, kind, permissions, access, ttl). Contains no room data.
-        `POST` on this path mints an invite and requires a room credential.
-      security: []
-      responses:
-        '200': { description: Static contract document }
-    post:
-      summary: Mint a guest invite as an account-backed owner (room named in the body)
-      description: >-
-        Same operation as POST /api/rooms/{roomId}/guest-agent-links with
-        the room in the body: a room bearer key, or a browser room or
-        account session (`x-project-room-auth: account` or `?auth=account`)
-        with `Origin` and `X-CSRF-Token`. Owner with `manage_members` only.
-        Body: `{ roomId, requestId, linkToken? (the optional guest invite token), expectedOwnerRevision,
-        displayName? }`. `linkToken` is optional: the server can issue a secret once; a tokenless retry returns a receipt without that secret. Minting requires an account-backed owner. 30 per address per minute. See docs/JOINING.md.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [roomId, requestId, expectedOwnerRevision]
-              properties:
-                roomId: { type: string }
-                requestId: { type: string }
-                linkToken: { type: string }
-                expectedOwnerRevision: { type: integer }
-                displayName: { type: string }
-      responses:
-        '201': { description: Guest-agent member created; the link is the credential }
-        '200': { description: Exact retry of a journaled mint }
-        '401': { description: unauthenticated }
-        '403': { description: "owner_required, account_session_required, access_denied or csrf_denied" }
-        '409': { description: "stale_member_revision, membership_ended or pilot_limit" }
-        '422': { description: invalid_link }
-        '429': { description: rate_limited }
-    head:
-      summary: Read public response headers
-      description: Uses the same public GET policy and status with no response body.
-      security: []
-      responses:
-        '200': { description: Response headers only }
   /api/rooms/{roomId}:
     get:
       summary: Room snapshot
@@ -14046,42 +13925,6 @@ paths:
       responses:
         '401': { description: unauthenticated }
         '200': { description: "{ roomId, viewerId, messageId, saved: false }" }
-  /api/rooms/{roomId}/guest-agent-links:
-    post:
-      summary: Mint a guest invite as an account-backed owner
-      description: >-
-        Owner by ID with `manage_members`: room bearer key, or browser room or
-        account session with CSRF. Minting stays account-bound (403
-        account_session_required for an accountless owner). Body: `{ requestId,
-        expectedOwnerRevision, displayName?, roomId? }`; the server always
-        issues the guest credential (GA-1, issue #941) — a 256-bit server-generated
-        token returned once, only its hash stored. Supplying
-        `linkToken` is rejected with 422 `client_token_rejected`. An exact
-        retry returns a receipt without redisclosing the secret. 30 per
-        address per minute. `GET` on the
-        top-level path is the open contract document.
-      parameters:
-        - $ref: '#/components/parameters/RoomId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [requestId, expectedOwnerRevision]
-              properties:
-                requestId: { type: string }
-                expectedOwnerRevision: { type: integer }
-                displayName: { type: string }
-                roomId: { type: string }
-      responses:
-        '401': { description: unauthenticated }
-        '201': { description: Guest-agent member created }
-        '200': { description: Exact retry of a journaled mint }
-        '403': { description: "owner_required, account_session_required or csrf_denied" }
-        '409': { description: "stale_member_revision, membership_ended or pilot_limit" }
-        '422': { description: invalid_link }
-        '429': { description: rate_limited }
   /api/rooms/{roomId}/guest-invites:
     post:
       x-consumer: agent-api
