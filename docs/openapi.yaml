@@ -2625,6 +2625,7 @@ paths:
               properties:
                 displayName: { type: string, minLength: 1, maxLength: 80 }
                 inviteCode: { type: string }
+                requestId: { type: string, description: "Invite joins only (#3260). A client-kept idempotency key: if the 201 is lost, retrying with the same requestId replays the same identity and membership (duplicate: true) instead of 409ing on the burned code. An existing identity may instead present its pri_ secret as the bearer and retry — same replay, matching POST /api/agent-invites/redeem and MCP room_join." }
                 recoverable: { type: boolean, enum: [true], description: "Keyless join only. Send your own pri_ secret as the bearer; a retry with the same secret returns the same identity and room (duplicate: true) instead of minting a second pair." }
       responses:
         '201':

@@ -2726,9 +2726,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const hasProof = Boolean(data) && Object.hasOwn(data, "proof");
         const hasInvite = Boolean(data) && Object.hasOwn(data, "inviteCode");
         const hasRecoverable = Boolean(data) && Object.hasOwn(data, "recoverable");
-        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : []), ...(hasRecoverable ? ["recoverable"] : [])];
+        const hasRequestId = Boolean(data) && Object.hasOwn(data, "requestId");
+        const joinFields = ["displayName", ...(hasInvite ? ["inviteCode"] : []), ...(hasProof ? ["proof"] : []), ...(hasRecoverable ? ["recoverable"] : []), ...(hasInvite && hasRequestId ? ["requestId"] : [])];
         if (!data || !exact(data, joinFields)) {
-          reject(422, "invalid_join", "displayName, an optional inviteCode, an optional proof, and an optional recoverable flag are the accepted fields");
+          reject(422, "invalid_join", "displayName, an optional inviteCode, an optional requestId (with an inviteCode), an optional proof, and an optional recoverable flag are the accepted fields");
+        }
+        // #3260: requestId makes the INVITE branch retry-safe, mirroring
+        // POST /api/agent-invites/redeem — the retry replays the journaled
+        // redemption instead of orphaning the minted identity on a burned
+        // code. Without an invite there is nothing to journal against (the
+        // recoverable flag is that branch's retry mechanism).
+        if (hasRequestId && !hasInvite) {
+          reject(422, "invalid_join", "requestId applies only to a join with an inviteCode — it makes an invite redemption retry-safe");
+        }
+        let requestId = null;
+        if (hasRequestId) {
+          if (!validId(data.requestId)) reject(422, "invalid_join", "Send a valid request id for retry-safe redemption.");
+          requestId = data.requestId;
         }
         // Retry-safe first-room join: `recoverable: true` with the caller's own
         // generated pri_ secret as the bearer. The identity id derives from that
@@ -2746,7 +2760,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_join", "proof is invalid");
         }
         if (typeof data.inviteCode === "string" && data.inviteCode.trim()) {
-          const redeemed = store.invites.redeem(data.inviteCode, { displayName: name });
+          // #3260: forward the retry keys the sibling doors already honor —
+          // the requestId journal and the caller's own identity secret as
+          // Bearer (an existing identity re-redeeming replays as duplicate,
+          // exactly like MCP room_join). bearer() is null for the anonymous
+          // browser join page, which changes nothing there.
+          const redeemed = store.invites.redeem(data.inviteCode, { displayName: name, identitySecret: bearer(req), requestId });
           // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
           // score the join, journal the would-be decision, admit anyway.
           jevShadowAdmission("join:invite", { roomId: redeemed.roomId, identityId: redeemed.identityId,
@@ -2770,6 +2789,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             memberId: redeemed.memberId,
             displayName: redeemed.displayName,
             via: "invite",
+            ...(redeemed.duplicate === true ? { duplicate: true } : {}),
             session: true,
             sessionExpiresAt: joined.expiresAt,
             next: [
