@@ -126,8 +126,13 @@ export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50
   let board = [];
   try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
   const claims = availableClaimsFromBoard(board, roomId, { viewerId, state });
+  // Decision #10 transition: a work item with a board card is offered
+  // once, as the board claim (its claim action is the board door). The
+  // workItem source below only covers items the migration has not
+  // reached yet; PR-3 (board-only) removes it outright.
+  const cardedWorkItemIds = new Set(board.map(item => item?.workItemId).filter(id => typeof id === "string"));
   const items = Object.values(state.workItems ?? {})
-    .filter(item => workItemAvailable(item, nowMs))
+    .filter(item => workItemAvailable(item, nowMs) && !cardedWorkItemIds.has(item.id))
     .map(item => workItemItem(roomId, item));
   const all = [...claims, ...items];
   return { items: all.slice(0, limit), total: all.length };
