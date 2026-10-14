@@ -166,6 +166,24 @@ test("shed loop retries a failed handoff on a later tick, then dedups the succes
   await waitFor(() => attempts() > failedAttempts, 45000, "a retry of the failed handoff on a later tick");
   await waitFor(handedOk, 45000, "the retried handoff to be recorded as successful");
 
+  // handed.json is persisted after EACH handoff (#2879), so handedOk can
+  // flip mid-tick, while later items of the retry tick are still being
+  // handed. The attempt count must therefore be snapshotted at a tick
+  // boundary, not at the success observation: wait for the post-tick
+  // heartbeat of a tick that ended after the success was observed (ticks
+  // are sequential, so that heartbeat closes the tick in which the success
+  // was recorded). Without this gate the snapshot can precede the same
+  // tick's remaining first successes, and the assert below misfires on
+  // them — observed on hosted CI as 4 !== 3, the extra attempt being
+  // another item's legitimate first success, not a repeat (FLAKE-2878).
+  let heartbeatAtSuccess = null;
+  await waitFor(() => {
+    let h = null;
+    try { h = JSON.parse(readFileSync(heartbeatPath, "utf8")); } catch { return false; }
+    if (heartbeatAtSuccess === null) { heartbeatAtSuccess = typeof h?.ts === "string" ? h.ts : null; return false; }
+    return typeof h?.detail?.items === "number" && typeof h.ts === "string" && h.ts > heartbeatAtSuccess;
+  }, 45000, "the retry tick to complete");
+
   // Once a retry succeeds, the item is deduped again: no further attempts
   // across another full poll interval.
   const successAttempts = attempts();
