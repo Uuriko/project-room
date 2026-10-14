@@ -476,7 +476,10 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (asks) reviewAsks.push(asks);
     const mine = myWorkOf(store, link.roomId, link.memberId, claims);
     if (mine) myWork.push(mine);
-    const after = roomWatermark(parsed, link.roomId);
+    // A watermark above the room head (a numeric since taken from another
+    // room's seq, or a cursor saved before a restore) can never be passed
+    // legitimately; keeping it would hide this room's next events.
+    const after = Math.min(roomWatermark(parsed, link.roomId), authority.sequence);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
     let candidates = [];
