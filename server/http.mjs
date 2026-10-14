@@ -3825,7 +3825,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
       // the DM's own visibility (server/dm-event-visibility.mjs).
-      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages, [], id => store.archivedDmParties(roomId, id));
+      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
       const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two

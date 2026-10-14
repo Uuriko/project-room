@@ -834,3 +834,43 @@ test("rehydrating projections rolls the archive back: the whole room returns, th
   assert.equal(f.store.rehydrateAllProjections(), 0, "a second run has nothing left to do");
   assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0, "the room can be archived again after a rollback");
 });
+
+test("archived DM party lookups read the archive marker once per request, not once per message", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 4; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `dm-${i}`, toMemberId: "agent", body: `private ${i}` });
+  for (let i = 0; i < 3; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived, 4);
+  let markerReads = 0;
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => { if (String(sql).includes("messagesArchive.throughSeq")) markerReads++; return prepare(sql); };
+  const parties = f.store.archivedDmPartiesReader("commons");
+  assert.deepEqual(parties("dm-0"), ["human", "agent"]);
+  for (const id of ["dm-1", "dm-2", "dm-3", "no-such"]) parties(id);
+  assert.equal(markerReads, 1);
+  assert.equal(parties("x-2"), null, "a public or projected message is not an archived DM");
+});
+
+test("REST search with since_join history never returns archived messages from before the reader joined", async t => {
+  const { createRoomServer } = await import("../server/http.mjs");
+  const f = fixture(t);
+  f.send(f.owner, T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "before-pub", body: "quartz before late joined" });
+  f.send(f.owner, T.MEMBER_ADDED, { memberId: "late", displayName: "late", kind: "human", permissions: [] });
+  const late = f.store.issueAccessKey("commons", "late");
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "after-pub", body: "quartz after late joined" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "new-pub", body: "quartz newest" });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  archiveOldest(f, 2);
+  assert.deepEqual(f.store.room("commons").state.messages.map(m => m.id), ["new-pub"]);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const get = async (path, token) => (await fetch(origin + path, { headers: { Authorization: `Bearer ${token}` } })).json();
+  const ids = async token => (await get("/api/rooms/commons/search?q=quartz&kind=messages", token)).messages.map(m => m.id);
+  assert.deepEqual(f.store.search(late, "commons", "quartz", "messages").messages.map(m => m.id), ["after-pub", "new-pub"], "store.search applies the history floor to archived hits");
+  assert.deepEqual(await ids(f.human), ["before-pub", "after-pub", "new-pub"], "an earlier member keeps the full history");
+  assert.deepEqual(await ids(late), ["after-pub", "new-pub"], "the late joiner gets archived messages from after their join only");
+});
