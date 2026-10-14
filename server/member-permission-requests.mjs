@@ -1,7 +1,7 @@
 // Authenticated permission requests by existing room members. No identity is
 // minted for a human: the durable principal is explicitly room-member scoped.
 import { randomUUID, createHash } from "node:crypto";
-import { PERMISSIONS, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
+import { PERMISSIONS, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember } from "../src/events.js";
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -101,7 +101,7 @@ export class MemberPermissionRequests {
   review(token, roomId, row, { decision, permissions, note }, auth, binding) {
     const contents = permissionRequestContents(row), upgrade = contents.upgrade;
     const authority = this.store.roomAuthority(roomId);
-    const member = Object.hasOwn(authority.members, upgrade.memberId) ? authority.members[upgrade.memberId] : null;
+    const member = ownMember(authority.members, upgrade.memberId) ?? null;
     const recorded = this.db.prepare("SELECT body FROM events WHERE room_id=? AND id=?").get(roomId, eventKey(row.request_id));
     const basisEvent = recorded ? JSON.parse(recorded.body) : null;
     const eventIdentityId = upgrade.identityId ?? upgrade.memberId;
@@ -144,7 +144,7 @@ export class MemberPermissionRequests {
       .run(decision === "approve" ? "approved" : "denied", this.store.now(), auth.member.id, note?.trim() || null, JSON.stringify(stored), row.request_id);
     const updated = this.access.toRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(row.request_id));
     return Object.freeze({ ...updated, memberId: upgrade.memberId, decisionMessageId: messageId,
-      ...(decision === "approve" ? { grantedPermissions: Object.freeze([...this.store.roomAuthority(roomId).members[upgrade.memberId].permissions]) } : {}) });
+      ...(decision === "approve" ? { grantedPermissions: Object.freeze([...ownMember(this.store.roomAuthority(roomId).members, upgrade.memberId).permissions]) } : {}) });
   }
 }
 
