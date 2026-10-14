@@ -20,13 +20,6 @@
       "owner": "jill",
       "quarantined_at": "2026-10-06",
       "repair_by": "2026-10-20"
-    },
-    {
-      "test": "scripts/board-browser-check.mjs > waiting prerequisites stay visible, link by keyboard, and become claimable only when ready",
-      "reason": "Fails intermittently on green main with 'locator.waitFor: Timeout 8000ms exceeded' waiting for #board-dialog to become visible (dialog resolved to hidden 20x). Failed on main run 37506438368 (2026-10-06T17:48Z, head dddbee1a); passed on main runs 37514808041 (18:53Z), 37509966421, 37508713760, 37504619530 the same day. Non-deterministic on the same green tree => browser timing flake, not product breakage.",
-      "owner": "jill",
-      "quarantined_at": "2026-10-06",
-      "repair_by": "2026-10-20"
     }
   ]
 }

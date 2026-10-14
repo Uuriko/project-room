@@ -475,7 +475,13 @@ function seedClaim(store, item) {
 // intermittently on green main. They run in the non-blocking lane
 // (`npm run test:quarantined`, QUARANTINE_RUN=1).
 const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
-test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+// Timeout budget: this journey makes two full viewport passes plus a
+// held-route refresh race. Measured on a CPU-oversubscribed runner (load
+// ~13 on 2 cores) completed passes take 79-103s and one run was censored by
+// the old 120s cap at 121s; on CI the whole test takes ~4s. 240s is ~2x the
+// worst measured loaded pass. It is a cap, not a wait: every in-page wait
+// keeps its original 8s default and no assertion changes.
+test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 240000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
@@ -513,7 +519,11 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
+  // Explicit navigation timeout: the 8s default timeout also governs goto,
+  // and a cold page boot under load exceeds it (measured: goto timed out at
+  // 8000ms on a loaded runner while the same boot completes in ~2s unloaded).
+  // 30s covers the boot only; every in-page wait below keeps the 8s default.
+  await page.goto(origin, { timeout: 30000 });
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const snapshot = () => ({
@@ -527,6 +537,9 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.keyboard.press("Control+k");
     await page.locator("#room-actions-query").waitFor({ state: "visible" });
     await page.locator("#room-actions-query").fill("board");
+    // Ensure the filter applied and Board is the actionable item before Enter;
+    // otherwise Enter can fire with a stale list and never open the dialog.
+    await page.locator('#room-actions-list button[data-room-action="board"]').waitFor({ state: "visible" });
     await page.locator('[data-room-action="board"]').press("Enter");
     await dialog.waitFor({ state: "visible" });
   };
