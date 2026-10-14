@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../../../server/store.mjs";
 import { createRoomServer } from "../../../server/http.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../../../server/spend-grants.mjs";
 import { initialRoom } from "../../../server/bootstrap.mjs";
 import { spawnContext } from "../../lib/spawn.mjs";
 import { loadConfig, saveConfig } from "../../lib/config.mjs";
@@ -153,6 +154,13 @@ async function enrolled(t, { roomId = "commons" } = {}) {
     code: "bot-code", home, env, relayHttp: relay.http, insecure: true, // local fake relay
   }));
   assert.equal(result.ok, true, JSON.stringify(result));
+  // #3269: staging files over REST is the priced room_put_file twin, and the
+  // bot stages its completion receipt as the enrolled agent — the owner
+  // issues it a production spend grant with ample, non-single-use cap.
+  ensureSpendGrantsSchema(served.store.db);
+  issueSpendGrant(served.store.db, roomId, result.identityId, {
+    grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now(),
+  });
   return { ...served, home, env, relay, identityId: result.identityId };
 }
 

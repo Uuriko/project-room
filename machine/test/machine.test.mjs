@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../../server/store.mjs";
 import { createRoomServer } from "../../server/http.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../../server/spend-grants.mjs";
 import { initialRoom } from "../../server/bootstrap.mjs";
 import { spawnContext } from "../lib/spawn.mjs";
 import { saveConfig, defaultConfig } from "../lib/config.mjs";
@@ -77,7 +78,7 @@ async function serve(t) {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  return { origin, ownerKey };
+  return { origin, ownerKey, store };
 }
 
 async function post(origin, path, body, token) {
@@ -573,7 +574,7 @@ test.describe("room-machine", { concurrency: false }, () => {
   });
 
   test("doctor posts measured facts, and release closes the claim with at most ten blobs", async (t) => {
-    const { origin, ownerKey } = await serve(t);
+    const { origin, ownerKey, store } = await serve(t);
     const home = homeDir();
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const relay = await startFakeRelay();
@@ -598,6 +599,13 @@ test.describe("room-machine", { concurrency: false }, () => {
     });
     const enrolled = await spawnContext.run({ env }, () => enroll({ code: "desk-code", home, env, relayHttp: relay.http, insecure: true }));
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
+    // #3269: staging files over REST is the priced room_put_file twin, and
+    // the doctor report / machine release stage blobs as the enrolled agent
+    // — the owner issues it a production spend grant with ample cap.
+    ensureSpendGrantsSchema(store.db);
+    issueSpendGrant(store.db, "commons", enrolled.identityId, {
+      grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now(),
+    });
     const secret = await spawnContext.run({ env }, () => readSecret("identity", home));
     const presence = await get(origin, "/api/agent-heartbeats", secret);
     assert.equal(presence.status, 200, JSON.stringify(presence.json));

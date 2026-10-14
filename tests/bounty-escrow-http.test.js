@@ -11,12 +11,21 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../server/spend-grants.mjs";
 
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
   // Test-only ledger seeding: grant the fixture members payable credits so
   // fund/claim/dispute can lock real (valueless) balances over HTTP.
   const escrow = new BountyEscrow(fixture.store, { allowLegacyStringLanes: true });
+  // #3269: posting a bounty over REST is the priced bounty_post twin, so the
+  // producer agent needs a production spend grant to post in setup (the
+  // owner posts free). One non-single-use grant with ample cap covers every
+  // post in a test, including the idempotency-replay first call.
+  ensureSpendGrantsSchema(fixture.store.db);
+  issueSpendGrant(fixture.store.db, ROOM, "producer", {
+    grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now(),
+  });
   fixture.store.transaction(() => {
     escrow._ensure();
     const at = new Date().toISOString();
