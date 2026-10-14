@@ -5118,6 +5118,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const selected = parsed.searchParams.get("workItemId");
         if (selected && validId(selected)) workItemId = selected;
+        // E4-REG: public-work task routes carry the task id in the path,
+        // not a room or a ?workItemId= — without it the error envelope's
+        // guidance cannot name the concrete task read (the #3246 fallback
+        // to /api/session). Mirrors the roomId extraction above.
+        if (!workItemId) {
+          const publicWorkTask = /^\/api\/public-work\/tasks\/([^/]+)/.exec(parsed.pathname);
+          if (publicWorkTask) {
+            try { const id = decodeURIComponent(publicWorkTask[1]); if (validId(id)) workItemId = id; } catch { /* ignore */ }
+          }
+        }
       } catch { /* ignore */ }
       const httpStatus = error.status || 500;
       const code = error.code || "internal_error";

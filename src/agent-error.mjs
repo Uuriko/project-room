@@ -23,6 +23,159 @@ const BOND_DM_DATA_SHAPES = {
   "dm.posted": "{ to, body, messageId? }",
 };
 
+// ---------------------------------------------------------------------------
+// E4-REG (decision #19c): the single bidirectional error registry. A migrated
+// code's guidance — envelope status/reason, hint, next, AND the errors
+// catalog's declared HTTP/Retry/Recovery row — is declared HERE, once, and
+// agentErrorAx() resolves the code from this table alone (its old cascade
+// branch is deleted as it migrates). tests/errors-catalog-drift.test.js pins
+// shipped == registry == catalog for every entry, so the three cannot
+// diverge again. hint/next may be functions of the envelope context
+// ({ httpStatus, message, roomId, workItemId }) for message-shaped codes.
+// New codes must be born here (registry-born ratchet); the remaining estate
+// migrates surface by surface under the tracking issue filed with this PR.
+// ---------------------------------------------------------------------------
+export const ERROR_REGISTRY = {
+  // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
+  // of the dedicated branch #3026 landed for #3021.
+  agent_not_registered: {
+    status: "action_required",
+    hint: "No host has reported for this identity yet. POST /api/agent-heartbeats with your hostId first, then poll again.",
+    next: [path("/api/agent-heartbeats"), tool("heartbeat_set"), command("POST /api/agent-heartbeats with { hostId } for this identity (or call heartbeat_set), then re-poll GET /api/agent-wakes/poll")],
+    catalog: { http: 404, retry: "fix", recovery: "POST /api/agent-heartbeats first, then poll. The identity has no live host yet." },
+  },
+  // Wake surface: the two refused fields are hostId and waitMs; the hint
+  // names the refused one (the generic input copy named neither).
+  invalid_wake_poll: {
+    status: "action_required",
+    hint: ({ message }) => /waitMs/.test(String(message || ""))
+      ? "waitMs must be an integer from 0 to 55000 (milliseconds). Resend the poll with waitMs in range, or omit it for the default wait."
+      : "hostId is required or malformed: it must be 1-128 chars of [A-Za-z0-9._-] — one wake waiter per host. Pass the hostId you send heartbeats with.",
+    next: ({ message }) => [command(/waitMs/.test(String(message || ""))
+      ? "Resend GET /api/agent-wakes/poll with waitMs between 0 and 55000 (or omit waitMs), keeping your hostId."
+      : "Resend GET /api/agent-wakes/poll?hostId=<your hostId> — with several registered hosts, pass the hostId you heartbeat with; if no host has reported yet, POST /api/agent-heartbeats first, then poll.")],
+    catalog: { http: 422, retry: "fix+resend", recovery: "Fix hostId (1-128 chars, [A-Za-z0-9._-]; with several registered hosts, pass the hostId you heartbeat with) or waitMs (0..55000), then resend the poll." },
+  },
+  // Public-work surface (#3246 fix). The terms check runs before any write
+  // on claim/renew/release/finish, so a rejected action saved nothing. The
+  // recovery names the task read itself — the room work-claims copy
+  // (workContext / /api/session) this code used to inherit from the generic
+  // stale_* branch cannot converge for an identity-secret bearer.
+  stale_public_work: {
+    status: "action_required",
+    hint: "The task's terms changed since you read it — your expectedTermsVersion is stale. Re-read the task for the current termsVersion, then resend with it.",
+    next: ({ workItemId }) => {
+      const taskPath = workItemId ? `/api/public-work/tasks/${encodeURIComponent(workItemId)}` : "/api/public-work/tasks";
+      return [path(taskPath), command(`GET ${taskPath} to read the current termsVersion, then resend your action with expectedTermsVersion set to it. A rejected action saved nothing — if you were finishing, keep your artifact text and send it again.`)];
+    },
+    catalog: { http: 409, retry: "re-read", recovery: "Re-read the task (GET /api/public-work/tasks/<taskId>) for the current termsVersion, then resend with it. A rejected action saved nothing — keep your artifact and re-send it." },
+  },
+  // Public-work surface (#3249 fix). Mechanically executable: the named
+  // task read discloses claim.submittedReceiptId (the recorded receipt).
+  public_work_already_submitted: {
+    status: "action_required",
+    hint: "This task already has a submitted receipt. Read the task to see it — you cannot submit, renew, release, or re-claim it.",
+    next: ({ workItemId }) => {
+      const taskPath = workItemId ? `/api/public-work/tasks/${encodeURIComponent(workItemId)}` : "/api/public-work/tasks";
+      return [path(taskPath), command(`GET ${taskPath} to read the task — claim.submittedReceiptId names the recorded receipt. For other work, GET /api/public-work/tasks and claim a different task.`)];
+    },
+    catalog: { http: 409, retry: "no", recovery: "Do not submit again. Read the task (GET /api/public-work/tasks/<taskId>) — claim.submittedReceiptId names the recorded receipt; for other work, list GET /api/public-work/tasks." },
+  },
+  // Public-work surface. Verbatim port of the G4 branch (message-shaped:
+  // the message names the holder and the lease expiry).
+  public_work_claim_conflict: {
+    status: "action_required",
+    hint: ({ message }) => {
+      const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+      const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+      const hint = holder
+        ? self
+          ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
+          : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
+        : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+      return hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+    },
+    next: ({ message }) => {
+      const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+      const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+      return [path("/api/public-work/tasks"), command(self
+        ? "Renew your claim to extend the lease instead of claiming again."
+        : holder
+          ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
+          : "Re-read the task to see who holds the claim; wait for release or pick another task.")];
+    },
+    catalog: { http: 409, retry: "wait", recovery: "Another member holds the claim: wait for release or lease expiry, or pick another item. If the holder is you, renew the claim instead of claiming again." },
+  },
+  // Public-work surface. Verbatim port of the G5 branch (message-shaped:
+  // the generation changed, or the lease lapsed/was released). The rejected
+  // artifact bytes were never stored — generation is checked before the
+  // receipt write — so the agent must keep them and re-submit.
+  stale_public_claim: {
+    status: "action_required",
+    hint: ({ message }) => {
+      const text = String(message || "");
+      const changed = /generation changed/i.test(text);
+      const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
+      const hint = changed
+        ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
+        : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
+      return hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.";
+    },
+    next: ({ message }) => {
+      const changed = /generation changed/i.test(String(message || ""));
+      return [path("/api/public-work/tasks"), command(changed
+        ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
+        : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")];
+    },
+    catalog: { http: 409, retry: "re-claim", recovery: "Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them." },
+  },
+  // Guest-join surface (#3381). A stale signed CARD is a freshness failure,
+  // not a stale revision: the generic stale() branch taught the
+  // workContext/expectedRevision recovery (and /api/session, unreachable
+  // pre-join). The only fix is a fresh signature over a current issuedAt.
+  stale_card: {
+    status: "action_required",
+    hint: "The signed joinRequest's issuedAt is outside the server's freshness window. Sign a fresh joinRequest with a current issuedAt and resend it — the same signed bytes will never be accepted.",
+    next: [command("Sign a fresh joinRequest with issuedAt set to the current time, then resend the join request. Do not retry the previous signed card.")],
+    catalog: { http: 422, retry: "no — re-sign fresh", recovery: "Sign a fresh joinRequest with a current issuedAt and resend; do not retry the same signed card." },
+  },
+  // Trial-seat ceiling (many emit sites, one meaning). Replaces the generic
+  // 403 branch for this code: the ceiling is the seat, and the path up is
+  // upgrading it — not minting a(nother) guest invite.
+  guest_scope_denied: {
+    status: "action_required",
+    hint: "Guest (trial-seat) members cannot do this — the action is reserved for full members. Run room_check_access to see what this identity can do.",
+    next: [tool("room_check_access"), command("Ask the room owner to upgrade this trial seat to a full membership (or Add agent as a full member). Do not retry this call with the guest credential.")],
+    catalog: { http: 403, retry: "no", recovery: "Guests (trial seats) cannot do this — it is reserved for full members. room_check_access to see what this identity can do; ask the owner to upgrade the seat to a full membership. Do not retry with the guest credential." },
+  },
+  // Mint surface (POST /api/agent-identities). Verbatim move of the
+  // dedicated #1547 branch.
+  proof_required: {
+    status: "action_required",
+    hint: "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.",
+    next: [
+      command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
+      command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
+    ],
+    catalog: { http: 428, retry: "fix", recovery: "Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code (no proof needed)." },
+  },
+};
+
+// Resolve a registry-owned code's envelope. Returns null for codes the
+// registry does not own yet (the cascade in agentErrorAx serves those).
+export function errorRegistryAx(code, { httpStatus = 0, message = "", roomId, workItemId } = {}) {
+  const entry = ERROR_REGISTRY[code];
+  if (!entry) return null;
+  const ctx = { httpStatus, message, roomId, workItemId };
+  const pick = value => typeof value === "function" ? value(ctx) : value;
+  return {
+    status: entry.status,
+    reason: entry.reason ?? code,
+    hint: pick(entry.hint),
+    next: pick(entry.next),
+  };
+}
+
 // #3055: named recoveries for server-emittable codes whose message (and the
 // errors catalog, skills/project-room/references/errors-catalog.md) names a
 // concrete recovery the old "Unknown error … no known recovery" fallthrough
@@ -260,6 +413,12 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
   const readWork = workItemId ? tool("room_read_work", { workItemId }) : tool("room_read_work");
 
+  // E4-REG: registry-owned codes resolve from ERROR_REGISTRY alone; their
+  // cascade branches are deleted. Everything else flows through the cascade
+  // below unchanged.
+  const registeredAx = errorRegistryAx(reasonCode, { httpStatus, message, roomId, workItemId });
+  if (registeredAx) return registeredAx;
+
   if (reasonCode === "member_required") {
     return {
       status: "action_required", reason: "member_required",
@@ -468,53 +627,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
-  // G4 (usage-burn): a raced public-work claim names its holder and lease
-  // expiry in the message — turn them into the hint/next the taxonomy
-  // promises, the way session_claimed names its holder.
-  if (reasonCode === "public_work_claim_conflict") {
-    const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
-    const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
-    const hint = holder
-      ? self
-        ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
-        : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
-      : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
-    return {
-      status: "action_required", reason: "public_work_claim_conflict",
-      hint: hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.",
-      next: [
-        path("/api/public-work/tasks"),
-        command(self
-          ? "Renew your claim to extend the lease instead of claiming again."
-          : holder
-            ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
-            : "Re-read the task to see who holds the claim; wait for release or pick another task.")
-      ]
-    };
-  }
-  // G5 (usage-burn): stale_public_claim must beat the generic stale_* branch
-  // below and say which — the generation changed, or the lease expired — with
-  // the re-read/re-claim recovery. The rejected artifact bytes were never
-  // stored (generation is checked before the receipt write), so the agent
-  // must keep them and re-submit.
-  if (reasonCode === "stale_public_claim") {
-    const text = String(message || "");
-    const changed = /generation changed/i.test(text);
-    const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
-    const hint = changed
-      ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
-      : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
-    return {
-      status: "action_required", reason: "stale_public_claim",
-      hint: hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.",
-      next: [
-        path("/api/public-work/tasks"),
-        command(changed
-          ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
-          : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")
-      ]
-    };
-  }
+  // (public_work_claim_conflict and stale_public_claim are registry-owned —
+  // see ERROR_REGISTRY above; their G4/G5 branches moved there verbatim.)
   if (stale(reasonCode, message)) {
     return {
       status: "action_required", reason: "stale_revision",
@@ -768,7 +882,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       invitation_already_used: "This invitation was already accepted through another request. Read its current state; do not accept it again.",
       key_already_registered: "This public key is already registered for the identity. Use the existing registration; do not register it again.",
       public_work_already_enabled: "Public claims are already enabled for this room — nothing to do.",
-      public_work_already_submitted: "This task already has a submitted receipt. Read the task instead of submitting again.",
+      // (public_work_already_submitted is registry-owned — ERROR_REGISTRY.)
       quarantine_already_reviewed: "This quarantine was already reviewed and reviews are final. Do not review it again.",
       quarantine_already_split: "This quarantine is already split off its thread. Read its current state; do not split it again.",
     };
@@ -795,23 +909,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Retry after Retry-After")]
     };
   }
-  if (reasonCode === "proof_required") {
-    // #1547: a paste-only agent dead-ends on this 428 — "See proof" names no
-    // tool, no one-liner, and no manual alternative. The 428 body carries the
-    // machine-readable spec (proof.challenge, proof.acceptBuckets,
-    // proof.prefix, proof.nonce); the hint restates the recipe in words and
-    // names the no-computation escape hatch: redeeming a member-issued invite
-    // code via POST /api/agent-invites/redeem mints the identity without the
-    // anonymous proof-of-work gate.
-    return {
-      status: "action_required", reason: "proof_required",
-      hint: "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.",
-      next: [
-        command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
-        command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
-      ]
-    };
-  }
+  // (proof_required is registry-owned — see ERROR_REGISTRY above; its
+  // #1547 branch moved there verbatim.)
   // Lane 5 (docspolish-error-quality): the availability-503 family needs its
   // own recovery, not the generic 500 branch. storage_unavailable is the
   // Retry-After retry docs/ERROR-TAXONOMY.md promises; mail_not_configured
@@ -921,13 +1020,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         tool("room_check_access")]
     };
   }
-  if (reasonCode === "agent_not_registered") {
-    return {
-      status: "action_required", reason: "agent_not_registered",
-      hint: "No host has reported for this identity yet. POST /api/agent-heartbeats with your hostId first, then poll again.",
-      next: [path("/api/agent-heartbeats"), tool("heartbeat_set"), command("POST /api/agent-heartbeats with { hostId } for this identity (or call heartbeat_set), then re-poll GET /api/agent-wakes/poll")]
-    };
-  }
+  // (agent_not_registered is registry-owned — see ERROR_REGISTRY above.)
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.

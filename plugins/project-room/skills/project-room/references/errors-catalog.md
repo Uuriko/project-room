@@ -356,7 +356,7 @@ response's own `hint`/`next` when it names something more specific.
 | `grant_denied` | 403 | Guest passes cannot hold capability grants; a grant can never widen a guest beyond its scope | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `guest_not_found` | 404 | No active guest with that member id | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `guest_only` | 403 | Only a guest credential can rotate itself | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
-| `guest_scope_denied` | 403 | { status: 403, code: "guest_scope_denied", message: `Guest members cannot call ${name}` }; return { status: 40 | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `guest_scope_denied` | 403 | { status: 403, code: "guest_scope_denied", message: `Guest members cannot call ${name}` }; return { status: 40 | no | Guests (trial seats) cannot do this — it is reserved for full members. room_check_access to see what this identity can do; ask the owner to upgrade the seat to a full membership. Do not retry with the guest credential. |
 | `guest_session_ended` | 409 | Your previous browser identity expired. Sign out before joining as a new guest. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `guide_starter_only` | 403 | Room Guide can only claim and close starter tasks. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `halt_active` | 409 | This member recorded halt-all; a steer/decide member must clear the exact halt before further work mutations | no | A steer/decide member must clear the exact halt before further work mutations. |
@@ -678,7 +678,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_wake` | 422 | Supply a queue key, intent, due time, max attempts and request ID. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_claim` | 422 | fencingToken is required; limit must be 1..50 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_pause` | 422 | Supply a request ID and an optional short reason. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
-| `invalid_wake_poll` | 422 | hostId is required (1-128 chars, [A-Za-z0-9._-]) — one wake waiter per host | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_wake_poll` | 422 | hostId is required (1-128 chars, [A-Za-z0-9._-]) — one wake waiter per host | fix+resend | Fix hostId (1-128 chars, [A-Za-z0-9._-]; with several registered hosts, pass the hostId you heartbeat with) or waitMs (0..55000), then resend the poll. |
 | `invalid_wake_resume` | 422 | Supply a request ID. reason is optional. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_wake_time` | 422 | Choose a due time within one year. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_webhook` | 500 | fail("invalid_webhook", message); }; const URL_PATTERN = /^https:\/\/[^\s/$.?#].[^\s]*$/i; // --- SSRF guard (RC-2026-09-19-087; H-1 fix RC-2026-09-25 | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
@@ -811,8 +811,8 @@ response's own `hint`/`next` when it names something more specific.
 | `proxy_denied` | 403 | Invalid proxy configuration | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `public_receipt_not_found` | 404 | Public receipt not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `public_work_already_enabled` | 409 | Public claims already enabled | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
-| `public_work_already_submitted` | 409 | This task already has a submitted receipt | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
-| `public_work_claim_conflict` | 409 | Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'}) | wait | Another member holds the claim. Wait for release or lease expiry, or pick another item. |
+| `public_work_already_submitted` | 409 | This task already has a submitted receipt | no | Do not submit again. Read the task (GET /api/public-work/tasks/<taskId>) — claim.submittedReceiptId names the recorded receipt; for other work, list GET /api/public-work/tasks. |
+| `public_work_claim_conflict` | 409 | Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'}) | wait | Another member holds the claim: wait for release or lease expiry, or pick another item. If the holder is you, renew the claim instead of claiming again. |
 | `public_work_not_eligible` | 422 | Public claims currently require an unpaid offer with a repository URL | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `public_work_not_found` | 404 | Public task not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `public_work_not_owner` | 403 | Only the claimant may change this lease | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
@@ -919,7 +919,7 @@ response's own `hint`/`next` when it names something more specific.
 | `squad_roster_full` | 422 | A squad holds at most ${MAX_SQUAD_MEMBERS} members | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `squad_unknown` | 422 | squadId "${typeof data.squadId === "string" ? data.squadId : "?"}" is not an active squad in this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `stale_account_revision` | 409 | Stale account revision | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
-| `stale_card` | 422 | The card signature is stale; sign a fresh joinRequest | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
+| `stale_card` | 422 | The card signature is stale; sign a fresh joinRequest | no — re-sign fresh | Sign a fresh joinRequest with a current issuedAt and resend; do not retry the same signed card. |
 | `stale_demigod_offer` | 409 | Offer changed; read it again | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_email_connection` | 409 | Connection changed. Refresh before editing. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_email_cursor` | 409 | Sync context changed. Start a fresh scan. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
@@ -943,7 +943,7 @@ response's own `hint`/`next` when it names something more specific.
 | `stale_membership` | 409 | Current active membership required; ask a room owner to review access | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_offer` | 409 | Offer changed; read it again | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_public_claim` | 409 | Claim generation changed (submitted ${input.generation}, current ${row.generation}) | re-claim | Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them. |
-| `stale_public_work` | 409 | Task terms changed | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
+| `stale_public_work` | 409 | Task terms changed | re-read | Re-read the task (GET /api/public-work/tasks/<taskId>) for the current termsVersion, then resend with it. A rejected action saved nothing — keep your artifact and re-send it. |
 | `stale_reminder` | 409 | Your reminder changed. Review its current time before saving. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_reply_attempt` | 409 | Reply status changed. Refresh it. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_reply_attempt` | 500 | Reply status changed. Refresh it. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
