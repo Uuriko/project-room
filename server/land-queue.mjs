@@ -33,6 +33,14 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // forever. Ten minutes is generous — the longest keyed call (add's GitHub
 // refresh) completes in seconds under normal conditions.
 const STALE_INFLIGHT_MS = 10 * 60 * 1000;
+// #3255: per-fetch bound for GitHub reads. A keyed mutating call chains at
+// most five fetches (PR + status + up to three check-run pages), so its
+// worst case stays near 2.5 minutes — comfortably below STALE_INFLIGHT_MS,
+// which is what makes "the first attempt is still alive when the staleness
+// window passes" unreachable through a merely hung forge read. The claim
+// nonce in #requestKey is the correctness fence; this timeout keeps the
+// window honest.
+const GITHUB_FETCH_TIMEOUT_MS = 30 * 1000;
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -92,6 +100,7 @@ export const landQueueSchema = `
     input_hash TEXT NOT NULL,
     status INTEGER NOT NULL DEFAULT 0,
     response TEXT,
+    claim_nonce TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (room_id, request_id)
@@ -111,6 +120,15 @@ export function migrateLandQueueColumns(db) {
   if (!columns.has("backoff_ms")) db.exec("ALTER TABLE land_queue ADD COLUMN backoff_ms INTEGER NOT NULL DEFAULT 60000");
   if (!columns.has("poll_etag")) db.exec("ALTER TABLE land_queue ADD COLUMN poll_etag TEXT");
   if (!columns.has("rate_limited_until")) db.exec("ALTER TABLE land_queue ADD COLUMN rate_limited_until INTEGER");
+  // #3255: claim_nonce fences a superseded attempt's commit/abort (see
+  // LandQueue#requestKey). Additive, same pattern as the columns above;
+  // rows claimed before this column existed carry NULL and are only ever
+  // removed by the staleness-predicated takeover DELETE.
+  const idemExists = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='land_queue_idempotency'").get();
+  if (idemExists) {
+    const idemColumns = new Set(db.prepare("SELECT name FROM pragma_table_info('land_queue_idempotency')").all().map(row => row.name));
+    if (!idemColumns.has("claim_nonce")) db.exec("ALTER TABLE land_queue_idempotency ADD COLUMN claim_nonce TEXT");
+  }
 }
 
 export function nextPollBackoff(currentMs) {
@@ -303,13 +321,16 @@ function isRateLimitResponse(response, message) {
   return /rate limit/i.test(message);
 }
 
-async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now() } = {}) {
+async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now(), timeoutMs = GITHUB_FETCH_TIMEOUT_MS } = {}) {
   const headers = githubHeaders(token);
   const cached = usableEtag(etag);
   if (cached) headers["If-None-Match"] = cached;
   let response;
   try {
-    response = await fetchImpl(url, { headers });
+    // #3255: every forge read is time-bounded (the claim-pr-sync
+    // AbortSignal.timeout pattern). Without a signal a hung read could
+    // keep an idempotency attempt alive past STALE_INFLIGHT_MS.
+    response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     fail(502, "github_unavailable", "GitHub could not be reached");
   }
@@ -370,7 +391,7 @@ function slimRuns(runs) {
 // Latest attempt of every check run on the head SHA. One page is 100; a
 // further page is only requested when the first page says there are more.
 // filter=latest is the rollup set: a rerun replaces the earlier attempt.
-async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
+async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now, timeoutMs = GITHUB_FETCH_TIMEOUT_MS) {
   const runs = [];
   let etag = null;
   for (let page = 1; page <= CHECK_RUN_PAGES; page += 1) {
@@ -378,7 +399,8 @@ async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
     const result = await githubFetch(fetchImpl, url, token, {
       etag: page === 1 ? cached?.etag ?? null : null,
       missingOk: true,
-      now
+      now,
+      timeoutMs
     });
     if (page === 1) etag = result.etag ?? null;
     if (page === 1 && result.notModified) {
@@ -395,12 +417,12 @@ async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
   return { notModified: false, etag, runs, incomplete: true };
 }
 
-export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now() } = {}) {
+export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now(), timeoutMs = GITHUB_FETCH_TIMEOUT_MS } = {}) {
   const [owner, name] = parseRepo(repo).split("/");
   const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   const cache = previous?.cache && typeof previous.cache === "object" ? previous.cache : null;
   const prResult = await githubFetch(fetchImpl, `${base}/pulls/${parsePrNumber(prNumber)}`, token, {
-    etag: cache?.etags?.pr ?? null, now
+    etag: cache?.etags?.pr ?? null, now, timeoutMs
   });
   let sha = null;
   let prFields = null;
@@ -421,12 +443,12 @@ export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImp
   if (sha) {
     const sameSha = cache?.sha === sha;
     const statusResult = await githubFetch(fetchImpl, `${base}/commits/${sha}/status`, token, {
-      etag: sameSha ? statusEtag : null, missingOk: true, now
+      etag: sameSha ? statusEtag : null, missingOk: true, now, timeoutMs
     });
     statusNotModified = statusResult.notModified === true;
     statusEtag = statusResult.etag ?? null;
     if (!statusNotModified) statusBody = statusResult.missing ? null : statusResult.body;
-    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now);
+    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now, timeoutMs);
     checksNotModified = checksResult.notModified === true;
     checksEtag = checksResult.etag ?? null;
     incomplete = checksResult.incomplete === true;
@@ -618,12 +640,14 @@ export class LandQueue {
     this.db = store.db;
     this.token = null;
     this.fetchImpl = (...args) => fetch(...args);
+    this.fetchTimeoutMs = GITHUB_FETCH_TIMEOUT_MS;
   }
 
-  configure({ env = null, token = undefined, fetchImpl = undefined } = {}) {
+  configure({ env = null, token = undefined, fetchImpl = undefined, fetchTimeoutMs = undefined } = {}) {
     if (token !== undefined) this.token = token || null;
     else if (env) this.token = githubAccessToken(env);
     if (fetchImpl) this.fetchImpl = fetchImpl;
+    if (Number.isFinite(fetchTimeoutMs) && fetchTimeoutMs > 0) this.fetchTimeoutMs = fetchTimeoutMs;
     return this;
   }
 
@@ -654,6 +678,16 @@ export class LandQueue {
   // than replaying a stale error (e.g. a transient 503 github_unconfigured).
   // Without a requestId the returned gate is a no-op and behavior is
   // unchanged.
+  //
+  // #3255: every claim carries a fresh claim_nonce, and commit/abort are
+  // predicated on (status=0 AND claim_nonce = mine). The staleness
+  // takeover fences racing *reclaimers*, but before this fix it did not
+  // fence the original attempt: if attempt 1 was merely slow (a hung
+  // GitHub read — now also time-bounded, see GITHUB_FETCH_TIMEOUT_MS),
+  // its late commit overwrote the takeover's stored response and its late
+  // abort deleted the takeover's committed record. A superseded attempt's
+  // commit/abort now match nothing: the row belongs to its new owner, or
+  // is already committed and can no longer be aborted away.
   #requestKey(roomId, memberId, op, requestId, invalidCode, input) {
     const noop = { replay: false, commit() {}, abort() {} };
     if (requestId === undefined || requestId === null) return noop;
@@ -662,10 +696,11 @@ export class LandQueue {
     }
     const inputHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     const now = this.store.now();
+    const claimNonce = randomBytes(16).toString("base64url");
     const claimed = this.db.prepare(`INSERT OR IGNORE INTO land_queue_idempotency
-      (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
-      VALUES (?,?,?,?,?,0,NULL,?,?)`)
-      .run(roomId, requestId, op, memberId, inputHash, now, now);
+      (room_id, request_id, op, actor_member_id, input_hash, status, response, claim_nonce, created_at, updated_at)
+      VALUES (?,?,?,?,?,0,NULL,?,?,?)`)
+      .run(roomId, requestId, op, memberId, inputHash, claimNonce, now, now);
     if (claimed.changes === 0) {
       const prior = this.db.prepare(`SELECT op, actor_member_id AS actor, input_hash AS inputHash,
         status, response, updated_at AS updatedAt FROM land_queue_idempotency WHERE room_id=? AND request_id=?`)
@@ -696,12 +731,20 @@ export class LandQueue {
     return {
       replay: false,
       commit(body) {
+        // #3255: only the claim's owner, while the claim is still
+        // in flight, may record the response. If a takeover superseded
+        // this attempt, the row carries the new owner's nonce (or is
+        // already committed) and this write lands nowhere.
         db.prepare(`UPDATE land_queue_idempotency SET status=1, response=?, updated_at=?
-          WHERE room_id=? AND request_id=?`)
-          .run(JSON.stringify(body), store.now(), roomId, requestId);
+          WHERE room_id=? AND request_id=? AND status=0 AND claim_nonce=?`)
+          .run(JSON.stringify(body), store.now(), roomId, requestId, claimNonce);
       },
       abort() {
-        db.prepare("DELETE FROM land_queue_idempotency WHERE room_id=? AND request_id=?").run(roomId, requestId);
+        // #3255: an abort may only remove its OWN in-flight placeholder —
+        // never a takeover's placeholder, and never a committed record.
+        db.prepare(`DELETE FROM land_queue_idempotency
+          WHERE room_id=? AND request_id=? AND status=0 AND claim_nonce=?`)
+          .run(roomId, requestId, claimNonce);
       }
     };
   }
@@ -929,6 +972,7 @@ export class LandQueue {
         prNumber: item.prNumber,
         token: this.token,
         fetchImpl: this.fetchImpl,
+        timeoutMs: this.fetchTimeoutMs,
         now,
         previous: row ? {
           title: row.title ?? null,
