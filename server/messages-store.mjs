@@ -659,3 +659,26 @@ export function restoreArchivedMessages(store, roomId) {
     return missing.length;
   });
 }
+
+// Bring one archived message back into the projection so the normal delete and
+// redaction path can act on it. The id joins the marker's retainedIds (it is at
+// or below throughSeq but no longer archived) and the archived count drops by
+// one, so the marker, the table and a marker-aware replay all agree. Returns
+// true when the message was restored. Runs inside the caller's command
+// transaction, so a delete the reducer then refuses rolls this back too.
+export function restoreArchivedMessage(store, roomId, messageId) {
+  const db = store.db;
+  const marker = archiveMarker(db, roomId);
+  if (!archivedMessageRow(db, roomId, messageId, marker)) return false;
+  const state = store.room(roomId).state;
+  if ((state.messages ?? []).some(message => message.id === messageId)) return false;
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+  const original = (store._replayRoom(roomId, head.sequence).state.messages ?? []).find(message => message.id === messageId);
+  if (!original) throw new Error("Archived message could not be restored from the event log");
+  const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
+  const messages = [...(state.messages ?? []), original].sort((a, b) => (seqs.get(a.id) ?? Infinity) - (seqs.get(b.id) ?? Infinity));
+  const next = { ...state, messages, messagesArchive: { throughSeq: marker.throughSeq, count: Math.max(0, marker.count - 1), retainedIds: [...marker.retainedIds, messageId] } };
+  db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
+  store._projectionCache?.clear?.();
+  return true;
+}

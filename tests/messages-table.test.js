@@ -337,7 +337,6 @@ test("changing or replying to an archived message is refused with a clear error,
   const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
   const before = f.store.room("commons").sequence;
   assert.equal(code(() => f.send(f.human, T.MESSAGE_EDITED, { messageId: "old-pub", body: "x", expectedMessageRevision: 0 })), "message_archived");
-  assert.equal(code(() => f.send(f.human, T.MESSAGE_DELETED, { messageId: "old-pub", expectedMessageRevision: 0, reason: "x" })), "message_archived");
   assert.equal(code(() => f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: "old-pub", reaction: "like", active: true })), "message_archived");
   assert.equal(code(() => f.send(f.human, T.MESSAGE_PINNED, { messageId: "old-pub" })), "message_archived");
   assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-1", body: "r", replyToId: "old-pub" })), "message_archived");
@@ -873,4 +872,47 @@ test("REST search with since_join history never returns archived messages from b
   assert.deepEqual(f.store.search(late, "commons", "quartz", "messages").messages.map(m => m.id), ["after-pub", "new-pub"], "store.search applies the history floor to archived hits");
   assert.deepEqual(await ids(f.human), ["before-pub", "after-pub", "new-pub"], "an earlier member keeps the full history");
   assert.deepEqual(await ids(late), ["after-pub", "new-pub"], "the late joiner gets archived messages from after their join only");
+});
+
+test("the author and the Room owner can delete an archived message; nobody else can, and a stranger learns nothing", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-mine", body: "harmful text one" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "harmful private text" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-owner", body: "harmful text three" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `n-${i}`, body: `later ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived >= 3);
+  const ids = () => f.store.room("commons").state.messages.map(m => m.id);
+  assert.ok(!ids().includes("old-mine"));
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  const del = (who, messageId) => f.send(who, T.MESSAGE_DELETED, { messageId, expectedMessageRevision: 0, reason: "x" });
+  // Someone who may not delete it changes nothing, and a stranger cannot tell the DM exists.
+  const before = f.store.room("commons").sequence;
+  assert.equal(code(() => del(f.agent, "old-mine")), "message_archived");
+  const probe = code(() => del(f.stranger, "old-dm")), unknown = code(() => del(f.stranger, "no-such-id"));
+  assert.equal(probe, unknown, "a stranger gets the unknown-id answer");
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.ok(!ids().includes("old-mine"), "a refused delete restores nothing");
+  // The author deletes a public and a private archived message; the owner deletes another's.
+  del(f.human, "old-mine");
+  del(f.human, "old-dm");
+  del(f.owner, "old-owner");
+  for (const id of ["old-mine", "old-dm", "old-owner"]) {
+    const message = f.store.room("commons").state.messages.find(m => m.id === id);
+    assert.ok(message?.deletedAt && message.body === null, `${id} is a tombstone`);
+    const log = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' AND body LIKE ?").all(`%"messageId":"${id}"%`).map(row => row.body).join("\n");
+    assert.ok(!/harmful/.test(log), `${id} keeps no text in the event log`);
+    const row = f.store.db.prepare("SELECT * FROM messages WHERE message_id=?").get(id);
+    assert.ok(!JSON.stringify(row).includes("harmful"), `${id} keeps no text in the messages table`);
+  }
+  // The room still audits clean, still archives, and the restored ids are retained, not re-archived.
+  assert.doesNotThrow(() => auditRecovery(f.store));
+  f.store.checkMessagesParity();
+  f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false });
+  assert.doesNotThrow(() => auditRecovery(f.store));
+  // Deleting an already-deleted archived message is refused and leaves the room as it was.
+  const seq = f.store.room("commons").sequence;
+  assert.ok(code(() => del(f.human, "old-mine")));
+  assert.equal(f.store.room("commons").sequence, seq);
 });
