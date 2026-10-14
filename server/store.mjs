@@ -91,6 +91,7 @@ import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
+import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -1181,7 +1182,7 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" } = {}) {
+    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1", workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     const coldStart = startColdStart();
@@ -1849,6 +1850,38 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       phases.checksum = { ms: 0, rowsRead: 0 };
     }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
+    // Decision #10: backfill projection work items onto the work-claims
+    // board (server/work-item-board.mjs). Runs in both integrity modes —
+    // a deferred (Durable Object) database holds one room, so the pass is
+    // bounded there too; the versioned marker makes repeat opens a single
+    // marker read per room. "manual" defers the pass to an explicit
+    // backfillWorkItemClaims() call (tests staging a legacy corpus, or an
+    // operator-controlled rollout). A failing room never bricks the
+    // open: its marker stays behind and the next open retries it.
+    this.workItemBoardBackfillMode = workItemBoardBackfill;
+    if (workItemBoardBackfill !== "manual" && !this.readOnly) {
+      try {
+        this.workItemBoardBackfill = backfillAllRoomsWorkItemBoard(this, { nowMs: this.now() });
+        if (this.workItemBoardBackfill.errors.length > 0 || this.workItemBoardBackfill.diverged.length > 0) {
+          console.error(`work-item board backfill: ${this.workItemBoardBackfill.errors.length} error(s), ${this.workItemBoardBackfill.diverged.length} diverged item(s)`, JSON.stringify(this.workItemBoardBackfill).slice(0, 2000));
+        }
+      } catch (error) {
+        this.workItemBoardBackfill = { error: error?.message ?? String(error) };
+        console.error("work-item board backfill failed at open", error);
+      }
+    }
+  }
+
+  // Decision #10 operator/test surface: run (or re-run, with force) the
+  // workItems -> board-claims backfill, and read a room's shadow diff.
+  backfillWorkItemClaims({ force = false } = {}) {
+    return backfillAllRoomsWorkItemBoard(this, { nowMs: this.now(), force });
+  }
+  backfillRoomWorkItemClaims(roomId) {
+    return this.transaction(() => backfillRoomWorkItems(this, roomId, { nowMs: this.now() }));
+  }
+  workItemBoardDiff(roomId) {
+    return diffRoomWorkItems(this, roomId, { nowMs: this.now() });
   }
 
   coldStartExtra(deferIntegrity) {
