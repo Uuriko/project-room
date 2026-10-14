@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { publicAssets } from "./runtime-package.mjs";
 
-export const MANIFEST_PATH = "docs/CANDIDATE-MANIFEST.json";
+export const MANIFEST_PATH = "scripts/CANDIDATE-MANIFEST.json";
 const DEPLOYMENT_FILES = [".github/workflows/deploy-prod.yml", "scripts/deploy-recovery.mjs", "cloudflare/room.mjs", "cloudflare/storage.mjs", "cloudflare/bootstrap.mjs",
   "cloudflare/build-assets.mjs", "cloudflare/wrangler.jsonc", "cloudflare/package.json", "cloudflare/pnpm-lock.yaml"];
 const PACKAGE_FILES = ["package.json", "package-lock.json"];
