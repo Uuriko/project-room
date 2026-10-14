@@ -634,8 +634,10 @@ test("chargeSpendBeforeCall routes the check+reserve through store.transaction (
   assert.ok(error instanceof SpendGrantError, `expected SpendGrantError, got ${error}`);
   assert.equal(error.status, 402);
   assert.equal(error.code, "payment_required");
-  assert.equal(platformTxCalls, 1,
-    "the spend check+reserve must run inside the store platform transaction, never raw SQL");
+  assert.equal(platformTxCalls, 2,
+    "the spend paths must run inside the store platform transaction, never raw SQL: "
+    + "one transaction for the #3377 crash-recovery reap (committed independently, "
+    + "ahead of the charge) and one for the check+reserve itself");
 });
 
 // --- End-to-end through tools/call ---
