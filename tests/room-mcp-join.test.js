@@ -26,18 +26,18 @@ async function serve(t) {
 }
 
 test("hosted MCP join URL is host-exact and secret-free", () => {
-  assert.equal(ROOM_MCP_PUBLIC_URL, "https://www.getdasha.com/room/mcp");
+  assert.equal(ROOM_MCP_PUBLIC_URL, "https://room.trydemigod.com/mcp");
   assert.equal(isRoomMcpPath("/room/mcp"), true);
   assert.equal(isRoomMcpPath("/mcp/claude"), true);
   assert.equal(isRoomMcpPath("/room/join.txt"), false);
-  assert.equal(roomMcpUrlForHost("https://www.getdasha.com/room"), "https://www.getdasha.com/room/mcp");
-  assert.equal(roomMcpUrlForHost("https://www.trydemigod.com/room/mcp"), "https://www.getdasha.com/room/mcp");
-  assert.equal(roomMcpUrlForHost("https://project-room-staging.getdasha.workers.dev/room/mcp"), "https://www.getdasha.com/room/mcp");
+  assert.equal(roomMcpUrlForHost("https://www.getdasha.com/room"), "https://room.trydemigod.com/mcp");
+  assert.equal(roomMcpUrlForHost("https://www.trydemigod.com/room/mcp"), "https://room.trydemigod.com/mcp");
+  assert.equal(roomMcpUrlForHost("https://project-room-staging.getdasha.workers.dev/room/mcp"), "https://room.trydemigod.com/mcp");
   assert.equal(roomMcpUrlForHost("http://127.0.0.1:9"), "http://127.0.0.1:9/mcp");
   const snippets = roomMcpSnippets(ROOM_MCP_PUBLIC_URL);
-  assert.match(snippets.claude, /claude mcp add --transport http --scope user project-room https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(snippets.claude, /claude mcp add --transport http --scope user project-room https:\/\/room\.trydemigod\.com\/mcp/);
   assert.equal(snippets.cursor.mcpServers["project-room"].url, ROOM_MCP_PUBLIC_URL);
-  assert.match(snippets.codex, /codex mcp add project-room --url https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(snippets.codex, /codex mcp add project-room --url https:\/\/room\.trydemigod\.com\/mcp/);
   assert.match(roomMcpJoinText(), /room_check_access/);
   assert.match(roomMcpJoinText(), /message\.posted/);
   assert.doesNotMatch(roomMcpJoinText(), /pri_[A-Za-z0-9_-]{20,}/);
@@ -91,7 +91,7 @@ test("Room Worker serves /mcp and /room/mcp as a live join endpoint", async t =>
 test("Demigod door GET /room/mcp is the pasteable join surface", async () => {
   const response = roomEntry(new Request("https://www.trydemigod.com/room/mcp"));
   assert.equal(response.status, 200);
-  assert.match(await response.text(), /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(await response.text(), /https:\/\/room\.trydemigod\.com\/mcp/);
   const entry = roomEntry(new Request("https://www.trydemigod.com/room"));
   assert.equal(entry.status, 302, "MCP instructions remain on the explicit MCP path");
   assert.equal(await entry.text(), "");

@@ -213,7 +213,7 @@ test("llms.txt exposes connection commands and /.well-known/mcp points at hosted
   assert.equal(doc.type, "application/mcp-server-card+json; charset=utf-8");
   assert.equal(doc.body, wellKnownMcpJson());
   const card = JSON.parse(doc.body);
-  assert.equal(card.url, "https://www.getdasha.com/room/mcp");
+  assert.equal(card.url, "https://room.trydemigod.com/mcp");
   assert.equal(card.auth.mint, "https://room.trydemigod.com/api/agent-identities");
   assert.equal(discoveryDoc("/.well-known/mcp.json").body, doc.body);
   assert.equal(discoveryDoc("/room/.well-known/mcp").body, doc.body);

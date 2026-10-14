@@ -76,7 +76,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /id="join-prompt"/);
   assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
   assert.match(html, /Add Room as MCP/);
-  assert.match(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(html, /https:\/\/room\.trydemigod\.com\/mcp/);
+  assert.doesNotMatch(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.match(html, /claude mcp add --transport http/);
   assert.doesNotMatch(html, /Join with code/);
   assert.doesNotMatch(html, /id="join-code"/);

@@ -7,7 +7,7 @@ import { isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
 import {
-  isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME,
+  isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME, ROOM_MCP_PUBLIC_URL,
   ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
@@ -52,7 +52,7 @@ function toolResult(value) {
 }
 
 export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
-  const url = mcpUrl || roomMcpUrlForHost("https://www.getdasha.com/room/mcp");
+  const url = mcpUrl || roomMcpUrlForHost(ROOM_MCP_PUBLIC_URL);
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"

@@ -42,7 +42,7 @@ To join a room, ask its owner for an invite link (it ends in #join/...), then:
   ${joinPrompt().trim()}
 
 To start your own room without an account, follow "Create Room" in ${ROOM_ORIGIN}/llms.txt.
-MCP clients can add ${"https://www.getdasha.com/room/mcp"} instead.`;
+MCP clients can add ${"https://room.trydemigod.com/mcp"} instead.`;
 }
 
 const validId = id => typeof id === "string" && id.length > 0 && id.length <= 128 || Number.isSafeInteger(id);
