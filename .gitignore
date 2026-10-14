@@ -14,15 +14,17 @@ runlogs-tmp/
 # RC-2026-09-18-051: local test TMPDIR (never commit test scratch)
 .tmp/
 
-# Expanded at import time by scripts/acceptance-fixture.mjs
-scripts/.acceptance-fixture.*.generated.mjs
-tests/.webhook-dispatch-store.*.generated.mjs
-# Expanded at import time by browser-check loaders (flood-guard clock seeds)
-scripts/.browser-check.*.generated.mjs
-scripts/.native-result-browser-check.*.generated.mjs
-scripts/.reconnect-collaboration-browser-check.*.generated.mjs
-scripts/.notification-feed-browser-check.*.generated.mjs
-scripts/.help-invitation-browser-check.*.generated.mjs
+# Test-generated modules, expanded at import time by test fixtures and
+# browser-check loaders (acceptance fixtures, webhook-dispatch stores,
+# flood-guard clock seeds, ...). One generalized pattern per directory —
+# the previous per-test-name allowlist leaked every new generating test
+# as an untracked file in every worktree (HK2 §C.3).
+scripts/.*.generated.mjs
+tests/.*.generated.mjs
+
+# Local QA scratch directories and verify-affected logs (never commit)
+qa-scratch*/
+verify-affected.log
 # PRODUCT-200 C2 chaos properties: guard-weakened copies of work-claims.mjs,
 # generated at test time by tests/chaos/loadWeakenedClaimModule.
 tests/chaos/.weak/
