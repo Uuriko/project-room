@@ -404,6 +404,10 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   await p.locator("#message-input").fill("Keep my unsent follow-up");
   await first.stop();
   const second = channelPeer(t, f); await second.initialize(); second.send({ method: "notifications/initialized" });
+  const continuation = f.store.room("commons").state.messages.find(message => message.body === "Continue this transport result");
+  assert.ok(continuation);
+  const resumedNotice = await second.wait(frame => frame.method === "notifications/claude/channel" && frame.params.content.includes(continuation.id));
+  assert.ok(resumedNotice.params.meta.signal_id, "restart delivers the actual human continuation wake");
   const replay = await call(second, "room_post_draft", draftArgs);
   assert.equal(replay.duplicate, true);
   assert.equal(replay.messageId, draft.messageId);
