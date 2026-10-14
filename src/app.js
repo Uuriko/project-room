@@ -5863,15 +5863,19 @@ async function runAcquisitionIntent() {
   if (!intent || state || !accountClient.session?.authenticated) return;
   try {
     if (intent.kind === "request") {
+      // #3293 step 2: the account-panel request door is gone — the join
+      // page carries the one request-access door (human-map §8.1). The
+      // intent re-homes there: ?room= prefills the door's room field and
+      // ?ref= carries the stashed receipt referrer to its referrer field.
       clearAcquisition();
-      inboxUI.showRoomList();
-      const input = $("#account-request-room");
-      if (input && intent.roomId) input.value = intent.roomId;
-      const details = $("#account-request-access");
-      if (details) details.open = true;
-      const referred = $("#account-request-referred");
+      const query = new URLSearchParams();
+      const roomId = typeof intent.roomId === "string" ? intent.roomId.trim() : "";
+      if (roomId) query.set("room", roomId);
       const ref = receiptReferrer();
-      if (referred && !referred.value && ref) referred.value = ref;
+      if (ref) query.set("ref", ref);
+      const qs = query.toString();
+      const door = location.pathname.startsWith("/room/") ? "/room" : "";
+      location.assign(`${door}/join${qs ? `?${qs}` : ""}`);
       return;
     }
     if (intent.kind === "template") {

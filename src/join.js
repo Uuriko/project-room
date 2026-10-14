@@ -13,6 +13,7 @@ import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { AccountClient } from "./client.js";
 import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
+import { readAccessRequest } from "./invite-context.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
@@ -93,6 +94,18 @@ export function requestDoorRoom(pathname, search) {
   const hint = joinRoomHint(search);
   if (hint) return { roomId: hint, fixed: false };
   return { roomId: GENERAL_REQUEST_DEFAULT_ROOM_ID, fixed: false };
+}
+
+// The referrer a hand-off link carried (?ref=, the receipt-footer
+// convention src/app.js's GR1 stash uses), validated the same way:
+// at most 80 chars, no control characters. The app's acquisition-intent
+// consumer re-homes its "request" intent to this page and passes the
+// stashed referrer along so the door can prefill "Who referred you?".
+export function requestDoorReferrer(search) {
+  const params = new URLSearchParams(String(search ?? "").replace(/^\?/, ""));
+  const ref = params.get("ref") ?? "";
+  if (!ref || ref.length > 80 || /[\u0000-\u001f\u007f]/.test(ref)) return null;
+  return ref;
 }
 
 // API base for this page's fetches: the www door serves the room under /room.
@@ -353,6 +366,23 @@ function renderRequestDoor() {
   } else if (roomInput && !roomInput.dataset.prefilled) {
     roomInput.dataset.prefilled = "1";
     roomInput.value = roomId;
+  }
+  // A hand-off link may carry the referrer (?ref= — the app's
+  // acquisition-intent re-home passes its stashed receipt referrer);
+  // prefill once, never over what the visitor typed.
+  const referredInput = $("join-request-referred");
+  if (referredInput && !referredInput.dataset.prefilled) {
+    referredInput.dataset.prefilled = "1";
+    const referrer = requestDoorReferrer(globalThis.location?.search);
+    if (referrer && !referredInput.value) referredInput.value = referrer;
+  }
+  // The submit flow stashes the requester's name per room; a returning
+  // requester gets it back (the retired account door did the same).
+  const nameInput = $("join-request-name");
+  if (nameInput && !nameInput.dataset.prefilled) {
+    nameInput.dataset.prefilled = "1";
+    const stashed = readAccessRequest(globalThis.sessionStorage, roomId);
+    if (stashed?.displayName && !nameInput.value) nameInput.value = stashed.displayName;
   }
   const form = $("join-request-form");
   if (form && !form.dataset.requestWired) {
