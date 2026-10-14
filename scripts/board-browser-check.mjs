@@ -471,10 +471,10 @@ function seedClaim(store, item) {
 
 // Rendering, dependency navigation and readiness are the UI boundary here.
 // The projection matrix separately owns classification/old-completion filtering.
-// Quarantined flakes (tests/quarantine.json): both browser tests below fail
-// intermittently on green main. They run in the non-blocking lane
-// (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
+// Both browser tests below were quarantined (tests/quarantine.json) and are
+// repaired and re-admitted: waiting prerequisites in #3291 (PR #3338), the
+// draft-PR linking test in #3290 — snapshot waits replaced with condition
+// waits, no registry entries remain.
 // Timeout budget: this journey makes two full viewport passes plus a
 // held-route refresh race. Measured on a CPU-oversubscribed runner (load
 // ~13 on 2 cores) completed passes take 79-103s and one run was censored by
@@ -730,7 +730,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // Authoring gate: the real browser owns form availability, approval copy and
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
-test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
@@ -837,9 +837,11 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal(await card.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-review");
     assert.equal(await card.locator(".claim-pr a").getAttribute("href"), pullRequest);
     assert.match(await card.locator(".claim-reviews").innerText(), /previous approval.*does not qualify for current work/);
-    // Query the current input and active element in one browser turn: SSE
-    // refresh may replace an element handle while restoring focus correctly.
-    assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
+    // Focus returns with the readback repaint, not atomically with the
+    // status text: wait on the focus condition itself (#3290). A one-shot
+    // snapshot here flakes false !== true on green main — the repaint can
+    // swap the input node and restore focus a frame after the status lands.
+    await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
     assert.deepEqual(requests, [{ appendPullRequest: pullRequest, expectedClaimedAt: before.claimedAt, expectedHistoryLength: before.history.length }]);
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
@@ -886,9 +888,10 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal((await rejected).status(), 409);
     await page.waitForFunction(() => document.querySelector("#board-status")?.textContent.startsWith("Claim changed. The board is refreshed"));
     await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
-    // A locator handle can retire between resolution and evaluation during
-    // an SSE paint. The current visible control must retain actual focus.
-    assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
+    // No snapshot assert after the wait (#3290 — this exact line failed on
+    // green main): between the wait's last poll and a fresh evaluate, an SSE
+    // repaint can swap the input node while focus lands a frame later. The
+    // wait above IS the assertion that the current control retains focus.
     await page.locator("#board-close").focus();
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
     refreshRelease.resolve();
