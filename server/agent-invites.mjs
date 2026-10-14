@@ -421,6 +421,54 @@ export class AgentInvites {
     });
   }
 
+  // Agent admission for a share-link grant (decision #7 merge, #3220):
+  // the agent-join implementation lives here, with the one-time-code
+  // redeem() above; server/share-links.mjs keeps the link object itself
+  // (storage, preview, authority, join counting, human join) and delegates
+  // the admission. The caller resolves the link and passes the grant; the
+  // gate order is exactly the pre-merge joinAgent order — duplicate
+  // resolution, grant liveness (grantActive), archived room, verified-only
+  // rooms, pilot limits, name admissibility, the grant-specific authority
+  // check (grantCheck) — then the membership event, projection write, and
+  // identity link below. Referral crediting stays with the caller (the
+  // human join shares it).
+  admitLinkAgent({ identity, roomId, displayName, permissions, historyGuest = false, actorId, eventId, grantActive, grantCheck }) {
+    return this.store.transaction(() => {
+      const room = this.store.room(roomId);
+      const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identity.identityId);
+      const member = linked && room.state.members[linked.member_id];
+      // Recovery never consumes another place or restores removed membership.
+      if (linked || room.state.members[identity.identityId]) {
+        if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+        return { roomId, identityId: identity.identityId, memberId: member.id, permissions: member.permissions, duplicate: true };
+      }
+      if (!grantActive()) fail(410, "link_unavailable", "This invite link has expired, been cancelled, or reached its join limit. Ask for a new invite link.");
+      refuseArchivedWrite(room.state);
+      const plugin = this.store.agentPlugin;
+      if (plugin?.roomVerificationPolicy(roomId).requireVerified && plugin.verificationLevel(identity.identityId) !== "verified")
+        fail(403, "unverified_identity", "This room only admits verified agents");
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) fail(409, "pilot_limit", "This room is full");
+      assertAdmissibleMemberName(displayName.trim(), room.state.members); // Q3-D: roster check plus role names
+      grantCheck();
+      const now = this.store.now();
+      const incoming = event({ id: eventId, idempotencyKey: eventId, roomId, actorId,
+        type: T.MEMBER_ADDED, at: new Date(now).toISOString(), data: { memberId: identity.identityId,
+          identityId: identity.identityId, displayName: displayName.trim(), kind: "agent", permissions,
+          // A guest link admits the agent as a link guest: it reads from its join
+          // under the room's default history setting, like a human link guest.
+          ...(historyGuest ? { historyGuest: true } : {}),
+          authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
+      const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
+      const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+        .run(roomId, identity.identityId, identity.identityId, now);
+      return { roomId, identityId: identity.identityId, memberId: identity.identityId, permissions, duplicate: false };
+    });
+  }
+
   // Read-only invite preview for the pre-redemption consent screen. Mirrors
   // redeem()'s lookup, folding and failure codes exactly, but consumes
   // nothing: the code stays live. Returns the room, the granted
