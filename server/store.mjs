@@ -154,7 +154,7 @@ import {
   assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
-import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
+import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
@@ -5177,7 +5177,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Attention: write-time activity fan-out (mention/reply/thread_reply/
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
-      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); } catch {}
+      // #3261: but it is no longer silent either. The fan-out is atomic
+      // per recipient set (see activity.mjs), the failure is logged and
+      // journaled durably, and the opportunistic replay below backfills
+      // the feed once the fault clears.
+      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); }
+      catch (error) {
+        console.error(`activity fan-out failed for room ${roomId} event ${incoming.id}:`, error?.message ?? error);
+        try {
+          journalActivityFanoutFailure(this, { roomId, senderId: auth.member.id, command, incoming, error });
+        } catch (journalError) {
+          console.error(`activity fan-out failure journal failed for room ${roomId} event ${incoming.id}:`, journalError?.message ?? journalError);
+        }
+      }
+      try { retryActivityFanoutFailures(this, roomId); }
+      catch (error) { console.error(`activity fan-out retry failed for room ${roomId}:`, error?.message ?? error); }
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the legacy event-sourced work.completed receipt, journal the
       // would-be verdict, accept anyway. Runs in the same transaction as

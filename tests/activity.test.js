@@ -361,3 +361,63 @@ test("saved messages and the read horizon keep working for an archived message o
   assert.equal((await listed()).length, 0);
   assert.equal((await save({ messageId: "missing" }, "DELETE")).status, 404);
 });
+
+// ---- Fan-out failure contract (#3261) ----
+// The fan-out must never lose events silently: failures are logged and
+// journaled durably, a failed fan-out leaves no partial recipient rows,
+// and a later successful command in the room replays the journal and
+// backfills the feed.
+
+function captureFanoutErrors(fn) {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => { lines.push(args.map(String).join(" ")); };
+  try { fn(); } finally { console.error = original; }
+  return lines;
+}
+
+test("fan-out failure is atomic, logged, journaled, and backfilled by a later command (#3261)", t => {
+  const f = setup(t);
+  // Fault injection: the second recipient's insert aborts mid-loop.
+  f.store.db.exec(`CREATE TRIGGER fx4_fail_maya BEFORE INSERT ON activity_events
+    WHEN NEW.user_id='maya' BEGIN SELECT RAISE(ABORT, 'injected fan-out fault'); END`);
+  let result;
+  const lines = captureFanoutErrors(() => {
+    result = post(f, "owner", { messageId: "m-atomic", body: "hey @agent and @maya, look" });
+  });
+  assert.equal(result, "m-atomic", "the command itself still succeeds");
+  assert.deepEqual(eventsFor(f, "agent"), [], "no partial fan-out: the first recipient's row was compensated away");
+  assert.deepEqual(eventsFor(f, "maya"), []);
+  assert.ok(lines.some(line => /activity fan-out failed/.test(line)), "the failure was logged, not swallowed");
+  const journal = f.store.db.prepare("SELECT * FROM activity_fanout_failures WHERE room_id='commons'").all();
+  assert.equal(journal.length, 1, "the failure was journaled durably");
+  assert.equal(journal[0].recovered_at, null);
+  assert.match(journal[0].error, /injected fan-out fault/);
+  // Heal, then any later successful command in the room replays the journal.
+  f.store.db.exec("DROP TRIGGER fx4_fail_maya");
+  post(f, "owner", { messageId: "m-after", body: "plain follow-up" });
+  assert.deepEqual(eventsFor(f, "agent").map(e => [e.type, e.messageId]), [["mention", "m-atomic"]],
+    "the lost mention was backfilled");
+  assert.deepEqual(eventsFor(f, "maya").map(e => [e.type, e.messageId]), [["mention", "m-atomic"]]);
+  const healed = f.store.db.prepare("SELECT recovered_at FROM activity_fanout_failures WHERE room_id='commons'").get();
+  assert.ok(healed.recovered_at !== null, "the journal row is marked recovered");
+});
+
+test("fan-out with the activity table faulted still journals and later backfills (#3261)", t => {
+  const f = setup(t);
+  post(f, "owner", { messageId: "m-ok", body: "hey @agent" });
+  assert.equal(eventsFor(f, "agent").length, 1);
+  // D5's exact fault: schema skew — the fan-out's table is gone.
+  f.store.db.exec("ALTER TABLE activity_events RENAME TO activity_events_fault");
+  let lines = captureFanoutErrors(() => {
+    post(f, "owner", { messageId: "m-lost", body: "hey @agent, again" });
+  });
+  assert.ok(lines.some(line => /activity fan-out failed/.test(line)), "the failure was logged");
+  const journal = f.store.db.prepare("SELECT * FROM activity_fanout_failures WHERE room_id='commons'").all();
+  assert.equal(journal.length, 1, "journaled even while the fan-out table itself is faulted");
+  f.store.db.exec("ALTER TABLE activity_events_fault RENAME TO activity_events");
+  assert.deepEqual(eventsFor(f, "agent").map(e => e.messageId), ["m-ok"], "nothing backfilled before a retry runs");
+  post(f, "owner", { messageId: "m-next", body: "trigger the repair" });
+  assert.deepEqual(eventsFor(f, "agent").map(e => e.messageId), ["m-ok", "m-lost"],
+    "the next successful command backfilled the lost event");
+});
