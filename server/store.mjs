@@ -90,8 +90,7 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
-import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
-import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems } from "./work-item-board.mjs";
+import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -5114,10 +5113,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
         // Board is the claim authority the MCP tools share with /work-claims.
-        // Same transaction as the projection event: a handoff or supersede
-        // leaves a successor card, and a failed board write rolls the command back.
-        if (["claim.acquired", "claim.released", "claim.renewed", "work.handoff_recorded", "work.superseded"].includes(incoming.type)) {
-          mirrorProjectionClaim(this, roomId, auth.member.id, incoming);
+        // Same transaction as the projection event: decision #10's write-path
+        // cutover syncs the item's board claim from post-command state via
+        // the migration mapping (server/work-item-board.mjs) — the full
+        // lifecycle, not just the five events the frozen mirror translated
+        // (decision #34) — and a failed board write (caps, occupied
+        // successor) rolls the command back.
+        if (WORK_ITEM_BOARD_SYNC_TYPES.has(incoming.type)) {
+          syncWorkItemClaim(this, roomId, auth.member.id, incoming, state);
         }
         // MSG-1: double-write the messages table in this same transaction.
         // A throw here rolls the event back with the row. No read path uses
