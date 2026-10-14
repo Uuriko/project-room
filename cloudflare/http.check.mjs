@@ -163,6 +163,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/api/healthz'), leftoverHealth);
+    // #3274: the Worker's origin guard for operational GETs answers with the
+    // standard error envelope, not a bare { error: { code, message } }.
+    const foreignOrigin = await call('/api/health', { headers: { Origin: 'https://foreign.example' } });
+    assert.equal(foreignOrigin.status, 403);
+    const foreignBody = await foreignOrigin.json();
+    assert.equal(foreignBody.error.code, 'origin_denied');
+    assert.equal(typeof foreignBody.hint, 'string');
+    assert.ok(foreignBody.hint.length > 0);
+    assert.ok(Array.isArray(foreignBody.next));
+    assert.equal(typeof foreignBody.operationId, 'string');
+    assert.equal(typeof foreignBody.category, 'string');
     const ready = await json(await call('/api/ready'));
     assert.equal(ready.status, 'ready');
     assert.equal(ready.mode, 'cloudflare-staging');

@@ -33,7 +33,7 @@ import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResp
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
-import { edgePublicResponse } from './edge-public.mjs';
+import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
@@ -63,8 +63,11 @@ function roomUnavailableResponse(request) {
   const message = 'Project Room is temporarily unavailable. ' + (read
     ? 'Please try again in 30 seconds.'
     : 'The request outcome could not be confirmed. Check its status before repeating it.');
+  // #3274: API callers get the standard error envelope for the outage shape
+  // (this is the one response agents see exactly when the room is down, so
+  // its hint/next matter most); non-API callers keep the plain-text answer.
   return new Response(request.method === 'HEAD' ? null : api
-    ? JSON.stringify({ error: { code: 'room_unavailable', message } }) : message + '\n', {
+    ? JSON.stringify(workerErrorBody({ httpStatus: 503, code: 'room_unavailable', message })) : message + '\n', {
     status: 503,
     headers: {
       'Content-Type': api ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
@@ -476,7 +479,9 @@ export default {
     }
     const url = new URL(request.url);
     // Never derive the trusted origin from a caller-controlled Host header.
-    if (url.origin !== roomOrigin(env).origin) return finish(new Response('Unexpected host', { status: 403 }), 'worker');
+    // #3274: same rejection the Node host guard makes (403 host_denied,
+    // "Unexpected host") — as the standard JSON envelope, not plain text.
+    if (url.origin !== roomOrigin(env).origin) return finish(workerErrorResponse({ httpStatus: 403, code: 'host_denied', message: 'Unexpected host' }), 'worker');
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     internalPublicPolicy = publicPageCsp(url.origin);
     browserPublicPolicy = publicPageCsp(browserOrigin);
@@ -528,9 +533,8 @@ export default {
     if (operationalGet) {
       const originHeader = request.headers.get('Origin');
       if (originHeader && originHeader !== url.origin) {
-        return finish(new Response(JSON.stringify({ error: { code: 'origin_denied', message: 'Request origin is not allowed' } }), {
-          status: 403, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }
-        }), 'worker');
+        // #3274: standard error envelope, same as the handler's origin guard.
+        return finish(workerErrorResponse({ httpStatus: 403, code: 'origin_denied', message: 'Request origin is not allowed', headers: { 'Cache-Control': 'no-store' } }), 'worker');
       }
     }
     // Liveness is the Worker. It does not construct or query the Durable Object.
