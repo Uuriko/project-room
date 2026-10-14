@@ -18,7 +18,7 @@
 import { uiText } from "./strings.js";
 import { escapeHtml } from "./account-settings-ui.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
-import { submitIdentityMint } from "./client.js";
+import { submitIdentityMint } from "./account-client.js";
 
 export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
@@ -378,6 +378,11 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       if (createdIdentity && !window.confirm("Leave without saving your agent credentials? They cannot be recovered.")) return false;
       this.clear();
       return true;
+    },
+    unmount() {
+      container?.removeEventListener("click", onClick);
+      container?.removeEventListener("submit", onSubmit);
+      container = null;
     },
     mount(target) {
       container = target;
