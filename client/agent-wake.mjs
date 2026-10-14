@@ -29,10 +29,19 @@ function signals(value) {
   });
 }
 export class AgentWakeClient {
-  #connection; #fetch; #room;
+  #connection; #fetch; #room; #fencingToken = null;
   constructor({ connection, fetchImpl = fetch }) {
     this.#room = new RoomAgentClient({ ...connection, fetchImpl });
-    if (!connection.memberId || !connection.token.startsWith('pri_')) throw usage();
+    // CX5-FIX: two supported listener credentials — the pri_ identity
+    // secret (identity-level listener), or the rak_ API key standard
+    // setup saves, which is room-scoped by construction and therefore
+    // requires the connection's roomId (the server binds the key to that
+    // room and re-verifies membership on every call). A rak_ key without
+    // a room binding is not a supported listener configuration.
+    if (!connection.memberId
+      || !(connection.token.startsWith('pri_')
+        || (connection.token.startsWith('rak_') && typeof connection.roomId === 'string' && connection.roomId.length > 0)))
+      throw usage();
     this.#connection = { ...connection }; this.#fetch = fetchImpl;
   }
   async #request(path, body, timeoutMs = 15000) {
@@ -69,18 +78,40 @@ export class AgentWakeClient {
     return { version: 1, connection, hostId, registration: host ? 'registered' : 'not_registered',
       heartbeatStatus: value.status, hostMode: host?.mode ?? null, listening: 'not_observed', execution: 'not_observed' };
   }
-  async setup({ hostId, cadenceSeconds }) {
+  async setup({ hostId, cadenceSeconds, listener = false }) {
     hostOptions(hostId, cadenceSeconds); await this.#room.checkConnection();
-    const value = await this.#request('/api/agent-heartbeats', { hostId, mode: 'wakeable', cadenceSeconds });
+    const value = await this.#request('/api/agent-heartbeats', { hostId, mode: 'wakeable', cadenceSeconds,
+      // The lease is per-room: name the connection's pinned room when it
+      // has one (the scoped setup credential is bound to it anyway), else
+      // lease the roomless identity queue.
+      ...(listener ? { listenerLease: this.#connection.roomId ? { roomId: this.#connection.roomId } : true } : {}) });
     if (!object(value.host) || value.host.hostId !== hostId || value.host.mode !== 'wakeable' || value.host.cadenceSeconds !== cadenceSeconds || !id(value.host.agentId)) throw invalid();
-    return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: signals(value.pendingWakes), execution: 'not_observed' };
+    // CX5-FIX: listener:true asks the same heartbeat to acquire/renew the
+    // durable listener lease. Contention is data, not an error — the host
+    // is registered either way; only the lease holder's ack is fenced in.
+    let listenerInfo = null;
+    if (listener) {
+      if (!object(value.listener) || typeof value.listener.acquired !== 'boolean') throw invalid();
+      if (value.listener.acquired) {
+        if (typeof value.listener.fencingToken !== 'string' || !value.listener.fencingToken || !Number.isFinite(value.listener.leaseExpiresAt)) throw invalid();
+        this.#fencingToken = value.listener.fencingToken;
+        listenerInfo = { acquired: true, leaseExpiresAt: value.listener.leaseExpiresAt, renewed: value.listener.renewed === true };
+      } else {
+        if (!id(value.listener.activeListenerId)) throw invalid();
+        listenerInfo = { acquired: false, activeListenerId: value.listener.activeListenerId, leaseExpiresAt: value.listener.leaseExpiresAt };
+      }
+    }
+    return { version: 1, status: 'registered_not_listening', hostId, cadenceSeconds, pendingWakes: signals(value.pendingWakes),
+      ...(listener ? { listener: listenerInfo } : {}), execution: 'not_observed' };
   }
   async wait({ hostId, cadenceSeconds, waitMs = 25000, attentionCursor, sinceVersion }) {
     hostOptions(hostId, cadenceSeconds);
     if (!Number.isInteger(waitMs) || waitMs < 0 || waitMs > 55000) throw usage();
     const before = await resumeAgent({ connection: this.#connection, fetchImpl: this.#fetch, attentionCursor, sinceVersion });
     if (before.connection.status !== 'credential_accepted') throw invalid();
-    await this.setup({ hostId, cadenceSeconds });
+    // A client holding a listener lease renews it on the wait's setup
+    // heartbeat, so a long poll never outlives its own queue ownership.
+    await this.setup({ hostId, cadenceSeconds, listener: this.#fencingToken !== null });
     const value = await this.#request('/api/agent-wakes/poll?hostId=' + encodeURIComponent(hostId) + '&waitMs=' + waitMs, undefined, waitMs + 10000);
     if (!id(value.agentId) || typeof value.timedOut !== 'boolean' || !Number.isFinite(value.waitedMs)) throw invalid();
     const pendingWakes = signals(value.pendingWakes);
@@ -94,7 +125,8 @@ export class AgentWakeClient {
   async ack({ signalIds }) {
     if (!Array.isArray(signalIds) || signalIds.length < 1 || signalIds.length > 50 || !signalIds.every(id) || new Set(signalIds).size !== signalIds.length) throw usage();
     await this.#room.checkConnection();
-    const value = await this.#request('/api/agent-heartbeats/ack', { signalIds });
+    const value = await this.#request('/api/agent-heartbeats/ack', { signalIds,
+      ...(this.#fencingToken ? { fencingToken: this.#fencingToken } : {}) });
     if (!Array.isArray(value.acknowledged) || !value.acknowledged.every(entry => signalIds.includes(entry)) || new Set(value.acknowledged).size !== value.acknowledged.length) throw invalid();
     return { version: 1, status: 'ack_response_received', acknowledged: value.acknowledged,
       notAcknowledged: signalIds.filter(entry => !value.acknowledged.includes(entry)) };

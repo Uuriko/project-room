@@ -253,6 +253,33 @@ const KNOWN_DRIFT = [
     issue: "https://github.com/Uuriko/project-room/issues/1566",
     detail: "POST /api/agent-rooms accepts starter (boolean, default true); the room_create tool neither exposes it nor passes it through (handler allowlists title/purpose/roomId/kind/displayName).",
   },
+  // CX5-FIX: the REST listener-lease params are HTTP-adapter surface for
+  // now; the in-process MCP wake tools compose the store directly and do
+  // not expose them yet (parity design tracked in the issue).
+  {
+    tool: "wake_register",
+    param: "listenerLease",
+    issue: "https://github.com/Uuriko/project-room/issues/3481",
+    detail: "POST /api/agent-heartbeats accepts listenerLease (true or { roomId }) to acquire/renew the durable listener lease; the wake_register tool does not expose it.",
+  },
+  {
+    tool: "wake_clear",
+    param: "listenerLease",
+    issue: "https://github.com/Uuriko/project-room/issues/3481",
+    detail: "POST /api/agent-heartbeats accepts listenerLease (true or { roomId }) to acquire/renew the durable listener lease; the wake_clear tool does not expose it.",
+  },
+  {
+    tool: "heartbeat_set",
+    param: "listenerLease",
+    issue: "https://github.com/Uuriko/project-room/issues/3481",
+    detail: "POST /api/agent-heartbeats accepts listenerLease (true or { roomId }) to acquire/renew the durable listener lease; the heartbeat_set tool does not expose it.",
+  },
+  {
+    tool: "heartbeat_ack",
+    param: "fencingToken",
+    issue: "https://github.com/Uuriko/project-room/issues/3481",
+    detail: "POST /api/agent-heartbeats/ack accepts fencingToken (required to ack signals fenced by a live listener lease); the heartbeat_ack tool does not expose it.",
+  },
 ];
 
 // ---------------------------------------------------------------------------
