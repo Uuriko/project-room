@@ -217,9 +217,13 @@ export class AgentConnections {
           // RC-2026-09-24-201: stamp the identity on the member record so
           // the room state is self-describing (agent-rooms.mjs already does).
           ...(request.identityId ? { identityId: request.identityId } : {}) } }, binding);
+      if (action === "disconnect" && ownMember(this.store.room(roomId).state.members, memberId)?.active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
+        data: { memberId, expectedMemberRevision, active: false, permissions: ownMember(this.store.room(roomId).state.members, memberId)?.permissions } }, binding);
+      // Read AFTER the create/disconnect commands above: downstream state
+      // persistence needs the post-command member (revision, permissions) —
+      // hoisting this read above the disconnect command was the #3283
+      // hosted-CI failure (verifyHistory rejected the stale member_revision).
       const member = ownMember(this.store.room(roomId).state.members, memberId);
-      if (action === "disconnect" && member?.active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
-        data: { memberId, expectedMemberRevision, active: false, permissions: member?.permissions } }, binding);
       if (membership) now = Date.parse(membership.event.at);
       if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
