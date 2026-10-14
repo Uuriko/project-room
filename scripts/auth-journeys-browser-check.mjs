@@ -165,9 +165,14 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   assert.equal(requests.includes("/src/app.js"), false, "workspace stays unloaded at first paint and idle");
   for (const path of ["/src/client.js", "/src/events.js", "/src/emoji-catalog.js", "/src/inbox-ui.js", "/src/request-access.js"])
     assert.equal(requests.includes(path), false, path);
+  // Agent sign-in is the standalone /agent-signin page on current main
+  // (decision #37): the wall button is a link there, and the page's own
+  // "Back to log in" link returns. (Integration: the PR's original leg used
+  // the pre-#3445 in-page panel's #agent-auth-back.)
   await page.locator("#agent-signin-button").click();
   await page.locator("#agent-signin-ui input").first().waitFor({ state: "visible" });
-  await page.locator("#agent-auth-back").click();
+  await page.locator("#agent-signin-home").click();
+  await form.waitFor({ state: "visible" });
   await form.locator('[name="email"]').fill("entry-draft@example.invalid");
   await page.locator("[data-forgot-password]").click();
   await page.evaluate(() => history.back());
