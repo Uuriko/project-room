@@ -262,9 +262,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
   // to them, and the activity module owns its schema.
+  // activity_fanout_failures (#3261) is the same module's failure journal,
+  // created by the same schema exec.
   "activity_events",
   "read_horizons",
   "saved_messages",
+  "activity_fanout_failures",
   // web_fetch_cache + web_fetch_log (room-side web fetch, RC-2026-09-23-102):
   // page cache and the per-request fetch journal (no page content journaled).
   // Purely additive and intentionally NOT fenced — older writers have no
