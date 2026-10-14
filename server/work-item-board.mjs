@@ -23,6 +23,8 @@
 // backfill over an unchanged room produces byte-identical rows and the
 // second run writes nothing.
 import { createHash } from "node:crypto";
+import { emitWorkClaimEvent } from "./work-claim-events.mjs";
+import { openClaimCount, roomWorkClaimConfig } from "./work-claims.mjs";
 
 export const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -42,8 +44,8 @@ const BLOB_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const BOARD_SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 // The claim id a work item maps to on the board. Moved here verbatim
-// from server/work-claim-mirror.mjs (which re-exports it during the
-// migration; the mirror cut removes that module, not this mapping):
+// from the former server/work-claim-mirror.mjs in step 1 of the
+// migration (the mirror module itself was cut in step 2):
 // ids that are already board-safe pass through unchanged, so existing
 // cards — and receipts, rc_<claim id> — keep their ids. Any other id is
 // encoded reversibly instead of squashed: "_" is the escape character
@@ -84,20 +86,24 @@ const cleanText = (value, max) => (typeof value === "string" && value.length > 0
 // strings; fileBlocks: path -> named block). Same normalization the mirror
 // applied from claim data: block-labeled paths keep their label.
 function filesFromClaim(claim, blocks) {
+  const labels = new Map();
+  for (const block of Array.isArray(blocks) ? blocks : []) {
+    if (!block || typeof block !== "object" || typeof block.path !== "string") continue;
+    const name = typeof block.block === "string" ? block.block
+      : (typeof block.region === "string" ? block.region : (typeof block.name === "string" ? block.name : null));
+    if (name) labels.set(block.path, name.slice(0, 128));
+  }
   const files = [];
   const fileBlocks = {};
   const seen = new Set();
-  const add = (path, block) => {
+  const add = path => {
     if (typeof path !== "string" || path.length === 0 || seen.has(path)) return;
     seen.add(path);
     files.push(path);
-    if (typeof block === "string" && block.length > 0) fileBlocks[path] = block.slice(0, 128);
+    if (labels.has(path)) fileBlocks[path] = labels.get(path);
   };
-  for (const path of claim?.paths ?? []) add(path, null);
-  for (const block of Array.isArray(blocks) ? blocks : []) {
-    if (!block || typeof block !== "object") continue;
-    add(block.path, typeof block.block === "string" ? block.block : (typeof block.region === "string" ? block.region : (typeof block.name === "string" ? block.name : null)));
-  }
+  for (const path of claim?.paths ?? []) add(path);
+  for (const path of labels.keys()) add(path);
   return { files, fileBlocks };
 }
 
@@ -576,10 +582,8 @@ export function planWorkItemBoardBackfill({ items, events = [], existing = new M
   const factsByItem = workItemEventFacts(events);
   const rows = new Map();
   const diverged = [];
-  const workItemIds = new Set();
   for (const item of items ?? []) {
     if (!item || typeof item.id !== "string") continue;
-    workItemIds.add(item.id);
     const claimId = boardClaimId(item.id);
     const current = existing.get(claimId) ?? null;
     const mapped = boardClaimForWorkItem(item, factsByItem.get(item.id) ?? null, { nowMs, existing: current });
@@ -590,19 +594,27 @@ export function planWorkItemBoardBackfill({ items, events = [], existing = new M
     }
     rows.set(claimId, mapped);
   }
-  // Successor lineage lives on the SOURCE card's chain + supersededBy
-  // (set by the mapping above) and on phantom successor cards — exactly
-  // the mirror's shape. A real successor work item's own card never
-  // gains a dependsOn from lineage: the board's availability gate
-  // requires dependencies to be done, and a superseded source is closed,
-  // never done, so a lineage dependsOn would hide live work forever.
+  // Successor lineage: the source card carries chain + supersededBy;
+  // the successor's card carries dependsOn [source] — the mirror's
+  // shape, created at supersede time whenever the successor has no card
+  // yet (a phantom, even when the successor is a merely-proposed work
+  // item; its own mapping later replaces the phantom's title and keeps
+  // the dependsOn, which the mapping preserves from existing rows). A
+  // successor that already has a board row of its own (board-native, or
+  // mapped from its item) is never given lineage it did not have —
+  // except the mapped-row case below, where the plan owns the row.
   for (const item of items ?? []) {
     if (!item || item.state !== "superseded" || typeof item.supersededBy !== "string") continue;
     const sourceId = boardClaimId(item.id);
     const targetId = boardClaimId(item.supersededBy);
     if (targetId === sourceId) continue;
     const supersedeEvent = (factsByItem.get(item.id)?.supersedeEvents ?? [])[0];
-    if (!rows.has(targetId) && !existing.has(targetId) && !workItemIds.has(item.supersededBy)) {
+    if (rows.has(targetId)) {
+      const target = rows.get(targetId);
+      if (!target.dependsOn.includes(sourceId)) {
+        target.dependsOn = [...target.dependsOn, sourceId].slice(0, 16);
+      }
+    } else if (!existing.has(targetId)) {
       rows.set(targetId, phantomSuccessorCard({
         targetId: item.supersededBy,
         title: item.supersededBy,
@@ -669,6 +681,12 @@ export const sameClaimRow = (a, b) => JSON.stringify(canonicalClaimRow(a)) === J
 // dryRun, writes nothing. Emits NO room events — the work_claims table
 // is the board's source of truth and the migration must not spam the
 // room timeline or fire receipt cards for historical completions.
+export function roomEvents(store, roomId) {
+  return store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)
+    .map(row => { try { return JSON.parse(row.body); } catch { return null; } })
+    .filter(Boolean);
+}
+
 export function backfillRoomWorkItems(store, roomId, { nowMs = Date.now(), dryRun = false } = {}) {
   const report = { roomId, items: 0, created: 0, updated: 0, unchanged: 0, diverged: [], errors: [] };
   const roomRow = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
@@ -678,9 +696,7 @@ export function backfillRoomWorkItems(store, roomId, { nowMs = Date.now(), dryRu
   const items = Object.values(state?.workItems ?? {});
   report.items = items.length;
   if (items.length === 0) return report;
-  const events = store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)
-    .map(row => { try { return JSON.parse(row.body); } catch { return null; } })
-    .filter(Boolean);
+  const events = roomEvents(store, roomId);
   const existing = new Map(store.workClaims.list(roomId).map(row => [row.id, row]));
   const { rows, diverged } = planWorkItemBoardBackfill({ items, events, existing, nowMs });
   report.diverged = diverged;
@@ -748,4 +764,120 @@ export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force
     }
   }
   return aggregate;
+}
+
+// ---------------------------------------------------------------------------
+// Write-path cutover (decision #10 step 2): the command layer writes
+// board claims directly, from post-command projection state, through the
+// same mapping the backfill uses — replacing the work-claim-mirror's
+// event translation, and the mirror module is deleted in this same step
+// (the repo's reachability gate does not allow a shipped module with no
+// runtime importer to linger for a later cleanup PR; decision #34's
+// intent — the mirror dies only once its replacement is live in the
+// same change, never before — is preserved). Because sync and backfill
+// share the mapping, the board converges to the same rows by
+// construction; the room diff (diffRoomWorkItems) stays empty across
+// live command flow.
+//
+// The mirror's transactional guards carry over exactly: the room
+// open-claim cap and the per-member open-claim cap throw 409s that roll
+// the whole command back, and a handoff/supersede naming a successor
+// card that is a live claim held as someone else's work is refused
+// (work_claim_conflict). A board row the item cannot explain (a live
+// board-native claim by a member the item never named) is left alone —
+// the mirror likewise returned such a card unchanged.
+
+export const WORK_ITEM_BOARD_SYNC_TYPES = new Set([
+  "work.accepted", "work.started", "work.blocked", "work.blocker_resolved",
+  "work.completed", "work.superseded", "work.handoff_recorded",
+  "claim.acquired", "claim.renewed", "claim.released",
+  "verification.recorded", "owner.decision_recorded",
+]);
+
+const SYNC_ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
+
+function boardConfig(store, roomId) {
+  const registry = store.workClaims;
+  if (typeof registry.configFor === "function") return registry.configFor(roomId);
+  return roomWorkClaimConfig({ workClaims: typeof registry.rawConfig === "function" ? registry.rawConfig(roomId) : {} });
+}
+
+function refuse(status, code, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  throw error;
+}
+
+export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
+  const registry = store?.workClaims;
+  if (!registry || typeof registry.get !== "function" || typeof registry.set !== "function") return null;
+  if (!WORK_ITEM_BOARD_SYNC_TYPES.has(incoming?.type)) return null;
+  const data = incoming?.data ?? {};
+  const workItemId = data.workItemId;
+  if (typeof workItemId !== "string" || !workItemId) return null;
+  const item = state?.workItems?.[workItemId];
+  if (!item) return null;
+  const nowMs = Date.parse(incoming.at);
+  if (!Number.isFinite(nowMs)) return null;
+  const claimId = boardClaimId(workItemId);
+  const existing = new Map(registry.list(roomId).map(row => [row.id, row]));
+  const current = existing.get(claimId) ?? null;
+
+  // Occupied-successor refusal (the mirror's work_claim_conflict): a
+  // handoff/supersede successor card that is a live claim NOT already
+  // chained to this source belongs to someone else's work.
+  if (incoming.type === "work.handoff_recorded" || (incoming.type === "work.superseded" && typeof data.supersededByWorkItemId === "string")) {
+    const targetId = incoming.type === "work.handoff_recorded" ? boardClaimId(`${workItemId}-next`) : boardClaimId(data.supersededByWorkItemId);
+    const successorRow = existing.get(targetId);
+    if (successorRow && SYNC_ACTIVE.has(successorRow.state) && !(successorRow.dependsOn ?? []).includes(claimId)) {
+      refuse(409, "work_claim_conflict", `Board card ${targetId} is already claimed. It is not a successor of ${claimId}.`);
+    }
+  }
+
+  const events = roomEvents(store, roomId);
+  const { rows, diverged } = planWorkItemBoardBackfill({
+    items: Object.values(state.workItems ?? {}), events, existing, nowMs,
+  });
+  // A diverged primary row is the board's own live state, not the item's
+  // to rewrite: leave the whole sync alone (mirror parity).
+  if (diverged.some(entry => entry.claimId === claimId)) return current;
+  const mapped = rows.get(claimId) ?? null;
+
+  // Caps, checked before any write so a refusal rolls the command back
+  // with nothing written (the surrounding transaction does the rest).
+  const config = boardConfig(store, roomId);
+  if (mapped && !current && openClaimCount([...existing.values()], nowMs) >= config.maxOpenClaims) {
+    refuse(409, "work_board_full", `This room already has ${config.maxOpenClaims} open claims. Close stale claims (close or cancel) before opening another.`);
+  }
+  const takesCard = incoming.type === "claim.acquired" || (incoming.type === "claim.renewed" && !current);
+  if (mapped && takesCard && (!current || current.state === "unclaimed")) {
+    const held = [...existing.values()].filter(entry => entry.owner === actorId && SYNC_ACTIVE.has(entry.state)).length;
+    if (held >= config.maxMemberOpenClaims) {
+      refuse(409, "too_many_open_claims", `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`);
+    }
+  }
+
+  // Write only rows that differ (unchanged rows stay untouched, so a
+  // no-op command emits nothing). Events fire for the command's own
+  // item, plus "created" for any phantom successor the plan produced.
+  let primary = current;
+  for (const [rowId, row] of rows) {
+    const before = existing.get(rowId) ?? null;
+    if (before && sameClaimRow(before, row)) { if (rowId === claimId) primary = row; continue; }
+    registry.set(roomId, row);
+    if (rowId === claimId) primary = row;
+    if (!before) emitWorkClaimEvent(store, roomId, { actorId, item: row, action: "created", atMs: nowMs });
+  }
+  if (mapped && current && sameClaimRow(current, mapped)) return primary;
+  if (mapped) {
+    const action = !current
+      ? (incoming.type === "claim.acquired" || incoming.type === "claim.renewed" ? "claimed" : null)
+      : incoming.type === "claim.acquired" ? "claimed"
+        : incoming.type === "claim.renewed" ? "renewed"
+          : incoming.type === "claim.released" ? "released"
+            : "state_changed";
+    if (action) emitWorkClaimEvent(store, roomId, { actorId, item: mapped, action, atMs: nowMs });
+  }
+  return primary;
 }

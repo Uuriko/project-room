@@ -16,7 +16,6 @@ import {
   boardClaimId, boardClaimForWorkItem, planWorkItemBoardBackfill,
   diffRoomWorkItems, sameClaimRow,
 } from "../server/work-item-board.mjs";
-import { boardClaimId as mirrorBoardClaimId } from "../server/work-claim-mirror.mjs";
 import { availableWorkInRoom, availableWorkInRoomBoardOnly } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { updateWork } from "../server/work-claims.mjs";
@@ -54,14 +53,24 @@ const factsFor = events => {
   return { events, byEventId, pullRequests: [], blocks: [], supersedeEvents: events.filter(e => e.type === "work.superseded") };
 };
 
-test("boardClaimId: identical to the mirror's mapping for every id shape", () => {
-  const samples = ["task-a", "task.1", "task:1", "task_1", "tâche.2", "a".repeat(200), "", "UPPER_case-9", "x".repeat(128), "café:menu.1"];
-  for (const sample of samples) assert.equal(boardClaimId(sample), mirrorBoardClaimId(sample), sample);
-  assert.equal(boardClaimId("task.1"), "_etask_p1");
-  assert.equal(boardClaimId("task:1"), "_etask_c1");
-  assert.equal(boardClaimId("task_1"), "task_1"); // "_" is board-safe: passes through
-  assert.equal(boardClaimId("task-a"), "task-a"); // board-safe passes through: receipt ids stay stable
-  assert.match(boardClaimId("a".repeat(200)), /^_h[0-9a-f]{40}$/);
+test("boardClaimId: the id mapping is pinned character-for-character (existing cards and receipt ids depend on it)", () => {
+  // Expectations generated from the pre-migration mirror implementation
+  // (the function moved verbatim to server/work-item-board.mjs in step 1
+  // and the mirror was cut in step 2 — these literals are now the pin).
+  const samples = new Map([
+    ["task-a", "task-a"],           // board-safe: passes through unchanged
+    ["task.1", "_etask_p1"],
+    ["task:1", "_etask_c1"],
+    ["task_1", "task_1"],           // "_" is board-safe: passes through
+    ["tâche.2", "_et_xe2_che_p2"],  // non-ASCII: code-point escape
+    ["", "workitem"],
+    ["UPPER_case-9", "UPPER_case-9"],
+    ["café:menu.1", "_ecaf_xe9__cmenu_p1"],
+  ]);
+  for (const [input, expected] of samples) assert.equal(boardClaimId(input), expected, input);
+  assert.equal(boardClaimId("x".repeat(128)), "x".repeat(128)); // at the limit: still a pass-through
+  assert.match(boardClaimId("a".repeat(200)), /^_h[0-9a-f]{40}$/); // over the limit: hash fallback
+  assert.equal(boardClaimId("a".repeat(200)), "_hc2a908d98f5df987ade41b5fce213067efbcc21e");
 });
 
 test("mapping: proposed items map to NO card (unaccepted work must not become board-claimable)", () => {
@@ -192,7 +201,7 @@ test("mapping: superseded -> closed with supersededBy and a supersede chain link
   assert.deepEqual(row.chain, [{ kind: "supersede", targetId: "task-b", at: at(8 * H), actorId: "owner", note: "replanned" }]);
 });
 
-test("plan: phantom successors match the mirror's cards; real successors gain no lineage dependsOn", () => {
+test("plan: successor lineage matches the mirror's cards (dependsOn on the successor, phantom when cardless)", () => {
   const source = item({ id: "task-a", state: "superseded", supersededBy: "task-b" });
   const supersede = ev("work.superseded", 8 * H, "owner", { workItemId: "task-a", supersededByWorkItemId: "task-b", reason: "replanned" });
   // Target is not a work item in the room: phantom card, dependsOn [source].
@@ -202,11 +211,22 @@ test("plan: phantom successors match the mirror's cards; real successors gain no
   assert.equal(phantom.title, "task-b");
   assert.equal(phantom.workItemId, "task-b");
   assert.deepEqual(phantom.dependsOn, ["task-a"]);
-  // Target IS a work item: its own card is mapped from it, no dependsOn added.
+  // Target is a PROPOSED work item (no mapped row of its own): the
+  // mirror still created the successor card at supersede time.
+  const proposedPlan = planWorkItemBoardBackfill({ items: [source, item({ id: "task-b", state: "proposed" })], events: [supersede], existing: new Map(), nowMs: NOW });
+  assert.equal(proposedPlan.rows.get("task-b").title, "task-b");
+  assert.deepEqual(proposedPlan.rows.get("task-b").dependsOn, ["task-a"]);
+  // Target is an ACCEPTED work item: its mapped card gains the lineage
+  // dependsOn (and keeps its own title).
   const target = item({ id: "task-b", title: "Replacement", state: "accepted" });
   const realPlan = planWorkItemBoardBackfill({ items: [source, target], events: [supersede], existing: new Map(), nowMs: NOW });
-  assert.deepEqual(realPlan.rows.get("task-b").dependsOn, []);
+  assert.deepEqual(realPlan.rows.get("task-b").dependsOn, ["task-a"]);
   assert.equal(realPlan.rows.get("task-b").title, "Replacement");
+  // And once the phantom exists, the target's own mapping preserves the
+  // dependsOn while replacing the phantom title with the item's title.
+  const grown = boardClaimForWorkItem(target, factsFor([]), { nowMs: NOW, existing: phantom });
+  assert.equal(grown.title, "Replacement");
+  assert.deepEqual(grown.dependsOn, ["task-a"]);
   // Handoff: "-next" phantom titled by the FIRST handoff's nextAction.
   const handed = item({ id: "task-c", state: "working", claim: liveClaimFields(), handoff: { nextAction: "Second step" } });
   const handoff1 = ev("work.handoff_recorded", 5 * H, "worker", { workItemId: "task-c", nextAction: "First step" });
@@ -336,14 +356,20 @@ function driveLifecycle(f) {
 test("store: backfill lands every lifecycle state on the board; receipts read the migrated card", async (t) => {
   const f = fixture(t);
   driveLifecycle(f);
-  // Pre-migration truth (both ways): the mirror has a card only for the
-  // claimed item, and even that card never learned the item completed.
+  // The legacy state this migration repairs, staged by wiping the board
+  // rows the sync wrote: with only the (frozen) mirror's behavior, the
+  // claimed item's card would still say "claimed" after completion and
+  // the accepted item would have no card at all. Delete the rows and let
+  // the backfill rebuild the board from projection + event log alone.
+  f.store.db.prepare("DELETE FROM work_claims WHERE room_id='commons'").run();
   assert.equal(f.store.workClaims.get("commons", "task-open"), null);
-  assert.equal(f.store.workClaims.get("commons", "task-done").state, "claimed");
+  assert.equal(f.store.workClaims.get("commons", "task-done"), null);
 
   const report = f.store.backfillRoomWorkItemClaims("commons");
   assert.deepEqual(report.errors, []);
   assert.equal(report.items, 3);
+  assert.equal(report.created, 2); // task-open + task-done rebuilt from the log alone
+  assert.equal(report.updated, 0);
   assert.equal(f.store.workClaims.get("commons", "task-open").state, "unclaimed");
   // Proposed items get NO card: unaccepted work is not board-claimable.
   assert.equal(f.store.workClaims.get("commons", "task-idle"), null);
@@ -385,6 +411,9 @@ test("store: backfill lands every lifecycle state on the board; receipts read th
 test("store: the open-time backfill runs on reopen (auto mode) and the marker makes it stick", async (t) => {
   const f = fixture(t);
   driveLifecycle(f);
+  // Stage the legacy corpus: projection + event log present, board rows
+  // absent (the pre-migration database shape).
+  f.store.db.prepare("DELETE FROM work_claims WHERE room_id='commons'").run();
   assert.equal(f.store.workClaims.get("commons", "task-open"), null);
   f.reopen(); // default options: auto backfill at open
   assert.equal(f.store.workClaims.get("commons", "task-open").state, "unclaimed");
@@ -400,6 +429,10 @@ test("store: AvailableWork board-only shadow read equals the dual-source read af
   // A board-native claim too: both reads must carry it throughout.
   const { createWork } = await import("../server/work-claims.mjs");
   f.store.workClaims.set("commons", createWork({ id: "board-native", title: "Board native" }, { now: Date.now(), agentId: "owner" }));
+  // Stage the pre-migration gap: the work-item cards are absent (the
+  // sync wrote them during driveLifecycle; a legacy database has none),
+  // so the board-only read must miss task-open until the backfill runs.
+  f.store.db.prepare("DELETE FROM work_claims WHERE room_id='commons' AND claim_id IN ('task-open', 'task-done', 'task-idle')").run();
   const identities = entries => new Set(entries.map(entry => {
     if (entry.source === "workItem") return entry.id;
     return f.store.workClaims.get("commons", entry.id)?.workItemId ?? entry.id;
@@ -414,4 +447,156 @@ test("store: AvailableWork board-only shadow read equals the dual-source read af
   const boardAfter = identities(availableWorkInRoomBoardOnly(f.store, "commons", { limit: 50 }).items);
   assert.deepEqual(boardAfter, after);
   assert.deepEqual(boardAfter, new Set(["board-native", "task-open"]));
+});
+
+// ---------------------------------------------------------------------------
+// PR-2 (write-path cutover): store.command syncs the board directly.
+// The fixture stays in manual-backfill mode, so every card below was
+// written by the sync — and after every command the backfill's own diff
+// must read converged (sync ≡ backfill by construction).
+
+const boardEvents = (f, claimId) => f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all()
+  .map(row => JSON.parse(row.body))
+  .filter(event => event.type === "work_claim.updated" && event.data?.workClaim === claimId)
+  .map(event => event.data.action);
+
+test("sync: the full lifecycle lands on the board command by command, diff converged at each step", async (t) => {
+  const f = fixture(t);
+  const signEvidence = makeTestSigner(f.store);
+  const converged = () => assert.equal(diffRoomWorkItems(f.store, "commons").converged, true);
+  f.send(f.ownerKey, "propose", "work.proposed", {
+    workItemId: "task-live", title: "Live task", definitionOfDone: "Sync it",
+    accountableMemberId: "worker", verifierMemberId: "owner", mode: "write", labels: ["live"],
+  });
+  assert.equal(f.store.workClaims.get("commons", "task-live"), null); // proposed: no card
+  f.mutate(f.workerKey, "accept", "work.accepted", "task-live");
+  assert.equal(f.store.workClaims.get("commons", "task-live").state, "unclaimed");
+  converged();
+  f.mutate(f.workerKey, "claim", "claim.acquired", "task-live", {
+    repository: "Uuriko/project-room", ref: "main", paths: ["server/**"],
+    expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+  });
+  let card = f.store.workClaims.get("commons", "task-live");
+  assert.equal(card.state, "claimed");
+  assert.equal(card.owner, "worker");
+  assert.deepEqual(boardEvents(f, "task-live"), ["created", "claimed"]);
+  converged();
+  f.mutate(f.workerKey, "start", "work.started", "task-live");
+  assert.equal(f.store.workClaims.get("commons", "task-live").state, "in_progress");
+  converged();
+  f.mutate(f.workerKey, "block", "work.blocked", "task-live", { reason: "waiting", nextAction: "ping" });
+  card = f.store.workClaims.get("commons", "task-live");
+  assert.equal(card.state, "blocked");
+  assert.equal(card.premiseFlag.reason, "waiting");
+  converged();
+  f.mutate(f.workerKey, "resolve", "work.blocker_resolved", "task-live", { resolution: "go" });
+  assert.equal(f.store.workClaims.get("commons", "task-live").state, "claimed");
+  converged();
+  f.mutate(f.workerKey, "restart", "work.started", "task-live");
+  const text = "Live delivery";
+  f.mutate(f.workerKey, "complete", "work.completed", "task-live", {
+    summary: text, evidenceVersion: `sha256:${createHash("sha256").update(text).digest("hex")}`,
+    producerId: "worker", evidenceUrl: "https://example.com/live", nextAction: "Verify",
+    signedEvidence: signEvidence(),
+  });
+  card = f.store.workClaims.get("commons", "task-live");
+  assert.equal(card.state, "done"); // the transition the frozen mirror could never make
+  assert.equal(card.attestations[0].note, text);
+  converged();
+  const receipt = f.item("task-live").receipt;
+  f.mutate(f.ownerKey, "verify", "verification.recorded", "task-live", {
+    result: "pass", completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion, summary: "ok",
+  });
+  assert.equal(f.store.workClaims.get("commons", "task-live").reviewedBy, "owner");
+  converged();
+  assert.ok(boardEvents(f, "task-live").includes("state_changed"));
+});
+
+test("sync: release returns the card to unclaimed and renew extends it, with the mirror's event actions", async (t) => {
+  const f = fixture(t);
+  f.send(f.ownerKey, "propose", "work.proposed", {
+    workItemId: "task-lease", title: "Lease task", definitionOfDone: "x",
+    accountableMemberId: "worker", mode: "write",
+  });
+  f.mutate(f.workerKey, "accept", "work.accepted", "task-lease");
+  f.mutate(f.workerKey, "claim", "claim.acquired", "task-lease", {
+    repository: "Uuriko/project-room", ref: "main", paths: ["server/**"],
+    expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+  });
+  f.mutate(f.workerKey, "renew", "claim.renewed", "task-lease", { expiresAt: new Date(Date.now() + 5 * H).toISOString() });
+  let card = f.store.workClaims.get("commons", "task-lease");
+  assert.ok(Date.parse(card.leaseExpiresAt) > Date.now() + 4 * H);
+  assert.deepEqual(boardEvents(f, "task-lease"), ["created", "claimed", "renewed"]);
+  f.mutate(f.workerKey, "release", "claim.released", "task-lease");
+  card = f.store.workClaims.get("commons", "task-lease");
+  assert.equal(card.state, "unclaimed");
+  assert.equal(card.owner, null);
+  assert.deepEqual(card.files, []);
+  assert.deepEqual(boardEvents(f, "task-lease"), ["created", "claimed", "renewed", "released"]);
+  assert.equal(diffRoomWorkItems(f.store, "commons").converged, true);
+});
+
+test("sync: handoff leaves a -next phantom and supersede closes the source, like the mirror did", async (t) => {
+  const f = fixture(t);
+  f.send(f.ownerKey, "propose", "work.proposed", {
+    workItemId: "task-hand", title: "Handoff task", definitionOfDone: "x",
+    accountableMemberId: "worker", mode: "write",
+  });
+  f.mutate(f.workerKey, "accept", "work.accepted", "task-hand");
+  f.mutate(f.workerKey, "claim", "claim.acquired", "task-hand", {
+    repository: "Uuriko/project-room", ref: "main", paths: ["server/**"],
+    expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+  });
+  f.mutate(f.workerKey, "start", "work.started", "task-hand");
+  f.mutate(f.workerKey, "handoff", "work.handoff_recorded", "task-hand", {
+    doneSummary: "Part", evidenceUrl: "https://example.com/e", evidenceVersion: "v1",
+    nextAction: "Finish it", limitReason: "time",
+  });
+  const next = f.store.workClaims.get("commons", "task-hand-next");
+  assert.equal(next.title, "Finish it");
+  assert.deepEqual(next.dependsOn, ["task-hand"]);
+  assert.equal(f.store.workClaims.get("commons", "task-hand").chain[0].kind, "handoff");
+
+  f.send(f.ownerKey, "propose-2", "work.proposed", {
+    workItemId: "task-new", title: "Replacement", definitionOfDone: "y",
+    accountableMemberId: "worker", mode: "read",
+  });
+  f.mutate(f.ownerKey, "supersede", "work.superseded", "task-hand", { supersededByWorkItemId: "task-new", reason: "replanned" });
+  const source = f.store.workClaims.get("commons", "task-hand");
+  assert.equal(source.state, "closed");
+  assert.equal(source.supersededBy, "task-new");
+  assert.equal(diffRoomWorkItems(f.store, "commons").converged, true);
+});
+
+test("sync: the mirror's caps and occupied-successor refusal still roll commands back", async (t) => {
+  const f = fixture(t);
+  f.store.workClaims.configure("commons", { maxOpenClaims: 2, maxMemberOpenClaims: 1 });
+  const propose = (id, n) => f.send(f.ownerKey, `propose-${n}`, "work.proposed", {
+    workItemId: id, title: id, definitionOfDone: "x", accountableMemberId: "worker", mode: "write",
+  });
+  propose("task-cap-a", 1);
+  propose("task-cap-b", 2);
+  f.mutate(f.workerKey, "accept-a", "work.accepted", "task-cap-a");
+  f.mutate(f.workerKey, "accept-b", "work.accepted", "task-cap-b");
+  // Two cards exist (cap = 2): the member cap (1) refuses worker's second claim.
+  f.mutate(f.workerKey, "claim-a", "claim.acquired", "task-cap-a", {
+    repository: "Uuriko/project-room", ref: "main", paths: ["a/**"], expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+  });
+  assert.throws(
+    () => f.mutate(f.workerKey, "claim-b", "claim.acquired", "task-cap-b", {
+      repository: "Uuriko/project-room", ref: "main", paths: ["b/**"], expiresAt: new Date(Date.now() + 2 * H).toISOString(),
+    }),
+    error => error.code === "too_many_open_claims");
+  assert.equal(f.item("task-cap-b").claim, null); // the command rolled back, projection included
+
+  // Occupied successor: a live board-native claim sits at the -next id.
+  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  const foreign = claimWork(createWork({ id: "task-cap-a-next", title: "Someone else's" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
+  f.store.workClaims.set("commons", foreign);
+  assert.throws(
+    () => f.mutate(f.workerKey, "handoff", "work.handoff_recorded", "task-cap-a", {
+      doneSummary: "Part", evidenceUrl: "https://example.com/e", evidenceVersion: "v1", nextAction: "Next", limitReason: "time",
+    }),
+    error => error.code === "work_claim_conflict");
+  assert.ok(!f.item("task-cap-a").handoff); // rolled back (no handoff recorded)
 });
