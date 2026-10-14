@@ -1,6 +1,7 @@
 [
   "404.html",
   "about.html",
+  "agent-signin.html",
   "index.html",
   "join.html",
   "offers.html",
@@ -15,6 +16,7 @@
   "src/agent-error.mjs",
   "src/agent-first-run.js",
   "src/agent-invite-ui.js",
+  "src/agent-signin-page.js",
   "src/agent-signin-ui.js",
   "src/app.js",
   "src/audit-receipts.mjs",

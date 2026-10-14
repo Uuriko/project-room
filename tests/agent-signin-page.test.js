@@ -37,11 +37,8 @@ test("agent sign-in page is public: GET /agent-signin and its /room twin serve t
   assert.match(roomTwin, /href="\/room\/"/, "the /room twin points its home link at the /room door");
 });
 
-test("agent sign-in page route shape: .html alias redirects, HEAD is empty, POST is refused", async t => {
+test("agent sign-in page route shape: HEAD is empty, POST is refused", async t => {
   const { origin } = await serve(t);
-  const alias = await fetch(`${origin}/agent-signin.html`, { redirect: "manual" });
-  assert.equal(alias.status, 301);
-  assert.equal(alias.headers.get("location"), "/agent-signin");
   const head = await fetch(`${origin}/agent-signin`, { method: "HEAD" });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");

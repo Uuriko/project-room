@@ -1,15 +1,10 @@
 // Standalone agent sign-in page (GET /agent-signin, decision #37):
 // hosts the same agent sign-in UI component the login wall used to
-// embed in its #agent-auth-step, with the same endpoints
-// (/api/auth/agent/rooms, /api/auth/agent/session, /api/agent-rooms).
-// The component sets the browser session cookie itself; this host
-// only takes the browser into the room the agent picked.
-//
-// First-run orientation: the component mounts the one-time card
-// (src/agent-first-run.js) right after onSignedIn. On this page the
-// card's steps have nowhere in-page to land, so greet/discover ARE
-// the trip into the room — and a returning agent (card already seen)
-// is taken straight in with no interstitial.
+// embed, with the same endpoints; the component sets the session
+// cookie itself and this host takes the browser into the picked room.
+// First-run orientation: the component mounts the one-time card right
+// after onSignedIn; here its greet/discover steps ARE the trip into
+// the room, and a returning agent (card seen) goes straight in.
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
 
