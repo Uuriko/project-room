@@ -116,7 +116,7 @@ export function publishBountyEvent(store, roomId, event) {
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
 }
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, chargePricedCall = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -208,11 +208,22 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
       invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
-      const { bounty, receipt } = escrow.postBounty(roomId,
-        { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
-          deadline: payload.deadline, verifierId: payload.verifierId ?? null,
-          approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
-      return { roomId, bounty, receipt };
+      // #3269: bounty_post is a priced MCP tool; posting over REST charges
+      // the identical spend boundary. The charge hook is injected by the
+      // HTTP mount (server/http.mjs), which owns the authenticated member
+      // the spend layer keys on — this module's callers and tests work in
+      // ledger lanes. The thunk runs only on real execution, so an
+      // idempotent replay of this post is never charged; settle after
+      // success, void on any failure.
+      const spend = typeof chargePricedCall === "function" ? chargePricedCall("bounty_post") : null;
+      try {
+        const { bounty, receipt } = escrow.postBounty(roomId,
+          { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
+            deadline: payload.deadline, verifierId: payload.verifierId ?? null,
+            approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
+        spend?.settle();
+        return { roomId, bounty, receipt };
+      } catch (error) { spend?.void(); throw error; }
     });
   }
   // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
