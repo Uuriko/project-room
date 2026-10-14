@@ -4630,15 +4630,41 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // shown only to that message's two parties. A database from before the
   // #658 schema has no mention_states table and simply has no mentions.
   openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now(), window = null) {
-    let rows;
+    // R211-1: the event log holds the body as originally posted; the live
+    // projection is the current state. A mention deleted after posting must
+    // not surface at all (it listed a tombstone with a room_reply next step),
+    // and an edited mention must show its current body, not the pre-edit
+    // text. Messages missing from the projection fall back to the logged
+    // body, as the #2941 fix did for room DMs. Deleted rows are skipped
+    // inside the scan so they never consume one of the caller's limit slots.
+    let liveMessages = [];
+    try { liveMessages = this.room(roomId).state?.messages ?? []; } catch { /* unknown room: no overlay */ }
+    const currentById = new Map(liveMessages.map(message => [message.id, message]));
+    const rows = [];
     try {
-      rows = this.db.prepare(
+      const stmt = this.db.prepare(
         `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
            AND e.sequence>? AND e.sequence<=?
          ORDER BY e.sequence DESC LIMIT ?`
-      ).all(roomId, memberId, window?.after ?? 0, window?.through ?? Number.MAX_SAFE_INTEGER, limit);
+      );
+      let cursor = window?.after ?? 0;
+      const through = window?.through ?? Number.MAX_SAFE_INTEGER;
+      while (rows.length < limit) {
+        const want = limit - rows.length + 1;
+        const batch = stmt.all(roomId, memberId, cursor, through, want);
+        if (!batch.length) break;
+        const nextCursor = batch[batch.length - 1].sequence;
+        for (const row of batch) {
+          const event = JSON.parse(row.body);
+          const current = currentById.get(event.data?.messageId ?? row.eventId);
+          if (current?.deletedAt) continue;
+          if (rows.length < limit) rows.push(row);
+        }
+        if (batch.length < want || nextCursor === cursor) break;
+        cursor = nextCursor;
+      }
     } catch (error) {
       if (/no such table/i.test(error?.message ?? "")) return [];
       throw error;
@@ -4661,7 +4687,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         messageId: event.data.messageId ?? null,
         replyToId: event.data.messageId ?? row.eventId,
         from: event.actorId,
-        body: event.data.body,
+        body: currentById.get(event.data.messageId ?? row.eventId)?.body ?? event.data.body,
         at: event.at,
         state: row.state !== "timed_out" && row.timeoutAt <= nowMs ? "timed_out" : row.state,
         channel: event.data.channelId ?? "general",
