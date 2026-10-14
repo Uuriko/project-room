@@ -28,7 +28,7 @@ export class ScopedTestRoom extends ProjectRoom {
  }
 }
 export default entry;`;
-test('actual Worker supports setup-saved scoped credential and explicit lease-fenced ack', { timeout:60000 }, async () => {
+test('actual Worker supports setup-saved scoped credential and default lease-fenced ack', { timeout:60000 }, async () => {
  const root = await mkdtemp(join(tmpdir(),'scoped-worker-'));
  const bundled = await build({stdin:{contents:fixture,resolveDir:process.cwd(),sourcefile:'scoped-fixture.mjs'},bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']});
  const origin='https://room.example.test';
@@ -42,8 +42,6 @@ test('actual Worker supports setup-saved scoped credential and explicit lease-fe
   const connection=readAgentConnection(setup.configDirectory);
   assert.match(connection.token,/^rak_/);
   const client=new AgentWakeClient({connection,fetchImpl});
-  const registered=await client.setup({hostId:'worker-scoped',cadenceSeconds:60,listener:true});
-  assert.equal(registered.listener.acquired,true);
   const queued=await (await post('/__fixture/signal',{identityId:setup.identityId})).json();
   const waited=await client.wait({hostId:'worker-scoped',cadenceSeconds:60,waitMs:0});
   assert.ok(waited.pendingWakes.some(row=>row.signalId===queued.signal.signalId));
