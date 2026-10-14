@@ -822,6 +822,10 @@
       "path": "/api/operator/restore"
     },
     {
+      "method": "POST",
+      "path": "/api/operator/restore-from-backup"
+    },
+    {
       "method": "GET",
       "path": "/api/opportunities.json"
     },
@@ -4334,6 +4338,10 @@
     {
       "method": "POST",
       "path": "/api/operator/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/restore-from-backup"
     },
     {
       "method": "POST",
