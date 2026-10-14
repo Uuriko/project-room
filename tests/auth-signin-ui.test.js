@@ -321,3 +321,40 @@ test("duplicate signup on a mail-configured room still promises the sign-in link
   await container.listeners.submit[0](submitForm("password", { email: "dup@example.invalid", password: "synthetic-password-1" }));
   assert.match(container.status.textContent, /check your email for a sign-in link/i);
 });
+
+const flushOptions = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
+
+function mountWithOptions(options) {
+  const client = stubClient({});
+  const ui = createAuthSigninUI({
+    accountClient: client,
+    ensureAccountSession: async () => {},
+    onSignedIn: async () => {},
+    loadSigninOptions: async () => options
+  });
+  const container = fakeContainer();
+  ui.mount(container);
+  return { client, container, ui };
+}
+
+test("unconfigured mail hides the email-link offers and coerces magic entries to password (#3341)", async () => {
+  const { container, ui } = mountWithOptions({ providers: { mail: { configured: false } } });
+  await flushOptions();
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
+  assert.match(container.innerHTML, /data-signin-form="reset-request"/);
+  assert.doesNotMatch(container.innerHTML, /data-email-method="magic"/, "no email-link offer when this deployment cannot send mail");
+  assert.match(container.innerHTML, /Email password reset link/, "password recovery remains offered");
+  // Programmatic entries into the magic views coerce to password sign-in.
+  assert.equal(ui.showMagic(), true);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  assert.equal(ui.showView("magic-request"), true);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+});
+
+test("configured mail keeps the email-link offers (#3341)", async () => {
+  const { container } = mountWithOptions({ providers: { mail: { configured: true } } });
+  await flushOptions();
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
+  assert.match(container.innerHTML, /data-email-method="magic"/);
+  assert.match(container.innerHTML, /Email me a sign-in link instead/);
+});

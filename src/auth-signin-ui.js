@@ -39,12 +39,19 @@ export function classifyAuthLink(params) {
   return { kind: hasReset ? "reset" : "magic", proof, email };
 }
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions }) {
   let container = null, welcome = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
+  // Whether this deployment can actually send sign-in email, learned from
+  // the public /api/auth/signin-options feed at mount. Defaults to true
+  // (fail-open to the historical behavior, whose submit-time honesty stays
+  // as backstop) until the feed positively reports mail unconfigured —
+  // only then are the email-link offers hidden (§8.1: never offer a
+  // sign-in method the deployment cannot serve).
+  let mailConfigured = true;
   const surface = () => container;
   const statusNode = () => surface()?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
@@ -62,6 +69,22 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   async function authedSession() {
     await ensureAccountSession();
     return accountClient.currentSession("signing in");
+  }
+  // Learn the deployment's sign-in capabilities once at mount, through
+  // the host-injected loader (kept off accountClient.request so request
+  // accounting in hosts/tests is untouched). Only a positive "mail not
+  // configured" answer changes anything; a missing loader or any failure
+  // (offline, older server) leaves the historical behavior in place.
+  async function loadSigninCapabilities() {
+    if (typeof loadSigninOptions !== "function") return;
+    try {
+      const options = await loadSigninOptions();
+      if (options?.providers?.mail?.configured === false) {
+        mailConfigured = false;
+        if (emailMethod === "magic" && !pendingLink) { emailMethod = "password"; passwordMode = "login"; }
+        render();
+      }
+    } catch { /* fail open — see the mailConfigured note above */ }
   }
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
   const mutationApi = async (session, path, data, validate) => {
@@ -100,6 +123,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (busy || pendingTerms) return false;
     const valid = ["welcome", "password-login", "password-signup", "forgot", "reset-request", "reset-sent", "reset-form", "magic-request", "magic-sent", "account-switch"];
     if (!valid.includes(view)) return false;
+    // An unconfigured-mail deployment has no magic views to show.
+    if (view.startsWith("magic-") && !mailConfigured) view = "password-login";
     if (view === "account-switch") { if (!pendingLink) return false; }
     else {
       pendingLink = null;
@@ -127,13 +152,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingLink) return uiText("signin.copy.006", { fragmentA: busy ? "disabled" : "" });
     if (emailMethod === "forgot") {
       const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
-      return uiText("signin.copy.007") + (passkeySupported ? uiText("signin.passkey.action") : "");
+      return uiText("signin.copy.007") + (mailConfigured ? uiText("signin.magic.action") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
     if (emailMethod === "reset") {
       if (resetPhase === "sent") return uiText("signin.copy.008", { fragmentA: escapeHtml(resetEmail) });
       if (resetPhase === "form") return uiText("signin.copy.009", { fragmentA: busy ? "disabled" : "" });
       const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
-      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (passkeySupported ? uiText("signin.passkey.action") : "");
+      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (mailConfigured ? uiText("signin.magic.instead") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
     if (emailMethod === "password") {
       const signup = passwordMode === "signup";
@@ -241,7 +266,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       welcome = false;
       const currentEmail = surface()?.querySelector('[name="email"]')?.value;
       if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
-      if (method) emailMethod = method.dataset.emailMethod === "password" ? "password" : "magic";
+      if (method) emailMethod = method.dataset.emailMethod === "password" || !mailConfigured ? "password" : "magic";
       if (mode) emailMethod = "password";
       if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
       pendingLink = null; magicPhase = "request"; setStatus(""); render();
@@ -433,13 +458,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     showPassword(mode = "login") { return showView(mode === "signup" ? "password-signup" : "password-login"); },
     showMagic() {
       if (busy) return false;
+      if (!mailConfigured) return showView("password-login");
       welcome = false; emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
     },
     openEmail(mode = "magic", panel) {
       if (busy) return false;
       if (panel && container && !panel.contains?.(container)) panel.prepend?.(container);
       if (panel) panel.hidden = false;
-      emailMethod = mode === "password" ? "password" : "magic";
+      emailMethod = mode === "password" || !mailConfigured ? "password" : "magic";
       render(); return true;
     },
     closeEmail() { return back(); },
@@ -450,6 +476,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     },
     mount(target) {
       container = target; render(); bind(container);
+      void loadSigninCapabilities();
       return consumeMagicLinkFromUrl();
     }
   };
