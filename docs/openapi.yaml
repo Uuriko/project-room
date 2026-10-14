@@ -8803,6 +8803,46 @@ paths:
         '413': { description: Body over the 64 MiB cap }
         '422': { description: Export is invalid or failed verification }
         '503': { description: Store unavailable }
+  /api/operator/restore-from-backup:
+    post:
+      summary: Operator restore from the KV-stored daily backup
+      x-worker-only: true
+      x-room-permission: operator
+      description: >-
+        Operator only. Answered by the Durable Object. Requires
+        Authorization: <redacted>
+        the same token as GET /api/operator/export. A missing or short token
+        is 404. A wrong token is 401. Restores the daily backup already
+        stored in the ROOM_BACKUPS_KV namespace, so no export crosses the
+        request body and the 64 MiB cap of /api/operator/restore does not
+        apply (#3409): the manifest and parts are verified (per-part and
+        whole-backup sha256) and replayed one part at a time, and the same
+        trailer, foreign-key, watermark, recovery, and invitation audits
+        must pass. The optional JSON body names the backup,
+        { key: "room-backups/YYYY-MM-DD.ndjson" } (default: today's key);
+        an absent backup is 404. The store must hold no rooms: a non-empty
+        store is 409 and is never overwritten. A failed replay deletes
+        everything it touched, leaving the store empty and retryable.
+        Other methods are 405.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key: { type: string }
+      responses:
+        '200': { description: "{ ok, verified, events, ... } restore summary" }
+        '400': { description: Body could not be read }
+        '401': { description: Wrong operator token }
+        '404': { description: Restore is not configured, or no backup under that key }
+        '405': { description: Method is not POST }
+        '409': { description: Store already holds rooms }
+        '422': { description: Backup is malformed or failed verification }
+        '503': { description: Store or backup namespace unavailable }
   /api/version:
     get:
       summary: Deployed revision
