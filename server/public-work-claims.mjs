@@ -100,7 +100,10 @@ export class PublicWorkClaims {
   }
   read(offerId) {
     return this.store.readTransaction(() => {
-      const row = this.task(offerId), offer = this.offer(row);
+      const row = this.task(offerId);
+      // Operator unpublish hides the task (and its submittedReceiptId) here too.
+      if (isUnpublished(this.db, 'room', row.room_id)) fail(404, 'public_work_not_found', 'Public task not found');
+      const offer = this.offer(row);
       return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer);
     });
   }
@@ -118,7 +121,10 @@ export class PublicWorkClaims {
         AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id`).all();
       // Claim state lives in the work-claims store and receipts, not in a
       // column SQL can order by, so packets are materialized before ordering.
-      let tasks = rows.map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
+      // Operator-unpublished rooms are dropped before materializing: their
+      // packets (including submittedReceiptId) must never be built or served.
+      let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
+        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
       if (claimable) tasks = tasks.filter(task => task.claimable);
       if (claimableFirst) {
