@@ -11,7 +11,7 @@
 
 import { resolvePasskeyParams } from "../account-passkeys.mjs";
 
-async function handleSigninOptions(ctx) {
+export async function handleSigninOptions(ctx) {
   const { res, json, magicMailer, expectedOrigin, githubClient, googleClient } = ctx;
   const configured = probe => { try { return probe() !== null; } catch { return false; } };
   return json(res, 200, {
