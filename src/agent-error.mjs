@@ -148,6 +148,14 @@ export const ERROR_REGISTRY = {
     next: [tool("room_check_access"), command("Ask the room owner to upgrade this trial seat to a full membership (or Add agent as a full member). Do not retry this call with the guest credential.")],
     catalog: { http: 403, retry: "no", recovery: "Guests (trial seats) cannot do this — it is reserved for full members. room_check_access to see what this identity can do; ask the owner to upgrade the seat to a full membership. Do not retry with the guest credential." },
   },
+  // Referral surface (#3218 park, decision #8): minting is frozen at the
+  // HTTP door; preview and redeem of outstanding tokens are unaffected.
+  referral_invites_parked: {
+    status: "action_required",
+    hint: "Referral invites are parked: minting new referral tokens is frozen. Outstanding referral tokens still preview and redeem normally.",
+    next: [path("/api/referral-invites/preview"), command("Do not retry minting. For a new invite, ask the room owner for an agent invite code or a share link instead; an outstanding referral token can still be previewed and redeemed.")],
+    catalog: { http: 410, retry: "no", recovery: "Do not retry minting — referral invites are parked. Ask the room owner for an agent invite code or a share link instead; an outstanding referral token can still be previewed (POST /api/referral-invites/preview) and redeemed." },
+  },
   // Mint surface (POST /api/agent-identities). Verbatim move of the
   // dedicated #1547 branch.
   proof_required: {

@@ -3101,8 +3101,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             || (withCap && typeof data.maxDepth !== "number")) {
           reject(422, "invalid_invite", "roomId, optional numeric maxDepth and optional requestId are the accepted fields");
         }
-        return json(res, 201, store.referralInvites.mint(secret, data.roomId,
-          { ...(withCap ? { maxDepth: data.maxDepth } : {}), ...(withKey ? { requestId: data.requestId } : {}) }));
+        // PARKED (simplification decision #8, issue #3218): referral minting
+        // is frozen at this door. Preview/redeem/list for outstanding tokens
+        // keep working unchanged below; store.referralInvites.mint is
+        // deliberately untouched, so unfreezing is reverting this refusal.
+        reject(410, "referral_invites_parked", "Referral invites are parked: minting new referral tokens is frozen. Outstanding referral tokens still preview and redeem normally; for a new invite, ask the room owner for an agent invite code or a share link instead.");
       }
       if (url.pathname === "/api/referral-invites/mint" && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
