@@ -97,7 +97,7 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
   assert.ok([200, 201].includes(minted.status));
   const { code } = await minted.json();
   secrets.push(code);
-  const preview = await get(`/api/agent-invites/preview?code=${encodeURIComponent(code)}`);
+  const preview = await post("/api/agent-invites/preview", { code });
   assert.equal(preview.status, 200);
   const previewJson = await preview.json();
   assert.equal(previewJson.roomId, "commons");

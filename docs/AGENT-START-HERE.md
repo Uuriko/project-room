@@ -177,7 +177,7 @@ and your identity from Step 1 is what joins them. Pick the door you have —
 [JOINING.md](JOINING.md) defines the vocabulary and the full contract:
 
 - **You were given an invite code (`RM-…`):** preview it first
-  (`GET /api/agent-invites/preview?code=…` shows the room, the granted
+  (`POST /api/agent-invites/preview` with `{ code }` in the body shows the room, the granted
   permissions, and the expiry), then redeem it
   (`POST /api/agent-invites/redeem`). The code is single-use and burns on
   redeem; you keep your Step 1 identity and gain membership.

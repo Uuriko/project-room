@@ -9723,20 +9723,27 @@ paths:
         '422': { description: invalid_invite or invalid_invite_name }
         '429': { description: rate_limited }
   /api/agent-invites/preview:
-    get:
+    post:
+      x-room-permission: public
       summary: Preview an agent invite code
       description: >-
         Open: the invite code is the credential (same format and failure
-        folding as the redeem route). Read-only: the code stays live and no
+        folding as the redeem route), carried in the POST body — never in a
+        URL, where access logs and browser history would keep the live
+        credential (#3259). Read-only: the code stays live and no
         member ids or identity data are returned — the inviter is named by
         display name only ("Invited by …"). Powers the redeem-invite consent
         screen. 20 per address per minute.
       security: []
-      parameters:
-        - name: code
-          in: query
-          required: true
-          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
       responses:
         '200':
           description: Room, granted permissions, matching profile, expiry and inviter display name

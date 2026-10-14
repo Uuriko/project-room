@@ -3116,13 +3116,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Agent invite preview: read-only consent data for the pre-redemption
-      // review screen. Unauthenticated (the code is the bearer credential);
-      // consumes nothing, reveals no member or identity data.
-      if (url.pathname === "/api/agent-invites/preview" && req.method === "GET") {
+      // review screen. POST (not GET) like every other preview door
+      // (#3259): the code is a live single-use credential and must never
+      // land in a query string or access log. Unauthenticated (the code is
+      // the bearer credential); consumes nothing, reveals no member or
+      // identity data.
+      if (url.pathname === "/api/agent-invites/preview" && req.method === "POST") {
         rate(`invite-preview:${remoteAddress}`, 20);
-        const code = url.searchParams.get("code");
-        if (typeof code !== "string" || !code) reject(422, "invalid_invite", "Invite code is required");
-        return json(res, 200, store.invites.preview(code));
+        const data = await body(req);
+        if (!exact(data, ["code"]) || typeof data.code !== "string" || !data.code) reject(422, "invalid_invite", "Invite code is required");
+        return json(res, 200, store.invites.preview(data.code));
+      }
+      if (url.pathname === "/api/agent-invites/preview" && req.method !== "POST") {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
       // Self-serve access requests: an identity without membership asks to
       // join. The caller proves the identity's secret as Bearer (issue
