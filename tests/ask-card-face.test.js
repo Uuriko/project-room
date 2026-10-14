@@ -12,9 +12,10 @@ test('a queued ask reads Asked, then Not picked up at 10 s', () => {
   assert.equal(askFaceStatus({ ...run, createdAt: 5_000 }, 1_000).key, 'asked', 'a clock behind the server never reads as late');
 });
 
-test('a host silent past the window reads Stalled with a way out; other states keep honest words', () => {
+test('a host silent past the window reads Stalled; the stop button only renders for controls', () => {
   assert.equal(askFaceStatus({ status: 'unknown', createdAt: 0 }, 1e9).key, 'stalled');
-  assert.match(askFaceStatus({ status: 'unknown' }).text, /You can stop it/);
+  assert.match(askFaceStatus({ status: 'unknown' }).text, /2 minutes/);
+  assert.doesNotMatch(askFaceStatus({ status: 'unknown' }).text, /stop/i);
   assert.equal(askFaceStatus({ status: 'cancelled' }).text, 'Stopped');
   assert.equal(askFaceStatus({ status: 'done' }).text, 'Result ready');
   assert.equal(askFaceStatus(null), null);
