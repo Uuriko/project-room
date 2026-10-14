@@ -3714,7 +3714,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // existing clients keep matching on them; only the message changes,
       // and only for expired (never revoked) guest credentials.
       if (!row.revoked && !row.parent_hash && row.expires_at <= this.now() && isGuestAgentMemberId(row.member_id)) {
-        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: self-serve guests re-run POST /api/guest-invites/request with a fresh signed joinRequest (a new requestId); invited guests ask the owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
+        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: ask the room owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
       }
       fail(401, "unauthenticated", "Session or key expired or revoked");
     }

@@ -70,7 +70,6 @@
     "POST /api/guest-agent-links/preview",
     "POST /api/guest-invites/preview",
     "POST /api/guest-invites/redeem",
-    "POST /api/guest-invites/request",
     "POST /api/guest-invites/rotate",
     "POST /api/identities/{identityId}/link-code",
     "POST /api/identity-create",

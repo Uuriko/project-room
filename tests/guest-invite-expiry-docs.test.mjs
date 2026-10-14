@@ -141,15 +141,19 @@ test("token expiry 401 teaches the recovery: doc wording matches the store messa
     "the teaching branch must be scoped to guest credentials");
 });
 
-test("self-serve expiry recovery is documented and matches code constants", () => {
-  assert.ok(/self-serve/i.test(recovery), "recovery must cover the self-serve path");
-  assert.ok(recovery.includes("24 hours"), "recovery must state the fixed 24h self-serve TTL");
-  assert.ok(recovery.includes("new") && recovery.includes("requestId"),
-    "recovery must say a fresh joinRequest needs a new requestId");
-  assert.ok(recovery.includes("renewed"), "recovery must name the renewed renewal marker");
-  assert.ok(recovery.includes("stale_card"), "recovery must say replaying the old requestId 422s");
-  assert.equal(exportedMs(v1Src, "GUEST_SELF_SERVE_TTL_MS"), 24 * 60 * 60 * 1000);
-  assert.ok(httpSrc.includes("/api/guest-invites/request"), "the self-serve route must exist");
+test("self-serve door stays removed and the legacy path is documented honestly", () => {
+  // #3219: the self-serve guest door was cut — guests are owner-issued
+  // trial seats only. The recovery section documents the legacy seats'
+  // fate (expire, not renewed; way back is an owner-issued code) instead
+  // of teaching the dead route.
+  assert.ok(!httpSrc.includes("/api/guest-invites/request"), "the self-serve route must stay removed from http.mjs");
+  assert.ok(!v1Src.includes("requestSelfServe"), "the self-serve handler must stay removed from guest-invites.mjs");
+  assert.ok(/self-serve/i.test(recovery), "recovery must still address legacy self-serve seats");
+  assert.ok(recovery.includes("removed"), "recovery must say the self-serve door was removed");
+  assert.ok(recovery.includes("24-hour") || recovery.includes("24 hours"),
+    "recovery must state the legacy seats' fixed 24h TTL");
+  assert.ok(!storeSrc.includes("/api/guest-invites/request"),
+    "the expiry teaching message must not point at the removed route");
 });
 
 test("JOINING.md points at the recovery decision tree with the corrected v1 wording", () => {
