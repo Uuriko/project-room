@@ -802,3 +802,29 @@ test("ANCHOR-D7c: a malformed requestId is a 422, never a silent new redemption"
   const ok = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "D7 Bot" });
   assert.equal(ok.status, 201);
 });
+
+test("redeem: a member re-joining under its own name gets identity_already_linked, not a rename suggestion (#3382)", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const me = store.identities.create("Returning Agent");
+  const code1 = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  const code2 = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(code1.status, 201); assert.equal(code2.status, 201);
+  const joined = await post(origin, "/api/agent-invites/redeem", { code: code1.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(joined.status, 201, JSON.stringify(joined.json));
+  assert.equal(joined.json.identityId, me.identityId);
+  // Second fresh code, same identity, its OWN member name: the first
+  // refusal must be the reconcile answer (identity_already_linked), not
+  // display_name_unavailable's rename suggestion (W3 S4 leg C).
+  const again = await post(origin, "/api/agent-invites/redeem", { code: code2.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(again.status, 409, JSON.stringify(again.json));
+  assert.equal(again.json.error.code, "identity_already_linked");
+  // The refusal happened pre-burn: a stranger can still redeem code #2.
+  const stranger = await post(origin, "/api/agent-invites/redeem", { code: code2.json.code, displayName: "New Agent" });
+  assert.equal(stranger.status, 201, JSON.stringify(stranger.json));
+  // Contrast: a stranger colliding with an existing member's name still
+  // gets the rename guidance.
+  const code3 = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  const collide = await post(origin, "/api/agent-invites/redeem", { code: code3.json.code, displayName: "Returning Agent" });
+  assert.equal(collide.status, 422, JSON.stringify(collide.json));
+  assert.equal(collide.json.error.code, "display_name_unavailable");
+});
