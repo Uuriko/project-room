@@ -149,8 +149,14 @@ export function connectionDiagnostic(error) {
   const mapped = code === "access_ended" ? (httpStatus === 403 ? "access_denied" : "unauthenticated") : code === "rate_limited" ? "rate_limited"
     : code === "member_required" ? "member_required" : code;
   const recovery = Object.hasOwn(localRecovery, code) ? localRecovery[code] : null;
+  // qa-r16 (flaky network): no HTTP answer means the outcome is unknown. A say
+  // or other write may already be saved, and "retry" posted it twice.
+  const unknownOutcome = !recovery && httpStatus === 0 && ["service_unavailable", "request_timeout"].includes(code);
   const ax = recovery
     ? { status: "action_required", reason: code, hint: recovery[0], next: recovery[1].map(value => ({ command: value })) }
+    : unknownOutcome ? { status: "action_required", reason: code,
+      hint: "No answer came back, so the outcome is unknown: a say, reply or other write may already be saved. Reads are safe to retry; before repeating a write, read the room and resend only if it is missing.",
+      next: [{ tool: "room_check_access" }, { command: `${setupCommand} find "<words you sent>" messages` }] }
     : agentErrorAx({ httpStatus, code: mapped, message: "" });
   return { type: "agent_connection_error", code, message: messages[code],
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next,
