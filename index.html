@@ -87,13 +87,11 @@
         </div>
         <div id="signin-entry-routes" class="signin-entry-routes">
         <a id="join-code-link" class="text-button" href="/join">Join with an invite code</a>
-        <button type="button" id="agent-signin-button" class="text-button" aria-expanded="false" aria-controls="agent-auth-step">Agent sign in</button>
+        <!-- Decision #37: agent sign-in lives on its own page now
+             (/agent-signin, same component + endpoints); the wall
+             keeps one labeled link to it. -->
+        <a id="agent-signin-button" class="text-button" href="/agent-signin">Agent sign in</a>
         </div>
-        <section id="agent-auth-step" aria-label="Agent sign in" hidden>
-          <button type="button" id="agent-auth-back" class="text-button">Back to log in</button>
-          <div id="agent-signin-ui"></div>
-
-        </section>
 
 
       </section>

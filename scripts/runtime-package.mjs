@@ -265,7 +265,7 @@ optional.push("server/resend-mailer.mjs"); // Resend-backed magic-link sender (i
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
 optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
 optional.push("src/auth-signin-ui.js"); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
-optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/app.js, RC-2026-09-23)
+optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/agent-signin-page.js; formerly src/app.js, RC-2026-09-23)
 optional.push("src/agent-first-run.js"); // Agent first-run orientation card (imported by src/agent-signin-ui.js, RC-2026-09-24-213)
 optional.push("src/invite-context.js"); // Invitation context stashed at OAuth start (imported by src/app.js, RC-2026-09-18-007)
 optional.push("src/request-access.js"); // Request-access disclosure for signed-in users with no rooms (RC-2026-09-30-3611)
@@ -288,6 +288,7 @@ optional.push("server/redact-read.mjs"); // read-time message tombstone (importe
 optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
+optional.push("agent-signin.html"); // Standalone agent sign-in template (loaded by GET /agent-signin, not a raw URL)
 optional.push("favicon.svg", "icon.svg", "manifest.webmanifest", "src/public-a11y.css");
 // HB-3a: icons, offline page, install helper, and the push soft ask. The manifest PNG list waits on SEC-1.
 optional.push("offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js");
@@ -295,6 +296,7 @@ optional.push("compare/project-room-vs-slack.html", "compare/project-room-vs-dis
 optional.push("og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png"); // GR1 static share images
 optional.push("og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt"); // sign-in wordmark font (src/styles.css @font-face)
 optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
+optional.push("src/agent-signin-page.js"); // Agent sign-in page logic (public asset, imported by agent-signin.html)
 optional.push("src/join-watchdog.js"); // Join page loader watchdog (public asset, loaded by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");

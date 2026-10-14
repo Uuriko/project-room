@@ -2005,6 +2005,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(301, { Location: url.pathname.replace(/\.html$/, "") + url.search });
         return res.end();
       }
+      if ((url.pathname === "/agent-signin.html" || url.pathname === "/room/agent-signin.html") && ["GET", "HEAD"].includes(req.method)) {
+        res.writeHead(301, { Location: url.pathname.replace(/\.html$/, "") + url.search });
+        return res.end();
+      }
       if ((url.pathname === "/favicon.ico" || url.pathname === "/room/favicon.ico") && ["GET", "HEAD"].includes(req.method)) {
         res.writeHead(301, { Location: (url.pathname.startsWith("/room/") ? "/room" : "") + "/favicon.svg" });
         return res.end();
@@ -2830,6 +2834,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
+      }
+      // Standalone agent sign-in page: GET /agent-signin (plus the
+      // /room twin on the www door). Decision #37 moved agent sign-in
+      // off the login wall to its own page; it hosts the same
+      // agent-signin UI component and the same auth endpoints, and is
+      // unauthenticated and stateless by design, like /join. Outside
+      // the /api/ inventory by design, like the join page.
+      const agentSigninPageMatch = /^\/(?:room\/)?agent-signin\/?$/.exec(url.pathname);
+      if (agentSigninPageMatch) {
+        if (req.method !== "GET" && req.method !== "HEAD") reject(405, "method_not_allowed", "Method not allowed");
+        const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
+        const page = (await loadAsset("agent-signin.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
+        return res.end(req.method === "HEAD" ? undefined : page);
       }
       // Q3-E HTML 404. A browser Accept that prefers text/html gets 404.html
       // (lang, title, h1, links home / about / receipts, X-Robots-Tag: noindex).
