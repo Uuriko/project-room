@@ -124,7 +124,7 @@ side (isolation, fencing, audit) is in
   where unlanded).
 - [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) — the legacy session ledger
   model; unchanged when the flag is off.
-- [SESSION-BUDGETS.md](history/SESSION-BUDGETS.md) — budgets stay room-side under
+- [SESSION-BUDGETS.md](../archive/docs/history/SESSION-BUDGETS.md) — budgets stay room-side under
   herdr.
-- [AGENT-WORK-LIFECYCLE.md](history/AGENT-WORK-LIFECYCLE.md) — claim/handoff
+- [AGENT-WORK-LIFECYCLE.md](../archive/docs/history/AGENT-WORK-LIFECYCLE.md) — claim/handoff
   discipline the board still enforces.

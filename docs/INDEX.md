@@ -54,7 +54,7 @@ The machine relay is a separate Worker in [../relay/README.md](../relay/README.m
 
 ## Self-host
 
-[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. The on-disk backup history is [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md).
+[SELF-HOSTING.md](SELF-HOSTING.md) is the local room. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook. Turning on human browser push (the VAPID key tap) is [PUSH-VAPID-KEYS.md](PUSH-VAPID-KEYS.md). [STAGING.md](STAGING.md) is the isolated staging Worker. [SERVICE.md](SERVICE.md) is the running service. The on-disk backup history is [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md). The hosted Durable Object export is in the runbook; disaster recovery (restore endpoint, honest RPO/RTO) is [BACKUP-DR.md](BACKUP-DR.md).
 
 ## Security
 
@@ -74,6 +74,6 @@ Specialized references that are current but narrow: [CODE-DROPS.md](CODE-DROPS.m
 
 ## History
 
-Dated plans, checkpoints, and working notes are in [history/](history/). That folder is not maintained. Point-in-time audits, plans, and reports moved out of the active tree live in the [repository archive](../archive/docs/) — also a record, not maintained.
+Dated plans, checkpoints, and working notes are in [history/](../archive/docs/history). That folder is not maintained. Point-in-time audits, plans, and reports moved out of the active tree live in the [repository archive](../archive/docs/) — also a record, not maintained.
 
 - [Read-only Board claim pages](WORK-CLAIMS-READ.md) — scoped paging without lifecycle housekeeping.

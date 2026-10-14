@@ -3,7 +3,7 @@
 17 September 2026. Contract + kit stub. Not a live door.
 
 Architecture spine:
-[ROOM-COHESIVE-ARCHITECTURE.md](history/ROOM-COHESIVE-ARCHITECTURE.md)
+[ROOM-COHESIVE-ARCHITECTURE.md](../archive/docs/history/ROOM-COHESIVE-ARCHITECTURE.md)
 (Second · Connect · ledger). Scorers audit the receipt graph; they do
 not become a second attention product.
 
@@ -11,8 +11,8 @@ Master plan:
 ROOM-STEALS-FULL-BUILD-2026-09-17.md.
 
 Receipts: [ROOM-RECEIPT-V1.md](ROOM-RECEIPT-V1.md). Graph:
-[ROOM-RECEIPT-GRAPH-V0.md](history/ROOM-RECEIPT-GRAPH-V0.md). Personas:
-[ROOM-PERSONAS-FACTORY.md](history/ROOM-PERSONAS-FACTORY.md).
+[ROOM-RECEIPT-GRAPH-V0.md](../archive/docs/history/ROOM-RECEIPT-GRAPH-V0.md). Personas:
+[ROOM-PERSONAS-FACTORY.md](../archive/docs/history/ROOM-PERSONAS-FACTORY.md).
 
 Catalog row: **Scorer (LLM-judge)** on
 [ROOM-KITS-CATALOG.md](ROOM-KITS-CATALOG.md) — Optional later, not a

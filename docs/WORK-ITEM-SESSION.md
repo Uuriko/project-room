@@ -17,7 +17,7 @@ self-reported state — the claims board stays authoritative and herdr
 ## Why
 
 A Work Item is the session. It is not a Slack thread with bots. Compute stays a
-separate run factory ([BRIDGE-COMPUTE.md](history/BRIDGE-COMPUTE.md) is Phase 1+).
+separate run factory ([BRIDGE-COMPUTE.md](../archive/docs/history/BRIDGE-COMPUTE.md) is Phase 1+).
 
 ## Fields (additive, schema 26)
 

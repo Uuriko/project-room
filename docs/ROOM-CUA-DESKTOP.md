@@ -4,7 +4,7 @@
 (alt OK: Cua Driver MCP).
 
 Architecture spine:
-[ROOM-COHESIVE-ARCHITECTURE.md](history/ROOM-COHESIVE-ARCHITECTURE.md)
+[ROOM-COHESIVE-ARCHITECTURE.md](../archive/docs/history/ROOM-COHESIVE-ARCHITECTURE.md)
 (Second · Connect · ledger). This kit is the **Connect Desktop**
 evidence path ([#454](https://github.com/Uuriko/project-room/pull/454))
 — not a second Connect product. Muse ACK: Connect chrome is Muse.
@@ -23,7 +23,7 @@ catalog door, a People-rail button, or enrollment changes.
 
 **Use Cua Driver (MCP / CLI) and, later, optional Fleet.** Room stays the
 ledger. Cua stays the computer-use layer. Compute stays a separate run
-factory ([BRIDGE-COMPUTE.md](history/BRIDGE-COMPUTE.md)).
+factory ([BRIDGE-COMPUTE.md](../archive/docs/history/BRIDGE-COMPUTE.md)).
 
 | Piece | Job in Room |
 | --- | --- |

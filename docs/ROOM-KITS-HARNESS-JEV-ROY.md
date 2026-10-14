@@ -3,7 +3,7 @@
 17 September 2026. Contract. Docs only. Not a live `/room/kits` door.
 
 Architecture spine:
-[ROOM-COHESIVE-ARCHITECTURE.md](history/ROOM-COHESIVE-ARCHITECTURE.md)
+[ROOM-COHESIVE-ARCHITECTURE.md](../archive/docs/history/ROOM-COHESIVE-ARCHITECTURE.md)
 (Second · Connect · ledger). Harness-bridge honesty sits under
 **Connect** (one surface: Wake · Pull · Desktop · Takeover). Muse ACK:
 Connect chrome is Muse.
@@ -99,7 +99,7 @@ Do not replace honesty receipts with lossy summaries.
 
 Never rename a model to hide a limit. When Astra / Fable / a quality pin
 is exhausted, fail-loud and offer the fast-default fallback
-([ROOM-PERSONAS-FACTORY.md](history/ROOM-PERSONAS-FACTORY.md)).
+([ROOM-PERSONAS-FACTORY.md](../archive/docs/history/ROOM-PERSONAS-FACTORY.md)).
 
 Judge models on [ROOM-SCORER.md](ROOM-SCORER.md) prefer `fast-default`
 for open-ended essays and `jev` for closed-set pins so scoring stays
@@ -107,7 +107,7 @@ inside the 3–5% token bound.
 
 Same-rung factory spawn is allowed: Second / `foreman` may pin
 children to the parent’s Roy rung
-([ROOM-PERSONAS-FACTORY.md](history/ROOM-PERSONAS-FACTORY.md)). Never rename
+([ROOM-PERSONAS-FACTORY.md](../archive/docs/history/ROOM-PERSONAS-FACTORY.md)). Never rename
 a model to hide which meter (`hosted` / `community` / `web`) a seat
 burns.
 
