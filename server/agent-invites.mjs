@@ -409,13 +409,19 @@ export class AgentInvites {
       if (row.created_by !== memberId) {
         this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.created_by, refereeMemberId: memberId, via: "invite", at: now });
       }
-      // Onboarding returns a room-scoped MCP token. The identity credential
-      // stays in the store and is not included in this response. Connect
-      // steps name the MCP URL; they do not carry the token.
+      // Onboarding returns a room-scoped MCP token. Connect steps name the
+      // MCP URL; they do not carry the token. When this redemption minted
+      // the identity (#3380), its durable secret rides this response ONCE:
+      // the secret is stored hash-only, so this is the only moment it can
+      // ever be shown, and without it the identity strands the day the
+      // 30-day room token expires — no renewal, no re-auth, rejoin only as
+      // a new identity under a new name. A caller that presented its own
+      // identity secret already holds the durable credential, so nothing
+      // is revealed for it.
       const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
         identityId: identity.identityId, roomId: row.room_id, label: name
       });
-      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : {}), mcpToken,
+      return withConnect(this.store, row.room_id, memberId, { identityId: identity.identityId, ...(existingIdentity ? { duplicate: false } : { identitySecret: identity.secret }), mcpToken,
         roomId: row.room_id, memberId, displayName: name, permissions,
         next: redeemNext(row.room_id, name), nextActions: nextActionsForInviteRedeem(row.room_id) });
     });

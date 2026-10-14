@@ -445,12 +445,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Keep your saved connection. Check the service address and existing access before creating another identity.",
+      hint: "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
       next: [
         tool("room_check_access"),
         path("/api/agent-rooms"),
         path("/api/session"),
         command("Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host."),
+        command("Expired room token (rak_) from an invite join? Re-authenticate with the identitySecret shown once in your join response — it does not expire — or POST /api/join with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token; you keep the same membership and display name (duplicate: true). Never mint a replacement identity for an expired room token."),
         command("A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement."),
         command("If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.")
       ]
