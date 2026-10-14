@@ -29,6 +29,7 @@ import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
 import { handleBountyEscrow } from "./bounty-escrow-routes.mjs"; // Escrowed bounties + credit ledger (agent work exchange, slice 1).
+import { chargeSpendForMember } from "./spend-grants.mjs"; // #3269: REST twins of priced MCP tools charge the same spend boundary.
 import { buildOpportunitiesFeed } from "./opportunities.mjs"; // Public opportunity feed v2: read-only open-work discovery, decoupled from admission.
 import { telegramConfig, TelegramLiveStatus } from "./channel-adapters/telegram-config.mjs";
 import { TelegramTransport } from "./channel-adapters/telegram-transport.mjs";
@@ -3388,10 +3389,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (!exact(data, allowed) || typeof data.repo !== "string" || !Number.isSafeInteger(data.prNumber)) {
               reject(422, "invalid_land_item", "repo and prNumber are required");
             }
-            const result = await store.landQueue.add(roomId, auth.member.id, {
-              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant,
-              requestId: data.requestId ?? null
-            });
+            // #3269: add_land_item is a priced MCP tool; this REST twin
+            // charges the identical spend boundary (grant, cap, room
+            // allowance, single-use) before the add runs — settle after
+            // success, void on any failure or idempotent duplicate.
+            const spend = chargeSpendForMember(store, auth.member, "add_land_item", roomId);
+            let result;
+            try {
+              result = await store.landQueue.add(roomId, auth.member.id, {
+                repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant,
+                requestId: data.requestId ?? null
+              });
+            } catch (error) { spend?.void(); throw error; }
+            if (spend) { if (result.duplicate) spend.void(); else spend.settle(); }
             return json(res, result.duplicate ? 200 : 201, result);
           }
           if (action === "remove_land_item") {
@@ -3458,7 +3468,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || !exact(data, ["id", "filename", "mediaType", "data"])) {
           reject(422, "invalid_attachment", "id, filename, mediaType, and data are required");
         }
-        const staged = store.roomAttachments.stage(selected.token, roomId, data);
+        // #3269: room_put_file is a priced MCP tool; staging over REST
+        // charges the identical spend boundary (grant, cap, room
+        // allowance, single-use) before the stage runs — settle after
+        // success, void on any failure or idempotent duplicate.
+        const spend = chargeSpendForMember(store, auth.member, "room_put_file", roomId);
+        let staged;
+        try {
+          staged = store.roomAttachments.stage(selected.token, roomId, data);
+        } catch (error) { spend?.void(); throw error; }
+        if (spend) { if (staged.duplicate) spend.void(); else spend.settle(); }
         return json(res, staged.duplicate ? 200 : 201, staged);
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);

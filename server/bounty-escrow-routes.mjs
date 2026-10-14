@@ -30,6 +30,7 @@
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { chargeSpendForMember } from "./spend-grants.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -208,11 +209,20 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
       invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
-      const { bounty, receipt } = escrow.postBounty(roomId,
-        { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
-          deadline: payload.deadline, verifierId: payload.verifierId ?? null,
-          approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
-      return { roomId, bounty, receipt };
+      // #3269: bounty_post is a priced MCP tool; posting over REST charges
+      // the identical spend boundary (grant, cap, room allowance,
+      // single-use) before the post runs — settle after success, void on
+      // any failure. The thunk runs only on real execution, so an
+      // idempotent replay of this post is never charged.
+      const spend = chargeSpendForMember(store, auth.member, "bounty_post", roomId);
+      try {
+        const { bounty, receipt } = escrow.postBounty(roomId,
+          { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
+            deadline: payload.deadline, verifierId: payload.verifierId ?? null,
+            approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
+        spend?.settle();
+        return { roomId, bounty, receipt };
+      } catch (error) { spend?.void(); throw error; }
     });
   }
   // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —

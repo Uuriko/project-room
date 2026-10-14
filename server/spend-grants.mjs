@@ -641,7 +641,22 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   const roomId = args?.roomId;
   if (typeof roomId !== "string" || roomId.length === 0) return null;
   const auth = store.authenticate(secret, roomId);
-  const member = auth.member;
+  return chargeSpendForMember(store, auth.member, name, roomId);
+}
+
+// #3269: the same trust boundary for callers the HTTP funnel has already
+// authenticated to a room member — the REST twins of the priced MCP tools
+// (POST /bounties, POST /files stage, POST /add_land_item). Agents reach
+// REST with the same identity secret they use at MCP, so both doors must
+// funnel into this one charge: the spend-grant permission, the per-agent
+// cap, the room spend allowance, and single-use consumption are enforced
+// identically, or transport choice alone decides whether a priced
+// operation is gated. Same contract as chargeSpendBeforeCall: null when
+// no charge applies, SpendGrantError on refusal, otherwise the
+// authorizeSpend handle (settle after success, void on failure).
+export function chargeSpendForMember(store, member, name, roomId) {
+  if (priceForTool(name) === null) return null; // unpriced tools never charge
+  if (typeof roomId !== "string" || roomId.length === 0) return null;
   if (!member || member.kind !== "agent") return null; // humans are never charged
   const room = store.room(roomId);
   if (member.id === room.state.room.ownerId) return null; // ownership implies full authority
