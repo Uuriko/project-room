@@ -261,6 +261,23 @@ function authorizationsTotal(db, roomId, agentId) {
   return Number(row?.total ?? 0);
 }
 
+// #3302: settled priced-tool charges inside the allowance period. The
+// projection ledger behind spendAllowanceReport counts work-session
+// spend only; tool charges live in spend_authorizations, and the room
+// reservation that represented a charge in flight is released at
+// settle — so without this sum a settled charge stopped counting
+// against the room allowance the moment it landed, and sequential
+// charges accumulated without bound. Windowed by settled_at at/after
+// the period start, matching spendLedger's rolling-period semantics.
+function settledToolChargesCents(db, roomId, sinceMs) {
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(CAST(price_cents AS INTEGER)), 0) AS total
+     FROM spend_authorizations
+     WHERE room_id = ? AND status = 'settled' AND settled_at >= ?`
+  ).get(roomId, sinceMs);
+  return Number(row?.total ?? 0);
+}
+
 export function remainingSpendCents(db, roomId, agentId) {
   const grant = resolveSpendGrant(db, roomId, agentId);
   if (!grant) return 0;
@@ -663,11 +680,14 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
     toolName: name,
     priceCents,
     nonce: randomUUID(),
-    // Cumulative enforcement: the projection snapshot is the base and
-    // authorizeSpend serializes every in-flight room reservation against
-    // it in the same transaction as the grant reservation.
+    // Cumulative enforcement: the committed base (session spend from the
+    // projection PLUS settled tool charges in the period, #3302) is the
+    // base and authorizeSpend serializes every in-flight room reservation
+    // against it in the same transaction as the grant reservation.
     roomAllowanceCents: report.allowance ? report.allowance.allowanceCents : null,
-    roomCommittedCents: report.committedCents,
+    roomCommittedCents: report.allowance
+      ? report.committedCents + settledToolChargesCents(store.db, roomId, Date.parse(report.period.since))
+      : report.committedCents,
     nowMs,
   }));
 }
