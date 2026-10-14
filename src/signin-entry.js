@@ -33,6 +33,11 @@ export function mountSigninEntry({ openWorkspace }) {
   const signin = createAuthSigninUI({
     accountClient,
     ensureAccountSession: () => accountClient.session ? Promise.resolve(accountClient.session) : restore(),
+    // Same capability loader the workspace app supplies (app.js): without
+    // it the entry's auth UI never learns the deployment cannot send mail
+    // and offers an email sign-in link it cannot serve (Codex review of
+    // the #3068 integration, 2026-10-14).
+    loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
     onViewChange: navigation.sync,
     onBack: navigation.back,
     onSignedIn: enterAccount,

@@ -20,12 +20,12 @@ const PASSWORD = "synthetic-email-password";
 const DESK = { viewport: { width: 1280, height: 860 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-async function setup(t) {
+async function setup(t, { mailConfigured = true } = {}) {
   const f = createAcceptanceFixture();
   const sent = [];
   let mailer = null;
   const server = createRoomServer({ store: f.store, streamInterval: 40,
-    magicLinkMailer: { isConfigured: () => true, sendMagicLink: p => mailer.sendMagicLink(p), sendPasswordResetNotice: p => mailer.sendPasswordResetNotice(p) } });
+    magicLinkMailer: { isConfigured: () => mailConfigured, sendMagicLink: p => mailer.sendMagicLink(p), sendPasswordResetNotice: p => mailer.sendPasswordResetNotice(p) } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   mailer = createMagicLinkMailer({ baseUrl: origin, send: async payload => { sent.push(payload); } });
@@ -181,6 +181,38 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(requests.includes("/src/app.js"), false, "account and agent controls do not import workspace code");
   await page.screenshot({ path: `test-results/signin-entry-${theme}-${kind.viewport.width}.png` });
+});
+
+// Regression (Codex review of the #3068 integration, 2026-10-14): the lazy
+// entry must learn the deployment's sign-in capabilities like the workspace
+// app does (GET /api/auth/signin-options). Without the loader the entry's
+// auth UI defaults to mail-configured and offers an email sign-in link on
+// deployments that cannot send mail. Fresh query-free / only — the
+// /?room=… workspace path never had the gap.
+async function freshEntryRecoveryOffers(t, mailConfigured) {
+  const f = await setup(t, { mailConfigured });
+  const page = await f.open(DESK);
+  const requests = [];
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  const optionsReply = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin-options");
+  await page.goto(f.origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  await optionsReply;
+  await page.locator("[data-forgot-password]").click();
+  await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
+  return { page, requests };
+}
+
+test("fresh / with mail unconfigured: the entry loads signin-options and offers no email link", async t => {
+  const { page, requests } = await freshEntryRecoveryOffers(t, false);
+  assert.ok(requests.includes("/api/auth/signin-options"), "the lazy entry requests the deployment's sign-in options");
+  assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 0, "no email-link offer when the deployment cannot send mail");
+});
+
+test("fresh / with mail configured: the entry still offers the email link", async t => {
+  const { page, requests } = await freshEntryRecoveryOffers(t, true);
+  assert.ok(requests.includes("/api/auth/signin-options"), "the lazy entry requests the deployment's sign-in options");
+  assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 1, "the email-link offer stays when mail is configured");
 });
 
 test("a failed workspace download after signup resumes the same account without repeating signup", { timeout: 45000 }, async t => {
