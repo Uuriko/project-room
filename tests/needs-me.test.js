@@ -129,3 +129,40 @@ test('needs-me room_reply suggestions carry a stable requestId', t => {
   const second = collectNeedsMe(store, ada.secret, {}).items.find(i => i.kind === 'mention');
   assert.equal(second.next.arguments.requestId, rid, 'requestId must be stable across calls');
 });
+
+
+// r205 (John's Tab QA): a watermark above a room's head must not be kept.
+// A numeric since taken from one room's item seq (or a cursor from before a
+// restore) used to pin a quieter room above its head in the returned cursor,
+// so that room's next mentions never surfaced while the cursor was followed.
+test('needs-me clamps a room watermark that is above the room head', t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  store.roomFlood = { consume() {} };
+  const rooms = new AgentRooms(store);
+  const ada = store.identities.create('Ada');
+  const bob = store.identities.create('Bob');
+  for (const roomId of ['busy', 'quiet']) {
+    rooms.create(bob.secret, { roomId, title: roomId, purpose: 'Clamp', kind: 'personal' });
+    store.identities.link(bob.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  }
+  for (let i = 0; i < 30; i++) store.command(bob.secret, 'busy', { id: `c${i}`, type: 'message.posted', data: { messageId: `c${i}`, body: `chatter ${i}` } });
+  store.command(bob.secret, 'busy', { id: 'busy-ask', type: 'message.posted', data: { messageId: 'busy-ask', body: '@Ada busy ask' } });
+  const first = collectNeedsMe(store, ada.secret, {});
+  const seq = first.items.find(item => item.id === 'busy-ask').seq;
+  const quietHead = store.roomAuthority('quiet').sequence;
+  assert.ok(seq > quietHead + 1, 'the busy room seq is above the quiet room head');
+  let page = collectNeedsMe(store, ada.secret, { since: seq });
+  assert.ok(page.cursor.rooms.quiet <= quietHead, 'returned cursor stays at or below the quiet room head');
+  assert.deepEqual(page.items.filter(item => item.roomId === 'quiet'), [], 'old quiet-room events stay suppressed');
+  store.command(bob.secret, 'quiet', { id: 'quiet-ask', type: 'message.posted', data: { messageId: 'quiet-ask', body: '@Ada quiet ask' } });
+  page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
+  assert.deepEqual(page.items.map(item => `${item.roomId}/${item.id}`), ['quiet/quiet-ask'], 'the next quiet-room mention surfaces');
+  const stale = { rooms: { busy: 10_000, quiet: 10_000 }, land: {}, landIds: {} };
+  store.command(bob.secret, 'busy', { id: 'busy-ask-2', type: 'message.posted', data: { messageId: 'busy-ask-2', body: '@Ada after a restore' } });
+  page = collectNeedsMe(store, ada.secret, { since: stale });
+  assert.ok(page.cursor.rooms.busy <= store.roomAuthority('busy').sequence, 'a cursor from before a restore is clamped');
+  store.command(bob.secret, 'busy', { id: 'busy-ask-3', type: 'message.posted', data: { messageId: 'busy-ask-3', body: '@Ada next' } });
+  page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
+  assert.deepEqual(page.items.map(item => item.id), ['busy-ask-3'], 'and then resumes delivery');
+});
