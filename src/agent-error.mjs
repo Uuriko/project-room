@@ -229,6 +229,7 @@ const AX_NAMED_RECOVERIES = {
   cursor_changed: ["Your caught-up marker moved. Restart the return brief from a fresh read.", "Restart the return brief from a fresh read."],
   cursor_not_found: ["No page exists at that cursor. Pass a messageId from a previous page, or restart without a cursor.", "Pass a messageId from a previous page as the cursor, or restart without one."],
   cursor_stale: ["The cursor is stale. Start the list again without a cursor.", "Start the list again without a cursor."],
+  discussion_reset_required: ["Discussion changed. Discard all retained discussion text and the cursor or resume token; do not append a fresh read to stale cached text.", "Fetch the full scoped discussion with a fresh consistent read, without a cursor or resume token."],
   direct_send_settled: ["This send attempt already settled. Read its outcome; do not send again under this attempt.", "Read the settled send's outcome; do not resend."],
   dm_no_pending_request: ["There is no pending DM request in this direction. Nothing to approve; send a DM request first if you want consent.", "Send a DM consent request first, or post in the room."],
   dm_not_blocked: ["This member is not blocked — there is no block to change. Read the current DM state.", "Re-read the DM state; no block exists."],
