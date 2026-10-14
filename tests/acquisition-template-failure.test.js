@@ -60,7 +60,7 @@ function memoryStorage(start = {}) {
 
 // Build the real runAcquisitionIntent (plus the real storage helpers it
 // calls) with only its external collaborators stubbed.
-async function buildRunner({ storage, startRoomFromTemplate, showAgentInvitePicker }) {
+async function buildRunner({ storage, startRoomFromTemplate, showAgentInvitePicker, receiptReferrer }) {
   const helpers = ["readAcquisition", "clearAcquisition", "clearTemplateRoom"]
     .map(name => extractFunction(app, name))
     .filter(Boolean);
@@ -68,7 +68,7 @@ async function buildRunner({ storage, startRoomFromTemplate, showAgentInvitePick
   assert.ok(runSource, "app.js defines runAcquisitionIntent");
   const factory = new AsyncFunction(
     "window", "$", "state", "accountClient", "inboxUI", "receiptReferrer",
-    "startRoomFromTemplate", "showAgentInvitePicker",
+    "startRoomFromTemplate", "showAgentInvitePicker", "location",
     `const ACQUISITION_KEY = ${JSON.stringify(ACQUISITION_KEY)};\n`
     + `const TEMPLATE_ROOM_KEY = ${JSON.stringify(TEMPLATE_ROOM_KEY)};\n`
     + helpers.join("\n") + "\n" + runSource + "\nreturn runAcquisitionIntent;",
@@ -78,17 +78,19 @@ async function buildRunner({ storage, startRoomFromTemplate, showAgentInvitePick
     if (!nodes.has(selector)) nodes.set(selector, { textContent: "", value: "", open: false });
     return nodes.get(selector);
   };
+  const assigned = [];
   const run = await factory(
     { sessionStorage: storage },
     nodeFor,
     null,
     { session: { authenticated: true } },
     { showRoomList() {} },
-    () => "",
+    receiptReferrer ?? (() => ""),
     startRoomFromTemplate,
     showAgentInvitePicker ?? (async () => {}),
+    { pathname: "/", assign: url => assigned.push(url) },
   );
-  return { run, nodeFor };
+  return { run, nodeFor, assigned };
 }
 
 function templateIntentStorage() {
@@ -151,18 +153,33 @@ test("a successful template acquisition still runs once and clears the intent", 
   assert.equal(calls, 1, "a consumed success is not replayed");
 });
 
-test("a request intent is still consumed before the form is populated", async () => {
+test("a request intent is consumed and re-homed to the join page door (#3293 step 2)", async () => {
   const storage = memoryStorage({
     [ACQUISITION_KEY]: JSON.stringify({ kind: "request", roomId: "commons" }),
   });
   let templateCalls = 0;
-  const { run, nodeFor } = await buildRunner({
+  const { run, assigned } = await buildRunner({
     storage,
     startRoomFromTemplate: async () => { templateCalls++; },
+    receiptReferrer: () => "Grace Hopper",
   });
   await run();
   assert.equal(templateCalls, 0);
+  assert.equal(storage.getItem(ACQUISITION_KEY), null, "the request intent is consumed before the hand-off");
+  // The join page door takes the room as an editable prefill and the
+  // stashed receipt referrer as its referrer prefill.
+  assert.deepEqual(assigned, ["/join?room=commons&ref=Grace+Hopper"]);
+});
+
+test("a request intent with no room or referrer hands off to the bare join page", async () => {
+  const storage = memoryStorage({
+    [ACQUISITION_KEY]: JSON.stringify({ kind: "request", roomId: "" }),
+  });
+  const { run, assigned } = await buildRunner({
+    storage,
+    startRoomFromTemplate: async () => {},
+  });
+  await run();
   assert.equal(storage.getItem(ACQUISITION_KEY), null);
-  assert.equal(nodeFor("#account-request-room").value, "commons");
-  assert.equal(nodeFor("#account-request-access").open, true);
+  assert.deepEqual(assigned, ["/join"]);
 });

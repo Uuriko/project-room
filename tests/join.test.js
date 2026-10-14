@@ -7,6 +7,7 @@ import {
   joinCodePath,
   joinRoomHint,
   joinRoomIdFromPath,
+  requestDoorReferrer,
   requestDoorRoom,
   serviceApiBase,
   roomEntryHref,
@@ -82,6 +83,16 @@ test("room hint only echoes a plausible room id", () => {
   assert.equal(joinRoomHint(""), null);
   assert.equal(joinRoomHint("?room=<script>"), null);
   assert.equal(joinRoomHint("?room=a/b"), null);
+});
+
+test("request-access door referrer: a ?ref= hand-off prefills, junk does not", () => {
+  assert.equal(requestDoorReferrer("?room=commons&ref=Grace+Hopper"), "Grace Hopper");
+  assert.equal(requestDoorReferrer("?ref=" + "x".repeat(80)), "x".repeat(80));
+  assert.equal(requestDoorReferrer("?ref=" + "x".repeat(81)), null);
+  assert.equal(requestDoorReferrer("?ref=a%01b"), null, "control characters are rejected (GR1's rule)");
+  assert.equal(requestDoorReferrer("?ref="), null);
+  assert.equal(requestDoorReferrer("?room=commons"), null);
+  assert.equal(requestDoorReferrer(""), null);
 });
 
 test("request-access door room: address fixes it, hint prefills, bare page defaults to the community room", () => {

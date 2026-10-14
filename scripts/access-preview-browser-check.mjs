@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { enableHumanAdvanced, openSettings, closeSettings, clickChrome } from "./room-chrome.mjs";
+import { enableHumanAdvanced, openSettings, closeSettings } from "./room-chrome.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
@@ -41,17 +41,14 @@ async function setup(t, { pending = 0, width = 1440 } = {}) {
 for (const width of [1440, 390]) test(`request access at ${width}px: retry leaves a visible confirmation after hiding the form`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width }), { page } = f;
   const origin = new URL(page.url()).origin;
-  f.store.createAccount("request-applicant");
-  f.store.completeOnboarding("request-applicant");
-  await page.goto(`${origin}/?account=1`);
-  await signInFixture(page, f.store.issueAccountAccessKey("request-applicant"));
-  await clickChrome(page, "#nav-rooms");
-  const disclosure = page.locator("#account-request-access > summary");
-  await disclosure.click();
-  await page.locator("#account-request-room").fill(`${origin}/?room=commons`);
-  await page.locator("#account-request-name").fill("Confirmation applicant");
-  const form = page.locator("#account-request-form"), status = page.locator("#account-request-status");
-  const submit = page.locator("#account-request-submit"), submissions = [];
+  // The request-access door lives on the join page since the #3293
+  // consolidation (the account-panel door is retired). It needs no
+  // account: the browser mints a self-serve identity to file with.
+  await page.goto(`${origin}/join`);
+  await page.locator("#join-request-room").fill(`${origin}/?room=commons`);
+  await page.locator("#join-request-name").fill("Confirmation applicant");
+  const form = page.locator("#join-request-form"), status = page.locator("#join-request-status");
+  const submit = page.locator("#join-request-submit"), submissions = [];
   let release, reached;
   const held = new Promise(resolve => { release = resolve; });
   const received = new Promise(resolve => { reached = resolve; });
@@ -66,7 +63,7 @@ for (const width of [1440, 390]) test(`request access at ${width}px: retry leave
     return route.fulfill({ response });
   });
   await submit.click();
-  await page.waitForFunction(() => document.querySelector("#account-request-status").classList.contains("error"));
+  await page.waitForFunction(() => document.querySelector("#join-request-status").classList.contains("error"));
   assert.equal(await status.isVisible(), true);
   assert.equal(await form.isVisible(), true);
   assert.equal(await submit.isEnabled(), true);
@@ -82,9 +79,6 @@ for (const width of [1440, 390]) test(`request access at ${width}px: retry leave
   assert.ok((await status.textContent()).includes(submissions[1].requestId));
   assert.equal(submissions[0].identityId, submissions[1].identityId, "retry reuses the same identity");
   assert.equal(f.access.list(f.keys.owner, "commons").length, 1, "one request reached the owner");
-  await disclosure.click(); await status.waitFor({ state: "hidden" });
-  await disclosure.click(); await status.waitFor({ state: "visible" });
-  assert.equal(await form.isVisible(), false, "reopening keeps the submitted form closed");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
   assert.deepEqual(f.errors, []);
 });
