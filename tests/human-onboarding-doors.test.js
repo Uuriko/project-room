@@ -12,7 +12,7 @@
 // a dropped link fails here exactly when the #1596 gap recurs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -45,6 +45,26 @@ test("GET / keeps product education out of the minimal sign-in entry", async t =
   const auth = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
   assert.equal((auth.match(/id="agent-signin-button"/g) ?? []).length, 1);
   assert.ok(!/href="(?:\/about|\/agents\.json|[^"]*#join-agent)/.test(auth), "education stays outside sign-in");
+});
+
+test("GET / offers GitHub sign-in beside Google on the front door", async t => {
+  const origin = await serve(t);
+  const response = await fetch(`${origin}/`);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const auth = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
+  const google = auth.indexOf('id="google-signin"');
+  const github = auth.indexOf('id="github-signin"');
+  assert.ok(google >= 0, "the panel still leads with the Google button");
+  assert.ok(github > google, "GitHub sits beside Google inside the sign-in methods");
+  assert.match(auth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start">/);
+  assert.match(auth, /Continue with GitHub/);
+  // Parity with Google in app.js: the pending-invite stash runs before the
+  // OAuth navigation, and the welcome view hides the button.
+  const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
+  assert.match(app, /\$\("#github-signin"\)\.hidden = view === "welcome";/);
+  const stash = app.match(/githubButton\.addEventListener\("click", stashInviteForOAuth\)/);
+  assert.ok(stash, "GitHub anchor stashes a pending invite like Google does");
 });
 
 test("GET /about carries the onboarding section and links the full human guide", async t => {
