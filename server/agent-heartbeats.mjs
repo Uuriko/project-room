@@ -829,7 +829,7 @@ export class AgentHeartbeats {
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
   // acknowledges: signals leave the queue only through ackWakes().
-  notePoll({ agentId, roomId = null }) {
+  notePoll({ agentId, roomId = null, hostId = null }) {
     checkAgentId(agentId);
     let known = null;
     try {
@@ -846,8 +846,12 @@ export class AgentHeartbeats {
     // recordPollActivity stays loud for its write-path caller heartbeat():
     // a missing stamp table there is a real problem, not a legacy DB.
     try { this.recordPollActivity(agentId); } catch (error) { if (!isMissingTable(error)) throw error; /* no stamp table yet */ }
+    // #3262: the poll door is a hosted read, not a hostless one — the caller
+    // passes the hostId it required so WorkWakes.pending can apply that
+    // host's opt-in consent, exactly as heartbeat() does. Omitting hostId
+    // keeps the legacy hostless contract (no work signals).
     return Object.freeze({
-      agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId }),
+      agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId, hostId }),
     });
   }
 
