@@ -593,6 +593,17 @@ export function renderHonestSummary(report) {
 // entries with a session_id (pre-B5 source; B5's herdr_sessions table becomes
 // canonical when it lands). Used for the already_herdr idempotency check and
 // for drain/orphan inventory.
+// The resume cursor for ONE room: the cursor on its latest
+// migration_cursor entry. Cursor entries are room-scoped — the executor
+// writes cursor = next plan index for the room it just processed, and
+// buildPlan slices one room's eligible list — so a resume must never read
+// another room's cursor (#2885). cmdStatus reads them per room the same
+// way. A room with no cursor entry resumes from the start.
+export function resumeCursorForRoom(journal, roomId) {
+  const cursors = (journal ?? []).filter((e) => e.kind === "migration_cursor" && e.room_id === roomId);
+  return cursors.length > 0 ? cursors[cursors.length - 1].cursor ?? 0 : 0;
+}
+
 export function linkedClaimIds(journal, roomId) {
   const out = new Set();
   for (const e of journal ?? []) {
@@ -1068,12 +1079,17 @@ async function cmdMigrate(flags, deps) {
   const nowMs = Date.now();
   const attachCap = await probeAttachCapability(bridgeBase);
 
-  let startIndex = 0;
-  if (flags.fromCursor != null) startIndex = flags.fromCursor;
-  else if (flags.resume) {
-    const cursors = journal.filter((e) => e.kind === "migration_cursor");
-    if (cursors.length > 0) startIndex = cursors[cursors.length - 1].cursor ?? 0;
-  }
+  // Resume is PER ROOM (#2885): migration_cursor entries are room-scoped
+  // (see resumeCursorForRoom). Taking the journal's last cursor globally
+  // and applying it to every room's plan skipped unmigrated claims in any
+  // room whose cursor lagged the global one, and re-ran finished rooms
+  // whose cursor led it. An explicit --from-cursor stays a single
+  // operator override applied to all rooms, as given.
+  const startIndexForRoom = (roomId) => {
+    if (flags.fromCursor != null) return flags.fromCursor;
+    if (!flags.resume) return 0;
+    return resumeCursorForRoom(journal, roomId);
+  };
 
   const results = [];
   let systemic = false;
@@ -1100,7 +1116,7 @@ async function cmdMigrate(flags, deps) {
       });
       classified.push({ roomId, claim, ...c });
     }
-    const { plan } = buildPlan(classified, { fromCursor: startIndex, limit: flags.limit ?? null });
+    const { plan } = buildPlan(classified, { fromCursor: startIndexForRoom(roomId), limit: flags.limit ?? null });
     const batches = batchPlan(plan, flags.batch);
 
     for (const batch of batches) {
