@@ -32,7 +32,6 @@ import { installInbox } from "./inbox-ui.js";
 import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
-import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
@@ -554,7 +553,6 @@ const client = new RoomClient({
     }
     if (!humanAuthBusy) signinUI?.clear();
     showSigninMethods();
-    agentSigninUI?.clear();
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();
@@ -844,30 +842,10 @@ const initialPasswordReset = initialAuthLink.kind === "reset";
 if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
-// Agent sign-in (RC-2026-09-23): agents choose their own account (identity
-// ID + secret) or fall back to human account sign-in. On success the room
-// cookie is set, so restore the client session for that room.
-const agentSigninUI = createAgentSigninUI({
-  onSignedIn: async (session) => {
-    const roomId = session?.roomId;
-    if (!roomId) return;
-    // Agent sign-in creates a room cookie, not a human account session.
-    const identity = await client.restore();
-    if (!identity || identity.roomId !== roomId || !state) return;
-    $("#message-input").focus();
-    if (state) revealLocationHash();
-  },
-  // Agent first-run orientation (2026-09-24): the card mounts itself after
-  // an agent browser sign-in and only when the browser hasn't seen it.
-  // greet focuses the composer so the agent can introduce itself; discover
-  // opens the People panel; the card's skill step links /agents.json.
-  firstRunActions: {
-    greet: () => $("#message-input")?.focus(),
-    discover: () => { const panel = $("#people-panel"); if (panel) panel.open = true; },
-    baseUrl: location.origin
-  }
-});
-agentSigninUI.mount($("#agent-signin-ui"));
+// Agent sign-in (RC-2026-09-23) moved off the wall to its own page
+// (GET /agent-signin, decision #37): src/agent-signin-page.js hosts
+// the same component and endpoints; the wall keeps only the labeled
+// link (#agent-signin-button).
 function openAccountSettings() {
   setSessionMenuOpen(false);
   if (!accountClient.session?.authenticated) return;
@@ -3821,34 +3799,17 @@ function syncSigninView(view) {
   $("#terms-notice").hidden = view === "welcome";
 }
 function showSigninMethods() {
-  $("#agent-auth-step").hidden = true;
-  $("#agent-signin-button").setAttribute("aria-expanded", "false");
   $("#signin-controller").prepend($("#auth-signin-ui"));
   signinUI.showPassword();
   syncSigninView("password-login");
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
-  if (!agentSigninUI.canLeave() || !signinUI.canLeave()) return;
+  if (!signinUI.canLeave()) return;
   signinHistoryReplay = !recordHistory;
   try { mode === "password" ? signinUI.showPassword() : signinUI.showMagic(); }
   finally { signinHistoryReplay = false; }
   focusSignin();
 }
-function openAgentSignin() {
-  if (!signinUI.canLeave()) return;
-  showSigninMethods();
-  $("#signin-methods").hidden = true;
-  $("#signin-entry-routes").hidden = true;
-  $("#agent-auth-step").hidden = false;
-  $("#agent-signin-button").setAttribute("aria-expanded", "true");
-  ($("#agent-signin-ui input:not([type=hidden])") || $("#agent-auth-back"))?.focus();
-}
-$("#agent-signin-button").addEventListener("click", openAgentSignin);
-$("#agent-auth-back").addEventListener("click", () => {
-  if (!agentSigninUI.leave()) return;
-  showSigninMethods();
-  $("#agent-signin-button").focus();
-});
 function handleSigninBack() {
   if (mainSigninHost() && history.state?.roomSigninView) {
     history.back(); return false;

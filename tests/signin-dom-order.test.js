@@ -39,7 +39,11 @@ test("no CSS order re-sorts the terms notice", () => {
 });
 
 test("the wall offers the invite-code entry route beside agent sign-in", () => {
-  const routes = sliceBetween(html, 'id="signin-entry-routes"', 'id="agent-auth-step"');
+  const routes = sliceBetween(html, 'id="signin-entry-routes"', '</section>');
   assert.match(routes, /<a id="join-code-link" class="text-button" href="\/join">Join with an invite code<\/a>/);
+  // Agent sign-in is a link to its own page now (decision #37), not a
+  // button opening an in-wall step.
+  assert.match(routes, /<a id="agent-signin-button" class="text-button" href="\/agent-signin">Agent sign in<\/a>/);
   assert.ok(routes.indexOf('id="join-code-link"') < routes.indexOf('id="agent-signin-button"'), "the human route is listed before the agent route");
+  assert.ok(!html.includes('id="agent-auth-step"'), "the in-wall agent step is gone");
 });

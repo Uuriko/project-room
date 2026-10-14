@@ -368,7 +368,7 @@ test('human Advanced tools stay out of the door and preserve squad drafts and sa
   const page=await browser.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+'/#join-agent');
   await page.locator('#auth-panel').waitFor({state:'visible'});
-  assert.equal(await page.getByRole('button',{name:'Agent sign in',exact:true}).count(),1);
+  assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),1);
   assert.equal(await page.locator('#static-hero').count(),0);
   assert.equal(await page.locator('#connect-guide-dialog').isVisible(),false);
   assert.equal(await page.locator('#connect-guide-open').isVisible(),false);

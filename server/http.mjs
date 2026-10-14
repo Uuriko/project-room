@@ -2831,6 +2831,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
       }
+      // Standalone agent sign-in page (decision #37): GET /agent-signin
+      // plus the /room twin; same component and endpoints as the wall's
+      // former step, unauthenticated and stateless like /join.
+      const agentSigninPageMatch = /^\/(?:room\/)?agent-signin\/?$/.exec(url.pathname);
+      if (agentSigninPageMatch) {
+        if (req.method !== "GET" && req.method !== "HEAD") reject(405, "method_not_allowed", "Method not allowed");
+        const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
+        const page = (await loadAsset("agent-signin.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
+        return res.end(req.method === "HEAD" ? undefined : page);
+      }
       // Q3-E HTML 404. A browser Accept that prefers text/html gets 404.html
       // (lang, title, h1, links home / about / receipts, X-Robots-Tag: noindex).
       // /api/, /mcp and /.well-known/ keep the JSON body, as does any client
