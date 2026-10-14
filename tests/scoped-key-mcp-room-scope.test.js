@@ -212,6 +212,7 @@ const WRITE_TOOLS = [
   "room_begin_work", "room_start_work", "room_propose_work", "room_record_completion",
   "room_post_draft", "room_close_work_claim",
   "bounty_post", "bounty_claim",
+  "room_create", "squads_create", "room_decide_access_request", "bond_propose", "bond_accept", "dm_posted", "room_discard_file", "remove_land_item",
 ];
 
 test("a rooms:read key is refused 403 on every write tool family over MCP", async t => {
@@ -244,4 +245,12 @@ test("a key pinned to another room is told it is limited to its room, on read an
       assert.equal(result.value.message, "This key is limited to its room", `${scopes} ${name}`);
     }
   }
+});
+
+test("room_create with a pinned key hears room_token_not_identity, not a room limit", async t => {
+  const { origin, issue } = await fixture(t);
+  const key = issue(["mcp:room:scope-room", "rooms:read", "rooms:write"]);
+  const created = await call(origin, "room_create", { title: "New", purpose: "p", roomId: "brand-new-room" }, key);
+  assert.equal(created.value.status, 401);
+  assert.equal(created.value.code, "room_token_not_identity");
 });
