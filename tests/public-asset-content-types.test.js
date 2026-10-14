@@ -14,7 +14,7 @@ import { edgePublicResponse } from "../cloudflare/edge-public.mjs";
 // "text/markdown" fallback.
 const EXPECTED = {
   ".js": /^text\/javascript\b/, ".mjs": /^text\/javascript\b/, ".css": /^text\/css\b/, ".html": /^text\/html\b/,
-  ".svg": /^image\/svg\+xml\b/, ".png": /^image\/png\b/, ".ttf": /^font\/ttf\b/, ".txt": /^text\/plain\b/,
+  ".svg": /^image\/svg\+xml\b/, ".png": /^image\/png\b/, ".ttf": /^font\/ttf\b/, ".woff2": /^font\/woff2\b/, ".txt": /^text\/plain\b/,
   ".webmanifest": /^application\/manifest\+json\b/, ".json": /^application\/json\b/, ".sh": /^text\/plain\b/,
   ".md": /^text\/markdown\b/,
 };
