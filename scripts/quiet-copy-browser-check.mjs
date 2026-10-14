@@ -48,7 +48,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator("#agent-signin-button").isVisible(), true);
     await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
     await openMagicSignin(page);
-    await page.locator('#auth-signin-ui [data-signin-form="magic-request"]').waitFor();
+    await page.locator('#auth-signin-ui [data-signin-form="password"]').waitFor();
     await page.screenshot({ path: `test-results/signin-${label}-email.png`, fullPage: true });
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);
