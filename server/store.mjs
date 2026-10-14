@@ -4957,7 +4957,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             && (typeof command.data.toMemberId !== "string" || !command.data.toMemberId)
             && (dmAncestor.authorId === auth.member.id || dmAncestor.toMemberId === auth.member.id)) {
           const otherParty = dmAncestor.authorId === auth.member.id ? dmAncestor.toMemberId : dmAncestor.authorId;
-          if (typeof otherParty === "string" && otherParty) command.data.toMemberId = otherParty;
+          if (typeof otherParty === "string" && otherParty) {
+            command.data.toMemberId = otherParty;
+            // r232: the stamped reply is a DM, so it needs the same consent
+            // check a DM with an explicit toMemberId got above; otherwise a
+            // blocked member keeps reaching the blocker through an old thread.
+            this.dmConsents.requireDmAllowed(roomId, auth.member.id, otherParty);
+          }
         }
       }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
