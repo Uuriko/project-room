@@ -30,6 +30,8 @@
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { withSpendCharge } from "./spend-grants.mjs";
+import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -133,7 +135,7 @@ export function publishBountyEvent(store, roomId, event) {
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
 }
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, secret = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -142,7 +144,7 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   const caller = canonicalLane(auth.member.id);
   const actor = normalizeActor(null, caller);
   const key = payload => idemKeyOf(req, payload);
-  const idem = (payload, route, status, thunk) =>
+  const idem = (payload, route, status, thunk, meta = null) =>
     runPure(reject, () => {
       const result = store.transaction(() => {
         // Body upload is asynchronous. Recheck the original credential and
@@ -158,6 +160,7 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
         return escrow.idemExecute(roomId, key(payload), route, status, () => runPure(reject, thunk),
           { callerLane: caller, bountyId: bountyId ?? sybilFlagId ?? null, payload: Object.fromEntries(Object.entries(payload).filter(([name]) => name !== "idempotencyKey")) });
       });
+      if (meta) meta.replayed = result.replayed === true;
       if (!result.replayed) publishBountyEvent(store, roomId, result.body?.receipt?.event);
       return json(res, result.status, result.body);
     });
@@ -224,13 +227,22 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
       invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
-    return idem(payload, "bounty.post", 201, () => {
+    const meta = {};
+    const post = () => idem(payload, "bounty.post", 201, () => {
       const { bounty, receipt } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
           deadline: payload.deadline, verifierId: payload.verifierId ?? null,
           approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
       return { roomId, bounty, receipt };
-    });
+    }, meta);
+    // #3269: bounty_post is a priced operation — charge through the shared
+    // spend path, exactly like the MCP door. Guests skip the charge so
+    // their established denial (guest_scope_denied, raised by reauthorize
+    // inside idem) keeps its precedence, mirroring the hosted MCP profile's
+    // denial-before-spend hierarchy; an idempotent replay is not charged.
+    if (!secret || isGuestAgentMemberId(auth.member.id)) return post();
+    return withSpendCharge(store, secret, "bounty_post", { roomId }, post,
+      { isReplay: () => meta.replayed === true });
   }
   // Slice 6: re-pin the rubric (v+1). Poster-only; only while PROPOSED —
   // funding pins the rubric for the rest of the lifecycle.

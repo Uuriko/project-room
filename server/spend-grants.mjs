@@ -672,6 +672,36 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   }));
 }
 
+// #3269: the ONE charge-then-forward path every transport runs a priced
+// operation through. Before this helper, the charge lived only in the MCP
+// profiles' dispatch wrappers, so the REST twins of bounty_post /
+// room_put_file / add_land_item executed free and ungated — the spend
+// grant's permission, per-agent cap, room allowance, and single-use
+// consumption were all void at the REST door. Semantics (identical at every
+// door): charge before the operation runs; settle after success; void on
+// any failure; void when the result is an idempotent replay/duplicate (the
+// original call already paid). A null secret (non-room credential modes:
+// account sessions, browser cookies) or a null charge (unpriced tool,
+// human, room owner, pricing disabled) runs the operation untouched.
+// opts.unwrap maps a transport's outcome envelope to the operation value
+// (hosted stdio returns { value, isError }); opts.isErrorOutcome marks an
+// envelope as failed; opts.isReplay marks an envelope as a replay.
+export async function withSpendCharge(store, secret, name, args, operation, opts = {}) {
+  if (typeof secret !== "string" || secret.length === 0) return operation();
+  const spend = chargeSpendBeforeCall(store, secret, name, args);
+  if (!spend) return operation();
+  let result;
+  try {
+    result = await operation();
+  } catch (error) { spend.void(); throw error; }
+  const value = opts.unwrap ? opts.unwrap(result) : result;
+  if (opts.isErrorOutcome && opts.isErrorOutcome(result)) spend.void();
+  else if (opts.isReplay && opts.isReplay(result)) spend.void();
+  else if (value && typeof value === "object" && (value.duplicate === true || value.idempotentReplay === true)) spend.void();
+  else spend.settle();
+  return result;
+}
+
 // --- HTTP management routes (mirroring server/grants.mjs) ---
 
 // POST /api/rooms/:roomId/spend-grants — body { agentId, capCents,

@@ -110,6 +110,7 @@ import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeF
   GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
+import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
 
 const roomCookieName = "room_session";
 const accountCookieName = "account_session";
@@ -3418,10 +3419,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (!exact(data, allowed) || typeof data.repo !== "string" || !Number.isSafeInteger(data.prNumber)) {
               reject(422, "invalid_land_item", "repo and prNumber are required");
             }
-            const result = await store.landQueue.add(roomId, auth.member.id, {
-              repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant,
-              requestId: data.requestId ?? null
-            });
+            // #3269: add_land_item is a priced operation — run it through
+            // the shared spend-charge path, exactly like the MCP door.
+            // Account-mode credentials pass a null secret and run free,
+            // matching how the charge treats their members.
+            const result = await withSpendCharge(store, selected.mode === "room" ? selected.token : null,
+              "add_land_item", { roomId }, () => store.landQueue.add(roomId, auth.member.id, {
+                repo: data.repo, prNumber: data.prNumber, claimantMemberId: claimant,
+                requestId: data.requestId ?? null
+              }));
             return json(res, result.duplicate ? 200 : 201, result);
           }
           if (action === "remove_land_item") {
@@ -3488,7 +3494,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || !exact(data, ["id", "filename", "mediaType", "data"])) {
           reject(422, "invalid_attachment", "id, filename, mediaType, and data are required");
         }
-        const staged = store.roomAttachments.stage(selected.token, roomId, data);
+        // #3269: room_put_file is a priced operation — charge through the
+        // shared spend path, exactly like the MCP door.
+        const staged = await withSpendCharge(store, selected.mode === "room" ? selected.token : null,
+          "room_put_file", { roomId }, () => store.roomAttachments.stage(selected.token, roomId, data));
         return json(res, staged.duplicate ? 200 : 201, staged);
       }
       // onboarding-funnel was removed on main (replaced by activation-pack);
@@ -4036,6 +4045,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
+          secret: selected.mode === "room" ? selected.token : null,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
           identity: identityMatch ? identityMatch[2] : null,
