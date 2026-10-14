@@ -4,6 +4,7 @@ import { ServiceError } from "./store.mjs";
 import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
+import { archiveMarker } from "./messages-store.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
@@ -71,13 +72,17 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     // Reset when a replay/certification switches the domain without a mutation.
     if (cursor !== null && (Boolean(saved.indexed) !== indexed
       || indexed && typeof saved.beforeId !== "string")) return reset();
-    const before = cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
+    // A page that already moved into the archived part of the history (see below)
+    // resumes there; the projection rows are exhausted by then.
+    const archivedFrom = cursor !== null && !indexed && Number.isSafeInteger(saved.archivedSeq) && typeof saved.archivedId === "string"
+      ? { seq: saved.archivedSeq, id: saved.archivedId } : null;
+    const before = archivedFrom ? 0 : cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
     // PRIV-2: a since_join reader pages only messages from their join onward.
     const floor = store.historyFloor(roomId, auth.member.id);
     // One JSON parameter keeps complete same-instant exclusions within Worker
     // SQLite's bind limit even for large imported equal-timestamp histories.
     const exclusions = JSON.stringify([...(floor?.sameInstant ?? [])]);
-    const rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
+    let rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
       FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
         AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
         AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
@@ -107,6 +112,28 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,
         id => store.room(roomId).state.messages.find(message => message.id === id)?.body) })
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
+    // Without a certified table the projection holds only the tail. Page the
+    // archived messages from the table after it, with the certified path's
+    // privacy, channel and history-floor rules.
+    const marker = indexed ? null : archiveMarker(store.db, roomId);
+    const want = messageId === null ? limit + 1 : 1;
+    if (marker?.throughSeq && rows.length < want) {
+      const archived = store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
+      FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))
+        AND (seq<? OR (seq=? AND message_id<?))
+        AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
+        AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
+        AND (? IS NULL OR message_id=?)
+        AND (? IS NULL OR created_at>=?)
+        AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))
+      ORDER BY seq DESC, message_id DESC LIMIT ?`)
+        .all(roomId, marker.throughSeq, marker.retainedJson, archivedFrom?.seq ?? Number.MAX_SAFE_INTEGER, archivedFrom?.seq ?? Number.MAX_SAFE_INTEGER, archivedFrom?.id ?? "",
+          auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
+          floor?.at ?? null, floor?.at ?? null, exclusions, want - rows.length)
+        .map(row => ({ ...row, archived: true }))
+        .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
+      rows = [...rows, ...archived];
+    }
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];
     let bytes = 0;
@@ -120,7 +147,9 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     }
     const messages = selected.map(row => JSON.parse(row.body)).reverse();
     const nextCursor = rows.length > selected.length ? signed.encode({ kind: "page", scope, sequence: head.sequence, anchor,
-      before: selected.at(-1).position, indexed, ...(indexed ? { beforeId: selected.at(-1).messageId } : {}) }) : null;
+      before: selected.at(-1).archived ? 0 : selected.at(-1).position, indexed,
+      ...(indexed ? { beforeId: selected.at(-1).messageId } : {}),
+      ...(selected.at(-1).archived ? { archivedSeq: selected.at(-1).position, archivedId: selected.at(-1).messageId } : {}) }) : null;
     // Include sequence/anchor: any intervening room mutation invalidates older
     // cached pages, even if the changed message is outside this latest window.
     const version = digest([head.sequence, anchor, messages]);
