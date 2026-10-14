@@ -8,28 +8,138 @@
 //
 // Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
 import { parseFailingTests } from "./failing-tests.mjs";
 
+const XML_ENTITIES = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+
+function decodeXml(text) {
+  return String(text ?? "").replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+    if (e[0] === "#") {
+      const code = /^#x/i.test(e) ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+    }
+    return XML_ENTITIES[e.toLowerCase()] ?? m;
+  });
+}
+
+function xmlAttributes(text) {
+  const out = {};
+  for (const m of String(text).matchAll(/([\w:.-]+)\s*=\s*"([^"]*)"/g)) out[m[1]] = decodeXml(m[2]);
+  return out;
+}
+
+function junitDisplayPath(file, cwd) {
+  if (!file) return "";
+  const normalized = file.split(sep).join("/");
+  if (!isAbsolute(normalized)) return normalized;
+  const rel = relative(cwd, file).split(sep).join("/");
+  return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : normalized;
+}
+
+const FILE_LIKE = /\.(?:test\.)?[cm]?[jt]s$/;
+
+/**
+ * Per-file measured runtimes (ms) from a Node junit report.
+ *
+ * Node's junit reporter does not group by file in one fixed shape: loose
+ * tests are `<testcase file="…" time="seconds">` elements directly under
+ * `<testsuites>`, `describe` suites become `<testsuite>` elements whose
+ * testcases still carry `file`, and some Node versions emit a testsuite
+ * named by file path with a per-suite `time`. This parser therefore sums
+ * testcase times per `file` (never testsuite times, which would double
+ * count the testcases inside them), falls back to the enclosing testsuite
+ * name when a testcase has no `file`, and uses a file-named testsuite's
+ * own `time` only when no testcase contributed to that file. Keys are
+ * repo-relative paths (relative to `cwd`); values are integer ms.
+ * Malformed or missing input yields {} — the receipt is still written so
+ * the merge gate can fail closed on the shard's own status.
+ */
+export function parseJunitFileDurations(xml, { cwd = process.cwd() } = {}) {
+  const text = String(xml ?? "");
+  const totals = new Map();
+  const add = (file, seconds) => {
+    const key = junitDisplayPath(file, cwd);
+    const secs = Number(seconds);
+    if (!key || !Number.isFinite(secs) || secs < 0) return;
+    totals.set(key, (totals.get(key) ?? 0) + Math.round(secs * 1000));
+  };
+  // Token scan in document order so a testcase can inherit the file from
+  // its enclosing testsuite, and so a file-named suite's time is only used
+  // when none of its testcases contributed.
+  const TOKEN = /<(testsuite|testcase)\b((?:\s+[\w:.-]+\s*=\s*"[^"]*")*)\s*(\/?)>|<\/testsuite\s*>/g;
+  const suiteStack = [];
+  const suitesWithCases = new Set();
+  let m;
+  while ((m = TOKEN.exec(text))) {
+    if (m[0].startsWith("</")) {
+      const suite = suiteStack.pop();
+      if (suite && FILE_LIKE.test(suite.name) && !suitesWithCases.has(junitDisplayPath(suite.name, cwd))) {
+        add(suite.name, suite.time);
+      }
+      continue;
+    }
+    const attrs = xmlAttributes(m[2]);
+    if (m[1] === "testsuite") {
+      if (!m[3]) suiteStack.push({ name: attrs.name ?? "", time: attrs.time });
+      else if (FILE_LIKE.test(attrs.name ?? "")) add(attrs.name, attrs.time);
+    } else {
+      const file = attrs.file || [...suiteStack].reverse().map((s) => s.name).find((name) => FILE_LIKE.test(name ?? ""));
+      if (file) {
+        add(file, attrs.time);
+        suitesWithCases.add(junitDisplayPath(file, cwd));
+      }
+    }
+  }
+  return Object.fromEntries([...totals.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+export function readJunitFileDurations(path, options = {}) {
+  try {
+    if (!path || !existsSync(path)) return {};
+    return parseJunitFileDurations(readFileSync(path, "utf8"), options);
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Run test files with `node --test`, teeing the reporter stream to the console.
- * Returns { status, signal, failures }: failing test names parsed from the
- * spec-reporter output (advisory — [] on success or when nothing parsed).
+ * Returns { status, signal, failures, fileDurationsMs }: failing test names
+ * parsed from the spec-reporter output (advisory — [] on success or when
+ * nothing parsed), and per-file measured runtimes parsed from the junit
+ * sidecar when `options.junitPath` is given ({} otherwise or when the
+ * sidecar is missing/unparseable).
+ *
+ * The spec reporter stays on stdout exactly as before — an additional
+ * junit reporter writes only to its sidecar file, so the stdout shape
+ * scripts/failing-tests.mjs parses and the job log are unchanged.
  */
-export function runTestFiles(files) {
+export function runTestFiles(files, options = {}) {
   // A child `node --test` spawned from inside a test-runner process refuses
   // to run ("recursively ... skipping running files") when it inherits
   // NODE_TEST_CONTEXT. Drop it so the child is always a fresh top-level
   // runner, whether invoked from CI or from a test.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
+  const junitPath = options.junitPath ?? null;
+  const args = ["--test"];
+  if (junitPath) {
+    mkdirSync(dirname(resolve(junitPath)), { recursive: true });
+    rmSync(junitPath, { force: true });
+    args.push(
+      "--test-reporter=spec", "--test-reporter-destination=stdout",
+      "--test-reporter=junit", `--test-reporter-destination=${junitPath}`
+    );
+  }
+  args.push(...files);
   // Pipe (not inherit) so failing test names can be parsed out of the
   // reporter stream for the shard receipt; tee both streams to the console
   // so the job log keeps its exact old shape.
-  const result = spawnSync(process.execPath, ["--test", ...files], {
+  const result = spawnSync(process.execPath, args, {
     stdio: ["inherit", "pipe", "pipe"],
     maxBuffer: 256 * 1024 * 1024,
     env,
@@ -44,7 +154,8 @@ export function runTestFiles(files) {
   // the merge gate fails closed on the receipt, and the PR comment step names
   // the failures instead of pointing at the log.
   const failures = status === 0 ? [] : parseFailingTests(stdout);
-  return { status, signal: result.signal, failures };
+  const fileDurationsMs = junitPath ? readJunitFileDurations(junitPath) : {};
+  return { status, signal: result.signal, failures, fileDurationsMs };
 }
 
 function main() {
@@ -71,8 +182,9 @@ function main() {
   mkdirSync(dirname(receiptPath), { recursive: true });
   rmSync(receiptPath, { force: true });
   console.log(`unit-ci: shard ${shard.index}/${shard.total}, ${files.length} test files`);
+  const junitPath = `test-results/unit-junit-${shard.index}-of-${shard.total}-attempt-${attempt}.xml`;
   const started = Date.now();
-  const { status, signal, failures } = runTestFiles(files);
+  const { status, signal, failures, fileDurationsMs } = runTestFiles(files, { junitPath });
   writeFileSync(
     receiptPath,
     JSON.stringify(
@@ -83,6 +195,10 @@ function main() {
         status,
         signal,
         failures,
+        // Per-file measured runtimes from this actual hosted run (junit
+        // sidecar). Backward compatible: older receipts omit this field
+        // and verifyUnitShards does not require it.
+        fileDurationsMs,
         revision: process.env.GITHUB_SHA ?? "local",
         runId: process.env.GITHUB_RUN_ID ?? "local",
         runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? "local",
