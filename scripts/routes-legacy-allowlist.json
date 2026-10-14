@@ -4277,10 +4277,6 @@
     },
     {
       "method": "POST",
-      "path": "/api/guest-invites/request"
-    },
-    {
-      "method": "POST",
       "path": "/api/guest-invites/rotate"
     },
     {
