@@ -190,6 +190,7 @@ optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (
 optional.push("server/content-trust.mjs"); // structured untrusted markers for member-authored text (leaf; imported by store, http surfaces, MCP)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs)
 optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
+optional.push("server/available-work.mjs"); // E1 AvailableWork projection (imported by server/orient.mjs and server/room-activation-pack.mjs; pure read projection, imports ../src/events.js + server/work-claim-routes.mjs)
 optional.push("server/wiki-read-api.mjs"); // W009: read-only wiki API for agents (imported by server/http.mjs; serves embedded wiki-data, no fs)
 optional.push("server/wiki-parse.mjs", "server/wiki-data.mjs"); // W009: pure wiki parsers (imported by wiki-read-api.mjs + scripts/wiki-build.mjs) and the build-time embedded wiki planes
 optional.push("server/updates.mjs"); // Updates projection (imported by server/http.mjs, server/needs-me.mjs, server/orient.mjs, server/store.mjs)

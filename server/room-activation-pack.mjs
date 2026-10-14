@@ -12,6 +12,7 @@ import { roomOrientation } from "../src/work-selectors.js";
 import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
+import { availableClaimsInRoom } from "./available-work.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 
 /**
@@ -52,6 +53,19 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       leaseExpiresAt: string|null, // ISO-8601 expiry of the write claim
  *       untrusted: true,       // title and claim note are member-authored
  *       note?: string          // blocker reason, when one is recorded
+ *     }
+ *   ],
+ *   openClaims: [              // AvailableWork projection, board source (#3020):
+ *     {                        // claims this viewer may pick up right now
+ *       id: string,
+ *       title: string,
+ *       source: "board",
+ *       roomId: string,
+ *       state: "unclaimed",    // the only claimable board state
+ *       owner: null,           // unclaimed by definition
+ *       leaseExpiresAt: null,
+ *       untrusted: true,       // title is member-authored
+ *       claimAction: { method: "POST", endpoint: string, params: object }
  *     }
  *   ],
  *   pinnedResources: [         // pinned messages, pin order
@@ -166,6 +180,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     orientation: annotateOrientation(roomOrientation(state)),
     members,
     openWork,
+    openClaims: availableClaimsInRoom(store, roomSlug, { viewerId }),
     // QA4 Q4-SEC-1: only pins whose message this viewer may read.
     // (Supersedes the audit-fix F-1 pinVisibleToViewer filter: the shared
     // messageVisibleToViewer predicate also enforces the history floor, and

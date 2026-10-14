@@ -21,6 +21,7 @@ import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
+import { availableClaimsFromBoard } from "./available-work.mjs";
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -128,6 +129,12 @@ function fleetSelfOrNull(store, roomSlug, room, viewerId) {
   } catch { return {}; }
 }
 
+// Board claims an arriving member can pick up right now (#3020) come from
+// the AvailableWork projection (server/available-work.mjs) — the ONE
+// availability definition every discovery surface consumes, so orient and
+// the activation pack cannot diverge. The `claims` list below stays the
+// viewer's own claims; `work`/`openWork` still derive from Work Items.
+
 export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
@@ -143,11 +150,14 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   const focusOf = query.focus === "conversation" ? CONVERSATION : query.focus === "work" ? WORK_FOCUS : query.focus === "review" ? REVIEW_FOCUS : null;
   const updates = (focusOf ? sections.updates.filter(item => focusOf.has(item.kind)) : sections.updates).slice(0, 10);
   let claims = [];
+  let availableClaims = [];
   try {
-    claims = (store.workClaims?.list?.(roomSlug) ?? [])
+    const board = store.workClaims?.list?.(roomSlug) ?? [];
+    claims = board
       .filter(item => item?.owner === viewerId)
       .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, untrusted: true }));
-  } catch { claims = []; }
+    availableClaims = availableClaimsFromBoard(board, roomSlug, { viewerId, state }).slice(0, MAX_WORK);
+  } catch { claims = []; availableClaims = []; }
   let nextActions = [];
   if (options.token && store.nextActions?.list) {
     try {
@@ -197,6 +207,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
     focus: query.focus,
     updates,
     claims,
+    availableClaims,
     workItems: openWork.filter(item => item.accountableMemberId === viewerId || item.claim?.holderId === viewerId || item.verifierMemberId === viewerId)
       .slice(0, MAX_WORK).map(item => workOf(item, now)),
     uncertain: sections.uncertain,
