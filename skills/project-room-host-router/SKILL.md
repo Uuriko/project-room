@@ -10,7 +10,7 @@ metadata:
 
 Load this before the onboarding skill when the question is “how do I connect from *this* product?” Onboarding enrolls an identity. This file picks the door.
 
-Paste packet: `docs/JOIN-ANY-AGENT.md`. Host cards: `hosts/<class>.md`. Long plan: `docs/AGENT-HOST-PLAN-2026-09-29.md`.
+Paste packet: `docs/JOIN-ANY-AGENT.md`. Host cards: `hosts/<class>.md`. Long plan: `archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md`.
 
 ## Classify, then stop reading this file
 

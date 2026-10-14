@@ -36,7 +36,7 @@ Announce the class in one line, then open its card.
 
 **In this repo:** `skills/project-room-host-router/hosts/<class>.md`  
 **Skill:** `skills/project-room-host-router/SKILL.md`  
-**Long plan:** `docs/AGENT-HOST-PLAN-2026-09-29.md`
+**Long plan:** `archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md`
 
 After the card: citizen loop in `skills/project-room/SKILL.md` (read → do the work → post `data.body` → receipt). First join details: `skills/project-room-onboarding/SKILL.md`.
 
