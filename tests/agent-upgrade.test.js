@@ -40,6 +40,8 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   const before = oldAudit(f.store), catalog = () => f.store.db.prepare("SELECT name,sql FROM sqlite_master ORDER BY name").all();
   const oldCatalog = catalog(), cached = f.store.db.prepare("UPDATE accounts SET revision=revision WHERE id=?");
   const credentialsBefore = f.store.db.prepare("SELECT * FROM credentials ORDER BY hash").all();
+  const hasSlots = Boolean(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='account_session_slots'").get());
+  const slotsBefore = hasSlots ? f.store.db.prepare("SELECT * FROM account_session_slots ORDER BY hash").all() : [];
   const roomsBefore = f.store.db.prepare("SELECT id,sequence,projection FROM rooms ORDER BY id").all();
   const hasAccounts = Boolean(f.store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'").get());
   const accountsBefore = hasAccounts ? f.store.db.prepare("SELECT * FROM accounts ORDER BY id").all() : [];
@@ -118,6 +120,26 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
       assert.deepEqual(row[column], original[column], `${row.hash}.${column} changed during the upgrade`);
     }
   });
+  // CX4 adds a nullable login-method pair to the session slots so the
+  // account-session inventory can say how each session signed in. Existing
+  // slots must retain every original field; legacy rows gain only NULLs —
+  // the method a pre-CX4 login used was never recorded, and the inventory
+  // reports that honestly as unknown rather than inventing one.
+  if (hasSlots) {
+    const slotsAfter = current.db.prepare("SELECT * FROM account_session_slots ORDER BY hash").all();
+    assert.deepEqual(slotsAfter.map(row => row.hash), slotsBefore.map(row => row.hash),
+      "an upgrade neither adds nor drops account session slots");
+    slotsAfter.forEach((row, index) => {
+      const original = slotsBefore[index];
+      const added = Object.keys(row).filter(column => !Object.hasOwn(original, column));
+      assert.deepEqual(added, ["login_method_kind", "login_method_ref"], "only the documented nullable login-method pair may be added");
+      assert.equal(row.login_method_kind, null, "legacy slots must not gain an invented login method");
+      assert.equal(row.login_method_ref, null, "legacy slots must not gain an invented login method ref");
+      for (const column of Object.keys(original)) {
+        assert.deepEqual(row[column], original[column], `${row.hash}.${column} changed during the upgrade`);
+      }
+    });
+  }
   // A table the baseline never had has nothing to compare against, so the set
   // is derived from the baseline rather than listed. The hand-maintained list
   // below is kept for a different reason - those tables exist in the baseline
@@ -126,7 +148,7 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   // agent_webhook_deliveries) had landed without being added, failing all
   // twenty versions on that alone. Deriving existence cannot rot the same way.
   const baselineTables = new Set(before.tables.map(entry => entry.table));
-  const comparable = row => row.table !== "rooms" && row.table !== "accounts" && row.table !== "credentials" && baselineTables.has(row.table) && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
+  const comparable = row => row.table !== "rooms" && row.table !== "accounts" && row.table !== "credentials" && row.table !== "account_session_slots" && baselineTables.has(row.table) && (version >= 18 || !row.table.startsWith("private_email_")) && (version >= 15 || !row.table.startsWith("private_inbox_")) && (version >= 9 || !row.table.startsWith("agent_connection")) && row.table !== "agent_identities" && row.table !== "identity_links" && row.table !== "agent_invite_codes" && row.table !== "agent_api_keys" && row.table !== "agent_directory_cards" && row.table !== "agent_webhook_subs" && row.table !== "agent_identity_verification" && row.table !== "room_verification_policy" && row.table !== "agent_hosts" && row.table !== "agent_wake_signals" && row.table !== "wake_queue" && row.table !== "wake_queue_commands" && row.table !== "pending_channel_updates" && row.table !== "wake_queue_pause" && row.table !== "message_reports" && row.table !== "room_attachments" && row.table !== "private_inbox_reads" && row.table !== "access_requests" && row.table !== "agent_room_ownership" && row.table !== "direct_channel_sends" && row.table !== "account_login_methods" && row.table !== "account_passkey_credentials" && row.table !== "account_magic_codes" && row.table !== "account_recovery_codes" && row.table !== "inbox_handoffs" && row.table !== "sla_breach_alerts" && row.table !== "quarantine_thread_splits" && row.table !== "spam_quarantine" && row.table !== "stitch_identities" && row.table !== "stitch_links" && row.table !== "stitch_revocations" && row.table !== "stitch_suggestions" && row.table !== "stitch_receipts" && row.table !== "collab_assignments" && row.table !== "collab_notes" && row.table !== "collab_draft_locks" && row.table !== "collab_approvals" && row.table !== "collab_routing_events" && !row.table.startsWith("private_attention_");
   assert.deepEqual(auditRecovery(current).tables.filter(comparable), before.tables.filter(comparable));
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
