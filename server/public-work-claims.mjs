@@ -53,8 +53,44 @@ const filesOf = input => {
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
 
+export const PUBLIC_WORK_IDENTITY_RATE_LIMIT = 60;
+export const PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS = 60000;
+// At most this many distinct identity buckets stay live, matching the bound
+// server/http.mjs sets for each of its rate families: a flood of foreign
+// identities evicts the least recently touched bucket instead of growing
+// memory or refusing every new identity.
+const PUBLIC_WORK_IDENTITY_RATE_KEYS = 2000;
+
 export class PublicWorkClaims {
-  constructor(store) { this.store = store; this.db = store.db; }
+  constructor(store) { this.store = store; this.db = store.db; this.identityRateBuckets = new Map(); }
+  // The one per-identity public-work claim ceiling (#3271): the bucket
+  // lives here so every door counts against the same state, and the doors
+  // invoke it — the REST act route and the MCP public-work handler before
+  // delegating to act(), and match() at its claim site when autoClaim
+  // actually claims. act()/apply() deliberately do not enforce: they are
+  // also the in-process domain entry (state seeding, keeper flows), which
+  // is not a network door and must be able to represent boards whose
+  // claims accumulated over time rather than within one window. Semantics mirror the fixed-window bucket the
+  // direct REST door used in server/http.mjs (60 per minute, same
+  // rate_limited shape and X-RateLimit-* headers): every authenticated
+  // attempt counts, including attempts that go on to fail downstream and
+  // journal replays, exactly as the REST door counted them before its
+  // transport-level bucket was folded into this one.
+  enforceIdentityRateLimit(identityId) {
+    const now = this.store.now();
+    for (const [key, entry] of this.identityRateBuckets) if (entry.until <= now) this.identityRateBuckets.delete(key);
+    let entry = this.identityRateBuckets.get(identityId);
+    if (entry) this.identityRateBuckets.delete(identityId);
+    else {
+      if (this.identityRateBuckets.size >= PUBLIC_WORK_IDENTITY_RATE_KEYS)
+        this.identityRateBuckets.delete(this.identityRateBuckets.keys().next().value);
+      entry = { n: 0, until: now + PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS };
+    }
+    entry.n++;
+    this.identityRateBuckets.set(identityId, entry);
+    if (entry.n > PUBLIC_WORK_IDENTITY_RATE_LIMIT) throw new ServiceError(429, 'rate_limited', 'Too many requests; retry after a minute',
+      { 'X-RateLimit-Limit': PUBLIC_WORK_IDENTITY_RATE_LIMIT, 'X-RateLimit-Remaining': 0, 'X-RateLimit-Reset': Math.ceil(entry.until / 1000), 'X-RateLimit-Bucket': 'public-work-identity' });
+  }
   verifySchema({ allowAbsent = false } = {}) {
     const definitions = publicWorkClaimsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
     const shapes = definitions.map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
@@ -277,6 +313,14 @@ export class PublicWorkClaims {
     return run(() => {
       const identity = secret ? this.store.identities.resolveGlobalIdentitySecret(secret) : null;
       if ((secret || input.autoClaim === true) && !identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
+      // match with autoClaim is a claim door (#3271): when it actually
+      // claims, the claim counts against the same per-identity ceiling as a
+      // direct claim. The count is taken at the claim site below, not here:
+      // a search that matches nothing claimable performs no claim and must
+      // not burn ceiling (the recommendation page's empty-result recovery
+      // searches would otherwise lock the identity out for retrying). A
+      // plain recommendation (autoClaim not set, including MCP
+      // public_work_recommend) claims nothing and is never counted.
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
         if (reward !== 'volunteer') return outcome;
@@ -299,6 +343,9 @@ export class PublicWorkClaims {
         // used by other (stale) proposals for this same outcome object.
         if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)) outcome.reasonCode = 'no_claimable_tasks';
         if (input.autoClaim === true && candidates.length) {
+          // #3271: an auto-claim is a claim — count it against the ceiling
+          // here, where a claim actually happens (see the note above).
+          this.enforceIdentityRateLimit(identity.identityId);
           const selected = candidates[0].task;
           const claimInput = { expectedTermsVersion: selected.termsVersion };
           // The outer @match journal owns this choice; direct-command keys cannot alias it.
