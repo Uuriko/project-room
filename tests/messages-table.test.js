@@ -701,3 +701,19 @@ test("a file committed onto an archived DM stays visible to the DM's parties onl
   assert.equal(files.visibleTo({ ...row, message_id: "old-pub" }, index, "stranger"), true);
   assert.equal(files.visibleTo({ ...row, message_id: "never-posted" }, index, "stranger"), false);
 });
+
+test("reports can be filed against archived messages and keep their context, an archived DM stays hidden", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "rude old message" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "private" });
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  f.store.moderation.report(f.stranger, "commons", { messageId: "old-pub", reason: "rude" });
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  assert.equal(code(() => f.store.moderation.report(f.stranger, "commons", { messageId: "old-dm", reason: "x" })), code(() => f.store.moderation.report(f.stranger, "commons", { messageId: "no-such", reason: "x" })));
+  const { reports } = f.store.moderation.list(f.owner, "commons");
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].message?.body, "rude old message");
+});
