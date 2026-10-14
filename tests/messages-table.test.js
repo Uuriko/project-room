@@ -771,3 +771,17 @@ test("archiveMessages spot-checks the table rows and the posting events before i
   assert.equal(real.ok, false);
   assert.equal(f.store.room("commons").state.messages.length, 6, "nothing moved");
 });
+
+test("archiveMessages spot-check accepts an also-send-to-channel copy (its posting event carries the original id)", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "root", body: "root" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "rep", body: "reply, also in channel", replyToId: "root", alsoSendToChannel: true });
+  for (let i = 0; i < 4; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `m${i}`, body: `b${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  const dry = f.store.archiveMessages("commons", { keepNewest: 2 });
+  assert.equal(dry.ok, true, JSON.stringify(dry));
+  const real = f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false });
+  assert.equal(real.ok, true, JSON.stringify(real));
+  assert.equal(f.store.room("commons").state.messages.length, 2);
+});
