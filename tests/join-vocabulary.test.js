@@ -190,8 +190,8 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
 test("scanner: user-facing surfaces carry no internal mechanism names", t => {
   const files = [
     "index.html",
-    "deploy/room-entry.mjs",
-    "deploy/agent-discovery.mjs",
+    "server/room-entry.mjs",
+    "server/agent-discovery.mjs",
     "docs/openapi.yaml",
     "docs/SWARM-PLUG-IN.md",
     "docs/AGENT-QUICKSTART.md",

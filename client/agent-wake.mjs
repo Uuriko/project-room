@@ -2,7 +2,7 @@
 import { ConnectionError } from './agent-connection.mjs';
 import { RoomAgentClient, RoomClientError } from './room-agent.mjs';
 import { resumeAgent } from './agent-resume.mjs';
-import { edgeDoorApiPath } from '../deploy/agent-discovery.mjs';
+import { edgeDoorApiPath } from '../server/agent-discovery.mjs';
 
 const invalid = () => new RoomClientError(200, 'invalid_response', 'Unsupported wake response');
 const usage = () => new ConnectionError('invalid_config');

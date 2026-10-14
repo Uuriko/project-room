@@ -14,7 +14,7 @@ import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
 import { CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { agentErrorAx, errorCategory } from "../src/agent-error.mjs";
-import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../deploy/agent-discovery.mjs";
+import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../server/agent-discovery.mjs";
 import { EVENT_TYPES as T, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 function setup(t) {

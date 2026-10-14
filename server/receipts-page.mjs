@@ -1,12 +1,12 @@
 // Public receipts HTML. Script-free. Live records come from receipts-live.mjs.
 // Every interpolated string is escaped: titles and names are room data.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
-export { PUBLIC_SEARCH_CSP as RECEIPTS_PAGE_CSP } from "../deploy/public-search.mjs";
+export { PUBLIC_SEARCH_CSP as RECEIPTS_PAGE_CSP } from "./public-search.mjs";
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/receipts.png`;
 

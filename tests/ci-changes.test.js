@@ -58,8 +58,8 @@ test("browser runs when a shared browser-check helper changes", () => {
   assert.equal(classifyChanges(["scripts/auth-signin.mjs"]).browser, true);
   assert.equal(classifyChanges(["scripts/room-chrome.mjs"]).browser, true);
   assert.equal(classifyChanges(["scripts/helpers/google-oauth-fixture.mjs"]).browser, true);
-  // deploy/ modules the checks import (transitively, via the server).
-  assert.equal(classifyChanges(["deploy/room-entry.mjs"]).browser, true);
+  // server/ modules the checks import (transitively, via the server).
+  assert.equal(classifyChanges(["server/room-entry.mjs"]).browser, true);
 });
 
 test("browser still skips when the diff cannot affect the checks", () => {

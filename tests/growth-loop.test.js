@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PAYOUT_DAILY_CAP, PAYOUT_WINDOW_MS, noteIdentityMint } from "../server/growth-loop.mjs";
-import { llmsTxt, agentsJson } from "../deploy/agent-discovery.mjs";
+import { llmsTxt, agentsJson } from "../server/agent-discovery.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
 

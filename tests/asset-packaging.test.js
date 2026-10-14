@@ -6,7 +6,7 @@ import { join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
-import { templateAssetPaths } from '../deploy/public-assets.mjs';
+import { templateAssetPaths } from '../server/public-assets.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 

@@ -2,7 +2,7 @@ import { anonymousPublicWorkMcpTools, publicWorkMcpDefinitions } from './mcp-pub
 import { anonymousIdentityMintMcpTools } from './mcp-identity-mint.mjs';
 // Binds the one server card to the tool lists the hosted MCP actually serves.
 import { MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
-import { ROOM_ORIGIN, ROOM_SOURCE, bindLiveMcpServerCard } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN, ROOM_SOURCE, bindLiveMcpServerCard } from "./agent-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, ROOM_MCP_SERVER_VERSION, CORE_MCP_TOOLS, CORE_MCP_BLURBS, mcpToolAlias } from "../src/room-mcp-join.js";
 import { MCP_TOOL_META } from "../src/mcp-tool-registry.js";
 import { renderMcpServerCardJson } from "../src/mcp-server-card.mjs";

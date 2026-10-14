@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { roomEntry } from '../deploy/room-entry.mjs';
+import { roomEntry } from '../server/room-entry.mjs';
 
 // The deployed Worker owns host rewriting; Chromium owns fragment inheritance.
 // The destination is the actual app/asset HTTP server, never fabricated auth UI.

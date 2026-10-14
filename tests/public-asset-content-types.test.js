@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { extname } from "node:path";
-import { publicAssetPaths } from "../deploy/public-assets.mjs";
+import { publicAssetPaths } from "../server/public-assets.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { edgePublicResponse } from "../cloudflare/edge-public.mjs";

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, previewSharedInvite, joinSharedInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
 import { readAgentConnection } from "./agent-connection.mjs";
 import { openSetupJournal, privateDirectory, atomicPrivateJson } from "./setup-journal.mjs";
-import { edgeDoorApiPath, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath, ROOM_ORIGIN } from "../server/agent-discovery.mjs";
 import { parseShareInviteCode } from "../src/share-invite-code.js";
 import { validId } from "../src/events.js";
 

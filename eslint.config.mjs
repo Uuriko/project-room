@@ -70,7 +70,7 @@ export default [
   // Door hash-forward is authored as a Node export then stringified into the
   // public door HTML, so it legitimately references browser globals.
   {
-    files: ["deploy/room-entry.mjs"],
+    files: ["server/room-entry.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
   {

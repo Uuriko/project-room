@@ -14,7 +14,7 @@
 // capabilities.pushNotifications false.
 
 import { createHash } from "node:crypto";
-import { ROOM_ORIGIN, joinPrompt } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN, joinPrompt } from "./agent-discovery.mjs";
 
 export const A2A_PATHS = Object.freeze(["/a2a", "/a2a/", "/room/a2a", "/room/a2a/"]);
 export const isA2aPath = pathname => A2A_PATHS.includes(pathname);

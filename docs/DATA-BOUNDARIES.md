@@ -155,7 +155,7 @@ script (`cloudflare/README.md` "Reproduce").
 The hosted service itself makes no outbound network calls: there is no `fetch`
 to any external host under `server/` (the only outbound call in the codebase is
 the operator script in section 6). Public entry points advertised to agents are
-listed, secret-free, in `deploy/agent-discovery.mjs` (`ROOM_ORIGIN`,
+listed, secret-free, in `server/agent-discovery.mjs` (`ROOM_ORIGIN`,
 `ROOM_DOOR` on `trydemigod.com`, `ROOM_PUBLIC_WWW`, `ROOM_PUBLIC_LOBBY`,
 `COMPUTE_DOOR`).
 

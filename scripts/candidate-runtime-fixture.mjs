@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntimePackage } from './runtime-package.mjs';
-import { publicAssetPaths } from '../deploy/public-assets.mjs';
+import { publicAssetPaths } from '../server/public-assets.mjs';
 
 export function candidateRuntimeFixture(repository, directory) {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim();
@@ -65,12 +65,12 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
   paths.add('src/board-ui.js'); paths.add('src/board-keyboard.mjs'); paths.add('src/board-mine.js'); paths.add('src/first-room-copy.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
-  paths.add('deploy/agent-discovery.mjs');
-  paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/procedures-index.mjs'); // W008: baked shared-procedure index (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/room-entry.mjs');
+  paths.add('server/agent-discovery.mjs');
+  paths.add('server/capabilities.mjs'); // #601: build-time route-family inventory (imported by server/agent-discovery.mjs)
+  paths.add('server/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by server/agent-discovery.mjs)
+  paths.add('server/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by server/agent-discovery.mjs)
+  paths.add('server/procedures-index.mjs'); // W008: baked shared-procedure index (imported by server/agent-discovery.mjs)
+  paths.add('server/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
@@ -98,7 +98,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/membership-delegation.mjs'); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
   paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
   paths.add('server/wake-queue-limits.mjs'); // Burs-IA A2: wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf)
-  paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by deploy/agent-discovery.mjs)
+  paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
   paths.add('server/discoverability.mjs'); // Burs-IA A1: Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');
@@ -187,10 +187,10 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipt-cards.mjs'); // in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // Room Guide demo agent (imported by cloudflare/room.mjs)
   paths.add('server/starter-room.mjs'); // starter seed (imported by server/room-lifecycle.mjs)
-  paths.add('deploy/public-search.mjs'); // public search assets (imported by server/http.mjs)
+  paths.add('server/public-search.mjs'); // public search assets (imported by server/http.mjs)
   paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
-  paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by deploy/public-search.mjs)
+  paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by server/public-search.mjs)
   for (const path of publicAssetPaths) paths.add(path);
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.

@@ -3,7 +3,7 @@ import { RoomAgentClient, RoomClientError } from './room-agent.mjs';
 import { connectionDiagnostic } from './agent-connection.mjs';
 import { parseNeedsMeBody } from './grok-host.mjs';
 import { validId } from '../src/events.js';
-import { edgeDoorApiPath } from '../deploy/agent-discovery.mjs';
+import { edgeDoorApiPath } from '../server/agent-discovery.mjs';
 
 const invalid = () => new RoomClientError(200, 'invalid_response', 'Unsupported resume response');
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);

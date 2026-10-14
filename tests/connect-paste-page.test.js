@@ -8,8 +8,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentPages, PASTE_PAGE } from "../scripts/build-agent-docs.mjs";
-import { publicAssetPaths } from "../deploy/public-assets.mjs";
-import { publicSearchAssets, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { publicAssetPaths } from "../server/public-assets.mjs";
+import { publicSearchAssets, reviewedPublicSearchPaths } from "../server/public-search.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 

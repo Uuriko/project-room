@@ -17,8 +17,8 @@ import { routeCandidates } from "./open-routes.mjs";
 import { nextActionsRouteTemplates, pluginRouteTemplates, workerRouteTemplates } from "./route-docs-check.mjs";
 import { A2A_PATHS } from "../server/a2a-jsonrpc.mjs";
 import { ROOM_MCP_PATHS } from "../src/room-mcp-join.js";
-import { DISCOVERY_PATHS, HEALTH_ALIAS_PATHS } from "../deploy/agent-discovery.mjs";
-import { PUBLIC_DOOR_PATHS } from "../deploy/room-entry.mjs";
+import { DISCOVERY_PATHS, HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
+import { PUBLIC_DOOR_PATHS } from "../server/room-entry.mjs";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const ALLOWLIST = "scripts/routes-legacy-allowlist.json";

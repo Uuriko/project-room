@@ -3,9 +3,9 @@
 // single-threaded, and a cold wake or a synchronous stretch closes its input
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
-import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicPageCsp, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
-import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../deploy/agent-discovery.mjs';
+import { publicAssetPaths } from '../server/public-assets.mjs';
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicPageCsp, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../server/public-search.mjs';
+import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';

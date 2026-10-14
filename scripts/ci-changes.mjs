@@ -86,7 +86,7 @@ function browserSuitePaths() {
 // from server/http.mjs, a few spawn server.mjs) and imports shared helpers
 // that are not themselves suite entries (scripts/acceptance-fixture.mjs,
 // scripts/auth-signin.mjs, scripts/room-chrome.mjs, scripts/helpers/*, the
-// deploy/ modules the server serves, …). A change to any of those runs
+// server/ modules the server serves, …). A change to any of those runs
 // against the browser suite, so it must enable it: server code always does
 // (checks also reach it through dynamically built import URLs and spawned
 // processes that a static scan cannot see), and every other file does when

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry } from "../deploy/room-entry.mjs";
+import { roomEntry } from "../server/room-entry.mjs";
 import {
   agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, DISCOVERY_PATHS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
@@ -13,7 +13,7 @@ import {
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
-} from "../deploy/agent-discovery.mjs";
+} from "../server/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer (?!<saved-identity-secret>|<room-mcp-token>)|ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
