@@ -129,6 +129,55 @@ function logIntegrity(integrity) {
   return integrity;
 }
 
+// #3334: a failed integrity tick must name the sub-check that threw, in a
+// form safe for the public health surface: stable codes and record CLASSES
+// only — never record ids, message bodies, or secrets. The store tags
+// deferred-batch and full-path errors with `integritySubcheck`; the message
+// patterns cover any untagged throw. Before this, the job converted every
+// throw into { errors: 1 } and the heartbeat could only ever render
+// "1 error(s) in tick", so three different root causes shared one
+// byte-identical external signature.
+export const INTEGRITY_SUBCHECKS = Object.freeze([
+  "share_links", "agent_connections", "inbox", "email", "channel_updates",
+  "quarantine_splits", "room_lifecycle", "identity_expiry", "referral_depth",
+  "messages_backfill", "messages_parity", "invitation_audit", "help_history",
+  "incremental", "snapshot", "unknown"
+]);
+const INTEGRITY_RECORD_CLASS = Object.freeze({
+  share_links: "journal", agent_connections: "journal", inbox: "journal",
+  email: "journal", channel_updates: "journal", quarantine_splits: "journal",
+  room_lifecycle: "room", identity_expiry: "unknown", referral_depth: "invitation",
+  messages_backfill: "message", messages_parity: "message",
+  invitation_audit: "invitation", help_history: "invitation",
+  incremental: "room", snapshot: "room", unknown: "unknown"
+});
+const SAFE_CARRIED_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
+
+export function classifyIntegrityError(error) {
+  const message = String(error?.message ?? error ?? "");
+  let subcheck = INTEGRITY_SUBCHECKS.includes(error?.integritySubcheck) ? error.integritySubcheck : null;
+  if (!subcheck) {
+    if (error?.code === "link_integrity_error") subcheck = "share_links";
+    else if (/^messages parity failed/.test(message)) subcheck = "messages_parity";
+    else if (/^messages backfill stopped/.test(message)) subcheck = "messages_backfill";
+    else if (/room lifecycle/i.test(message)) subcheck = "room_lifecycle";
+    else if (/help/i.test(message) && /reconciliation|history/.test(message)) subcheck = "help_history";
+    else if (/invitation/i.test(message)) subcheck = "invitation_audit";
+    else subcheck = "unknown";
+  }
+  // Only typed service errors (status + code) may carry their code onto the
+  // public surface; everything else gets a stable derived code.
+  const carried = typeof error?.code === "string" && Number.isFinite(error?.status) && SAFE_CARRIED_CODE.test(error.code)
+    ? error.code
+    : null;
+  const code = carried ?? (subcheck === "unknown" ? "integrity_check_failed" : `${subcheck}_failed`);
+  let errorClass = "unknown";
+  if (/no such (table|column)|missing schema|\bschema\b/i.test(message)) errorClass = "schema";
+  else if (/sqlite|database|storage|disk/i.test(message)) errorClass = "storage";
+  else if (subcheck !== "unknown") errorClass = "integrity_mismatch";
+  return { code, subcheck, errorClass, recordClass: INTEGRITY_RECORD_CLASS[subcheck] ?? "unknown" };
+}
+
 async function runNodeRetention(store, ctx) {
   const tableIndex = ctx.retentionIndex ?? 0;
   const receipt = runLiveStoreRetention({
@@ -271,7 +320,15 @@ export const JOBS = Object.freeze([
         return logIntegrity(integrity);
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
-        return { errors: 1 };
+        // #3334: the failure detail survives reporting — the heartbeat turns
+        // scanError into lastError and persists failureDetail, so the health
+        // surface names the failing sub-check instead of "1 error(s) in tick".
+        const failure = classifyIntegrityError(error);
+        return {
+          errors: 1,
+          scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+          failureDetail: failure
+        };
       }
     }
   }),
@@ -448,11 +505,24 @@ export function startNodeScheduler({
   const lastRan = new Map();
   // REL-24: per-job run record for GET /api/health/jobs on Node.
   const records = new Map();
-  const record = (name, at, ok) => {
+  // #3334 parity with the Worker heartbeat: a failing tick keeps a sanitized
+  // failure detail (token-shaped fields only) so the Node health surface can
+  // name the failing sub-check too.
+  const detailToken = /^[a-z][a-z0-9_]{0,63}$/i;
+  const failureDetailOf = source => {
+    const detail = source?.failureDetail;
+    if (!detail || typeof detail !== "object") return null;
+    const out = {};
+    for (const key of ["code", "subcheck", "errorClass", "recordClass"]) {
+      if (typeof detail[key] === "string" && detailToken.test(detail[key])) out[key] = detail[key];
+    }
+    return Object.keys(out).length ? out : null;
+  };
+  const record = (name, at, ok, { error = null, failure = null, durationMs = null } = {}) => {
     const prior = records.get(name) ?? { consecutiveFailures: 0 };
     records.set(name, ok
-      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0 }
-      : { ...prior, lastRunAt: at, lastErrorAt: at, consecutiveFailures: prior.consecutiveFailures + 1 });
+      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null }
+      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure });
   };
   // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
   // store progress on it across ticks (runNodeRetention advances
@@ -475,17 +545,23 @@ export function startNodeScheduler({
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
         if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
         const deadline = at + (job.budgetMs ?? JOB_BUDGET_MS);
+        const startedAt = now();
         try {
           // Jobs run sequentially under the `running` guard, so sharing
           // ctxBase is safe; only the per-job deadline changes between runs.
           ctxBase.deadline = deadline;
           const result = await job.run(store, ctxBase);
           lastRan.set(job.name, at);
-          record(job.name, at, !summaryFailed(result));
+          const failed = summaryFailed(result);
+          record(job.name, at, !failed, {
+            error: failed ? (result.scanError ? `scanError: ${oneLine(result.scanError)}` : `${Number(result.errors) || 0} error(s) in tick`) : null,
+            failure: failed ? failureDetailOf(result) : null,
+            durationMs: now() - startedAt
+          });
           outcomes.push({ job: job.name, ok: true, result });
         } catch (error) {
           lastRan.set(job.name, at);
-          record(job.name, at, false);
+          record(job.name, at, false, { error: oneLine(error?.message ?? error), failure: failureDetailOf(error), durationMs: now() - startedAt });
           console.warn(`[${job.name}] tick failed: ${oneLine(error?.message ?? error)}`);
           outcomes.push({ job: job.name, ok: false });
         }
@@ -519,6 +595,13 @@ export function startNodeScheduler({
           name: job.name, runtime: inRuntime ? "node" : "worker-only", enabled, reason,
           periodSeconds: Math.round((overrides.get(job.name) ?? job.cadenceMs) / 1000),
           lastRunAt: iso(rec.lastRunAt), lastSuccessAt: iso(rec.lastSuccessAt), lastErrorAt: iso(rec.lastErrorAt),
+          lastError: rec.lastError ?? null,
+          lastErrorCode: rec.lastFailure?.code ?? null,
+          lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
+          lastErrorClass: rec.lastFailure?.errorClass ?? null,
+          lastErrorRecordClass: rec.lastFailure?.recordClass ?? null,
+          lastDurationMs: rec.lastDurationMs ?? null,
+          lastSummaryAt: iso(rec.lastSummaryAt),
           consecutiveFailures: rec.consecutiveFailures ?? 0
         };
       });
