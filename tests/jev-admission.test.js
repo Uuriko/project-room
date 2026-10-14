@@ -120,7 +120,7 @@ test("decision mapping honors the documented thresholds", () => {
   assert.equal(jevAdmissionReviewThreshold, 0.45);
   assert.equal(jevAdmissionRejectThreshold, 0.75);
   assert.ok(jevAdmissionPaths.includes("access-request:approve"));
-  assert.ok(jevAdmissionPaths.includes("guest-agent-link:join"));
+  assert.ok(jevAdmissionPaths.includes("guest-invite:redeem"));
 });
 
 test("weights sum to a stable legend", () => {

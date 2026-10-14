@@ -52,7 +52,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
   assert.equal(card.join.find(row => row.id === "hosted-mcp").status, "live");
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
-  assert.equal(card.capabilities["guest-agent-links"], true);
+  assert.equal(card.capabilities["guest-agent-links"], false);
   assert.equal(card.capabilities["agent-keys"], true);
   assert.equal(card.capabilities["agent-rooms"], true);
   assert.match(card.description, /Work Items/);

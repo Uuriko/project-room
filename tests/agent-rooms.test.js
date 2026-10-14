@@ -660,9 +660,9 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   assert.equal(made.status, 201, JSON.stringify(made.body)?.slice(0, 200));
   const cancelled = await post(`${room}/share-links-cancel`, { token: ownerSecret, data: { linkId: made.body.link.id } });
   assert.equal(cancelled.status, 200);
-  // Guest-agent mint: the owner gate passes, but minting stays account-bound.
-  const guestMint = await post(`${room}/guest-agent-links`, { token: ownerSecret, data: {
-    requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Guest"
+  // Guest-invite mint: the owner gate passes, but minting stays account-bound.
+  const guestMint = await post(`${room}/guest-invites`, { token: ownerSecret, data: {
+    requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(guestMint.status, 403);
   assert.equal(guestMint.body?.error?.code, "account_session_required");
@@ -675,8 +675,8 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
     const res = await get(path, other.body.secret);
     assert.equal(res.status, 403, `${path}: ${res.status}`);
   }
-  const otherMint = await post(`${room}/guest-agent-links`, { token: other.body.secret, data: {
-    requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Guest"
+  const otherMint = await post(`${room}/guest-invites`, { token: other.body.secret, data: {
+    requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(otherMint.status, 403);
   assert.notEqual(otherMint.body?.error?.code, "account_session_required");

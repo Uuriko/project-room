@@ -452,7 +452,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     return {
       status: "action_required", reason: "wrong_link_kind",
       hint: "That is a human invite link. Ask the owner for a guest invite or Add agent.",
-      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
+      next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
@@ -460,7 +460,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required",
       reason: reasonCode,
       hint: "This guest invite is not live. Ask the owner to mint a new one or Add agent.",
-      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
+      next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   // This mapper has no deployment origin. Use the configured service origin,

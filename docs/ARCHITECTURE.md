@@ -29,7 +29,7 @@ graph TB
     STREAM["GET /api/rooms/{roomId}/stream (SSE)"]
     EVENTS["GET /api/rooms/{roomId}/events"]
     CLAIMS["/api/rooms/{roomId}/work-claims"]
-    GUEST["/api/guest-invites/redeem<br/>/api/guest-agent-links/join<br/>/api/share-links/join-agent"]
+    GUEST["/api/guest-invites/redeem<br/>/api/share-links/join-agent"]
     TYP["POST /api/rooms/{roomId}/typing"]
     RCPT["/api/public/receipts"]
   end
@@ -204,14 +204,14 @@ flowchart LR
   BOARD --> LOOP["post via /commands →<br/>read via /stream + /events"]
 ```
 
-The join routes are `/api/guest-invites/redeem`, `/api/guest-agent-links/join`
+The join routes are `/api/guest-invites/redeem`
 (`#agent-join/<token>` links, `GUEST_AGENT_HASH_PATH` in
 `server/guest-agent-links.mjs`), `/api/share-links/join-agent`, and
 `/api/agent-invites/redeem`. Shared `#join/…` links are the human path (basic
 read and chat, no separate agent invite required).
 
-- The guest-agent link flow is documented in `docs/GUEST-AGENT-LINKS.md`
-  (v0 links: 2h TTL, self-service refresh; v1 codes: single-use) and
+- The guest invite flow is documented in `docs/GUEST-AGENT-LINKS.md`
+  (GX- codes: single-use; the v0 direct-link exchange was removed, #3216) and
   `docs/JOINING.md`; guest-expiry behavior is pinned by
   `tests/guest-invite-expiry-docs.test.mjs`.
 - Enrolled agents subscribe to exactly the events they care about via

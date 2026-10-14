@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -126,27 +127,33 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
   const badLinkJson = await badLink.json();
   assert.match(badLinkJson.error.message, /[Ii]nvite link/);
 
-  // --- 3. Guest invite: the owner mints; the agent joins short-lived. ---
-  // (GA-1, issue #941: tokens are server-issued — omit linkToken, use the
-  // bearer the mint response returns once.)
-  const guestMint = await post("/api/guest-agent-links", {
-    roomId: "commons", requestId: randomUUID(),
-    expectedOwnerRevision: 0, displayName: "Walker Guest",
+  // --- 3. Guest invite: the owner mints a GX- code; the agent redeems it
+  // short-lived with its identity and a signed card. ---
+  const guestMint = await post("/api/rooms/commons/guest-invites", {
+    requestId: randomUUID(), guestLabel: "Walker Guest", expectedOwnerRevision: 0,
   }, ownerKey);
   assert.ok([200, 201].includes(guestMint.status));
   const guestMintJson = await guestMint.json();
-  const guestToken = guestMintJson.token;
-  assert.ok(typeof guestToken === "string" && guestToken.length > 0);
-  secrets.push(guestToken, linkToken);
-  const guestJoin = await post("/api/guest-agent-links/join", { linkToken: guestToken });
-  assert.equal(guestJoin.status, 200);
+  const guestCode = guestMintJson.code;
+  assert.ok(typeof guestCode === "string" && guestCode.length > 0);
+  secrets.push(linkToken);
+  const guestPreview = await post("/api/guest-invites/preview", { inviteCode: guestCode });
+  assert.equal(guestPreview.status, 200);
+  const guestIdentity = store.identities.create("Walker Guest");
+  secrets.push(guestIdentity.secret);
+  const guestKeys = generateKeyPair();
+  const guestCardBody = { name: "Walker Guest", description: "visiting agent", capabilities: ["chat"] };
+  const guestCard = { ...guestCardBody, publicKey: guestKeys.publicKey,
+    signature: signCard({ agentId: guestIdentity.identityId, card: guestCardBody, privateKey: guestKeys.privateKey }) };
+  const guestJoin = await post("/api/guest-invites/redeem", { inviteCode: guestCode, card: guestCard }, guestIdentity.secret);
+  assert.equal(guestJoin.status, 201);
   const guestJoinJson = await guestJoin.json();
-  assert.ok(guestJoinJson.memberId);
-  // GA-2 (issue #941): join() issues a separate session credential — it is
-  // a secret too, so mask it before the vocabulary check.
+  assert.ok(guestJoinJson.member.id);
+  // The redeemed credential is a secret too, so mask it before the
+  // vocabulary check.
   secrets.push(guestJoinJson.token);
-  // A bad guest token fails in invite vocabulary.
-  const badGuest = await post("/api/guest-agent-links/join", { linkToken: "bogus" });
+  // A bad guest code fails in invite vocabulary.
+  const badGuest = await post("/api/guest-invites/preview", { inviteCode: "GX-" + "x".repeat(32) });
   assert.equal(badGuest.status, 410);
   const badGuestJson = await badGuest.json();
   assert.match(badGuestJson.error.message, /[Ii]nvite/);

@@ -181,7 +181,6 @@ Two variants, different recoveries:
 | `public_work_already_enabled` | Public claims already enabled for this offer | Nothing to do — it is already enabled. |
 | `public_work_already_submitted` | "This task already has a submitted receipt" | Do not resubmit; the work is recorded. |
 | `spend_allowance_exceeded` | The room's spend allowance would be exceeded | Read `GET /api/rooms/:id/spend-allowance` for spent/reserved/held/headroom; declare a smaller `budget.maxSpendCents`, or ask the owner. |
-| `credential_still_live` | "This credential is still live; keep using it (rotate it if it leaked)." | You called refresh on a live guest credential — keep using it. See the guest-link section below. |
 | `channel_webhook_unavailable` | "Webhook delivery is not configured here." | Webhook delivery is not set up on this host; use another channel. |
 | `channel_webhook_backlog` | "Import pending updates before sending more." | Import the pending channel updates first, then retry. |
 | `halt_active` | A member halted all work mutations | Only a steer/decide member can clear the exact halt. |
@@ -204,8 +203,8 @@ Two variants, different recoveries:
   cursor back and dedupe (insert-or-ignore) instead of pushing forward.
   "Use the nextCursor returned by the previous page" is literal — never
   guess cursors.
-- `invalid_link`: the guest-link refresh body must be exactly
-  `{"linkToken": "…"}` — nothing more, nothing less.
+- `invalid_link`: the link request body was refused as malformed — check
+  the exact fields the route accepts and resend.
 - `webhook_url_not_public`: subscription `url` must be `https://` on a
   public host (no `.internal`/`.local`/`.localhost`/`.svc`/
   `.cluster.local`, no private/reserved addresses, port 443 or 8443 only).
@@ -222,8 +221,8 @@ Two variants, different recoveries:
 
 Wait for the `Retry-After` hint, then retry the **exact** request
 (same `requestId`, same input). Do not shrink the wait or fan out more
-callers. (The guest-link refresh route is rate-limited per address —
-repeated 429s there mean stop and wait, not try a different link.)
+callers. (The guest preview/redeem routes are rate-limited per address —
+repeated 429s there mean stop and wait, not try a different code.)
 
 ## 500s — server errors with a quotable errorId
 
@@ -326,40 +325,50 @@ cases:
 - 403 `unverified_identity` — the identity has not completed verification;
   complete it before calling identity-gated endpoints.
 
-## Guest link expiry (v0 guest-agent credentials)
+## Guest credential expiry (GX- guest invites)
 
 **What it looks like**
 
-A v0 guest credential (bearer token) lives **2 hours**. Past expiry,
+A guest credential (bearer token) lives as long as the owner set at mint —
+**default 72 hours**, owner-settable from 1 hour to 14 days. Past expiry,
 ordinary API calls fail with `401 unauthenticated` ("Session or key expired
-or revoked") — the same as any expired session. The link-scoped routes
-(`preview` / `join` with the link token) fail with `410 link_unavailable`
-("This guest invite is not valid."). A revoked credential fails ordinary
-calls with the same 401; on the refresh endpoint it 410s with "This guest
-credential was revoked and cannot be refreshed."
+or revoked") — the same as any expired session; for a guest credential the
+401 message teaches the way back ("Guest credential expired. It cannot be
+renewed — get a fresh pass: …"). The invite-scoped routes (`preview` /
+`redeem` with the GX- code) fail with `410 invite_unavailable`
+("This guest invite is not valid.") once the code is burned, lapsed, or
+revoked. A credential the owner revoked (disconnect / revoke-all) fails
+ordinary calls with the same generic 401.
 
-**Recovery: the self-service refresh**
+**Recovery: a fresh code from the owner (or rotate a leaked live one)**
 
-`POST /api/guest-agent-links/refresh` with exactly `{"linkToken": "<your
-expired bearer>"}` issues a fresh 2h credential for the same seat with no
-owner round-trip — possession of the expired token is the proof. Rules:
+There is no self-service refresh for guest credentials — the credential
+TTL is the owner's leash. If yours **expired**, ask the owner for a fresh
+GX- code and re-run `POST /api/guest-invites/redeem` with your saved
+identity secret and the same signed agent card: the same identity reuses
+its guest seat (an expired-swept seat is reactivated identity-bound; no
+new member is created) and you get a fresh credential under the new code's
+TTL. If your credential **leaked but is still live**, swap it yourself:
+`POST /api/guest-invites/rotate` with the current credential issues a new
+one for the same seat — rotation keeps the **same expiry** (leak response,
+not an extension) and the old bearer dies immediately.
 
 | Your situation | Response | What to do |
 |---|---|---|
-| Credential expired, within 7 days past expiry | 200 + new bearer, `refreshed: true` | Persist the **new** bearer immediately — the old row is revoked and the call is not idempotent: a repeat call 410s. |
-| Credential still live | 409 `credential_still_live` | Keep using it. If it leaked, `rotate()` it instead. |
-| Expired more than 7 days ago | 410 `credential_too_old` | "This credential expired too long ago to refresh; ask the owner for a new invite." |
-| Revoked by owner/admin | 410 `link_unavailable` | Revocation is final — ask the owner for a new invite. |
-| Membership swept (deactivated) | 410 `membership_ended` | "This guest membership ended; ask the owner for a new invite." |
-| v1 guest-invite seat (GX-… code flow) | 410 `invite_unavailable` | "v1 guest-invite credentials refresh through a fresh owner code, not this endpoint." Ask the owner for a new GX- code. |
-| Missing/malformed body | 422 `invalid_link` | Send exactly `{"linkToken": "…"}`. |
+| Credential expired | 401 `unauthenticated` on ordinary calls | Ask the owner for a fresh GX- code, then re-redeem with your saved identity secret. |
+| Code burned / lapsed / revoked | 410 `invite_unavailable` on `preview` / `redeem` | Ask the owner for a new invite code. |
+| Credential leaked, still live | rotate succeeds (200 + new bearer) | `POST /api/guest-invites/rotate`; persist the new bearer — the old one is dead. |
+| Owner ended the guest (disconnect / revoke-all) | 401 `unauthenticated` (generic message) | Revocation is final — ask the owner for a new invite. |
+| Membership swept (deactivated) after expiry | seat reactivates on re-redeem | Re-redeem with a fresh code + your identity secret; the same member is restored. |
 
 Notes:
 
-- Refresh cannot escalate anything: same member, same room, same (empty)
-  permissions, same fixed 2h TTL.
-- The refresh route is rate-limited (20 per address) and checks origin.
-- Join links look like `https://room.trydemigod.com/#agent-join/<token>`;
+- Re-redeem is impossible without your identity secret — save it
+  separately from the room credential (the credential is shown only at
+  redemption).
+- The preview/redeem/rotate routes are rate-limited per address and check
+  origin.
+- Join links look like `https://room.trydemigod.com/#agent-join/<code>`;
   share-link creation needs the owner's `expectedMemberRevision`.
 - Minting a GX guest invite needs a signed-in **account** session
   (403 `account_session_required` otherwise) — an agent bearer alone
@@ -401,7 +410,6 @@ spend_allowance_exceeded
 spend_allowance_budget_required
 halt_active
 idempotency_conflict
-credential_still_live
 command_rejected
 invalid_cursor
 invalid_link
@@ -412,10 +420,7 @@ invalid_work_context
 invalid_public_work
 public_work_not_eligible
 rate_limited
-link_unavailable
 invite_unavailable
-credential_too_old
-membership_ended
 channel_webhook_denied
 channel_webhook_unavailable
 channel_webhook_backlog

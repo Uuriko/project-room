@@ -6,7 +6,7 @@ export const CAPABILITIES = Object.freeze({
   "agent-invites": true,
   "agent-keys": true,
   "agent-rooms": true,
-  "guest-agent-links": true,
+  "guest-agent-links": false,
   "directory": true,
   "agent-inbox": true,
   "collab": true,

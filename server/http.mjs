@@ -58,7 +58,7 @@ import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "../deploy/room-entry.mjs";
-import { guestAgentLinkContract, GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
 // Board v2 is retired. Its routes answer 410 board_v2_retired. The
 // board_vtwo_* tables stay in place; nothing here drops them.
@@ -2490,57 +2490,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         setCookie(res, accountCookieName, "", 0);
         return json(res, 200, { deleted: true, accountId: session.account.id, receipt });
       }
-      if (url.pathname === "/api/guest-agent-links" && ["GET", "HEAD"].includes(req.method)) {
-        return json(res, 200, guestAgentLinkContract(), req.method === "HEAD");
-      }
-      if (url.pathname === "/api/guest-agent-links" && req.method === "POST") {
-        checkOrigin(req, !carriesBearer(req));
-        rate(`guest-agent-mint:${remoteAddress}`, 30);
-        const selected = roomCredentials(req, url);
-        if (!selected.token) reject(401, "unauthenticated", "Ask the owner to mint a guest invite or Add agent.");
-        const data = await body(req);
-        if (typeof data.roomId !== "string" || !validId(data.roomId)) reject(422, "invalid_link", "Supply the room and guest invite mint fields");
-        const fence = selected.mode === "account" ? accountBinding(req) : expectedBinding(req);
-        const auth = roomAuth(selected, data.roomId, fence);
-        if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
-        if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-        protectWrite(req, auth, selected.bearer);
-        const result = store.guestAgentLinks.mint(selected.token, data.roomId, data, fence);
-        return json(res, result.duplicate ? 200 : 201, result);
-      }
-      if (url.pathname === "/api/guest-agent-links/preview" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-agent-preview:${remoteAddress}`, 30);
-        const data = await body(req);
-        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
-        return json(res, 200, store.guestAgentLinks.preview(data.linkToken));
-      }
-      if (url.pathname === "/api/guest-agent-links/join" && req.method === "POST") {
-        checkOrigin(req, true);
-        rate(`guest-agent-join:${remoteAddress}`, 20);
-        const data = await body(req);
-        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
-        const joinedLink = store.guestAgentLinks.join(data.linkToken);
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
-        // score the join, journal the would-be decision, admit anyway. This
-        // path carries no signed card at join time (the card is checked at
-        // link mint), so the card component stays inactive.
-        jevShadowAdmission("guest-agent-link:join", { roomId: joinedLink.room?.id, memberId: joinedLink.memberId,
-          displayName: "", card: null });
-        return json(res, 200, joinedLink);
-      }
-      if (url.pathname === "/api/guest-agent-links/refresh" && req.method === "POST") {
-        // v0 self-service refresh (issue #1563): the holder of an EXPIRED
-        // guest-agent credential presents it and gets a fresh one for the
-        // same seat, no owner round-trip. Possession of the expired bearer
-        // is the proof; revoked, swept, and v1 seats are refused inside
-        // GuestAgentLinks#refresh. Rate matches the sibling join route.
-        checkOrigin(req, true);
-        rate(`guest-agent-refresh:${remoteAddress}`, 20);
-        const data = await body(req);
-        if (!exact(data, ["linkToken"])) reject(422, "invalid_link", "Guest-agent link required");
-        return json(res, 200, store.guestAgentLinks.refresh(data.linkToken));
-      }
       // GX-… guest invites (RC-2026-09-23-100): the public-handoff flow.
       // The invite code is public-safe (single-use, hash-stored, grants
       // nothing); the ga1. credential is issued only at redemption, after
@@ -3503,7 +3452,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-agent-links|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4794,11 +4743,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "agent-connections" && req.method === "POST") {
         const result = store.agentConnections.apply(selected.token, roomId, await body(req), fence);
-        return json(res, result.duplicate ? 200 : 201, result);
-      }
-      if (route === "guest-agent-links" && req.method === "POST") {
-        rate(`guest-agent-mint:${remoteAddress}`, 30);
-        const result = store.guestAgentLinks.mint(selected.token, roomId, await body(req), fence);
         return json(res, result.duplicate ? 200 : 201, result);
       }
       // GX-… guest invites: owner-administered through the same room funnel
