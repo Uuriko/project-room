@@ -471,10 +471,9 @@ function seedClaim(store, item) {
 
 // Rendering, dependency navigation and readiness are the UI boundary here.
 // The projection matrix separately owns classification/old-completion filtering.
-// Quarantined flakes (tests/quarantine.json): both browser tests below fail
-// intermittently on green main. They run in the non-blocking lane
-// (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
+// Both formerly quarantined board browser tests have been repaired and
+// re-admitted to the blocking suite (#3291 via PR #3338; the draft-PR
+// linking test via the #3290 repair), and tests/quarantine.json is empty.
 // Timeout budget: this journey makes two full viewport passes plus a
 // held-route refresh race. Measured on a CPU-oversubscribed runner (load
 // ~13 on 2 cores) completed passes take 79-103s and one run was censored by
@@ -730,7 +729,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // Authoring gate: the real browser owns form availability, approval copy and
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
-test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
@@ -837,6 +836,13 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal(await card.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-review");
     assert.equal(await card.locator(".claim-pr a").getAttribute("href"), pullRequest);
     assert.match(await card.locator(".claim-reviews").innerText(), /previous approval.*does not qualify for current work/);
+    // Wait on the focus condition itself before asserting it, the same way
+    // the refreshed-claim assert below does. The 2026-10-06 CI failures
+    // (false !== true, ~2.1 s) were this snapshot race in the second phase:
+    // the status text can land while an SSE repaint has replaced the input
+    // node and focus restoration is still a beat behind, so a one-shot
+    // read — or a handle resolved before the repaint — samples the gap.
+    await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
     // Query the current input and active element in one browser turn: SSE
     // refresh may replace an element handle while restoring focus correctly.
     assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
@@ -893,6 +899,11 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
     refreshRelease.resolve();
     await (await delivered).finished();
+    // One animation frame is a fixed wait, not proof the retired response
+    // was processed: under load its load continuation can run after the
+    // frame. Wait for the page's network to settle (the pattern the held
+    // Board retirement test uses), then a frame, before sampling focus.
+    await page.waitForLoadState("networkidle");
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
     assert.equal(await page.evaluate(() => document.activeElement?.id), "board-close", "retired refresh cannot steal focus");
     assert.equal(requests.length, 2, "a changed claim round does not trigger an automatic retry");
