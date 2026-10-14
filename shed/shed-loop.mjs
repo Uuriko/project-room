@@ -20,7 +20,7 @@
 // SHED_AGENT_CMD which they configured explicitly.
 
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { agentConnectionFromEnvironment, ConnectionError } from "../client/agent-connection.mjs";
@@ -44,6 +44,22 @@ function log(event) {
 
 function readJson(path, fallback) {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return fallback; }
+}
+
+// Persist the dedup map atomically: write a temp file, fsync it, then rename
+// over handed.json. A crash loses at most the write in flight — it can never
+// tear handed.json into the truncated half-file an in-place write leaves
+// behind (#2879). Best-effort like the heartbeat: returns false on failure
+// and the caller journals it; the in-memory map stays authoritative for the
+// rest of the tick and the end-of-tick persist retries.
+function persistHanded(handed) {
+  const tmpPath = handedPath + ".tmp";
+  try {
+    const fd = openSync(tmpPath, "w", 0o600);
+    try { writeSync(fd, JSON.stringify(handed) + "\n"); fsyncSync(fd); } finally { closeSync(fd); }
+    renameSync(tmpPath, handedPath);
+    return true;
+  } catch { return false; }
 }
 
 function writeHeartbeat(status, detail) {
@@ -118,10 +134,14 @@ async function tick(client, config) {
       const outcome = await handOff(packet);
       handed[key] = { ts: new Date().toISOString(), ok: outcome.ok };
       log({ event: "handoff", item: summary, ok: outcome.ok, reason: outcome.reason || outcome.code });
+      // Persist BEFORE the next item is attempted (#2879): a handoff can
+      // take up to 600s, and persisting only at end of tick meant a crash
+      // or kill during item N re-handed items 1..N-1 on restart.
+      if (!persistHanded(handed)) log({ event: "handoff_persist_failed", item: summary });
       handedCount++;
     }
   }
-  try { writeFileSync(handedPath, JSON.stringify(handed) + "\n", { mode: 0o600 }); } catch { /* best-effort */ }
+  persistHanded(handed);
   writeHeartbeat("ok", { items: items.length, handed: handedCount, pending: result.pending ?? null });
 }
 
