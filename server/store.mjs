@@ -5112,10 +5112,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
       // (not the proposer, who is online by definition) get a pointer-only
       // POST when offline with a push subscription.
+      // #3257: the doorbell alone is fire-and-forget — its failures exist
+      // only as a counter, and the proposal expires after 7 days. Enqueue
+      // the durable wake signal first (same contract as mentions/DMs), so
+      // the party's next heartbeat/poll carries the proposal even when the
+      // doorbell misses.
       if (bondEffect?.eventType === "bond.proposed" && bondEffect.data) {
         const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
         for (const partyId of [agentAId, agentBId]) {
           if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
+            this.agentHeartbeats.enqueueWake({ agentId: partyId, kind: "bond",
+              roomId, messageId: typeof bondId === "string" ? bondId : incoming.id });
             this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
               roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
           }

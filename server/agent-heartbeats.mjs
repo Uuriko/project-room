@@ -24,7 +24,7 @@ import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from ".
 import { postDelivery } from "./webhook-dispatch.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
-const WAKE_KINDS = Object.freeze(["mention", "dm"]);
+const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
 const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
@@ -77,7 +77,7 @@ export const agentHeartbeatSchema = `
   CREATE INDEX IF NOT EXISTS agent_hosts_seen ON agent_hosts(agent_id, last_seen_at);
   CREATE TABLE IF NOT EXISTS agent_wake_signals (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('mention','dm')),
+    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land')),
     room_id TEXT, message_id TEXT,
     created_at INTEGER NOT NULL, delivered_at INTEGER
   );
@@ -771,7 +771,8 @@ export class AgentHeartbeats {
     return Object.freeze({ released: dropped.changes > 0 });
   }
 
-  // Enqueue a wake signal for an agent (mention or DM). Coalesced on
+  // Enqueue a wake signal for an agent (mention, DM, bond, assignment, or
+  // land update — WAKE_KINDS). Coalesced on
   // (agent_id, room_id, message_id) — issue #2913: message ids repeat
   // across rooms, so the same message wakes an agent once per room.
   enqueueWake({ agentId, kind, roomId = null, messageId }) {

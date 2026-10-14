@@ -1195,6 +1195,12 @@ export class LandQueue {
     this.store.agentHeartbeats.pushNotify({
       identityId, eventType: "land.updated", roomId, id: incoming.id, ts: this.store.now()
     });
+    // #3257: the doorbell and the wake ping below are both fire-and-forget;
+    // enqueue the durable signal too, so the claimant's next heartbeat/poll
+    // carries the land update even when both misses. Coalesced per event id.
+    this.store.agentHeartbeats.enqueueWake({
+      agentId: identityId, kind: "land", roomId, messageId: incoming.id
+    });
     const signal = {
       signalId: incoming.id,
       kind: "land",

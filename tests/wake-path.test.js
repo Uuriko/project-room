@@ -550,3 +550,66 @@ test("pushNotify on an unknown identity never throws", async t => {
   await hb.flushPushes();
   assert.ok(true, "fire-and-forget ignores unknown identities silently");
 });
+
+const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
+  headers: secret ? { authorization: `Bearer ${secret}` } : {},
+});
+
+// ---- Durable wake contract (#3257) ----
+// Bond proposals, thread assignments, and land updates must enqueue a
+// durable agent_wake_signals row like mentions/DMs do — the push doorbell
+// alone is fire-and-forget, its failures are counter-only, and a bond
+// proposal expires unseen after 7 days when the doorbell misses.
+
+test("trigger: bond proposal enqueues a durable bond wake that survives a dead push endpoint (#3257)", async t => {
+  const { f, origin, transport, identity } = await triggerFixture(t, "bondagent");
+  const proposer = f.store.identities.create("bond-proposer");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: proposer.identityId, memberId: "proposer",
+    displayName: "Proposer", permissions: ["accept_work"],
+  });
+  setTier(f.store.db, "commons", "proposer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  // Fault injection: the doorbell endpoint is dead (D5's proof shape).
+  transport.setStatus(500);
+  const proposed = f.store.command(proposer.secret, "commons", {
+    id: randomUUID(), type: "bond.propose", data: { to: identity.identityId, scopes: ["peer.dm"] },
+  });
+  assert.equal(proposed.event.type, "bond.proposed");
+  const bondId = proposed.event.data.bondId;
+  await f.store.agentHeartbeats.flushPushes();
+  assert.ok(transport.calls.length >= 1, "the doorbell was still attempted");
+  const rows = f.store.db.prepare("SELECT * FROM agent_wake_signals WHERE agent_id=?").all(identity.identityId);
+  assert.equal(rows.length, 1, "exactly one durable wake signal for the proposal");
+  assert.equal(rows[0].kind, "bond");
+  assert.equal(rows[0].room_id, "commons");
+  assert.equal(rows[0].message_id, bondId);
+  // The durable channel carries it even though the doorbell failed: the
+  // party's next wake poll shows the bond wake, and ack drains it.
+  const poll = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
+  assert.deepEqual(poll.pendingWakes.map(w => [w.kind, w.messageId]), [["bond", bondId]]);
+  const ack = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [rows[0].signal_id] }, identity.secret)).json();
+  assert.deepEqual(ack.acknowledged, [rows[0].signal_id]);
+  const quiet = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
+  assert.deepEqual(quiet.pendingWakes, []);
+  // The proposer is never woken about their own proposal.
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE agent_id=?")
+    .get(proposer.identityId).n, 0);
+});
+
+test("trigger: collab assignment enqueues a durable assignment wake (#3257)", async t => {
+  const { f, origin, identity } = await triggerFixture(t, "taskagent");
+  const assignRes = await post(origin, "/api/rooms/commons/collab/assignments", {
+    threadId: randomUUID(), assignee: { kind: "agent", id: "taskagent" },
+  }, f.keys.owner);
+  assert.equal(assignRes.status, 201, "assignment created");
+  const { assignmentId } = await assignRes.json();
+  await f.store.agentHeartbeats.flushPushes();
+  const rows = f.store.db.prepare("SELECT * FROM agent_wake_signals WHERE agent_id=?").all(identity.identityId);
+  assert.equal(rows.length, 1, "exactly one durable wake signal for the assignment");
+  assert.equal(rows[0].kind, "assignment");
+  assert.equal(rows[0].room_id, "commons");
+  assert.equal(rows[0].message_id, assignmentId);
+  const beat = await (await post(origin, "/api/agent-heartbeats", { hostId: "push-host", mode: "wakeable" }, identity.secret)).json();
+  assert.deepEqual(beat.pendingWakes.map(w => [w.kind, w.messageId]), [["assignment", assignmentId]],
+    "the assignee's next heartbeat carries the assignment wake");
+});

@@ -223,7 +223,14 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   assert.equal(wake.pings[0].signal.pr, 969);
   assert.equal(wake.pings[0].signal.head, SHA);
   assert.deepEqual(wake.pings[0].signal.changed, ["green"]);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 0);
+  // #3257: the offline claimant also gets a durable land wake signal —
+  // the doorbell and ping are fire-and-forget, the queue row is not.
+  const landSignals = store.db.prepare("SELECT * FROM agent_wake_signals").all();
+  assert.equal(landSignals.length, 1);
+  assert.equal(landSignals[0].kind, "land");
+  assert.equal(landSignals[0].agent_id, identity.identityId);
+  assert.equal(landSignals[0].room_id, "commons");
+  assert.equal(landSignals[0].message_id, events[1].id);
   const room = store.room("commons");
   const rebuilt = store.rebuildProjection("commons");
   assert.equal(rebuilt.sequence, room.sequence);
@@ -266,7 +273,10 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
     error => error.status === 422 && error.code === "invalid_land_tip"
   );
   assert.equal(wake.warnings.some(line => line.includes(TOKEN)), false);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 0);
+  // #3257: one durable land signal per waking transition — green, behind,
+  // green+merged, and tip. The red transition enqueued none (claimant was
+  // online), and the no-change reportTip enqueued none either.
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE kind='land'").get().n, 4);
 });
 
 test("a missing token is 503 github_unconfigured and is not logged", async t => {
