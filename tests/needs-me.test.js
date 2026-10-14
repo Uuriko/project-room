@@ -166,3 +166,32 @@ test('needs-me clamps a room watermark that is above the room head', t => {
   page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
   assert.deepEqual(page.items.map(item => item.id), ['busy-ask-3'], 'and then resumes delivery');
 });
+
+
+// r216 (John's Tab QA): a numeric since must not follow the agent into rooms it
+// joins later. Once a full pass has recorded every linked room, the legacy
+// floor used to ride every later cursor, so a room joined afterwards inherited
+// it and its first mentions (seq <= that floor) never surfaced.
+test('needs-me numeric floor does not hide a room joined after the cursor', t => {
+  const store = new RoomStore(':memory:');
+  t.after(() => store.close());
+  store.roomFlood = { consume() {} };
+  const rooms = new AgentRooms(store);
+  const ada = store.identities.create('Ada');
+  const bob = store.identities.create('Bob');
+  rooms.create(bob.secret, { roomId: 'busy', title: 'busy', purpose: 'Floor', kind: 'personal' });
+  store.identities.link(bob.secret, 'busy', { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  for (let i = 0; i < 30; i++) store.command(bob.secret, 'busy', { id: `c${i}`, type: 'message.posted', data: { messageId: `c${i}`, body: `chatter ${i}` } });
+  store.command(bob.secret, 'busy', { id: 'busy-ask', type: 'message.posted', data: { messageId: 'busy-ask', body: '@Ada busy ask' } });
+  const seq = collectNeedsMe(store, ada.secret, {}).items.find(item => item.id === 'busy-ask').seq;
+  let page = collectNeedsMe(store, ada.secret, { since: seq });
+  assert.equal(page.hasMore, false);
+  rooms.create(bob.secret, { roomId: 'late', title: 'late', purpose: 'Floor', kind: 'personal' });
+  store.identities.link(bob.secret, 'late', { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  store.command(bob.secret, 'late', { id: 'late-ask', type: 'message.posted', data: { messageId: 'late-ask', body: '@Ada welcome, first ask' } });
+  assert.ok(store.roomAuthority('late').sequence < seq, 'the new room head is below the old numeric since');
+  page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
+  assert.deepEqual(page.items.map(item => `${item.roomId}/${item.id}`), ['late/late-ask'], 'the first mention in a room joined later surfaces');
+  page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });
+  assert.deepEqual(page.items, [], 'and is not replayed');
+});
