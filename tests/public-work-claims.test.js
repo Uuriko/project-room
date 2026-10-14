@@ -113,6 +113,18 @@ test('operator unpublish hides a public-work receipt and its full artifact at th
   assert.throws(() => f.service().artifact(roomResult.receipt.receiptId), code('public_receipt_not_found'));
 });
 
+test('operator unpublish removes public-work tasks from the list and detail reads', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('unpublish-listed-task');
+  f.service().act('unpublish-listed-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('unpublish-listed-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Submitted work', checksReported: [] }));
+  // Before takedown the task advertises itself, including the submitted receipt id.
+  assert.equal(f.service().read('unpublish-listed-task').claim.submittedReceiptId, result.receipt.receiptId);
+  assert.deepEqual(f.service().list().tasks.map(task => task.taskId), ['unpublish-listed-task']);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: f.store.now() });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
+  assert.throws(() => f.service().read('unpublish-listed-task'), code('public_work_not_found'));
+});
+
 test('a reused identity cannot submit an earlier generation after release and reclaim', t => {
   const f = fixture(t), [a] = f.identities; f.enable('same-identity');
   f.service().act('same-identity', a.secret, 'claim', claim('first'));
