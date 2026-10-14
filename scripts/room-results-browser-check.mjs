@@ -369,6 +369,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   await p.locator("#work-done-input").fill("Return one exact local transport result");
   await p.locator("#work-options > summary").click();
   await p.locator("#assignee-select").selectOption(f.connection.memberId);
+  await p.locator("#work-mode-select").selectOption("read");
   await p.locator("#require-verification").uncheck();
   await p.locator("#require-decision").uncheck();
   await p.locator("#create-work-button").click();
