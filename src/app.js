@@ -6577,19 +6577,35 @@ window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
   if (accountHomeFromLocation()) { ensureAccountSession().then(showAccountWorkspace).catch(handleFailureNotice); return; }
   const roomId = selectedRoomFromLocation();
+  // Access held when the page was shown again. A restore that cannot
+  // revalidate it has ended it, even though restore() itself only reports
+  // the failure — the teardown below is what drops the stale room shell.
+  const hadAccess = Boolean(client.session);
   // Same join-flow rule as the initial boot: a #room/ deep link first tries
   // the room-cookie session (no account needed), then the account flow.
   const restoreDeepLink = async () => {
-    if (!roomId) return client.restore();
+    if (!roomId) {
+      try { return await client.restore(); }
+      catch (error) {
+        if (hadAccess && [401, 403].includes(error.status)) client.endAccess();
+        throw error;
+      }
+    }
+    let accessEnded = false;
     try {
       const joined = await client.restore();
       if (joined?.roomId === roomId) return joined;
-      client.endAccess();
+      client.endAccess(); accessEnded = true;
     } catch (error) {
       if (![401, 403].includes(error.status)) throw error;
     }
     const account = await ensureAccountSession();
-    return account?.authenticated ? client.restore(roomId) : null;
+    if (account?.authenticated) return client.restore(roomId);
+    // Neither credential restored the session: the access this page held is
+    // over. End it through the lifecycle's own teardown (the same one a
+    // stream 401 uses) instead of leaving the room shell on stale content.
+    if (hadAccess && !accessEnded) client.endAccess();
+    return null;
   };
   restoreDeepLink().catch(handleFailureNotice);
 });
