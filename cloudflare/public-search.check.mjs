@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
-import { publicAssetPaths } from '../deploy/public-assets.mjs';
+import { publicAssetPaths } from '../server/public-assets.mjs';
 
 function assertPublicPolicy(response, origin) {
   const directives = Object.fromEntries(response.headers.get('content-security-policy').split(';').map(part => {

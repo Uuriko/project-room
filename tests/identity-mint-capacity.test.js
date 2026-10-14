@@ -29,7 +29,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { encodeRow } from "../server/persisted-row.mjs";
 import { GUEST_CREDENTIAL_TTL_MIN_MS } from "../server/guest-invites.mjs";
-import { agentsJson, llmsTxt } from "../deploy/agent-discovery.mjs";
+import { agentsJson, llmsTxt } from "../server/agent-discovery.mjs";
 import {
   AgentIdentities,
   IDENTITY_POW_BITS,

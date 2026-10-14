@@ -4,7 +4,7 @@
 // so the served card carries no signature envelope and no A2A v1.0 JWS
 // `signatures` array. The deploy flow re-signs this file (dirty worktree
 // state, reverted after deploy) when the private key is present;
-// deploy/agent-discovery.mjs only attaches the envelope and the JWS array
+// server/agent-discovery.mjs only attaches the envelope and the JWS array
 // when the signature covers exactly the served build's revision.
 //
 // AGENT_CARD_UNSIGNED_REASON records whether the unsigned state was an

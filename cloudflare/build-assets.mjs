@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, readdir, lstat } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { publicAssetPaths, templateAssetPaths } from '../deploy/public-assets.mjs';
+import { publicAssetPaths, templateAssetPaths } from '../server/public-assets.mjs';
 export const assetPaths = publicAssetPaths;
 const packagedPaths = [...publicAssetPaths, ...templateAssetPaths];
 

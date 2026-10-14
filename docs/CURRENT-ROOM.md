@@ -15,7 +15,7 @@ Do not continue from a ChatGPT worktree or the stale project-root
 
 This is the single deployment record. What the repo can prove: the Worker
 source is `cloudflare/` (`wrangler.jsonc`, `room.mjs`), the door HTML source
-is `deploy/room-entry.mjs`, and the CI `cloudflare` job runs the Worker
+is `server/room-entry.mjs`, and the CI `cloudflare` job runs the Worker
 runtime checks plus `wrangler deploy --dry-run` on every PR. Procedure:
 [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) is the deploy runbook: stage, verify,
 promote the same checkout, probe, and roll back. Canonical Worker first, then
@@ -72,8 +72,8 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Quiet / fast | [QUIET-FAST.md](history/QUIET-FAST.md) | Infer route, hide chrome, no success toasts |
 | Work Item Session | [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) | Title + status + Stop ledger; schema 26 additive; no Slack-with-bots UI |
 | Room lifecycle (issue #6 A2) | `server/room-lifecycle.mjs`, `src/events.js`, Rooms panel in `src/app.js` | Schema 34 adds `rooms.archived_at`. `POST /api/account-rooms` creates a room for an account that administers membership somewhere; owner-only `room.archived` makes a room read-only (reads, streams and export continue, every write is 409 `room_archived`); a member leaves with `member.access_changed` on themself; the switcher lists archived rooms as read-only entries. Personal/organization is a `room.kind` badge until D1 |
-| Demigod `/room` landing | `deploy/room-entry.mjs` | Live on trydemigod.com; Connect P1 + private invite (no lobby publish) after next door publish |
-| getdasha `/room` door | `deploy/room-entry.mjs` `PUBLIC_ROOM_DOOR_HTML` | Worker serves HTML at `/room`; packets stay at `/room/llms.txt`; Connect invite stays private by default |
+| Demigod `/room` landing | `server/room-entry.mjs` | Live on trydemigod.com; Connect P1 + private invite (no lobby publish) after next door publish |
+| getdasha `/room` door | `server/room-entry.mjs` `PUBLIC_ROOM_DOOR_HTML` | Worker serves HTML at `/room`; packets stay at `/room/llms.txt`; Connect invite stays private by default |
 | Research / messaging plans | not in this tree | The research notes were removed from the tree |
 
 ## Inbox and email (yesterday’s Codex work)
@@ -111,7 +111,7 @@ ancestry. #3–#5 were reconciled; see [UNIFICATION-2026-09-07.md](history/UNIFI
 #9’s harness and #16–#18 still need deliberate adaptation. #24 is independent
 conformance. #25/#26 operator API-key work is deferred.
 
-The unlisted Demigod entry is `deploy/room-entry.mjs` (GET/HEAD `/room` and
+The unlisted Demigod entry is `server/room-entry.mjs` (GET/HEAD `/room` and
 `/project-room`, noindex, one link to the isolated origin). A small footer link
 to `/room` is live on Demigod home/weekly/contact/hardware. It is not in the
 main nav.

@@ -1,5 +1,5 @@
 import { demoRoomView, PUBLIC_PAGE_CSP } from "../public-rooms.mjs";
-import { publicPageCsp } from "../../deploy/public-search.mjs";
+import { publicPageCsp } from "../public-search.mjs";
 export function demoRoute(ctx) {
   ctx.rate(`acquisition:${ctx.remoteAddress}`,120);
   const html = demoRoomView({ref:ctx.url.searchParams.get("ref") ?? ""}).html;

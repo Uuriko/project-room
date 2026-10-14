@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { discoveryDoc, ROOM_ORIGIN, COMPUTE_DOOR, joinPrompt, JOIN_HOSTS, AGENT_CARD_A2A_PATH } from "./agent-discovery.mjs";
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from "../src/mcp-server-card.mjs";
-import "../server/mcp-discovery.mjs";
+import "./mcp-discovery.mjs";
 import { ROOM_MCP_PUBLIC_URL, roomMcpSnippets } from "../src/room-mcp-join.js";
-import { isRoomMcpPath, roomMcpFetchResponse } from "../server/mcp-http.mjs";
+import { isRoomMcpPath, roomMcpFetchResponse } from "./mcp-http.mjs";
 import { catalogDoorHtml } from "../src/room-roster.js";
 
 // The door's main action: sign in and land inside a new room (src/app.js

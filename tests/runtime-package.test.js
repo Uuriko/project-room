@@ -84,7 +84,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
   const { buildAssets, assetPaths: committedAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
-  const { templateAssetPaths: committedTemplates } = await import(pathToFileURL(join(destination, "deploy/public-assets.mjs")));
+  const { templateAssetPaths: committedTemplates } = await import(pathToFileURL(join(destination, "server/public-assets.mjs")));
   // Templates such as join.html are copied for the worker loader and are not raw URLs.
   const packagedAssets = [...committedAssets, ...committedTemplates];
   const assets = join(directory, "assets");
@@ -98,7 +98,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   // is "dev") and update the manifest hash. A real production build goes
   // through scripts/sign-agent-card.mjs, which fails closed without the key.
   {
-    const signedPath = "deploy/agent-card-signed.mjs";
+    const signedPath = "server/agent-card-signed.mjs";
     const module = `// Fixture-signed by tests/runtime-package.test.js for the packaged\n// production boot probe — not a real signature (see scripts/sign-agent-card.mjs).\nexport const AGENT_CARD_SIGNATURE = "fixture-signature";\nexport const AGENT_CARD_SIGNED_REVISION = "dev";\nexport const AGENT_CARD_UNSIGNED_REASON = null;\nexport const AGENT_CARD_JWS_SIGNATURES = null;\n`;
     writeFileSync(join(destination, signedPath), module);
     const manifestPath = join(destination, "runtime-manifest.json");

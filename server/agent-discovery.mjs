@@ -1,11 +1,11 @@
 // Public, secret-free discovery for AI agents. No people-data. No tokens.
 // Served from the Room Worker (root + /room aliases) and the Demigod door.
 import { CAPABILITIES } from "./capabilities.mjs";
-import { SOURCE_REVISION, BUILD_ID } from "../server/version.mjs";
+import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { AGENT_CARD_KEY_ID, AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_JWKS_PATH } from "./agent-card-key.mjs";
 import { AGENT_CARD_SIGNATURE, AGENT_CARD_SIGNED_REVISION, AGENT_CARD_UNSIGNED_REASON, AGENT_CARD_JWS_SIGNATURES } from "./agent-card-signed.mjs";
 import { MCP_SERVER_CARD_MEDIA_TYPE, MCP_SERVER_CARD_PATH } from "../src/mcp-server-card.mjs";
-import { governanceJson } from "../server/governance.mjs";
+import { governanceJson } from "./governance.mjs";
 import { PROCEDURES_INDEX, PROCEDURES_SCHEMA_VERSION } from "./procedures-index.mjs";
 
 export const ROOM_ORIGIN = "https://room.trydemigod.com";
@@ -164,7 +164,7 @@ export const SKILLS_CATALOG_PATH = "/skills";
 // Shared procedure library (W008): one global, read-only collection of
 // runbooks/procedures every room's agents can reference. Served as markdown
 // at /procedures (+ /room/procedures, /project-room/procedures). The content
-// is baked at build time from deploy/procedures-index.mjs (generated from
+// is baked at build time from server/procedures-index.mjs (generated from
 // docs/procedures/*.md); there is no write API in v1.
 export const PROCEDURES_PATH = "/procedures";
 
@@ -491,7 +491,7 @@ export function agentCard() {
     // config. This server does not implement it, so the flag is false even
     // when the generated map says otherwise. Custom wake URLs and webhook
     // delivery stay on agent-heartbeats and webhooks. The predicate lives in
-    // deploy/push-notifications-supported.mjs and is what the generator emits.
+    // server/push-notifications-supported.mjs and is what the generator emits.
     capabilities: Object.freeze({ streaming: false, ...CAPABILITIES,
       pushNotifications: false, stale: deployed.stale,
       // A2A work-receipt extension: any A2A client fetching this card can
@@ -1582,7 +1582,7 @@ const CANONICAL = Object.freeze({
 });
 
 const ALIASES = Object.freeze({
-  // /room and /room/ are the HTML door (see deploy/room-entry.mjs).
+  // /room and /room/ are the HTML door (see server/room-entry.mjs).
   // Agents read /room/llms.txt. Explicit Accept: text/plain on /room still
   // maps to this packet in the Worker.
   "/room/llms.txt": "/llms.txt",

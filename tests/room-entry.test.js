@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { runInThisContext } from "node:vm";
-import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
+import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../server/room-entry.mjs";
+import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../server/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
@@ -227,7 +227,7 @@ test("www /room #room/{id} still rewrites Open/People and does not follow Join",
 });
 
 test("public door pages have skip links and /room is indexable (QA4 polish)", async () => {
-  const { PUBLIC_ROOM_DOOR_HTML } = await import("../deploy/room-entry.mjs");
+  const { PUBLIC_ROOM_DOOR_HTML } = await import("../server/room-entry.mjs");
   const html = publicRoomDoorHtml();
   for (const page of [html, PUBLIC_ROOM_DOOR_HTML]) {
     assert.match(page, /<a class="skip" href="#main">Skip to content<\/a>/);

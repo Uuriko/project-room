@@ -69,7 +69,7 @@ integrity.
   **fails closed** without `ROOM_AGENT_CARD_SIGNING_KEY` (unless explicit
   `--allow-unsigned`). Post-deploy, the smoke requires EVERY
   `/.well-known/agent-card.json` fetch on both doors to carry a signature that
-  verifies against the pinned key in `deploy/agent-card-key.mjs` and binds the
+  verifies against the pinned key in `server/agent-card-key.mjs` and binds the
   deployed revision — any unsigned or flapping state fails the smoke and the
   pipeline rolls back.
 - **Rollback:** pre-deploy snapshot (`scripts/deploy-recovery.mjs snapshot`);
@@ -82,7 +82,7 @@ integrity.
 The pipeline verified the *signature after deploy* (smoke) but had no
 **pre-upload signed-artifact verification**: a build-time tamper between
 `sign-agent-card.mjs` and `wrangler deploy` (e.g. a modified generated
-`deploy/agent-card-signed.mjs`, or a stamped `server/version.mjs` that does not
+`server/agent-card-signed.mjs`, or a stamped `server/version.mjs` that does not
 name the gated commit) would ship first and only be caught post-hoc by the
 smoke.
 
@@ -92,10 +92,10 @@ immediately after `sign-agent-card.mjs`. It fail-closes when:
 - the stamped `server/version.mjs` `SOURCE_REVISION` is not a full commit SHA
   or does not equal the build checkout's `git rev-parse HEAD`;
 - `BUILD_ID` is not valid JSON-string stamped content;
-- `deploy/agent-card-signed.mjs` fails signature verification against the
-  pinned key in `deploy/agent-card-key.mjs`, or the signed card does not bind
+- `server/agent-card-signed.mjs` fails signature verification against the
+  pinned key in `server/agent-card-key.mjs`, or the signed card does not bind
   the stamped revision;
-- `deploy/agent-card-signed.mjs` is unsigned while the pinned key exists
+- `server/agent-card-signed.mjs` is unsigned while the pinned key exists
   (no silent unsigned builds in the pipeline).
 
 Because it runs inside the wrangler build command, it covers every deploy path

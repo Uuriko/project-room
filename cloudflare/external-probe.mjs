@@ -13,7 +13,7 @@
 //     A getdasha door origin (https://www.getdasha.com, no /room path) is
 //     prefixed via edgeDoorApiPath: /api/* there is Webflow, not the Worker.
 
-import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
 
 export const FAILURES_BEFORE_ALERT = 2;
 export const DEFAULT_ORIGIN = "https://room.trydemigod.com";

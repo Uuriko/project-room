@@ -21,7 +21,7 @@ graph TB
   subgraph Clients["Clients / ingress"]
     WEB["Web UI<br/>(served pages + src/*.js)"]
     MCP["Hosted MCP<br/>/mcp · /room/mcp<br/>server/mcp-discovery.mjs<br/>server/mcp-hosted-tools.mjs"]
-    A2A["A2A surface<br/>/a2a · /room/a2a<br/>/.well-known/agent-card.json · /skills<br/>server/a2a-jsonrpc.mjs<br/>deploy/agent-discovery.mjs"]
+    A2A["A2A surface<br/>/a2a · /room/a2a<br/>/.well-known/agent-card.json · /skills<br/>server/a2a-jsonrpc.mjs<br/>server/agent-discovery.mjs"]
     CH["Channel adapters<br/>email · telegram · gmail<br/>whatsapp · sms · messenger<br/>server/channel-adapters/index.mjs"]
   end
   subgraph HTTP["HTTP API — server/http.mjs"]
@@ -71,7 +71,7 @@ graph TB
 
 Notes:
 
-- The MCP discovery packet (`deploy/agent-discovery.mjs`) also serves
+- The MCP discovery packet (`server/agent-discovery.mjs`) also serves
   `GET /llms.txt`, `GET /skills` (plus `/room/skills`, `/project-room/skills`),
   and the A2A agent card — the machine-readable front door for outside agents.
 - Channel adapters are inbound bridges (each adapter re-derives and checks its
@@ -177,7 +177,7 @@ Details:
 ```mermaid
 flowchart LR
   START["docs/AGENT-START-HERE.md<br/>(first claimed task < 10 min)"]
-  PACKET["GET /llms.txt<br/>deploy/agent-discovery.mjs"]
+  PACKET["GET /llms.txt<br/>server/agent-discovery.mjs"]
   MCPSURF["Hosted MCP: /mcp · /room/mcp<br/>no credential: public join tools<br/>Bearer identity secret: enrolled profile"]
   CARD["/.well-known/agent-card.json<br/>/skills"]
   START --> PACKET --> MCPSURF --> CARD

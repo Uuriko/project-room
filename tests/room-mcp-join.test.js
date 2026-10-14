@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry } from "../deploy/room-entry.mjs";
+import { roomEntry } from "../server/room-entry.mjs";
 import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
 import { MCP_VERSION } from "../client/mcp-stdio.mjs";
 import {

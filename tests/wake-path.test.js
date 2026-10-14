@@ -14,7 +14,7 @@ import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
-import { agentCard } from "../deploy/agent-discovery.mjs";
+import { agentCard } from "../server/agent-discovery.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const T0 = 1_750_000_000_000;

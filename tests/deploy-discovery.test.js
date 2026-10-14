@@ -6,9 +6,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { buildCapabilities, pluginRoutes, renderCapabilitiesModule, FAMILIES, inventoryRoutes } from "../scripts/build-capabilities.mjs";
-import { agentCard, agentCardJson, llmsTxt, llmsFullTxt, deployedInfo } from "../deploy/agent-discovery.mjs";
-import { pushNotificationsSupported } from "../deploy/push-notifications-supported.mjs";
-import { CAPABILITIES } from "../deploy/capabilities.mjs";
+import { agentCard, agentCardJson, llmsTxt, llmsFullTxt, deployedInfo } from "../server/agent-discovery.mjs";
+import { pushNotificationsSupported } from "../server/push-notifications-supported.mjs";
+import { CAPABILITIES } from "../server/capabilities.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAMILY_NAMES = FAMILIES.map(([name]) => name);
@@ -51,7 +51,7 @@ test("plugin route extraction finds anchored regex prefixes and descriptors", ()
   assert.equal(map["webhooks"], true);
 });
 
-test("checked-in deploy/capabilities.mjs matches a fresh inventory", () => {
+test("checked-in server/capabilities.mjs matches a fresh inventory", () => {
   const fresh = renderCapabilitiesModule(buildCapabilities(inventoryRoutes()));
   const checkedIn = readFileSync(join(root, "deploy", "capabilities.mjs"), "utf8");
   assert.equal(checkedIn, fresh, "run: node scripts/build-capabilities.mjs");

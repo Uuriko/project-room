@@ -1,4 +1,4 @@
-import { connectSnippets } from "../server/connect-snippets.mjs";
+import { connectSnippets } from "./connect-snippets.mjs";
 
 export const comparisonSlugs = Object.freeze([
   "project-room-vs-slack",

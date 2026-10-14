@@ -5,7 +5,7 @@ import { isPublicWorkMcpTool } from './mcp-public-work.mjs';
 // Writes from those tools go through RoomStore.command.
 
 import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
-import { llmsTxt, kitsTxt, joinPrompt } from "../deploy/agent-discovery.mjs";
+import { llmsTxt, kitsTxt, joinPrompt } from "./agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME, ROOM_MCP_PUBLIC_URL,
   ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName

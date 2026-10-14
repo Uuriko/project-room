@@ -8,7 +8,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry } from "../deploy/room-entry.mjs";
+import { roomEntry } from "../server/room-entry.mjs";
 import { MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
 import {
