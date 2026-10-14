@@ -587,8 +587,29 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
     // Every message at or below the cut that is not moving is explicitly retained.
     const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
     const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq };
+    // Spot-check before anything moves (dry run too): every moving message has a
+    // table row equal to its projection record, and a sample is tied back to its
+    // posting event in the log.
+    const rowFor = db.prepare("SELECT seq, body, record_json FROM messages WHERE room_id=? AND message_id=?");
+    const eventAt = db.prepare("SELECT body FROM events WHERE room_id=? AND sequence=?");
+    const step = Math.max(1, Math.floor(moving.length / 25));
+    for (const [index, message] of moving.entries()) {
+      const row = rowFor.get(roomId, message.id);
+      let record = null;
+      try { record = JSON.parse(row?.record_json); } catch { /* fails the check below */ }
+      let ok = Boolean(row) && isDeepStrictEqual(record, currentRecord(message)) && row.body === storedBody(message);
+      if (ok && index % step === 0) {
+        let posted = null;
+        try { posted = JSON.parse(eventAt.get(roomId, row.seq)?.body); } catch { /* fails below */ }
+        ok = posted?.type === POSTED && (posted.data?.messageId || posted.id) === message.id;
+      }
+      if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
+    }
     if (dryRun) return result;
     const next = { ...state, messages: inProjection.filter(message => !movingIds.has(message.id)) };
+    // The marker must never claim a message that is still in the projection.
+    const priorArchived = archivedMessageIds(db, roomId);
+    if (next.messages.some(message => movingIds.has(message.id) || priorArchived.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
     next.messagesArchive = { throughSeq, count: marker.count + moving.length, retainedIds };
     db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
     return result;
