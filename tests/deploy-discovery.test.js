@@ -53,7 +53,7 @@ test("plugin route extraction finds anchored regex prefixes and descriptors", ()
 
 test("checked-in server/capabilities.mjs matches a fresh inventory", () => {
   const fresh = renderCapabilitiesModule(buildCapabilities(inventoryRoutes()));
-  const checkedIn = readFileSync(join(root, "deploy", "capabilities.mjs"), "utf8");
+  const checkedIn = readFileSync(join(root, "server", "capabilities.mjs"), "utf8");
   assert.equal(checkedIn, fresh, "run: node scripts/build-capabilities.mjs");
 });
 
