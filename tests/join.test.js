@@ -7,6 +7,7 @@ import {
   joinCodePath,
   joinRoomHint,
   joinRoomIdFromPath,
+  requestDoorRoom,
   serviceApiBase,
   roomEntryHref,
   sameOriginRelativeNext,
@@ -81,6 +82,15 @@ test("room hint only echoes a plausible room id", () => {
   assert.equal(joinRoomHint(""), null);
   assert.equal(joinRoomHint("?room=<script>"), null);
   assert.equal(joinRoomHint("?room=a/b"), null);
+});
+
+test("request-access door room: address fixes it, hint prefills, bare page defaults to the community room", () => {
+  assert.deepEqual(requestDoorRoom("/rooms/johns-project-room", ""), { roomId: "johns-project-room", fixed: true });
+  assert.deepEqual(requestDoorRoom("/room/rooms/commons", "?room=other"), { roomId: "commons", fixed: true });
+  assert.deepEqual(requestDoorRoom("/join", "?room=team-7"), { roomId: "team-7", fixed: false });
+  assert.deepEqual(requestDoorRoom("/join", "?room=<script>"), { roomId: "muse-room", fixed: false });
+  assert.deepEqual(requestDoorRoom("/join", ""), { roomId: "muse-room", fixed: false });
+  assert.deepEqual(requestDoorRoom("/room/join", ""), { roomId: "muse-room", fixed: false });
 });
 
 test("room id comes from the /rooms/<id> address the join page is served at", () => {

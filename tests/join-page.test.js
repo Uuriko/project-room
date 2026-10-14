@@ -264,6 +264,21 @@ test("join page carries the code-entry card for humans holding a bare code (H-S3
   }
 });
 
+test("join page carries the consolidated request-access door", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/room/join", "/rooms/commons"]) {
+    const html = await (await fetch(`${origin}${path}`, { headers: { Accept: "text/html" } })).text();
+    assert.match(html, /id="join-request"/, `${path} has the request-access card`);
+    assert.match(html, /id="join-request-form"/, `${path} has the request form`);
+    assert.match(html, /id="join-request-room"/, `${path} has the room field`);
+    assert.match(html, /id="join-request-name"/, `${path} has the name field`);
+    assert.match(html, /id="join-request-note"/, `${path} has the note field`);
+    assert.match(html, /id="join-request-referred"/, `${path} has the referrer field`);
+    assert.match(html, /id="join-request-submit"/, `${path} has the submit button`);
+    assert.match(html, /id="join-request-status"/, `${path} has the status line`);
+  }
+});
+
 test("room address serves the join page to browsers, JSON 404 to API clients (H-S1)", async t => {
   const { origin } = await serve(t);
   // A browser opening /rooms/<id> gets the join page (room mode), on both doors.
