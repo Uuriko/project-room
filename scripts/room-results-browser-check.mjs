@@ -361,7 +361,14 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   const { channelJourneyFixture, channelPeer } = await import("./channel-journey-fixture.mjs");
   const f = await channelJourneyFixture(t), browser = await chromium.launch({ headless: true });
   t.after(() => browser.close());
+  const started = performance.now(), traffic = []; let clicks = 0;
+  f.server.on("request", (request, response) => {
+    const row = { method: request.method, path: request.url.split("?")[0], start: performance.now() }; traffic.push(row);
+    response.once("finish", () => { row.status = response.statusCode; row.elapsedMs = Math.round(performance.now() - row.start); });
+  });
   const p = await browser.newPage(); p.setDefaultTimeout(10000);
+  await p.exposeFunction("recordTransportJourneyClick", () => { clicks++; });
+  await p.addInitScript(() => document.addEventListener("click", () => { void window.recordTransportJourneyClick(); }));
   const errors = []; p.on("pageerror", error => errors.push(error.message));
   await p.goto(f.origin); await signInFixture(p, f.ownerKey);
   await f.connectAgent();
@@ -432,4 +439,8 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   assert.equal(f.store.room("commons").state.messages.filter(message => message.body === body).length, 1);
   assert.equal(await p.locator("#message-input").inputValue(), "Keep my unsent follow-up");
   assert.deepEqual(errors, []);
+  console.log("LOCAL_TRANSPORT_JOURNEY " + JSON.stringify({ elapsedMs: Math.round(performance.now() - started), clicks,
+    requests: traffic.length, finishedRequests: traffic.filter(row => row.status).length,
+    requestsByMethod: Object.fromEntries([...new Set(traffic.map(row => row.method))].map(method => [method, traffic.filter(row => row.method === method).length])),
+    scope: "local sign-in through saved scoped channel, deterministic MCP result, restart, continuation reply/ack; no external model or human think time" }));
 });
