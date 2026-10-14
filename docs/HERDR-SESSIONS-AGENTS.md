@@ -121,7 +121,7 @@ side (isolation, fencing, audit) is in
 - [SESSION-API.md](SESSION-API.md) — HTTP endpoint reference: work
   sessions, work claims, and the supervision-card APIs (marked pending
   where unlanded).
-- [WORK-ITEM-SESSION.md](history/WORK-ITEM-SESSION.md) — the legacy session ledger
+- [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) — the legacy session ledger
   model; unchanged when the flag is off.
 - [SESSION-BUDGETS.md](history/SESSION-BUDGETS.md) — budgets stay room-side under
   herdr.

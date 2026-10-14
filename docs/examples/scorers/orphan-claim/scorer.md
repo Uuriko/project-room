@@ -17,13 +17,13 @@ selfImprovement: true
 
 Judge only the receipt + trace for this Work Item. Return exactly one label.
 
-Contract: [ROOM-SCORER.md](../../../history/ROOM-SCORER.md). Receipt:
-[ROOM-RECEIPT-V1.md](../../../history/ROOM-RECEIPT-V1.md). Graph:
+Contract: [ROOM-SCORER.md](../../../ROOM-SCORER.md). Receipt:
+[ROOM-RECEIPT-V1.md](../../../ROOM-RECEIPT-V1.md). Graph:
 [ROOM-RECEIPT-GRAPH-V0.md](../../../history/ROOM-RECEIPT-GRAPH-V0.md).
 Architecture spine:
 [ROOM-COHESIVE-ARCHITECTURE.md](../../../history/ROOM-COHESIVE-ARCHITECTURE.md).
 Closed-set labels may pin `model: jev` when a TypeSafe / Gateway key
-is present ([ROOM-SCORER.md](../../../history/ROOM-SCORER.md) Jev rung).
+is present ([ROOM-SCORER.md](../../../ROOM-SCORER.md) Jev rung).
 Absent key → `fast-default`. `delegation.spawn` without
 `parentReceiptId` is an orphan claim.
 The spawn-steal research note is not in this tree.

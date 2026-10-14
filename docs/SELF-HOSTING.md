@@ -28,7 +28,7 @@ operator OAuth configuration; it is not required for email/password signup.
 Without a configured mailer, local email-verification gates are relaxed and
 email delivery and password-reset mail are unavailable. Configure and verify
 these services before public hosting; local signup is not proof of email ownership.
-Email Inbox examples are fixture-only; see [UNIFIED-INBOX.md](history/UNIFIED-INBOX.md)
+Email Inbox examples are fixture-only; see [UNIFIED-INBOX.md](UNIFIED-INBOX.md)
 for provider-specific limitations. No model subscription is included.
 
 ### Optional operator provisioning
