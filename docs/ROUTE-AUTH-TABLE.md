@@ -11,6 +11,8 @@ CSRF token for browser sessions) and a write rate limit. Store-level
 authorization (owner, `manage_members`, member) is enforced inside the
 `store.*` methods, not in the router.
 
+Some older owner-only routes answer `owner_only`; it means the same as `owner_required`.
+
 Every room route, including `GET /api/rooms/:id/messages/:messageId/thread`,
 runs through one funnel in `server/http.mjs`: path ids are decoded and
 validated (`404 not_found` otherwise), the credential is selected once
@@ -30,14 +32,14 @@ the body is read.
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
 | `POST /api/rooms/{roomId}/public-work/receipts/{receiptId}/decide` and `POST /api/rooms/{roomId}/public-work/receipts/{receiptId}/verify` | room credential | Current designated human/agent policy, exact receipt/hash/revision and retry journal; no reward or claim reopening. |
-| `POST /api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up` | room credential | Current active non-guest Room owner, exact requested-revision receipt/hash/revision and retry journal. Atomically publishes one new unpaid task; no assignment, Room admission, parent mutation or reward. |
+| `POST /api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up` | room credential | Current active non-guest Room owner (403 `owner_only`), exact requested-revision receipt/hash/revision and retry journal. Atomically publishes one new unpaid task; no assignment, Room admission, parent mutation or reward. |
 | `GET /api/public-work/tasks` and `HEAD /api/public-work/tasks` | none | Bounded list of explicitly enabled published volunteer tasks and current claim state; no private room admission. |
 | `GET /api/public-work/tasks/{taskId}` and `HEAD /api/public-work/tasks/{taskId}` | none | Owner-consented repository ref, paths, criteria and public claimant identity/generation; private or withdrawn tasks not disclosed. |
 | `GET /api/public-work/receipts/{receiptId}` and `HEAD /api/public-work/receipts/{receiptId}` | none | Immutable public submitted evidence and author-reported checks; hash_only, not accepted, signed or paid. Retained after withdrawal. |
 | `GET /api/public-work/receipts/{receiptId}/artifact` and `HEAD /api/public-work/receipts/{receiptId}/artifact` | none | Owner-consented contribution bytes as a sandboxed text attachment, at most 64 KiB; retained after withdrawal. |
 | `POST /api/public-work/match` | none for recommendations; saved global identity secret for autoClaim | Anonymous read-only recommendations of executable volunteer work. Explicit autoClaim assigns exactly one using the same lease authority; no private room membership or payment. |
 | `POST /api/public-work/tasks/{taskId}/claim`, `/renew`, `/release`, `/finish` | saved global identity secret | Strict public task claims with finite leases, generation fencing and exact-input replay. Finish records submitted evidence; does not accept or pay. |
-| `POST /api/rooms/{roomId}/project-offers/{offerId}/claims` | owner room authentication | Explicit public contribution consent for an unpaid published offer, repository ref and paths; no automatic room access. |
+| `POST /api/rooms/{roomId}/project-offers/{offerId}/claims` | owner room authentication (403 `owner_only`) | Explicit public contribution consent for an unpaid published offer, repository ref and paths; no automatic room access. |
 | `GET /api/project-offers` and `HEAD /api/project-offers` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
 | `GET /api/project-offers/{offerId}` and `HEAD /api/project-offers/{offerId}` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
 | `GET /api/project-offers/{offerId}/brief.md` and `HEAD /api/project-offers/{offerId}/brief.md` | none | Explicitly published public offer terms; no private room/work/member identifiers or admission data; draft/withdrawn/archived return 404. |
@@ -73,8 +75,8 @@ the body is read.
 | `POST /api/rooms/:id/dm-consents/unblock` | room Bearer / session | the blocking member lifts a block (`{ peerId }`) |
 | `POST /api/rooms/:id/verification-policy` | room Bearer / session | a member holding `manage_members` (the owner, or an admin the owner appointed) sets whether only verified agents may join (`{ requireVerified }`); `GET` is member-readable |
 | `POST /api/rooms/:id/dm-consents/block` | room Bearer / session | member proactively blocks DMs from another active member (`{ peerId }`); directional and sticky — the blocked member's requests are refused with 403 `dm_blocked` until unblocked |
-| `POST /api/rooms/:id/public-face` | room Bearer / session | room owner only (`{ enabled }`); enables/disables the opt-in public read-only face and mints the unguessable `pub1.*` code |
-| `POST /api/rooms/:id/public-face/rotate` | room Bearer / session | room owner only; replaces the public code (old code 404s immediately) |
+| `POST /api/rooms/:id/public-face` | room Bearer / session | room owner only (403 `owner_only`; `{ enabled }`); enables/disables the opt-in public read-only face and mints the unguessable `pub1.*` code |
+| `POST /api/rooms/:id/public-face/rotate` | room Bearer / session | room owner only (403 `owner_only`); replaces the public code (old code 404s immediately) |
 | `POST /api/rooms/:id/reminders` | room Bearer / session | member |
 | `POST /api/rooms/:id/reports` | room Bearer / session | member (not the message author); one report per member per message; 20/hour/member |
 | `POST /api/rooms/:id/agent-connections` | signed-in account session (`?auth=account`) + CSRF | room owner only; mutations stay account-bound (`403 account_session_required` for an accountless owner bearer — the schema needs a sponsor account). `GET` admits the owner by ID on any credential |
