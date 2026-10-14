@@ -26,11 +26,20 @@ test("parse join code from the path, rejecting lookalikes", () => {
   assert.equal(parseJoinCode("/join"), null);
   assert.equal(parseJoinCode("/join/"), null);
   assert.equal(parseJoinCode("/join/RM-ABC123/extra"), null);
-  assert.equal(parseJoinCode("/join/not-a-code"), null);
   assert.equal(parseJoinCode("/join/RM-ABC;DROP"), null);
   assert.equal(parseJoinCode("/rooms/join/RM-ABC123"), null);
   assert.equal(parseJoinCode("/join.html"), null);
   assert.equal(parseJoinCode(null), null);
+});
+
+test("a bogus code in the URL is a claim the server judges, not a silent entry form", () => {
+  // Regression (bounced PR #3267): the RM- shape gate here swallowed bogus
+  // codes, so /join/BOGUS-CODE rendered the code-entry form and the error
+  // state never appeared — the a11y browser checks timed out waiting for
+  // #join-error. The preview call must see the claim and answer for it.
+  assert.equal(parseJoinCode("/join/BOGUS-CODE"), "BOGUS-CODE");
+  assert.equal(parseJoinCode("/join/not-a-code"), "NOT-A-CODE");
+  assert.equal(joinCodeFromLocation({ pathname: "/join/BOGUS-CODE", search: "" }), "BOGUS-CODE");
 });
 
 test("invite code input accepts a bare code or a pasted link, rejecting the rest", () => {
@@ -54,7 +63,8 @@ test("join code resolution: path wins, ?code= is the fallback", () => {
   assert.equal(joinCodeFromLocation({ pathname: "/join/RM-PATH1", search: "?code=RM-QUERY1" }), "RM-PATH1");
   assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=RM-QUERY1" }), "RM-QUERY1");
   assert.equal(joinCodeFromLocation({ pathname: "/room/join", search: "?code=rm-query1" }), "RM-QUERY1");
-  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=nope" }), null);
+  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=nope" }), "NOPE");
+  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=!!!" }), null);
   assert.equal(joinCodeFromLocation({ pathname: "/join", search: "" }), null);
   assert.equal(joinCodeFromLocation({ pathname: "/join/!!!", search: "" }), null);
 });

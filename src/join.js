@@ -14,16 +14,25 @@ import { formatSessionExpiry } from "./session-expiry.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
-// "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the code, else null.
+// "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the claimed code,
+// else null. A code carried in the URL is a CLAIM, not a verdict: the
+// server preview is the authority, and a bogus or expired code must reach
+// it so the visitor lands on the error state ("this invite is no longer
+// valid") instead of a silent entry form. Only the token SHAPE is checked
+// here (single path segment); the strict RM- shape is enforced on what a
+// human types into the entry form (parseInviteCodeInput below), where a
+// non-code means "not a code yet", not an error screen.
 export function parseJoinCode(pathname) {
   const match = /^\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})\/?$/.exec(String(pathname ?? ""));
   const code = (match?.[1] ?? "").toUpperCase();
-  return JOIN_CODE_PATTERN.test(code) ? code : null;
+  return code || null;
 }
 
 // A human is usually handed a bare code (or a whole link pasted from chat),
-// not a tidy /join/<code> URL: accept the code, a full invite link, or a
-// ?code= value, and normalize all of them to the canonical code.
+// not a tidy /join/<code> URL: accept the code or a full invite link and
+// normalize to the canonical code. Strict on purpose — this validates the
+// entry FORM, where a bad shape is corrected inline before navigating;
+// URL-carried codes take the claimed-code path above instead.
 export function parseInviteCodeInput(value) {
   const text = String(value ?? "").trim();
   if (!text) return null;
@@ -32,13 +41,20 @@ export function parseInviteCodeInput(value) {
   return JOIN_CODE_PATTERN.test(candidate) ? candidate : null;
 }
 
+// A ?code= value is a claimed code too (same rule as the path segment):
+// single-token shape or nothing; the server preview judges validity.
+export function claimedCode(value) {
+  const text = String(value ?? "").trim().toUpperCase();
+  return /^[A-Z0-9_-]{1,64}$/.test(text) ? text : null;
+}
+
 // The code for this page load: the path wins; ?code= is the fallback so a
 // link shared as /join?code=RM-… works too.
 export function joinCodeFromLocation(locationLike) {
   const fromPath = parseJoinCode(locationLike?.pathname);
   if (fromPath) return fromPath;
   const params = new URLSearchParams(String(locationLike?.search ?? "").replace(/^\?/, ""));
-  return parseInviteCodeInput(params.get("code"));
+  return claimedCode(params.get("code"));
 }
 
 // Where the code-entry form sends the browser: the canonical code URL on
