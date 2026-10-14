@@ -34,13 +34,14 @@ const CLIENT = { clientId: "muse-qa", name: "Muse QA", redirectUris: ["https://m
 const ACCOUNT_COOKIE = "account_session";
 const cookiePair = token => `${ACCOUNT_COOKIE}=${token}`;
 
-async function startServer(t) {
+async function startServer(t, { streamInterval } = {}) {
   const fixture = createAcceptanceFixture();
   const sent = [];
   const server = createRoomServer({
     store: fixture.store,
     magicLinkMailer: createMagicLinkMailer({ send: async payload => { sent.push(payload); } }),
     connectorClients: [CLIENT],
+    streamInterval,
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
@@ -392,4 +393,36 @@ test("store inventory: methods recorded at login, rotation carries them, sign-ou
   store.db.prepare("UPDATE account_credentials SET revoked=1 WHERE hash=?").run(parent);
   assert.equal(store.listAccountSessions("cx4-store-alice").length, 0);
   assert.throws(() => store.authenticateAccountSession(slotC.token), /revoked/);
+});
+
+test("targeted native revoke closes an already-open real HTTP stream", { timeout: 15000 }, async t => {
+  const { origin, sent, store } = await startServer(t, { streamInterval: 10 });
+  const browser = await magicLogin(origin, sent, "stream-review@example.com");
+  const native = await desktopRedeem(origin, browser);
+  const view = await viewOf(origin, native.token);
+  store.initialize(initialRoom("held-stream"));
+  store.bindHumanAccount("held-stream", "owner", view.account.id);
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const stream = await fetch(`${origin}/api/rooms/held-stream/stream`, {
+    headers: { ...readHeaders(native, view), "X-Project-Room-Auth": "account", Accept: "text/event-stream" },
+    signal: controller.signal,
+  });
+  assert.equal(stream.status, 200);
+  const reader = stream.body.getReader();
+  await reader.read();
+  const desktop = (await listAccountSessions(origin, browser)).find(item => item.method === "desktop");
+  const revoked = await revokeOne(origin, browser, desktop.id, await viewOf(origin, browser.token));
+  assert.equal(revoked.status, 200);
+  let tail = "";
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      tail += new TextDecoder().decode(value);
+    }
+  } finally { clearTimeout(timeout); }
+  assert.match(tail, /event: access-ended/);
+  assert.equal((await listAccountSessions(origin, browser)).length, 1);
 });
