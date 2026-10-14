@@ -70,11 +70,11 @@ export function parseJunitFileDurations(xml, { cwd = process.cwd() } = {}) {
   // Token scan in document order so a testcase can inherit the file from
   // its enclosing testsuite, and so a file-named suite's time is only used
   // when none of its testcases contributed.
-  const TOKEN = /<(testsuite|testcase)\b((?:\s+[\w:.-]+\s*=\s*"[^"]*")*)\s*(\/?)>|<\/testsuite\s*>/g;
+  const TAG_PATTERN = /<(testsuite|testcase)\b((?:\s+[\w:.-]+\s*=\s*"[^"]*")*)\s*(\/?)>|<\/testsuite\s*>/g;
   const suiteStack = [];
   const suitesWithCases = new Set();
   let m;
-  while ((m = TOKEN.exec(text))) {
+  while ((m = TAG_PATTERN.exec(text))) {
     if (m[0].startsWith("</")) {
       const suite = suiteStack.pop();
       if (suite && FILE_LIKE.test(suite.name) && !suitesWithCases.has(junitDisplayPath(suite.name, cwd))) {
