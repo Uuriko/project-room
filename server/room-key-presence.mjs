@@ -1,3 +1,4 @@
+import { ownMember } from "../src/events.js";
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
@@ -81,10 +82,13 @@ export function scopedKeyRoomBinding(store, auth) {
     refuse(SCOPED_KEY_REFUSAL, "This API key is scoped to several rooms; a scoped listener binds exactly one room");
   const roomId = roomScopes[0].slice("mcp:room:".length);
   if (!roomId) refuse(SCOPED_KEY_REFUSAL, "This API key's room scope names no room");
-  const member = store.db.prepare(
-    "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, auth.identityId);
-  if (!member)
-    refuse(SCOPED_KEY_REFUSAL, "This API key's identity is not a member of its scoped room");
+  const link = store.db.prepare(
+    "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(roomId, auth.identityId);
+  const member = link ? ownMember(store.room(roomId).state.members, link.memberId) : null;
+  // Links survive access suspension. Recheck the current room member, not
+  // just the identity mapping, including when a held poll reauthorizes.
+  if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
+    refuse(SCOPED_KEY_REFUSAL, "This API key's identity is not an active member of its scoped room");
   return { roomId,
     hostPrefix: `ak_${createHash("sha256").update(auth.keyId).digest("hex").slice(0, 32)}_` };
 }
