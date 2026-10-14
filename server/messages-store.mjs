@@ -630,3 +630,32 @@ export function compactReplayLikeArchive(db, roomId, state) {
   state.messagesArchive = { throughSeq: marker.throughSeq, count: archived.size, retainedIds: marker.retainedIds };
   return state;
 }
+
+// Rollback of the archive: put every archived message back into the stored
+// projection and drop the marker, so code that does not know the marker (a
+// flag-off deploy, the old recovery audit) sees the whole room again. The
+// archived records come from replaying the event log; nothing else in the
+// projection changes. Returns how many messages were restored.
+export function restoreArchivedMessages(store, roomId) {
+  if (store?.readOnly) throw new Error("Read-only stores do not restore archived messages");
+  return store.transaction(() => {
+    const db = store.db;
+    const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    if (!head) return 0;
+    const archived = archivedMessageIds(db, roomId);
+    const state = store.room(roomId).state;
+    if (!state.messagesArchive && !archived.size) return 0;
+    const present = new Set((state.messages ?? []).map(message => message.id));
+    const replayed = new Map((store._replayRoom(roomId, head.sequence).state.messages ?? []).map(message => [message.id, message]));
+    const missing = [...archived].filter(id => !present.has(id));
+    if (missing.some(id => !replayed.has(id))) throw new Error("Archived message could not be restored from the event log");
+    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
+    const messages = [...(state.messages ?? []), ...missing.map(id => replayed.get(id))]
+      .sort((a, b) => (seqs.get(a.id) ?? Infinity) - (seqs.get(b.id) ?? Infinity));
+    const next = { ...state, messages };
+    delete next.messagesArchive;
+    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: false }), roomId);
+    store._projectionCache?.clear?.();
+    return missing.length;
+  });
+}
