@@ -525,7 +525,12 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (items.length === MAX_ITEMS && link !== links.at(-1)) { hasMore = true; break; }
   }
   // Retain the old rooms/land shape and extend it only for continuation/ties.
-  const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
+  // r216 (John's Tab QA): a legacy numeric floor must ride only while the read
+  // is still paginating (hasMore). Once a pass records every linked room, the
+  // floor would follow the agent into a room it joins later and hide that
+  // room's first mentions forever; without it, cursor.rooms/landIds keep the
+  // delivered state exact and nothing replays.
+  const cursor = { rooms, land, landIds, ...(parsed.number !== null && hasMore ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
   return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
 }
