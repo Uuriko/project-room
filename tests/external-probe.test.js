@@ -12,6 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { wireNodeJobs } from "../server/jobs.mjs";
 import worker from "../cloudflare/external-probe-worker.mjs";
+import { CRON_JOBS, jobHealthView, jobHealthResponse, jobHealthUnavailable } from "../cloudflare/job-heartbeat.mjs";
 import { runExternalProbe } from "../cloudflare/external-probe.mjs";
 
 function listen(server) {
@@ -493,4 +494,31 @@ test("a jobs-only outage alerts after two runs and recovers with the board", asy
   });
   assert.equal(recovered.ok, true);
   assert.deepEqual(hooks, ["outage", "recovery"]);
+});
+
+
+test("jobs diagnostics consume the real Worker health response, including 503", async () => {
+  const now = Date.now();
+  const healthy = Object.fromEntries(CRON_JOBS.map(job => [job.name, { lastRunAt: now, lastSuccessAt: now, consecutiveFailures: 0 }]));
+  const name = CRON_JOBS[0].name;
+  const probe = async response => {
+    const fallback = jobsFetch(HEALTHY_JOBS);
+    const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, input =>
+      String(input).endsWith("/api/health/jobs") ? response : fallback(input));
+    assert.doesNotMatch(JSON.stringify(result.checks), /private-error-secret/);
+    return result.checks.find(check => check.id === "jobs");
+  };
+  assert.equal((await probe(jobHealthResponse(jobHealthView(healthy, now)))).ok, true);
+  const stale = structuredClone(healthy); stale[name].lastSuccessAt = 0;
+  const staleCheck = await probe(jobHealthResponse(jobHealthView(stale, now)));
+  assert.equal(staleCheck.status, 503); assert.equal(staleCheck.reason, "job_stale"); assert.equal(staleCheck.detail, name);
+  const failing = structuredClone(healthy); failing[name].consecutiveFailures = 1; failing[name].lastError = "private-error-secret";
+  const failingCheck = await probe(jobHealthResponse(jobHealthView(failing, now)));
+  assert.equal(failingCheck.status, 503); assert.equal(failingCheck.reason, "job_failing"); assert.equal(failingCheck.detail, `${name} (unclassified)`);
+  for (const response of [jobHealthUnavailable(), new Response("private-error-secret", { status: 503 }),
+    new Response(JSON.stringify({ ...HEALTHY_JOBS, schema: "unknown" }), { status: 503 }),
+    new Response(JSON.stringify(HEALTHY_JOBS), { status: 503 })]) {
+    const check = await probe(response);
+    assert.equal(check.ok, false); assert.equal(check.status, 503); assert.equal(check.reason, "http_status"); assert.equal(check.detail, null);
+  }
 });

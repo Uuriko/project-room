@@ -212,9 +212,16 @@ async function runChecks(origin, fetchImpl, limitMs) {
   const jobs = checkCall("jobs", async () => {
     const response = await fetchImpl(new URL("/api/health/jobs", origin), { method: "GET", headers, redirect: "manual", signal: signal() });
     const body = await readLimited(response);
-    if (response.status !== 200) return fail("jobs", response.status, "http_status");
+    if (![200, 503].includes(response.status)) return fail("jobs", response.status, "http_status");
     let parsed;
-    try { parsed = JSON.parse(body); } catch { return fail("jobs", 200, "invalid_json"); }
+    try { parsed = JSON.parse(body); } catch { return fail("jobs", response.status, response.status === 503 ? "http_status" : "invalid_json"); }
+    // The real jobs route uses 503 for stale/failing heartbeats. Only its
+    // known diagnostic envelope may refine that HTTP failure; unavailable
+    // or unrelated upstream responses retain the generic, text-free fallback.
+    if (response.status === 503 && (parsed?.schema !== "room.job-health/1"
+      || !["stale", "failing"].includes(parsed.status) || !Array.isArray(parsed.jobs) || !parsed.jobs.length)) {
+      return fail("jobs", 503, "http_status");
+    }
     if (!parsed || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return fail("jobs", 200, "jobs_missing");
     const active = parsed.jobs.filter(job => job && typeof job === "object" && job.enabled !== false && job.status !== "disabled");
     const nameOf = job => (typeof job.name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(job.name) ? job.name : "job");
@@ -224,7 +231,7 @@ async function runChecks(origin, fetchImpl, limitMs) {
         const code = typeof job.lastErrorCode === "string" && /^[a-z0-9_]{1,64}$/i.test(job.lastErrorCode) ? job.lastErrorCode : "unclassified";
         return `${nameOf(job)} (${code})`;
       }).join(", ");
-      return fail("jobs", 200, "job_failing", detail);
+      return fail("jobs", response.status, "job_failing", detail);
     }
     const now = Date.now();
     const stale = active.filter(job => {
@@ -236,8 +243,8 @@ async function runChecks(origin, fetchImpl, limitMs) {
       const lastRun = Date.parse(job.lastRunAt ?? job.lastSuccessAt ?? "");
       return Number.isFinite(periodMs) && periodMs > 0 && Number.isFinite(lastRun) && now - lastRun > periodMs * 2.5;
     });
-    if (stale.length) return fail("jobs", 200, "job_stale", stale.slice(0, 3).map(nameOf).join(", "));
-    return pass("jobs", 200);
+    if (stale.length) return fail("jobs", response.status, "job_stale", stale.slice(0, 3).map(nameOf).join(", "));
+    return response.status === 200 ? pass("jobs", 200) : fail("jobs", 503, "http_status");
   });
   const checks = await Promise.all([ready, mcp, llms, jobs]);
   return checks;
