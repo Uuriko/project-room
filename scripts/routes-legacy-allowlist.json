@@ -287,6 +287,10 @@
     },
     {
       "method": "POST",
+      "path": "/api/agent-invites/preview"
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-invites/redeem"
     },
     {
@@ -4056,7 +4060,7 @@
       "path": "/api/agent-identities/{id}/verify"
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/agent-invites/preview"
     },
     {

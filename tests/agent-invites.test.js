@@ -89,8 +89,15 @@ test("owner mints a one-time code; the raw code is never stored", async t => {
   assert.deepEqual(res.json.next.map(n => n.action), ["share-code", "preview-invite", "list-invites"]);
   assert.ok(res.json.next[0].description.includes(res.json.code),
     "share-code tells the owner what the invitee sends to redeem");
-  assert.ok(res.json.next[1].path.includes(encodeURIComponent(res.json.code)),
-    "preview-invite points at the pre-redemption consent screen for this code");
+  // #3259: the code travels in the POST body, never in a URL — the
+  // preview-invite step names the bare path and carries the code in its
+  // body example only.
+  assert.equal(res.json.next[1].method, "POST");
+  assert.equal(res.json.next[1].path, "/api/agent-invites/preview");
+  assert.ok(res.json.next[1].description.includes(res.json.code),
+    "preview-invite shows the owner the exact code to send in the POST body");
+  assert.ok(res.json.next.every(n => !String(n.path ?? "").includes(res.json.code)),
+    "no next step puts the live code in a path");
   assert.ok(res.json.next.every(n => typeof n.description === "string"),
     "every next step explains what to do");
 });
@@ -454,7 +461,7 @@ test("preview returns the grant without consuming the code", async t => {
   const { origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey, { profile: "contribute", expiresInMinutes: 60, displayName: "Plug Bot" });
   assert.equal(minted.status, 201, JSON.stringify(minted.json));
-  const preview = await get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(minted.json.code)}`);
+  const preview = await post(origin, "/api/agent-invites/preview", { code: minted.json.code });
   assert.equal(preview.status, 200, JSON.stringify(preview.json));
   assert.equal(preview.json.roomId, "commons");
   assert.equal(preview.json.roomTitle, "Project Room Commons");
@@ -471,7 +478,7 @@ test("preview returns the grant without consuming the code", async t => {
 
 test("preview folds failures like redeem: unknown, used, revoked, expired", async t => {
   const { origin, ownerKey } = await serve(t);
-  const preview = code => get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(code)}`);
+  const preview = code => post(origin, "/api/agent-invites/preview", { code });
   const unknown = await preview("RM-AAAAAAAAAAAAAAAA");
   assert.equal(unknown.status, 404);
   assert.equal(unknown.json.error.code, "invite_unavailable");

@@ -312,9 +312,11 @@ export async function redeemAgentInvite(origin, code, displayName, options = {})
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
   return value;
 }
-// Preview consumes nothing and returns no identity data.
+// Preview consumes nothing and returns no identity data. The code travels
+// in the POST body (#3259): it is a live credential and must never sit in
+// a URL, where logs and history would keep it usable.
 export async function previewAgentInvite(origin, code, options = {}) {
-  const value = await discoveryRequest(origin, `/api/agent-invites/preview?code=${encodeURIComponent(code)}`, {}, options);
+  const value = await discoveryRequest(origin, "/api/agent-invites/preview", { method: "POST", body: { code } }, options);
   if (typeof value?.roomId !== "string" || !Array.isArray(value?.permissions) || typeof value?.profile !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite preview");
   return value;

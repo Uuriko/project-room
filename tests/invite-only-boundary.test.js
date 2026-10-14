@@ -158,9 +158,10 @@ const PROBES = {
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
-  // Invite preview: shape-valid code probe gets 404 invite_unavailable; a bare
-  // probe (no code query param) gets 422 invalid_invite.
-  "GET /api/agent-invites/preview": [undefined, 422],
+  // Invite preview (#3259: POST-only, code in the body): a bare probe (no
+  // code) gets 422 invalid_invite; the retired GET form gets 405.
+  "POST /api/agent-invites/preview": [undefined, 422],
+  "GET /api/agent-invites/preview": [undefined, 405],
   // Referral invite preview/redeem: a forged token is indistinguishable from
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],

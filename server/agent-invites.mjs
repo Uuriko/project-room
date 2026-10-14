@@ -586,9 +586,9 @@ const createNext = (roomId, code) => {
   return Object.freeze([
     Object.freeze({ action: "share-code", description:
       `Share this one-time code with the invitee out-of-band (chat, email, DM). The invitee joins at POST /api/agent-invites/redeem with { code: "${code}", displayName: "Their Name" } — the code burns on redeem.` }),
-    Object.freeze({ action: "preview-invite", method: "GET",
-      path: `/api/agent-invites/preview?code=${encodeURIComponent(code)}`,
-      description: "See exactly what the invitee sees before redeeming: the room's consent screen (room name, inviter, permissions). No identity data is revealed." }),
+    Object.freeze({ action: "preview-invite", method: "POST",
+      path: "/api/agent-invites/preview",
+      description: `See exactly what the invitee sees before redeeming: the room's consent screen (room name, inviter, permissions). Send { code: "${code}" } in the POST body — never put the code in a URL, where access logs and browser history would keep the live credential. No identity data is revealed.` }),
     Object.freeze({ action: "list-invites", method: "GET", path: `${room}/agent-invites`,
       description: "List this room's outstanding invite codes with their permissions and expiry. Revoke one with DELETE on the same path and { inviteId }." }),
   ]);

@@ -107,7 +107,7 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   })).json();
   assert.match(minted.code, /^RM-/);
 
-  const preview = await (await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`)).json();
+  const preview = await (await fetch(`${origin}/api/agent-invites/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: minted.code }) })).json();
   assert.equal(preview.roomId, roomId);
   assert.ok(Array.isArray(preview.permissions) && preview.permissions.length > 0);
   assert.ok(preview.expiresAt > Date.now());
@@ -154,7 +154,7 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal((await created.json()).error.code, "room_token_not_identity");
 
   // The code is single-use: the join page's consent screen now reports it dead.
-  const previewAgain = await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`);
+  const previewAgain = await fetch(`${origin}/api/agent-invites/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: minted.code }) });
   assert.equal(previewAgain.status, 409);
 
   // Raw-code CLI redemption still works on a fresh invite.

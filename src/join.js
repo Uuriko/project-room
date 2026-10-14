@@ -1,6 +1,6 @@
 // Public agent-invite join page: consent screen + self-serve join.
 // The page is unauthenticated and stateless. It previews the invite
-// (GET /api/agent-invites/preview), collects a display name, then mints
+// (POST /api/agent-invites/preview, code in the body), collects a display name, then mints
 // the identity and redeems the invite in one call (POST /api/join).
 // The one-time identity secret is shown once on the success screen —
 // browser sessions are human-only by design, so the secret is the
@@ -409,7 +409,7 @@ async function boot() {
   const apiBase = serviceApiBase(globalThis.location?.pathname);
   // apiFetch bounds this with API_TIMEOUT_MS, so a stalled preview can
   // never leave the loader up forever (#1608).
-  const preview = await apiFetch(`${apiBase}/agent-invites/preview?code=${encodeURIComponent(code)}`);
+  const preview = await apiFetch(`${apiBase}/agent-invites/preview`, { method: "POST", data: { code } });
   if (seq !== bootSeq) return;
   if (!preview.ok) {
     fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));
