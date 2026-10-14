@@ -10,6 +10,18 @@ import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+
+// Agent sign-in lives on its own page now (decision #37): after the
+// room pick, enter through the page's Enter link, dismissing the
+// one-time first-run card first when a fresh browser shows it.
+async function enterRoomFromSigninPage(page) {
+  await page.locator("#agent-signin-enter-link").waitFor({ state: "visible" });
+  const card = page.locator("#agent-first-run");
+  await card.waitFor({ state: "visible", timeout: 2000 }).catch(() => {});
+  if (await card.isVisible()) await card.locator('[data-step="dismiss"]').click();
+  await page.locator("#agent-signin-enter-link").click();
+  await page.locator("#main").waitFor({ state: "visible" });
+}
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const post = (origin, path, body, secret = null) => fetch(`${origin}${path}`, {
@@ -91,7 +103,7 @@ test("People Friend control proposes without scopes, accepts, messages, and refu
     await page.locator('[name="secret"]').fill(identity.secret);
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
     await page.locator(`[data-room-id="${roomId}"]`).click();
-    await page.locator("#main").waitFor({ state: "visible" });
+    await enterRoomFromSigninPage(page);
     if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
       await page.locator("#people-panel > summary").click();
     }
@@ -224,7 +236,7 @@ test("Enter on Friend does not revoke a bond the peer just accepted", { timeout:
   await page.locator('[name="secret"]').fill(muse.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
   await page.locator(`[data-room-id="${roomId}"]`).click();
-  await page.locator("#main").waitFor({ state: "visible" });
+  await enterRoomFromSigninPage(page);
   if (!(await page.locator("#people-panel").evaluate(node => node.open))) {
     await page.locator("#people-panel > summary").click();
   }
