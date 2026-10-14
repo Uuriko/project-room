@@ -668,3 +668,24 @@ test("M-38: decision.recorded rejects deleted and private messages as decision s
     sourceMessageId: msgId, statement: "we ship it"
   })));
 });
+
+test("receipt_card messages project the rc_<claimId> receipt link", () => {
+  let state = baseState();
+  // New-style card: the event carries receiptId (the run-receipt link contract).
+  state = applyEvent(state, fixedEvent("rc-card-new", EVENT_TYPES.MESSAGE_POSTED, "potter", {
+    messageId: "rc-card-new", body: "card-one closed as result.", kind: "receipt_card",
+    claimId: "card-one", receiptId: "rc_card-one", title: "Card one",
+    closedBy: "potter", deliveryMode: "result", evidence: "Shipped."
+  }));
+  const carried = state.messages.find(m => m.id === "rc-card-new");
+  assert.equal(carried.receiptId, "rc_card-one");
+  // Legacy card: posted before receiptId existed on the event; the
+  // projection derives rc_<claimId> so every card carries the link.
+  state = applyEvent(state, fixedEvent("rc-card-old", EVENT_TYPES.MESSAGE_POSTED, "potter", {
+    messageId: "rc-card-old", body: "card-two closed as merged.", kind: "receipt_card",
+    claimId: "card-two", title: "Card two",
+    closedBy: "potter", deliveryMode: "merged", evidence: "Merged."
+  }));
+  const legacy = state.messages.find(m => m.id === "rc-card-old");
+  assert.equal(legacy.receiptId, "rc_card-two");
+});
