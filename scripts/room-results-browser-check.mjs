@@ -364,6 +364,8 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   const p = await browser.newPage(); p.setDefaultTimeout(10000);
   const errors = []; p.on("pageerror", error => errors.push(error.message));
   await p.goto(f.origin); await signInFixture(p, f.ownerKey);
+  await f.connectAgent();
+  await p.locator(`[data-member-record-id="${f.connection.memberId}"]`).waitFor({ state: "attached" });
   await openComposerOptions(p); await p.locator("#new-work-button").click();
   await p.locator("#work-title-input").fill("Transport result");
   await p.locator("#work-done-input").fill("Return one exact local transport result");
@@ -393,7 +395,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   const completion = { requestId: "transport-complete", workItemId: task.id, expectedRevision: context.work.revision,
     summary: "Local transport result", nextAction: "Read and continue", evidenceMessageId: draft.messageId,
     evidenceMessageEventId: draft.eventId, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: f.connection.memberId };
-  await call(first, "room_submit_text_result", completion);
+  const completed = await call(first, "room_submit_text_result", completion);
   const card = p.locator(`[data-work-record-id="${task.id}"]`);
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
@@ -412,8 +414,21 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   const replay = await call(second, "room_post_draft", draftArgs);
   assert.equal(replay.duplicate, true);
   assert.equal(replay.messageId, draft.messageId);
+  const completedAgain = await call(second, "room_submit_text_result", completion);
+  assert.equal(completedAgain.duplicate, true);
+  assert.equal(completedAgain.eventId, completed.eventId, "completion replay confirms the same persisted result");
   const reread = await call(second, "room_read_work", { workItemId: task.id, includeDiscussion: true, includeResult: true });
   assert.ok(JSON.stringify(reread).includes("Continue this transport result"), "fresh process reads human continuation itself");
+  const replyArgs = { requestId: "transport-continuation-reply", replyToId: continuation.id, body: "Continuation received by the restarted transport peer" };
+  const reply = await call(second, "room_reply", replyArgs);
+  assert.equal(reply.status, "recorded");
+  const signalId = resumedNotice.params.meta.signal_id;
+  const ack = await call(second, "room_acknowledge_wake", { signalIds: [signalId] });
+  assert.deepEqual(ack.acknowledged, [signalId], "ack follows the confirmed continuation reply");
+  const repeatedReply = await call(second, "room_reply", replyArgs);
+  assert.equal(repeatedReply.duplicate, true);
+  assert.equal(f.store.room("commons").state.messages.filter(message => message.body === replyArgs.body).length, 1);
+  await p.locator("#message-list").getByText(replyArgs.body, { exact: true }).waitFor();
   assert.equal(f.store.room("commons").state.messages.filter(message => message.body === body).length, 1);
   assert.equal(await p.locator("#message-input").inputValue(), "Keep my unsent follow-up");
   assert.deepEqual(errors, []);

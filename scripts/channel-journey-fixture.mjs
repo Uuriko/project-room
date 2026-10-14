@@ -22,11 +22,15 @@ export async function channelJourneyFixture(t) {
     for (const child of children) if (child.exitCode === null && child.signalCode === null) { child.kill("SIGTERM"); await once(child, "exit"); }
     server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(root, { recursive: true, force: true });
   });
-  const invite = store.invites.create(ownerKey, "commons", { profile: "contribute", displayName: "Transport peer" });
-  const setup = await connectRoom({ origin, directory: join(root, "private"), name: "Transport peer", accept: true, target: invite.code });
-  const connection = readAgentConnection(setup.configDirectory);
-  assert.match(connection.token, /^rak_/);
-  return { root, store, ownerKey, server, origin, children, connection, setup, config: setup.configDirectory };
+  const fixture = { root, store, ownerKey, server, origin, children };
+  fixture.connectAgent = async () => {
+    const invite = store.invites.create(ownerKey, "commons", { profile: "contribute", displayName: "Transport peer" });
+    const setup = await connectRoom({ origin, directory: join(root, "private"), name: "Transport peer", accept: true, target: invite.code });
+    const connection = readAgentConnection(setup.configDirectory);
+    assert.match(connection.token, /^rak_/);
+    Object.assign(fixture, { connection, setup, config: setup.configDirectory });
+  };
+  return fixture;
 }
 export function channelPeer(t, f, ordinary = false) {
   const env = { ...process.env, ROOM_AGENT_CONFIG: f.config };
