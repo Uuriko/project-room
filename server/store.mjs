@@ -819,6 +819,12 @@ export function validateCommand(command) {
     if (body.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
     if (!body.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
     if (/[\u202A-\u202E\u2066-\u2069]/u.test(body)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+    // r217 (reply-crew QA): ZWSP, Hangul filler and bare combining marks
+    // passed the trim() empty check, so a blank bubble posted and counted as
+    // unread. Refuse a body with no visible characters after stripping
+    // whitespace, default-ignorable code points and combining marks. ZWJ
+    // emoji, "e\u0301" and LRM/RLM marks keep working.
+    if (!body.replace(/[\s\p{Default_Ignorable_Code_Point}\p{M}]/gu, "")) fail(422, "invalid_command", "body must contain visible characters (whitespace, zero-width and combining-mark-only bodies are refused)");
   }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
