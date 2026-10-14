@@ -167,6 +167,24 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const denied = await call('/llms.txt', { method: 'POST' });
     assert.equal(denied.status, 405);
     assert.equal(denied.headers.get('x-test-do-fetches'), '0');
+    // #3274: Worker-layer errors carry the standard envelope, not a bare
+    // { error: { code, message } } — same fields the Node handler emits.
+    const deniedBody = await denied.json();
+    assert.equal(deniedBody.error.code, 'method_not_allowed');
+    assert.equal(typeof deniedBody.hint, 'string');
+    assert.ok(deniedBody.hint.length > 0);
+    assert.ok(Array.isArray(deniedBody.next));
+    assert.equal(typeof deniedBody.operationId, 'string');
+    assert.equal(typeof deniedBody.category, 'string');
+    assert.equal(typeof deniedBody.reason, 'string');
+    // #3274: POST / is 404 (Node's answer for the app root), enveloped.
+    const rootPost = await call('/', { method: 'POST' });
+    assert.equal(rootPost.status, 404);
+    const rootPostBody = await rootPost.json();
+    assert.equal(rootPostBody.error.code, 'not_found');
+    assert.equal(typeof rootPostBody.hint, 'string');
+    assert.ok(Array.isArray(rootPostBody.next));
+    assert.equal(typeof rootPostBody.operationId, 'string');
 
     const missing = await call('/compare/project-room-vs-slack', { headers: { Accept: 'text/html' } });
     assert.equal(missing.status, 404);
