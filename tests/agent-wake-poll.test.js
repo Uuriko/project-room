@@ -46,6 +46,15 @@
 //     several hosts it 422s naming them. Regression: re-imposing the
 //     parameter the discovery packet never names (first-poll 422), or
 //     deriving across hosts and wedging the wrong host's waiter slot.
+// 11. poll/work parity (#3262) — contract: the poll door returns the same
+//     pending WORK wakes the heartbeat door returns for the opted-in host
+//     whose hostId the poll required, and a work transition releases a
+//     waiting poll the way enqueueWake does for mentions. Regression: the
+//     poll handler dropping hostId before notePoll (WorkWakes.pending
+//     refuses hostless readers by design) and WorkWakes.transition never
+//     releasing waiters — work assignments silently degraded to heartbeat
+//     cadence for exactly the hosts that wait on poll. Host consent is
+//     unchanged: a host that never opted in still sees no work wakes.
 //
 // Synthetic fixtures only — loopback HTTP, no external calls or real credentials.
 import test from "node:test";
@@ -524,4 +533,65 @@ test("fresh wakeable host retains between-poll mention across database restart u
   assert.equal(pullBeat.more, false);
   const attention = await (await get(origin, "/api/needs-me", worker.secret)).json();
   assert.ok(attention.items.some(item => item.id === "pull-message"));
+});
+
+test("poll returns the opted-in host's pending work wakes, like heartbeat (#3262)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("work-poll-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "workwake",
+    displayName: "Work wake", permissions: ["accept_work"],
+  });
+  const beat = body => post(origin, "/api/agent-heartbeats", body, identity.secret).then(r => r.json());
+  await beat({ hostId: "worker", mode: "pull-only", workWakes: true });
+  await beat({ hostId: "lurker", mode: "pull-only" });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "work.proposed",
+    data: { workItemId: "poll-work", title: "Synthetic assignment", definitionOfDone: "Synthetic requirement",
+      mode: "read", accountableMemberId: "workwake" } });
+
+  // Control: the heartbeat door returns the work wake for the opted-in host.
+  const viaBeat = await beat({ hostId: "worker", mode: "pull-only" });
+  assert.deepEqual(viaBeat.pendingWakes.map(w => [w.kind, w.workItemId]), [["work", "poll-work"]]);
+
+  // The poll door must return the same wake for the same host.
+  const viaPoll = await (await get(origin, "/api/agent-wakes/poll?hostId=worker&waitMs=0", identity.secret)).json();
+  assert.deepEqual(viaPoll.pendingWakes.map(w => [w.kind, w.workItemId]), [["work", "poll-work"]],
+    "poll door returns the opted-in host's work wakes");
+  assert.equal(viaPoll.pendingWakes[0].signalId, viaBeat.pendingWakes[0].signalId);
+
+  // notePoll forwards its hostId the same way; hostless reads stay empty.
+  assert.deepEqual(
+    f.store.agentHeartbeats.notePoll({ agentId: identity.identityId, hostId: "worker" }).pendingWakes.map(w => w.workItemId),
+    ["poll-work"]);
+  assert.deepEqual(
+    f.store.agentHeartbeats.notePoll({ agentId: identity.identityId }).pendingWakes, [],
+    "hostless notePoll still gains no work signals");
+
+  // Consent is per host: the registered host that never opted in sees none.
+  const lurker = await (await get(origin, "/api/agent-wakes/poll?hostId=lurker&waitMs=0", identity.secret)).json();
+  assert.deepEqual(lurker.pendingWakes, [], "a host that never opted in sees no work wakes on poll either");
+});
+
+test("a work transition releases a waiting poll with the work wake (#3262)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("work-poll-agent-2");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "workwake",
+    displayName: "Work wake", permissions: ["accept_work"],
+  });
+  await post(origin, "/api/agent-heartbeats", { hostId: "worker", mode: "pull-only", workWakes: true }, identity.secret);
+
+  const pollPromise = get(origin, "/api/agent-wakes/poll?hostId=worker&waitMs=10000", identity.secret).then(r => r.json());
+  // Let the poll register its waiter, then land a work transition while it waits.
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "work.proposed",
+    data: { workItemId: "poll-work-live", title: "Synthetic assignment", definitionOfDone: "Synthetic requirement",
+      mode: "read", accountableMemberId: "workwake" } });
+
+  const doc = await pollPromise;
+  assert.equal(doc.timedOut, false, "the work transition released the wait");
+  assert.ok(doc.waitedMs < 9000, `released by the transition, not the timeout (waited ${doc.waitedMs}ms)`);
+  assert.deepEqual(doc.pendingWakes.map(w => [w.kind, w.workItemId]), [["work", "poll-work-live"]]);
 });
