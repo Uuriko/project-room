@@ -254,6 +254,15 @@ export function archivedMessageRow(db, roomId, messageId) {
     .get(roomId, messageId, throughSeq, retainedJson) ?? null;
 }
 
+// Ids of the room's archived messages (no longer in the projection), for audits
+// that compare the projection with a full replay.
+export function archivedMessageIds(db, roomId) {
+  const { throughSeq, retainedJson } = archiveMarker(db, roomId);
+  if (!throughSeq) return new Set();
+  return new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+    .all(roomId, throughSeq, retainedJson).map(row => row.message_id));
+}
+
 // Current records of archived messages in one thread (the root itself when it is
 // archived, plus archived replies filed under it), oldest first.
 export function archivedThreadRecords(db, roomId, rootId) {
