@@ -2794,6 +2794,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (await operatorRoutes(req, res, { url, remoteAddress, requestId: operationId })) return;
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
+      // Human room URL (H-S1, human-map §8.2): /rooms/:id is the address
+      // people paste to each other, but it used to 404 for everyone — the
+      // app lives at /#room/:id and joining at /join. A browser asking for
+      // /rooms/:id gets the join page in room mode: the address IS the
+      // join page, and src/join.js reads the room id back out of the path.
+      // Non-HTML clients keep the JSON 404: no API route exists here.
+      const roomUrlMatch = /^\/(?:room\/)?rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/?$/.exec(url.pathname);
+      if (roomUrlMatch) {
+        if (req.method !== "GET" && req.method !== "HEAD") reject(405, "method_not_allowed", "Method not allowed");
+        if (acceptPrefersHtml(req.headers.accept)) {
+          const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
+          const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
+          return res.end(req.method === "HEAD" ? undefined : page);
+        }
+        reject(404, "not_found", "Not found");
+      }
       // Public agent-invite join page: GET /join and GET /join/:code
       // (plus the /room/join twins on the www door). Unauthenticated and
       // stateless by design, like POST /join: the page previews the invite

@@ -2,6 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseJoinCode,
+  parseInviteCodeInput,
+  joinCodeFromLocation,
+  joinCodePath,
+  joinRoomHint,
+  joinRoomIdFromPath,
   serviceApiBase,
   roomEntryHref,
   sameOriginRelativeNext,
@@ -21,11 +26,73 @@ test("parse join code from the path, rejecting lookalikes", () => {
   assert.equal(parseJoinCode("/join"), null);
   assert.equal(parseJoinCode("/join/"), null);
   assert.equal(parseJoinCode("/join/RM-ABC123/extra"), null);
-  assert.equal(parseJoinCode("/join/not-a-code"), null);
   assert.equal(parseJoinCode("/join/RM-ABC;DROP"), null);
   assert.equal(parseJoinCode("/rooms/join/RM-ABC123"), null);
   assert.equal(parseJoinCode("/join.html"), null);
   assert.equal(parseJoinCode(null), null);
+});
+
+test("a bogus code in the URL is a claim the server judges, not a silent entry form", () => {
+  // Regression (bounced PR #3267): the RM- shape gate here swallowed bogus
+  // codes, so /join/BOGUS-CODE rendered the code-entry form and the error
+  // state never appeared — the a11y browser checks timed out waiting for
+  // #join-error. The preview call must see the claim and answer for it.
+  assert.equal(parseJoinCode("/join/BOGUS-CODE"), "BOGUS-CODE");
+  assert.equal(parseJoinCode("/join/not-a-code"), "NOT-A-CODE");
+  assert.equal(joinCodeFromLocation({ pathname: "/join/BOGUS-CODE", search: "" }), "BOGUS-CODE");
+});
+
+test("invite code input accepts a bare code or a pasted link, rejecting the rest", () => {
+  assert.equal(parseInviteCodeInput("RM-ABC123"), "RM-ABC123");
+  assert.equal(parseInviteCodeInput("  rm-abc123  "), "RM-ABC123");
+  assert.equal(parseInviteCodeInput("https://room.trydemigod.com/join/RM-ABC123"), "RM-ABC123");
+  assert.equal(parseInviteCodeInput("https://www.getdasha.com/room/join/RM-ABC123?next=/offers"), "RM-ABC123");
+  assert.equal(parseInviteCodeInput("here's your code: https://room.trydemigod.com/join/RM-ABC123 — good luck"), "RM-ABC123");
+  assert.equal(parseInviteCodeInput(""), null);
+  assert.equal(parseInviteCodeInput("   "), null);
+  assert.equal(parseInviteCodeInput(null), null);
+  assert.equal(parseInviteCodeInput("RM-ABC 123"), null);
+  assert.equal(parseInviteCodeInput("not a code"), null);
+  assert.equal(parseInviteCodeInput("https://room.trydemigod.com/join/not-a-code"), null);
+  // The host in a pasted link is ignored — only the code is taken, and it
+  // is previewed against this origin before anything joins.
+  assert.equal(parseInviteCodeInput("https://other.example/join/RM-ABC123"), "RM-ABC123");
+});
+
+test("join code resolution: path wins, ?code= is the fallback", () => {
+  assert.equal(joinCodeFromLocation({ pathname: "/join/RM-PATH1", search: "?code=RM-QUERY1" }), "RM-PATH1");
+  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=RM-QUERY1" }), "RM-QUERY1");
+  assert.equal(joinCodeFromLocation({ pathname: "/room/join", search: "?code=rm-query1" }), "RM-QUERY1");
+  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=nope" }), "NOPE");
+  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "?code=!!!" }), null);
+  assert.equal(joinCodeFromLocation({ pathname: "/join", search: "" }), null);
+  assert.equal(joinCodeFromLocation({ pathname: "/join/!!!", search: "" }), null);
+});
+
+test("code entry navigates to the canonical code URL on the same door", () => {
+  assert.equal(joinCodePath("RM-ABC123", "/join"), "/join/RM-ABC123");
+  assert.equal(joinCodePath("RM-ABC123", "/room/join"), "/room/join/RM-ABC123");
+  assert.equal(joinCodePath("RM-ABC123", "/room/join/"), "/room/join/RM-ABC123");
+});
+
+test("room hint only echoes a plausible room id", () => {
+  assert.equal(joinRoomHint("?room=johns-project-room"), "johns-project-room");
+  assert.equal(joinRoomHint("?room="), null);
+  assert.equal(joinRoomHint(""), null);
+  assert.equal(joinRoomHint("?room=<script>"), null);
+  assert.equal(joinRoomHint("?room=a/b"), null);
+});
+
+test("room id comes from the /rooms/<id> address the join page is served at", () => {
+  assert.equal(joinRoomIdFromPath("/rooms/johns-project-room"), "johns-project-room");
+  assert.equal(joinRoomIdFromPath("/rooms/johns-project-room/"), "johns-project-room");
+  assert.equal(joinRoomIdFromPath("/room/rooms/commons"), "commons");
+  assert.equal(joinRoomIdFromPath("/join"), null);
+  assert.equal(joinRoomIdFromPath("/join/RM-ABC123"), null);
+  assert.equal(joinRoomIdFromPath("/rooms/"), null);
+  assert.equal(joinRoomIdFromPath("/rooms/a/b"), null);
+  assert.equal(joinRoomIdFromPath("/rooms/<script>"), null);
+  assert.equal(joinRoomIdFromPath(null), null);
 });
 
 test("service API base follows the door", () => {

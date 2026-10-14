@@ -14,11 +14,70 @@ import { formatSessionExpiry } from "./session-expiry.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
-// "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the code, else null.
+// "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the claimed code,
+// else null. A code carried in the URL is a CLAIM, not a verdict: the
+// server preview is the authority, and a bogus or expired code must reach
+// it so the visitor lands on the error state ("this invite is no longer
+// valid") instead of a silent entry form. Only the token SHAPE is checked
+// here (single path segment); the strict RM- shape is enforced on what a
+// human types into the entry form (parseInviteCodeInput below), where a
+// non-code means "not a code yet", not an error screen.
 export function parseJoinCode(pathname) {
   const match = /^\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})\/?$/.exec(String(pathname ?? ""));
   const code = (match?.[1] ?? "").toUpperCase();
-  return JOIN_CODE_PATTERN.test(code) ? code : null;
+  return code || null;
+}
+
+// A human is usually handed a bare code (or a whole link pasted from chat),
+// not a tidy /join/<code> URL: accept the code or a full invite link and
+// normalize to the canonical code. Strict on purpose — this validates the
+// entry FORM, where a bad shape is corrected inline before navigating;
+// URL-carried codes take the claimed-code path above instead.
+export function parseInviteCodeInput(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const linkMatch = /\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})(?:[/?#\s]|$)/.exec(text);
+  const candidate = (linkMatch?.[1] ?? text).toUpperCase();
+  return JOIN_CODE_PATTERN.test(candidate) ? candidate : null;
+}
+
+// A ?code= value is a claimed code too (same rule as the path segment):
+// single-token shape or nothing; the server preview judges validity.
+export function claimedCode(value) {
+  const text = String(value ?? "").trim().toUpperCase();
+  return /^[A-Z0-9_-]{1,64}$/.test(text) ? text : null;
+}
+
+// The code for this page load: the path wins; ?code= is the fallback so a
+// link shared as /join?code=RM-… works too.
+export function joinCodeFromLocation(locationLike) {
+  const fromPath = parseJoinCode(locationLike?.pathname);
+  if (fromPath) return fromPath;
+  const params = new URLSearchParams(String(locationLike?.search ?? "").replace(/^\?/, ""));
+  return claimedCode(params.get("code"));
+}
+
+// Where the code-entry form sends the browser: the canonical code URL on
+// the same door the visitor arrived through.
+export function joinCodePath(code, pathname) {
+  const door = String(pathname ?? "").startsWith("/room/") ? "/room" : "";
+  return [door, "join", encodeURIComponent(code)].join("/");
+}
+
+// The room whose address this page was served at: /rooms/<id> (and its
+// /room/ twin) serves this page in room mode (human-map §8.2 — the
+// address is the join page).
+export function joinRoomIdFromPath(pathname) {
+  const match = /^\/(?:room\/)?rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/?$/.exec(String(pathname ?? ""));
+  return match?.[1] ?? null;
+}
+
+// The room named by a ?room= hand-off, shape-checked so the entry screen
+// only ever echoes a plausible room id.
+export function joinRoomHint(search) {
+  const params = new URLSearchParams(String(search ?? "").replace(/^\?/, ""));
+  const room = params.get("room") ?? "";
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room) ? room : null;
 }
 
 // API base for this page's fetches: the www door serves the room under /room.
@@ -130,7 +189,7 @@ export function validateJoinName(name) {
 function $(id) { return document.getElementById(id); }
 
 function show(section) {
-  for (const id of ["join-loading", "join-consent", "join-success", "join-error"]) {
+  for (const id of ["join-loading", "join-enter", "join-consent", "join-success", "join-error"]) {
     const el = $(id);
     if (el) el.hidden = id !== section;
   }
@@ -220,9 +279,44 @@ function requestIdForJoin(code) {
   return joinRequestId;
 }
 
+// No code in the URL is not an error any more: a human holding a bare
+// code gets the entry form (H-S3). The form navigates to the canonical
+// /join/<code> URL, so the preview/consent flow below stays the only
+// join path. Wired once-only, like the retry button.
+function renderEnter() {
+  const room = joinRoomIdFromPath(globalThis.location?.pathname) ?? joinRoomHint(globalThis.location?.search);
+  const roomEl = $("join-enter-room");
+  if (roomEl) {
+    if (room) {
+      const textEl = $("join-enter-room-text");
+      if (textEl) textEl.textContent = `Room "${room}" — enter its invite code below, or if you're already a member:`;
+      const openEl = $("join-enter-open");
+      if (openEl) openEl.href = roomEntryHref(room);
+      roomEl.hidden = false;
+    } else roomEl.hidden = true;
+  }
+  const form = $("join-enter-form");
+  if (form && !form.dataset.enterWired) {
+    form.dataset.enterWired = "1";
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const statusEl = $("join-enter-status");
+      const code = parseInviteCodeInput($("join-enter-code")?.value);
+      if (!code) {
+        if (statusEl) { statusEl.textContent = "That doesn't look like an invite code. Codes look like RM-XXXXXX — or paste the whole invite link."; statusEl.classList.add("visible"); }
+        $("join-enter-code")?.focus();
+        return;
+      }
+      globalThis.location.assign(joinCodePath(code, globalThis.location?.pathname));
+    });
+  }
+  show("join-enter");
+  $("join-enter-code")?.focus();
+}
+
 async function boot() {
   const seq = ++bootSeq;
-  const code = parseJoinCode(globalThis.location?.pathname);
+  const code = joinCodeFromLocation(globalThis.location);
   // Register the retry button before any network call: when the preview
   // fetch fails, the user must still be able to retry (L-39). Once-only so
   // repeated retries don't stack duplicate boot() handlers.
@@ -232,9 +326,9 @@ async function boot() {
     retryEl.addEventListener("click", () => boot());
   }
   if (!code) {
-    // #1608: a missing token is not a broken link — name what's missing and
-    // the two ways forward, instead of leaving the loader up.
-    fail({ title: "No invite found", message: "Ask a room owner for an invite link, or sign in and request access.", retry: false });
+    // #1608: a missing token is not a broken link — the entry form names
+    // what's missing and gives the way forward, instead of a dead end.
+    renderEnter();
     return;
   }
   const apiBase = serviceApiBase(globalThis.location?.pathname);
