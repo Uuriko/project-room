@@ -535,7 +535,13 @@ export default {
     }
     // Liveness is the Worker. It does not construct or query the Durable Object.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
-      return finish(workerLivenessResponse(request, { mode, deployment }), 'worker');
+      // #3272: report the mailer state exactly as the DO's server does —
+      // magicLinkMailerFromEnv(env) non-null is the same derivation the
+      // Durable Object constructor uses to build its mailer (above), so the
+      // Worker liveness answer and the handler can never disagree about
+      // whether email gates are enforced or relaxed.
+      const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
+      return finish(workerLivenessResponse(request, { mode, deployment, emailVerification }), 'worker');
     }
     // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
     // A cold constructor must not turn this check into room_unavailable.

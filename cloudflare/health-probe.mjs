@@ -86,8 +86,12 @@ async function snapshotResponse(response) {
   };
 }
 
-export function workerLivenessResponse(request, { mode, deployment }) {
-  const body = { status: "ok", mode, ...(deployment ? { deployment } : {}) };
+export function workerLivenessResponse(request, { mode, deployment, emailVerification }) {
+  // emailVerification is part of the documented /api/health contract
+  // (docs/openapi.yaml): the Node handler reports it so a deploy that lost
+  // its mail secret cannot silently relax every email gate. #3272: the Worker
+  // liveness answer must carry the same field, derived from the same env.
+  const body = { status: "ok", mode, ...(deployment ? { deployment } : {}), ...(emailVerification ? { emailVerification } : {}) };
   return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
     status: 200,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }

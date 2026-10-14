@@ -191,7 +191,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(health.headers.get('x-test-do-probes'), '0');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
     const healthBody = await health.json();
-    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging' });
+    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer' });
 
     const ready = await call('/api/ready', { ip: '192.0.2.9' });
     assert.equal(ready.status, 200, await ready.clone().text());
