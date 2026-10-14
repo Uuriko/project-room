@@ -70,7 +70,7 @@ const SOURCE_PINS = {
   "ensureAutonomyTiersSchema@1": "10220d71e7134ef8",
   "ensureOperatorActionsSchema@1": "766e8f9fed79c6e6",
   "ensureGrantsSchema@1": "fe4b311a64923973",
-  "ensureSpendGrantsSchema@1": "b4661b0ef05d5593",
+  "ensureSpendGrantsSchema@2": "83476d36f1c8cadf",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
   "ensureAttachmentSchema@1": "3189ca5ebea7bf33"

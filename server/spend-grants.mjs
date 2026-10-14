@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS spend_room_reservations (
   amount_cents TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (room_id, nonce)
+  PRIMARY KEY (room_id, agent_id, nonce)
 );
 CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
   ON spend_room_reservations (room_id, status);
@@ -152,6 +152,35 @@ export function ensureSpendGrantsSchema(db) {
   // fix backfill NULL and the reaper reads their deadline from created_at.
   if (!db.prepare(`SELECT 1 FROM pragma_table_info('spend_authorizations') WHERE name='expires_at'`).get())
     db.exec("ALTER TABLE spend_authorizations ADD COLUMN expires_at INTEGER");
+  // #3376/#3383: room reservations are per-agent state, keyed exactly like
+  // the authorizations they back. The original (room_id, nonce) PK let two
+  // agents collide on one nonce (raw constraint error) and let one agent's
+  // settle/void release another's reservation. Rebuild pre-fix tables in
+  // place, rows preserved; a fresh table already has the widened PK. The
+  // rebuild follows the codebase's rename-aside pattern (share_links
+  // _legacy_v34 and siblings): the old table is renamed away and the
+  // canonical table name is recreated, so no transient table name ever
+  // enters the DDL the application-table registry scans.
+  const reservationsSql = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'spend_room_reservations'`).get()?.sql ?? "";
+  if (reservationsSql && !/PRIMARY KEY\s*\(\s*room_id\s*,\s*agent_id\s*,\s*nonce\s*\)/.test(reservationsSql)) {
+    db.exec(`ALTER TABLE spend_room_reservations RENAME TO spend_room_reservations_pre3376;
+    CREATE TABLE spend_room_reservations (
+      room_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      nonce TEXT NOT NULL,
+      amount_cents TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (room_id, agent_id, nonce)
+    );
+    INSERT INTO spend_room_reservations
+      (room_id, agent_id, nonce, amount_cents, status, created_at)
+      SELECT room_id, agent_id, nonce, amount_cents, status, created_at FROM spend_room_reservations_pre3376;
+    DROP TABLE spend_room_reservations_pre3376;
+    CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
+      ON spend_room_reservations (room_id, status);`);
+  }
 }
 
 // #1525: the reservation lease. Ten minutes is comfortably longer than
@@ -467,7 +496,15 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
             VALUES (?, ?, ?, ?, 'active', ?)`)
           .run(roomId, agentId, nonce, intToCents(roomReserved), nowMs);
     } catch (error) {
-      if (String(error?.code).includes("SQLITE_CONSTRAINT"))
+      // #3383: recognize constraint violations on both driver shapes —
+      // better-sqlite3-style SQLITE_CONSTRAINT* codes, and node:sqlite's
+      // ERR_SQLITE_ERROR, which carries the detail only in the message.
+      // Checking the code for "SQLITE_CONSTRAINT" alone left this 409
+      // conversion dead on node:sqlite and the raw database error escaped.
+      const errorCode = String(error?.code ?? "");
+      const isConstraint = errorCode.includes("SQLITE_CONSTRAINT")
+        || (errorCode === "ERR_SQLITE_ERROR" && /constraint failed/i.test(String(error?.message ?? "")));
+      if (isConstraint)
         refuse(409, "duplicate_nonce", "This spend authorization was already recorded; no double charge", {
           tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
         });
@@ -503,7 +540,7 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       .run(to, settledAt, roomId, agentId, nonce);
     return info.changes > 0;
   };
-  const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, nonce);
+  const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, agentId, nonce);
   const remainingNowCents = () => {
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs: Date.now() });
     if (!grant) return "0";
@@ -566,10 +603,14 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
 }
 
 // Room-allowance reservations are released on settle AND on void: the
-// allowance is only consumed by settled charges. Idempotent.
-function releaseRoomReservationRow(db, roomId, nonce) {
+// allowance is only consumed by settled charges. Idempotent. The release
+// is scoped to the authorization's own agent (#3376): a reservation backs
+// exactly one agent's authorization, and only that agent's settle/void (or
+// the reaper acting on that agent's expired row) may release it — keyed
+// (room_id, nonce) alone, one agent could free another's allowance.
+function releaseRoomReservationRow(db, roomId, agentId, nonce) {
   db.prepare(`UPDATE spend_room_reservations SET status = 'released'
-    WHERE room_id = ? AND nonce = ? AND status = 'active'`).run(roomId, nonce);
+    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'active'`).run(roomId, agentId, nonce);
 }
 
 // #1525: the reaper. A reservation that is still 'reserved' past its lease
@@ -594,7 +635,7 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
       db.prepare(`UPDATE spend_authorizations SET status = 'voided'
         WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
         .run(row.room_id, row.agent_id, row.nonce);
-      releaseRoomReservationRow(db, row.room_id, row.nonce);
+      releaseRoomReservationRow(db, row.room_id, row.agent_id, row.nonce);
     }
     return expired.length;
   });
@@ -616,7 +657,7 @@ export function settleSpend(db, { roomId, agentId, nonce, nowMs = Date.now() } =
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
         AND COALESCE(expires_at, created_at + ?) > ?`)
       .run(at, roomId, agentId, nonce, RESERVE_LEASE_MS, at);
-    if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, agentId, nonce);
     return info.changes > 0;
   });
 }
@@ -626,7 +667,7 @@ export function voidSpend(db, { roomId, agentId, nonce } = {}) {
     const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
       .run(roomId, agentId, nonce);
-    if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, agentId, nonce);
     return info.changes > 0;
   });
 }
