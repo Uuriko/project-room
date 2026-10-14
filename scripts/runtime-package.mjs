@@ -361,6 +361,7 @@ optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collecto
 // Preserve redistribution terms; historical commits predate these documents.
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
 optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/routes/inbox.mjs", "server/routes/auth.mjs", "server/routes/desktop-auth.mjs", "server/routes/signin-options.mjs", "server/routes/work-claims.mjs"); // batch RT: declarative route table (imported by server/http.mjs); signin-options added by H3 #3341
+optional.push("server/routes/account-sessions.mjs"); // CX4: account-session inventory + targeted revocation RT routes (imported by server/routes/table.mjs)
 // DX-1a begin: installer, agent docs, and the example pages those docs link to.
 // The docs/agents/*.html entries stay registered for historical packages only:
 // current sources no longer commit the pages and assetsFor() no longer holds a

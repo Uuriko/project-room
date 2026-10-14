@@ -27,6 +27,8 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { ACCOUNT_SESSION_ROUTES } from "../server/routes/account-sessions.mjs";
+import { ROUTES } from "../server/routes/table.mjs";
 
 const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CHALLENGE = createHash("sha256").update(VERIFIER).digest("base64url");
@@ -153,6 +155,17 @@ async function streamConnect(origin, native, roomId) {
 
 const revokeOne = (origin, session, id, view) => fetch(`${origin}/api/account/sessions/${id}`, {
   method: "DELETE", headers: writeHeaders(origin, session, view),
+});
+
+test("registration: the two routes are route-table rows with account auth and the SEC-03 authenticate hook", () => {
+  assert.deepEqual(ACCOUNT_SESSION_ROUTES.map(row => `${row.method} ${row.path}`),
+    ["GET /api/account/sessions", "DELETE /api/account/sessions/{id}"]);
+  for (const row of ACCOUNT_SESSION_ROUTES) {
+    assert.equal(row.auth, "account");
+    assert.equal(typeof row.authenticate, "function", `${row.id}: wrong-method answers must authenticate before 405`);
+    assert.match(row.parity, /^exempt:/);
+    assert.ok(ROUTES.includes(row), `${row.id} is registered in the route table`);
+  }
 });
 
 test("native chain: desktop redemption -> native read/stream -> targeted revoke from a second session -> native denied", async t => {

@@ -3311,7 +3311,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // layer answers 404 without distinguishing those cases (no probing).
   revokeAccountSession(accountId, sessionId) {
     if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
-    if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > 128) fail(422, "invalid_session_id", "A session id is required");
+    if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > 128) return 0;
     return this.transaction(() => {
       const now = this.now();
       const row = this.accountSessionRows(accountId)
