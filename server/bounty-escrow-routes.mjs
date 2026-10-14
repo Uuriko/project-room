@@ -61,6 +61,23 @@ export const isRoomOwner = (store, roomId, auth) => {
   return canonicalLane(ownerId) === canonicalLane(memberId);
 };
 
+// Credit-ledger reads (balances / history) are scoped to the lane itself or
+// the room owner — the same rule the MCP door enforces by only ever passing
+// the caller's own lane to escrow.balances/history (server/mcp-full-profile.mjs;
+// docs/BOUNTY-MCP-TOOLS.md: "read your own"). History is the stronger reason:
+// escrow.history expands to both legs of every movement the lane touched, so
+// any other member (guests included) reading it would get the lane's full
+// bilateral ledger — counterparties, amounts, before/after balances (#3281).
+// Fails closed: anything that is neither a canonical-lane self match nor the
+// room owner is refused.
+export const canReadLaneLedger = (store, roomId, auth, laneIdentity) => {
+  if (typeof laneIdentity !== "string" || !laneIdentity) return false;
+  const memberId = auth?.member?.id;
+  if (typeof memberId === "string" && memberId
+    && canonicalLane(laneIdentity) === canonicalLane(memberId)) return true;
+  return isRoomOwner(store, roomId, auth);
+};
+
 const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
@@ -349,13 +366,19 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     });
   }
   if (escrowRoute === "balances" && req.method === "GET") {
-    const balances = runPure(reject, () => escrow.balances(roomId, identityOf(reject, identity)));
+    const laneIdentity = identityOf(reject, identity);
+    if (!canReadLaneLedger(store, roomId, auth, laneIdentity))
+      reject(403, "not_authorized", "Only the lane itself or the room owner can read this lane's credit balances.");
+    const balances = runPure(reject, () => escrow.balances(roomId, laneIdentity));
     return json(res, 200, { roomId, balances });
   }
   if (escrowRoute === "history" && req.method === "GET") {
+    const laneIdentity = identityOf(reject, identity);
+    if (!canReadLaneLedger(store, roomId, auth, laneIdentity))
+      reject(403, "not_authorized", "Only the lane itself or the room owner can read this lane's credit history.");
     const params = url.searchParams;
     const state = params.get("state"), since = params.get("since");
-    const receipts = runPure(reject, () => escrow.history(roomId, identityOf(reject, identity),
+    const receipts = runPure(reject, () => escrow.history(roomId, laneIdentity,
       { state: state ?? null, since: since ?? null }));
     return json(res, 200, { roomId, receipts });
   }
