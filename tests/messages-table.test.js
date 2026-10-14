@@ -785,3 +785,52 @@ test("archiveMessages spot-check accepts an also-send-to-channel copy (its posti
   assert.equal(real.ok, true, JSON.stringify(real));
   assert.equal(f.store.room("commons").state.messages.length, 2);
 });
+
+test("an archived pinned DM can be unpinned by its parties and not by anyone else", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "private" });
+  f.send(f.human, T.MESSAGE_PINNED, { messageId: "old-dm" });
+  for (let i = 0; i < 4; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  // Pins are retained by the compaction, so build the legacy shape directly: the
+  // pinned DM is out of the projection and covered by the marker.
+  const row = f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
+  const projection = JSON.parse(row.projection);
+  const seq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='old-dm'").get().seq;
+  const others = projection.messages.filter(m => m.id !== "old-dm" && f.store.db.prepare("SELECT seq FROM messages WHERE message_id=?").get(m.id).seq <= seq).map(m => m.id);
+  projection.messages = projection.messages.filter(m => m.id !== "old-dm");
+  projection.messagesArchive = { throughSeq: seq, count: 1, retainedIds: others };
+  f.store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(projection));
+  f.store.rooms?.clear?.();
+  assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), true);
+  const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
+  const before = f.store.room("commons").sequence;
+  assert.ok(code(() => f.send(f.stranger, T.MESSAGE_UNPINNED, { messageId: "old-dm" })), "a stranger is refused");
+  assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), true, "the pin is still there");
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.equal(code(() => f.send(f.agent, T.MESSAGE_UNPINNED, { messageId: "old-dm" })), null, "the recipient can unpin");
+  assert.equal(f.store.room("commons").state.pins.some(pin => pin.messageId === "old-dm"), false);
+});
+
+test("rehydrating projections rolls the archive back: the whole room returns, the marker goes, audit and parity hold", t => {
+  const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "q-dm", toMemberId: "agent", body: "private" });
+  for (let i = 0; i < 5; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `q-${i}`, body: `q ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  const before = f.store.room("commons").state.messages.map(message => message.id);
+  assert.equal(before.length, 6);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived, 3);
+  assert.equal(f.store.room("commons").state.messages.length, 3);
+  assert.doesNotThrow(() => auditRecovery(f.store), "the audit accepts the archived prefix");
+  assert.ok(f.store.rehydrateAllProjections() >= 1);
+  const after = f.store.room("commons").state;
+  assert.deepEqual(after.messages.map(message => message.id), before, "every message is back, in order");
+  assert.equal(after.messagesArchive, undefined, "the marker is gone");
+  assert.equal(JSON.parse(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection).messagesArchive, undefined);
+  assert.doesNotThrow(() => auditRecovery(f.store), "the audit passes on the rolled-back room");
+  assert.doesNotThrow(() => f.store.checkMessagesParity());
+  assert.equal(f.store.rehydrateAllProjections(), 0, "a second run has nothing left to do");
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0, "the room can be archived again after a rollback");
+});
