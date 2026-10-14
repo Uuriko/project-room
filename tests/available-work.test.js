@@ -81,9 +81,9 @@ test("room projection: work items join board claims; zero-inventory is explicit"
     workItemId: "item-1", expectedRevision: 0 } });
   const after = availableWorkInRoom(store, ROOM, { viewerId: "worker" });
   assert.equal(after.total, 1);
-  // Decision #10 transition: the accepted item has a board card (the
-  // write-path sync created it at accept), so it is offered once, as the
-  // board claim — never twice. PR-3 removes the workItem source.
+  // Decision #10: the accepted item has a board card (the write-path
+  // sync created it at accept), and AvailableWork is board-only — the
+  // item is offered once, as the board claim.
   assert.equal(after.items[0].source, "board");
   assert.equal(after.items[0].claimAction.endpoint, `/api/rooms/${ROOM}/work-claims/item-1/claim`);
   // Once held under a live lease it leaves the available set.
