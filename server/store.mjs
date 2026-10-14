@@ -4924,6 +4924,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(422, "command_rejected", "Reaction must reference a message in this Room");
         }
       }
+      // r233: after a block, the blocked member's edit of its own DM (a new
+      // body in the blocker's view) or reaction to the blocker's DM (a new
+      // activity event for her) is new contact in the denied direction, so it
+      // gets the same consent check as a fresh DM. Retracting a reaction and
+      // deleting stay open; reply requests are room-threaded and exempt.
+      if ((command.type === T.MESSAGE_EDITED || (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true))
+          && typeof command.data?.messageId === "string") {
+        const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
+        if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)) {
+          const otherParty = target.authorId === auth.member.id ? target.toMemberId
+            : target.toMemberId === auth.member.id ? target.authorId : null;
+          if (otherParty && otherParty !== auth.member.id) this.dmConsents.requireDmAllowed(roomId, auth.member.id, otherParty);
+        }
+      }
       // A reply joins its parent's thread. A DM's thread belongs to its two
       // parties: a bystander replying to a DM id would thread into a private
       // conversation and learn from the answer that the id exists. Live
