@@ -304,3 +304,32 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   assert.equal(await card.locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
   assert.equal(await p.locator("#message-input").inputValue(), "My next thought while reading");
 });
+
+test("inline private result across persisted wake and revoked session", { timeout: 30000 }, async t => {
+  const f = await setup(t, { privateResult: true }), p = f.p;
+  await f.open(); await f.row("private-result").locator("[data-result-work]").click();
+  const card = p.locator('[data-work-record-id="private-result"]');
+  await card.locator("[data-read-result]").click(); await f.ready();
+  await p.locator("#message-input").fill("Unsent thought survives wake");
+  const wake = async () => {
+    const restored = p.waitForResponse(response => new URL(response.url()).pathname === "/api/session");
+    await p.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    return (await restored).status();
+  };
+  assert.equal(await wake(), 200);
+  await p.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await p.locator("#message-input").inputValue(), "Unsent thought survives wake");
+  // The same authorized viewer may keep the inspected text; reopen to refresh read ownership.
+  assert.equal(await p.locator("#result-body").textContent(), f.body);
+  await p.locator("#close-result").click();
+  assert.equal(await p.locator("#result-body").textContent(), "");
+  await card.locator("[data-read-result]").click(); await f.ready();
+  assert.equal(await p.locator("#result-discuss").isVisible(), false);
+  const cookie = (await p.context().cookies()).find(value => value.name.endsWith("room_session"));
+  assert.ok(cookie);
+  await p.context().addCookies([{ ...cookie, value: "revoked-session-token" }]);
+  assert.equal(await wake(), 401);
+  await p.waitForFunction(() => document.querySelector("#main").hidden);
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await p.locator("#result-body").textContent(), "", "revocation removes retained private exact text");
+});
