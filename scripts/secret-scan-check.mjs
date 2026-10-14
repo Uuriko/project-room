@@ -151,6 +151,11 @@ export const SAFE_ENTROPY_TOKENS = [
   // allowlist (server/usdc-payouts.mjs). World-readable on-chain; grant nothing.
   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC on Solana
+  // Public directory-listing target URL from scripts/listings.json (the
+  // listing check tracks this public PR). World-readable; grants
+  // nothing. Surfaced when E7 Phase 4 moved listings.json from docs/
+  // (unscanned prose) into scripts/ (tree-scanned).
+  "https://github.com/ARUNAGIRINATHAN-K/awesome-ai-agents-2026/pull/309",
 ];
 
 // Directories scanned: source code where a real secret could hide.
