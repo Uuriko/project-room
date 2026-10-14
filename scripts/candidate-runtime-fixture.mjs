@@ -1,9 +1,9 @@
 // Test-only packaging of allowlisted working files. Never a release certificate.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, cpSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntimePackage } from './runtime-package.mjs';
-import { publicAssetPaths } from '../server/public-assets.mjs';
+import { publicAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 
 export function candidateRuntimeFixture(repository, directory) {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim();
@@ -191,7 +191,18 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
   paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by server/public-search.mjs)
-  for (const path of publicAssetPaths) paths.add(path);
+  // Decision #36 (#3254, Option A): the generated agent pages are build
+  // output and are never committed, so a pristine checkout legitimately
+  // lacks them. Take only the pages the source tree actually has: the
+  // runtime package ships them when present and omits them when absent,
+  // and packagedPaths must mirror that exact set for the package-count
+  // contract in tests/runtime-package.test.js. Every other declared asset
+  // stays fail-closed — a missing committed file still throws at the
+  // copy loop below.
+  for (const path of publicAssetPaths) {
+    if (generatedAgentPages.includes(path) && !existsSync(join(repository, path))) continue;
+    paths.add(path);
+  }
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {
