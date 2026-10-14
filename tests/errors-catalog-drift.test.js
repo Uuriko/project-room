@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentErrorAx } from "../src/agent-error.mjs";
+import { agentErrorAx, ERROR_REGISTRY, errorRegistryAx } from "../src/agent-error.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = join(ROOT, "server");
@@ -185,9 +185,11 @@ test("no JSON-RPC numeric code section is empty", () => {
 //     file_lease_conflict (catalogued at 0, but server/work-claim-routes.mjs
 //     builds agentErrorBody({ httpStatus: 409, code: "file_lease_conflict" })
 //     and returns it to the client), which is checked explicitly at 409.
-//   - agent_not_registered is excluded: it is owned by #3021 / PR #3044,
-//     not by #3055.
-const AX_COVERAGE_EXCLUDED = new Set(["agent_not_registered"]);
+//   - agent_not_registered was excluded while #3021 / PR #3044 owned it.
+//     Both resolved (fix landed via PR #3026; #3044 closed as superseded),
+//     and the code is registry-owned now (E4-REG) — the exclusion is
+//     retired so the guard covers it like every other code.
+const AX_COVERAGE_EXCLUDED = new Set([]);
 
 function catalogAxRows() {
   const rows = [];
@@ -212,6 +214,135 @@ test("every catalogued server-emittable code has an AX recovery (#3055)", () => 
     if (ax.hint.startsWith("Unknown error")) unmapped.push(`${code} (${httpStatus})`);
   }
   assert.deepEqual(unmapped, [], `catalogued codes with no agentErrorAx() mapping or family coverage (Unknown fallthrough): ${unmapped.join(", ")}`);
+});
+
+// ---------------------------------------------------------------------------
+// E4-REG (decision #19c): joining-path codes migrated into ERROR_REGISTRY
+// (src/agent-error.mjs) are pinned in both directions — the shipped envelope
+// must equal the registry resolution for the real surface inputs, and the
+// catalog row must carry the registry's declared HTTP/Retry/Recovery, so
+// catalog copy and shipped copy cannot diverge again for migrated codes
+// (the #3246/#3249 failure shape).
+// ---------------------------------------------------------------------------
+
+function catalogRowFor(code, http) {
+  for (const line of catalogSection().split("\n")) {
+    const m = /^\| `([a-z][a-z0-9_]*)` \| (\S+) \|/.exec(line);
+    if (!m || m[1] !== code || Number(m[2]) !== http) continue;
+    const cells = line.split(" | ");
+    return {
+      retry: cells[3] ? cells[3].trim() : null,
+      recovery: cells[4] ? cells[4].replace(/\|\s*$/, "").trim() : null,
+    };
+  }
+  return null;
+}
+
+const nextTextOf = ax => ax.next.map(s => s.command ?? s.path ?? `tool:${s.tool}`).join(" ; ");
+
+const REGISTRY_FIXTURES = [
+  ["agent_not_registered", { httpStatus: 404, message: "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll." },
+    ax => {
+      assert.deepEqual(ax.next[0], { path: "/api/agent-heartbeats" });
+      assert.match(ax.hint, /agent-heartbeats/);
+    }],
+  ["invalid_wake_poll", { httpStatus: 422, message: "hostId must be 1-128 chars, [A-Za-z0-9._-] — one wake waiter per host" },
+    ax => {
+      assert.match(ax.hint, /hostId/);
+      assert.match(ax.hint, /1-128/);
+    }],
+  ["invalid_wake_poll", { httpStatus: 422, message: "waitMs must be 0..55000 milliseconds" },
+    ax => {
+      assert.match(ax.hint, /waitMs/);
+      assert.match(ax.hint, /55000/);
+    }],
+  // #3246: the public-work surface must ship public-work guidance — the
+  // concrete task read that yields the current termsVersion — never the
+  // room work-claims copy or /api/session (which 401s for this bearer).
+  ["stale_public_work", { httpStatus: 409, message: "Task terms changed", workItemId: "task_9" },
+    ax => {
+      assert.deepEqual(ax.next[0], { path: "/api/public-work/tasks/task_9" });
+      assert.match(ax.hint, /termsVersion/);
+      assert.doesNotMatch(`${ax.hint} ${nextTextOf(ax)}`, /\/api\/session|room_read_work|workContext/);
+    }],
+  ["stale_public_work", { httpStatus: 409, message: "Task terms changed" },
+    ax => {
+      assert.deepEqual(ax.next[0], { path: "/api/public-work/tasks" });
+    }],
+  // #3249: the advice must be mechanically executable — a named path whose
+  // read discloses the recorded receipt (claim.submittedReceiptId).
+  ["public_work_already_submitted", { httpStatus: 409, message: "This task already has a submitted receipt", workItemId: "task_9" },
+    ax => {
+      assert.deepEqual(ax.next[0], { path: "/api/public-work/tasks/task_9" });
+      assert.match(nextTextOf(ax), /submittedReceiptId/);
+      assert.match(ax.hint, /submitted receipt/);
+    }],
+  ["public_work_claim_conflict", { httpStatus: 409, message: "Task already claimed by alice (lease expires 2026-10-14T00:00:00.000Z)" },
+    ax => {
+      assert.match(ax.hint, /alice/);
+      assert.match(ax.hint, /Wait for release or lease expiry/);
+    }],
+  ["public_work_claim_conflict", { httpStatus: 409, message: "Task already claimed by you (lease expires 2026-10-14T00:00:00.000Z)" },
+    ax => {
+      assert.match(ax.hint, /Renew/);
+    }],
+  ["stale_public_claim", { httpStatus: 409, message: "Claim generation changed (submitted 1, current 2)" },
+    ax => {
+      assert.match(ax.hint, /generation 2/);
+      assert.match(nextTextOf(ax), /NOT saved/);
+    }],
+  ["stale_public_claim", { httpStatus: 409, message: "Claim expired: the lease lapsed or the claim was released (generation 1 is no longer held)" },
+    ax => {
+      assert.match(ax.hint, /expired/);
+    }],
+  // #3381: a stale signed CARD is a freshness failure, not a stale
+  // revision — the advice must teach re-signing, never workContext /
+  // expectedRevision / /api/session (unreachable pre-join anyway).
+  ["stale_card", { httpStatus: 422, message: "The card signature is stale; sign a fresh joinRequest" },
+    ax => {
+      assert.match(ax.hint, /issuedAt/);
+      assert.match(nextTextOf(ax), /fresh joinRequest/);
+      assert.doesNotMatch(`${ax.hint} ${nextTextOf(ax)}`, /\/api\/session|room_read_work|workContext|expectedRevision/);
+    }],
+  ["guest_scope_denied", { httpStatus: 403, message: "Guest members cannot perform this action" },
+    ax => {
+      assert.equal(ax.reason, "guest_scope_denied");
+      assert.match(ax.hint, /Guest/);
+      assert.match(ax.hint, /full members/);
+      assert.match(nextTextOf(ax), /full membership/);
+    }],
+  ["proof_required", { httpStatus: 428, message: "Identity mint proof required" },
+    ax => {
+      assert.match(ax.hint, /SHA-256/);
+      assert.match(nextTextOf(ax), /agent-invites\/redeem/);
+    }],
+];
+
+test("registry-migrated codes: shipped envelope equals the registry resolution (E4-REG)", () => {
+  assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
+  assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
+  const migrated = Object.keys(ERROR_REGISTRY);
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "guest_scope_denied", "invalid_wake_poll", "proof_required",
+    "public_work_already_submitted", "public_work_claim_conflict", "stale_card", "stale_public_claim", "stale_public_work"],
+    "the migrated set is the joining-path set; growing it is a deliberate edit here too");
+  for (const [code, ctx, check] of REGISTRY_FIXTURES) {
+    const shipped = agentErrorAx({ code, ...ctx });
+    const registered = errorRegistryAx(code, ctx);
+    assert.ok(registered, `${code} must resolve through the registry`);
+    assert.deepEqual(shipped, registered, `${code}: shipped envelope diverges from the registry`);
+    assert.doesNotMatch(shipped.hint, /^Unknown error/, `${code} must not hit the Unknown fallthrough`);
+    check(shipped);
+  }
+});
+
+test("catalog rows for registry-migrated codes match the registry declaration (E4-REG)", () => {
+  for (const [code, entry] of Object.entries(ERROR_REGISTRY)) {
+    assert.ok(entry.catalog, `${code}: registry entry must declare its catalog row`);
+    const row = catalogRowFor(code, entry.catalog.http);
+    assert.ok(row, `${code}: no catalog row at HTTP ${entry.catalog.http}`);
+    assert.equal(row.retry, entry.catalog.retry, `${code}: catalog Retry cell diverges from the registry`);
+    assert.equal(row.recovery, entry.catalog.recovery, `${code}: catalog Recovery cell diverges from the registry`);
+  }
 });
 
 test("flagship #3055 codes name their catalogued recovery, not 'no known recovery'", () => {
