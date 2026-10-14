@@ -133,6 +133,19 @@ export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50
   return { items: all.slice(0, limit), total: all.length };
 }
 
+// Decision #10 shadow read: the board-only form of availableWorkInRoom
+// (no workItem source). The migration's equivalence harness compares
+// this against the dual-source read; once a room's backfill has
+// converged the two agree on the work inventory, and the consumer
+// cutover flips availableWorkInRoom itself to the board-only definition.
+export function availableWorkInRoomBoardOnly(store, roomId, { viewerId = null, limit = 50 } = {}) {
+  const { state } = store.room(roomId);
+  let board = [];
+  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
+  const claims = availableClaimsFromBoard(board, roomId, { viewerId, state });
+  return { items: claims.slice(0, limit), total: claims.length };
+}
+
 // Just the board portion of a room's available work, in the compact shape
 // orientation surfaces have carried since #3020 (plus source/claimAction).
 // buildOrient and buildActivationPack both consume this — one definition,
