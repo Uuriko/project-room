@@ -6144,7 +6144,8 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
 function resultDiscussionMessage(view) {
   if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
     || isRoomArchived(state)) return null;
-  return state.messages.find(message => message.id === view.discussionId && message.workItemId === view.workItemId
+  // The ordinary thread composer does not inherit a DM audience.
+  return state.messages.find(message => !message.toMemberId && message.id === view.discussionId && message.workItemId === view.workItemId
     && !message.deletedAt && message.body === view.body && !state.channels?.[messageChannelId(message)]?.archivedAt);
 }
 function resultStatus() {
