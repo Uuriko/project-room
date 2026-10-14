@@ -206,6 +206,20 @@ function renderConsent(preview) {
 // blank a screen the retry already rendered.
 let bootSeq = 0;
 
+// #3260: one requestId per invite code for this page session. If the join
+// response is lost after the server committed, the retry replays the same
+// redemption (duplicate: true) instead of dying on the burned code with
+// the minted identity orphaned server-side.
+let joinRequestId = null;
+let joinRequestIdFor = null;
+function requestIdForJoin(code) {
+  if (joinRequestIdFor !== code) {
+    joinRequestIdFor = code;
+    joinRequestId = `join-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  }
+  return joinRequestId;
+}
+
 async function boot() {
   const seq = ++bootSeq;
   const code = parseJoinCode(globalThis.location?.pathname);
@@ -249,7 +263,7 @@ async function boot() {
     if (statusEl) { statusEl.textContent = "Joining…"; statusEl.classList.add("visible"); }
     // One call mints the identity and redeems the invite atomically.
     // /room/api/* is rewritten to /api/* on the www door, so this works on both.
-    const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code } });
+    const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code, requestId: requestIdForJoin(code) } });
     if (!joined.ok) {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
