@@ -755,3 +755,19 @@ test("conversation history still reaches archived messages after a new write lea
   assert.deepEqual(all(f.stranger), everything.filter(id => id !== "m2"), "an archived DM stays hidden from a stranger");
   assert.equal(readConversation(f.store, f.human, "commons", { messageId: "m1" }).messages[0].id, "m1");
 });
+
+test("archiveMessages spot-checks the table rows and the posting events before it moves anything, dry run included", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `m${i}`, body: `b${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 2 }).ok, true);
+  // A row that points at another message's posting event (certification still holds at the head).
+  f.store.db.prepare("UPDATE messages SET seq=(SELECT seq FROM messages WHERE message_id='m0') WHERE message_id='m1'").run();
+  const dry = f.store.archiveMessages("commons", { keepNewest: 2 });
+  assert.equal(dry.ok, false);
+  assert.equal(dry.reason, "archive_spot_check_failed");
+  const real = f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false });
+  assert.equal(real.ok, false);
+  assert.equal(f.store.room("commons").state.messages.length, 6, "nothing moved");
+});
