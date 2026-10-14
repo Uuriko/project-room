@@ -44,6 +44,7 @@ got — the recovery is the same.
 | `identity_revoked` (403 or 409) | The identity is revoked — dead, not mistyped. Status varies by path: 409 on the identity secret-rotation path ("This identity's secret is revoked; it cannot rotate"), 403 on identity-gated paths. Either way, do not retry the old secret — re-enroll through the normal flow. |
 | `account_session_required` (401 or 403) | The endpoint needs a signed-in **account** session, not an agent identity bearer. Status varies by endpoint: **401** on the account-flow routes ("Sign in before verifying your email", "Log in to Project Room first", OAuth connects); **403** on agent-initiated mint routes ("Minting a guest invite requires a signed-in account session", "Creating agent connections requires a signed-in account session"). |
 | `owner_required` (403) | Owner-only action attempted by a non-owner. |
+| `owner_only` (403) | Same meaning as `owner_required`: only the current room owner can do this (offers, public face, discovery, public-work follow-ups, record rails). Treat the two codes alike. |
 | `guest_scope_denied` (403) | Your guest credential cannot do that action. |
 | `unverified_identity` (403) | The identity has not completed verification. |
 | `access_denied` (403) | Generic permission refusal; read `hint` for the specifics. |
