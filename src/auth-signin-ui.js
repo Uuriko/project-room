@@ -40,7 +40,7 @@ export function classifyAuthLink(params) {
 }
 
 export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions }) {
-  let container = null, welcome = false;
+  let container = null, welcome = false, mountedBefore = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
@@ -184,6 +184,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
   }
   function render() {
+    if (mountedBefore && !container) return;
     const node = surface();
     const view = currentView();
     const hideBack = view === "welcome" || view === "terms" || view.startsWith("password-");
@@ -518,8 +519,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       onBusyChange?.(false);
       render();
     },
+    unmount() {
+      container?.removeEventListener("click", onClick);
+      container?.removeEventListener("submit", onSubmit);
+      container = null;
+    },
     mount(target) {
-      container = target; render(); bind(container);
+      container = target; mountedBefore = true; render(); bind(container);
       void loadSigninCapabilities();
       return consumeMagicLinkFromUrl();
     }

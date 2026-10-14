@@ -81,6 +81,17 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 900 },
     isMobile: touch, hasTouch: touch, reducedMotion: 'reduce' });
+  // Full-store read-only assertions need one writer. Hold the browser's
+  // independent, debounced read-horizon writes; activity-feed-browser-check
+  // covers their persistence. Agent calls still use the real server and store.
+  let releaseHorizons;
+  const horizonsHeld = new Promise(resolve => { releaseHorizons = resolve; });
+  await page.route('**/read-horizon', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await horizonsHeld;
+    await route.abort().catch(() => {});
+  });
+  t.after(() => releaseHorizons());
   page.setDefaultTimeout(8000); page.on('pageerror', error => errors.push(error.message));
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   await page.locator('#main').waitFor({ state: 'visible' });
@@ -221,7 +232,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   // contribution step synchronously, but focus may land a frame later.
   await page.waitForFunction((id) => document.activeElement?.dataset?.messageRecordId === id, draft.messageId, { timeout: 8000 });
   await page.screenshot({ path: `${prefix}-return-draft.png` });
-  assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'Returning and opening a draft do not change work or read markers');
+  assert.equal(auditRecovery(f.store).dataSha256, beforeDraftRetry, 'Opening a draft does not mutate the store while background read-horizon writes are held');
   // UI calming #2 moved "Save as result" into the per-message "⋯" overflow menu.
   await messageAction(page, draft.messageId, "result");
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
