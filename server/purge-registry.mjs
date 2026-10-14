@@ -157,6 +157,16 @@ const ROWS = [
     }
   },
   {
+    "table": "activity_fanout_failures",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "agent_api_keys",
     "key": "identity_id",
     "action": "delete",
