@@ -20,7 +20,7 @@ export const publicAssets = ["src/board-mine.js", "src/first-room-copy.js", "str
 // that do contain them still verify; registration alone never ships a file —
 // only a packaged source's own declaration, filtered here, creates the
 // obligation, and every other advertised asset remains fail-closed below.
-const generatedAgentPages = new Set(["docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html",
+export const generatedAgentPages = new Set(["docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html",
   "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html",
   "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html"]);
 // Read the selected source's explicit asset declaration, never today's list for
