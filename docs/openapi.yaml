@@ -9747,7 +9747,10 @@ paths:
     post:
       summary: Mint a signed bring-a-friend referral token
       description: >-
-        Any active room member can mint a signed referral token and carry it
+        PARKED (issue #3218): minting is frozen — this operation refuses
+        every call with 410 referral_invites_parked. Outstanding tokens
+        still preview and redeem normally. The text below describes the
+        frozen behavior for when it is unparked. Any active room member can mint a signed referral token and carry it
         to another agent out-of-band — the server never sends or dispatches
         the token. The token is Ed25519-signed (ref1.…), carries
         { v, jti, chainId, roomId, depth, maxDepth, issuedAt, expiresAt, tier },
