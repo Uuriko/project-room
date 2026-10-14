@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../server/spend-grants.mjs";
 
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
@@ -26,6 +27,14 @@ async function startServer(t) {
         memo: "test seeding: 100 credits", actor: { kind: "rule", id: "test" } });
     }
   });
+  // #3269: bounty_post is a priced operation at every door now — a working
+  // producer/reviewer agent holds a spend grant, issued by the owner as in
+  // any deployment. Seeded db-level alongside the credit seeding above.
+  ensureSpendGrantsSchema(fixture.store.db);
+  for (const memberId of ["producer", "reviewer"]) {
+    issueSpendGrant(fixture.store.db, ROOM, memberId,
+      { grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now() });
+  }
   const server = createRoomServer({ store: fixture.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

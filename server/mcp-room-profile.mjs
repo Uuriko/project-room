@@ -38,7 +38,7 @@ import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./
 import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
-import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { withSpendCharge } from "./spend-grants.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -446,26 +446,14 @@ async function callLandTool(store, secret, name, args) {
 // Spend-primitive MVP (charge-then-forward): the tool is never invoked until
 // payment has settled against the agent's spend grant. Unpriced tools,
 // humans, and the room owner pass through untouched. A SpendGrantError means
-// refusal — the tool must not run. settle() after success, void() on any
-// failure; an idempotent duplicate retry is voided (the original call
-// already paid).
+// refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
+// single implementation of the settle/void contract — the REST doors run
+// the same helper, so a priced operation charges identically everywhere.
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
-  const spend = chargeSpendBeforeCall(store, secret, name, args);
-  if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
-  let result;
-  try {
-    result = dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
-  } catch (error) { spend.void(); throw error; }
-  return Promise.resolve(result).then(
-    value => {
-      if (value && typeof value === "object" && value.duplicate === true) spend.void();
-      else spend.settle();
-      return value;
-    },
-    error => { spend.void(); throw error; }
-  );
+  return withSpendCharge(store, secret, name, args,
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms));
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {

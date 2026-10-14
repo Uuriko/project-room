@@ -11,7 +11,7 @@ import { OutsideAgents } from "./outside-agents.mjs";
 // Local attention tools stay off this URL: they read an operator directory.
 
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
-import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { withSpendCharge } from "./spend-grants.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
@@ -223,17 +223,12 @@ export async function callHostedStdioTool(store, secret, name, args) {
     if (tier === "t1_readonly" || isGuestAgentMemberId(auth.member.id))
       return dispatchHostedStdioTool(store, secret, name, args);
   }
-  const spend = chargeSpendBeforeCall(store, secret, name, args);
-  if (!spend) return dispatchHostedStdioTool(store, secret, name, args);
-  let outcome;
-  try {
-    outcome = await dispatchHostedStdioTool(store, secret, name, args);
-  } catch (error) { spend.void(); throw error; }
-  const value = outcome?.value;
-  if (outcome?.isError === true) spend.void();
-  else if (value && typeof value === "object" && (value.duplicate === true || value.idempotentReplay === true)) spend.void();
-  else spend.settle();
-  return outcome;
+  // The settle/void contract itself is withSpendCharge (spend-grants.mjs),
+  // shared with callRoomTool and the REST doors (#3269); this profile only
+  // adapts its { value, isError } outcome envelope to it.
+  return withSpendCharge(store, secret, name, args,
+    () => dispatchHostedStdioTool(store, secret, name, args),
+    { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
 async function dispatchHostedStdioTool(store, secret, name, args) {

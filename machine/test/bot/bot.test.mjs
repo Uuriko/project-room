@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../../../server/store.mjs";
 import { createRoomServer } from "../../../server/http.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../../../server/spend-grants.mjs";
 import { initialRoom } from "../../../server/bootstrap.mjs";
 import { spawnContext } from "../../lib/spawn.mjs";
 import { loadConfig, saveConfig } from "../../lib/config.mjs";
@@ -153,6 +154,16 @@ async function enrolled(t, { roomId = "commons" } = {}) {
     code: "bot-code", home, env, relayHttp: relay.http, insecure: true, // local fake relay
   }));
   assert.equal(result.ok, true, JSON.stringify(result));
+  // #3269: priced operations charge at the REST doors now, exactly as they
+  // always did at MCP — and the bot stages its receipt files over REST.
+  // Provision it the way a room owner provisions any agent: a spend grant.
+  const botLink = served.store.db.prepare(
+    "SELECT member_id FROM identity_links WHERE room_id = ? AND identity_id = ?").get(roomId, result.identityId);
+  assert.ok(botLink?.member_id, "bot member link missing after enroll");
+  ensureSpendGrantsSchema(served.store.db);
+  issueSpendGrant(served.store.db, roomId, botLink.member_id, {
+    grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now(),
+  });
   return { ...served, home, env, relay, identityId: result.identityId };
 }
 

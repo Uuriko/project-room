@@ -30,6 +30,7 @@
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -133,7 +134,7 @@ export function publishBountyEvent(store, roomId, event) {
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
 }
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, credential = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -225,10 +226,23 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
       invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
+      // #3269: bounty_post is a priced operation — charge it through the
+      // shared spend path (chargeSpendBeforeCall, the same helper the MCP
+      // profiles use), inside this idempotent transaction: reauthorize()
+      // and the journal replay check have already run (see idem above), so
+      // established denials keep their precedence, a replay never reaches
+      // here and is never charged, and the reservation settles atomically
+      // with the write — a refusal rolls both back. A null credential
+      // (account-session callers; http.mjs passes null in that mode) runs
+      // uncharged, mirroring withSpendCharge's guard at every other door.
+      const spend = typeof credential === "string" && credential.length > 0
+        ? chargeSpendBeforeCall(store, credential, "bounty_post", { roomId })
+        : null;
       const { bounty, receipt } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
           deadline: payload.deadline, verifierId: payload.verifierId ?? null,
           approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
+      spend?.settle();
       return { roomId, bounty, receipt };
     });
   }
