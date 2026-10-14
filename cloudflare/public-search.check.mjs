@@ -5,6 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { publicAssetPaths } from '../server/public-assets.mjs';
+import { agentPages } from '../scripts/build-agent-docs.mjs';
+
+// Decision #36 (#3254, Option A): the docs/agents pages are generated build
+// output and never committed. A deploy generates them before building assets
+// (the wrangler build command runs build-agent-docs first), so the deployed
+// asset store this check's binding stands in for holds the rendered pages —
+// serve them from the same generator instead of the source tree.
+const generatedPages = agentPages();
 
 function assertPublicPolicy(response, origin) {
   const directives = Object.fromEntries(response.headers.get('content-security-policy').split(';').map(part => {
@@ -31,6 +39,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
     serviceBindings: { ASSETS: async request => {
       const path = new URL(request.url).pathname.slice(1);
       if (!publicAssetPaths.includes(path) || (missing && path === 'about.html')) return new Response(null, { status: 404 });
+      if (generatedPages.has(path)) return new Response(generatedPages.get(path));
       return new Response(await readFile(new URL('../' + path, import.meta.url)));
     } }
   });

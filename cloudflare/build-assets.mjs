@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, readdir, lstat } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { publicAssetPaths, templateAssetPaths } from '../server/public-assets.mjs';
+import { publicAssetPaths, templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 export const assetPaths = publicAssetPaths;
 const packagedPaths = [...publicAssetPaths, ...templateAssetPaths];
 
@@ -18,17 +18,31 @@ async function checkOutput(directory, prefix = '') {
     } else if (!entry.isFile() || !packagedPaths.includes(path)) throw new Error(`Unexpected asset output: ${path}`);
   }
 }
+// Decision #36 (#3254, Option A): docs/agents/*.html are generated build
+// output (scripts/build-agent-docs.mjs), never committed. A wrangler build
+// generates them before this runs, so they are present at deploy time; an
+// exact-commit runtime package does not contain them, and building assets
+// from inside a package skips the absent pages. Any other missing or
+// non-regular source remains an error.
 export async function buildAssets(output = new URL('./public/', import.meta.url)) {
-  const sources = await Promise.all(packagedPaths.map(async file => {
+  const present = [];
+  for (const file of packagedPaths) {
+    const isFile = await lstat(new URL('../' + file, import.meta.url)).then(info => info.isFile(), error => {
+      if (error.code === 'ENOENT' && generatedAgentPages.includes(file)) return false;
+      throw error;
+    });
+    if (isFile) present.push(file);
+  }
+  const sources = await Promise.all(present.map(async file => {
     const source = new URL('../' + file, import.meta.url);
     if (!(await lstat(source)).isFile()) throw new Error(`Asset source must be a regular file: ${file}`);
     return readFile(source);
   }));
   await checkOutput(output);
-  const directories = new Set(packagedPaths.filter(file => file.includes('/')).map(file => file.slice(0, file.lastIndexOf('/') + 1)));
+  const directories = new Set(present.filter(file => file.includes('/')).map(file => file.slice(0, file.lastIndexOf('/') + 1)));
   await Promise.all([...directories].map(dir => mkdir(new URL(dir, output), { recursive: true })));
-  await Promise.all(packagedPaths.map((file, index) => writeFile(new URL(file, output), sources[index])));
-  return packagedPaths.length;
+  await Promise.all(present.map((file, index) => writeFile(new URL(file, output), sources[index])));
+  return present.length;
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   console.log(`Prepared ${await buildAssets()} exact application assets; no database, tests or operator files included.`);

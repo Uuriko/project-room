@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
-import { extname } from "node:path";
-import { publicAssetPaths } from "../server/public-assets.mjs";
+import { existsSync, rmSync } from "node:fs";
+import { extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { generatedAgentPages, publicAssetPaths } from "../server/public-assets.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { edgePublicResponse } from "../cloudflare/edge-public.mjs";
@@ -12,6 +13,18 @@ import { edgePublicResponse } from "../cloudflare/edge-public.mjs";
 // as text/markdown (Board j/k never loaded). Pin the type of every public asset by
 // extension, and make a new extension an explicit decision instead of a silent
 // "text/markdown" fallback.
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
+// Decision #36 (#3254, Option A): the generated agent pages are deploy-time
+// build output and are never committed, so a pristine checkout legitimately
+// lacks them and the Node server 404s them by design (the contract note in
+// server/public-assets.mjs). What this tree can serve is every declared asset
+// except generated pages absent from the tree — the same rule
+// scripts/candidate-runtime-fixture.mjs applies to the package copy set.
+// Generated pages that ARE present stay pinned by the server test below, and
+// committed assets stay fail-closed: a missing one still 404s and fails.
+const servableAssetPaths = publicAssetPaths.filter(path =>
+  !generatedAgentPages.includes(path) || existsSync(join(repositoryRoot, path)));
+
 const EXPECTED = {
   ".js": /^text\/javascript\b/, ".mjs": /^text\/javascript\b/, ".css": /^text\/css\b/, ".html": /^text\/html\b/,
   ".svg": /^image\/svg\+xml\b/, ".png": /^image\/png\b/, ".ttf": /^font\/ttf\b/, ".woff2": /^font\/woff2\b/, ".txt": /^text\/plain\b/,
@@ -29,7 +42,7 @@ test("the server serves every public asset with the content type for its extensi
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeAllConnections?.(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`, wrong = [];
-  for (const path of publicAssetPaths) {
+  for (const path of servableAssetPaths) {
     const res = await fetch(`${origin}/${path}`); await res.arrayBuffer();
     const type = res.headers.get("content-type") || "";
     if (res.status !== 200 || !EXPECTED[extname(path)].test(type)) wrong.push(`${path} -> ${res.status} ${type}`);
