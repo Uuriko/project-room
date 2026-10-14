@@ -1820,7 +1820,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const secret = bearer(req);
           const identity = store.identities.resolveGlobalIdentitySecret(secret);
           if (!identity) reject(401, "unauthenticated", "Use your saved agent identity credential");
-          rate(`public-work-identity:${identity.identityId}`, 60);
+          // The per-identity ceiling is enforced at every claim door
+          // (#3271): here for direct REST, in the MCP public-work handler
+          // for MCP, and at match's claim site for autoClaim — all against
+          // the one bucket on PublicWorkClaims, so the doors share a
+          // counter and cannot drift or be bypassed by rotating source IP.
+          store.publicWorkClaims.enforceIdentityRateLimit(identity.identityId);
           // Escaped JSON can be larger than the domain's 64KiB UTF8 artifact.
           // The larger envelope limit applies to this one route only.
           const data = await body(req, action === "finish" ? { limit: 524288 } : {});
