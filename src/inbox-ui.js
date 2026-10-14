@@ -563,7 +563,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
       if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
-    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) text("#inbox-status", errorText(error)); }
+      // A failed load is not an empty inbox: hide the empty note so the error
+      // whisper never sits under a claim that we know there is nothing here.
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { text("#inbox-status", errorText(error)); $("#inbox-empty").hidden = true; } }
   }
   async function open(sourceId) {
     if (!owns()) return;
