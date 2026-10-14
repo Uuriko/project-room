@@ -129,6 +129,29 @@ export const wakeListenerLeaseSchema = `
 // A claim is abandoned when its fencing token no longer holds a live lease;
 // redelivery replays the batch with redelivered=true.
 export const WAKE_LISTENER_LEASE_TTL_MS = 60000;
+
+// CX5-FIX: room-attributed listener activity. agent_wake_polls is the
+// identity-GLOBAL last-activity stamp; activity performed under a
+// room-scoped credential (a room access key, or a rak_ API key bound to one
+// room by its mcp:room: scope) must not advertise the identity as wakeable
+// in other rooms, so scoped activity is stamped here instead — one row per
+// (agent, room). Lazy DDL for the same reason as the lease tables: kept out
+// of agentHeartbeatSchema so deployed databases keep passing the strict
+// DDL-text verifySchema.
+// Scoped host registrations are namespaced by credential-derived prefixes
+// (room-key-presence.mjs): rk_<sha256(secret) hex>_ for room access keys,
+// ak_<sha256(keyId) hex, 32 chars>_ for scoped API keys. Presence consumers
+// that must see identity-level activity only (pushTargets) exclude them.
+export const wakeRoomActivitySchema = `
+  CREATE TABLE IF NOT EXISTS agent_wake_room_activity (
+    agent_id TEXT NOT NULL, room_id TEXT NOT NULL,
+    last_polled_at INTEGER NOT NULL,
+    PRIMARY KEY(agent_id, room_id)
+  );
+`;
+export const SCOPED_LISTENER_HOST_PATTERN = /^(?:rk_[a-f0-9]{64}|ak_[a-f0-9]{32})_/;
+export const isScopedListenerHostId = hostId =>
+  typeof hostId === "string" && SCOPED_LISTENER_HOST_PATTERN.test(hostId);
 const WAKE_SIGNAL_FENCED_CODE = "wake_signal_fenced";
 const WAKE_SIGNAL_FENCED_MESSAGE = "one or more signals are claimed by another listener — claim them again, then ack with the claiming fencing token";
 
@@ -307,14 +330,47 @@ export class AgentHeartbeats {
     return true;
   }
 
+  // Idempotent DDL for the room-activity table (no-op on warm databases).
+  ensureRoomActivitySchema() {
+    this.db.exec(wakeRoomActivitySchema);
+    return this;
+  }
+
   // plan-wake-live: stamp the agent's last-polled-at. Polls and
   // heartbeats both prove the host is listening (a heartbeat response
   // carries the pending wake queue), so both count as poll activity.
-  recordPollActivity(agentId, at = this.now()) {
+  // CX5-FIX: activity under a room-scoped credential passes its roomId and
+  // stamps ONLY the room row — never the identity-global row — so scoped
+  // listening in one room cannot advertise wakeability in another.
+  recordPollActivity(agentId, at = this.now(), roomId = null) {
+    if (roomId !== null) {
+      check(typeof roomId === "string" && roomId.length > 0,
+        422, "invalid_heartbeat", "roomId must be a non-empty string or null");
+      this.ensureRoomActivitySchema();
+      this.db.prepare(`INSERT INTO agent_wake_room_activity (agent_id, room_id, last_polled_at)
+        VALUES (?, ?, ?) ON CONFLICT(agent_id, room_id) DO UPDATE SET last_polled_at=excluded.last_polled_at`)
+        .run(agentId, roomId, at);
+      return this;
+    }
     this.db.prepare(`INSERT INTO agent_wake_polls (agent_id, last_polled_at)
       VALUES (?, ?) ON CONFLICT(agent_id) DO UPDATE SET last_polled_at=excluded.last_polled_at`)
       .run(agentId, at);
     return this;
+  }
+
+  // CX5-FIX: the agent's room-scoped activity stamps (one per room it has
+  // listened in under a scoped credential). Missing-table tolerant like
+  // the other read paths: a pre-feature database reads as no activity.
+  roomActivityOf(agentId) {
+    try {
+      const rows = this.db.prepare(
+        "SELECT room_id AS roomId, last_polled_at AS lastPolledAt FROM agent_wake_room_activity WHERE agent_id=?")
+        .all(agentId);
+      return Object.freeze(rows.map(row => Object.freeze(row)));
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return Object.freeze([]);
+    }
   }
 
   // plan-wake-live: wakeable = the agent polled or heartbeated within
@@ -335,10 +391,64 @@ export class AgentHeartbeats {
       // migrate): read as not wakeable, mirroring wakeStatusList.
       row = null;
     }
-    const lastPolledAt = row?.lastPolledAt ?? null;
+    // CX5-FIX: the identity's own wakeability also counts its room-scoped
+    // activity (listening in any room means the identity is listening);
+    // room-scoped *consumers* use wakeStatusListForRoom, which attributes
+    // per room. lastPolledAt is the freshest stamp of either kind.
+    let lastPolledAt = row?.lastPolledAt ?? null;
+    for (const roomRow of this.roomActivityOf(agentId)) {
+      if (lastPolledAt === null || roomRow.lastPolledAt > lastPolledAt) lastPolledAt = roomRow.lastPolledAt;
+    }
     return Object.freeze({
       agentId, lastPolledAt, windowMs: WAKEABLE_WINDOW_MS,
       wakeable: lastPolledAt !== null && this.now() - lastPolledAt <= WAKEABLE_WINDOW_MS,
+    });
+  }
+
+  // CX5-FIX: wakeStatusList attributed to ONE room. An agent is wakeable
+  // for this room when it has fresh identity-level activity (an unscoped
+  // listener hears every room it belongs to) OR fresh room-scoped activity
+  // attributed to this room. Activity scoped to OTHER rooms never leaks in
+  // — the pre-fix list used the identity-global stamp for every room, so a
+  // room-key registration made in one room advertised the identity as
+  // wakeable in any room it later joined. Entries carry the freshest
+  // applicable stamp (the room stamp when it is what qualifies the agent).
+  wakeStatusListForRoom(roomId) {
+    check(typeof roomId === "string" && roomId.length > 0,
+      422, "invalid_heartbeat", "roomId must be a non-empty string");
+    const base = this.wakeStatusList();
+    const at = this.now();
+    let roomRows = [];
+    try {
+      roomRows = this.db.prepare(
+        "SELECT agent_id AS agentId, last_polled_at AS lastPolledAt FROM agent_wake_room_activity WHERE room_id=?")
+        .all(roomId);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      roomRows = [];
+    }
+    const roomFresh = new Map();
+    for (const row of roomRows) {
+      if (at - row.lastPolledAt <= WAKEABLE_WINDOW_MS) roomFresh.set(row.agentId, row.lastPolledAt);
+    }
+    if (roomFresh.size === 0) return base;
+    const wakeable = [], notWakeable = [];
+    const seen = new Set();
+    for (const entry of base.wakeable) { wakeable.push(entry); seen.add(entry.agentId); }
+    for (const entry of base.notWakeable) {
+      seen.add(entry.agentId);
+      const roomStamp = roomFresh.get(entry.agentId);
+      if (roomStamp !== undefined) {
+        wakeable.push(Object.freeze({ agentId: entry.agentId, lastPolledAt: roomStamp }));
+      } else notWakeable.push(entry);
+    }
+    for (const [agentId, roomStamp] of roomFresh) {
+      if (!seen.has(agentId)) wakeable.push(Object.freeze({ agentId, lastPolledAt: roomStamp }));
+    }
+    wakeable.sort((a, b) => a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0);
+    return Object.freeze({
+      windowMs: base.windowMs, asOf: base.asOf,
+      wakeable: Object.freeze(wakeable), notWakeable: Object.freeze(notWakeable),
     });
   }
 
@@ -391,7 +501,7 @@ export class AgentHeartbeats {
   // counters, which re-arms a suspended subscription); a body without it
   // leaves the existing subscription untouched, so old heartbeat bodies
   // keep working unchanged.
-  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null, workWakes = undefined, workScopeRoomId = null }) {
+  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null }) {
     checkAgentId(agentId);
     checkHostId(hostId);
     check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
@@ -425,7 +535,9 @@ export class AgentHeartbeats {
         updated_at=excluded.updated_at`)
       .run(agentId, hostId, effectiveMode, url, at, at, at);
     // plan-wake-live: heartbeat activity proves the host is listening.
-    this.recordPollActivity(agentId, at);
+    // CX5-FIX: a room-scoped credential's heartbeat (activityRoomId set by
+    // the route) stamps room activity only — never the global stamp.
+    this.recordPollActivity(agentId, at, activityRoomId);
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
@@ -512,12 +624,21 @@ export class AgentHeartbeats {
     try {
       checkAgentId(agentId);
       const status = this.statusOf(agentId);
-      if (status.status !== "offline") return Object.freeze([]);
+      // CX5-FIX: the offline gate reads IDENTITY-LEVEL presence only.
+      // Room-scoped registrations (rk_/ak_ namespaced hosts) must not
+      // suppress push: a pull-only room-key heartbeat in one room used to
+      // hold the identity "online" globally and silently starve the push
+      // doorbell for its real wakeable hosts. Scoped hosts can never carry
+      // push configs (scoped credentials are refused push registration),
+      // so excluding them from the gate changes nothing else.
+      const ownHosts = status.hosts.filter(host => !isScopedListenerHostId(host.hostId));
+      const identityOnline = ownHosts.some(host => host.state === "online");
+      if (ownHosts.length === 0 || identityOnline) return Object.freeze([]);
       const configs = new Map(this.db.prepare(
         "SELECT host_id AS hostId, push_url AS pushUrl, push_token AS pushToken, push_suspended AS pushSuspended FROM agent_push_configs WHERE agent_id=?")
         .all(agentId).map(row => [row.hostId, row]));
       const targets = [];
-      for (const host of status.hosts) {
+      for (const host of ownHosts) {
         if (host.mode !== "wakeable") continue;
         const config = configs.get(host.hostId);
         if (!config || !config.pushUrl || config.pushSuspended) continue;
@@ -846,7 +967,10 @@ export class AgentHeartbeats {
     // The pending-wake read below still serves; only the stamp is skipped.
     // recordPollActivity stays loud for its write-path caller heartbeat():
     // a missing stamp table there is a real problem, not a legacy DB.
-    try { this.recordPollActivity(agentId); } catch (error) { if (!isMissingTable(error)) throw error; /* no stamp table yet */ }
+    // CX5-FIX: notePoll's roomId is the caller's credential scope (only
+    // room-scoped credentials carry one on this route), so a scoped poll
+    // stamps room activity; an unscoped poll stamps the global row.
+    try { this.recordPollActivity(agentId, this.now(), roomId); } catch (error) { if (!isMissingTable(error)) throw error; /* no stamp table yet */ }
     // #3262: the poll door is a hosted read, not a hostless one — the caller
     // passes the hostId it required so WorkWakes.pending can apply that
     // host's opt-in consent, exactly as heartbeat() does. Omitting hostId
