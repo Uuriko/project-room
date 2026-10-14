@@ -3,36 +3,59 @@
 How Project Room survives losing the Durable Object's SQLite — and what it
 honestly cannot survive yet.
 
-## Current state (2026-10-07, verified against production)
+## Current state (2026-10-14, verified against production)
 
-- **No backup is being taken.** The daily `room-backup` cron job exists in
-  code (`cloudflare/room-backup.mjs`, scheduled via `server/jobs.mjs`) but is
-  **disabled on production**: `GET /api/health/jobs` reports
-  `room-backup: disabled — ROOM_BACKUPS is not configured`, `lastSuccessAt:
-  null`. It has never run.
-- **No operator export.** `GET /api/operator/export` answers 404 on
-  production: `ROOM_BACKUP_TOKEN` is not configured.
-- **Restore path (new):** `POST /api/operator/restore` replays a whole-store
-  NDJSON export into an empty Durable Object (`server/restore-ndjson.mjs`,
-  wired in `cloudflare/room.mjs`). Same operator token as the export.
-  Fail-closed: 404 when the token is unconfigured, 401 on a bad token,
-  409 when the store already holds rooms, 413 over 64 MiB, 422 on a
-  malformed or failed-verification export.
+- **Nightly backups are running.** The `room-backup` job writes one
+  whole-store NDJSON export per day to Workers KV (binding `ROOM_BACKUPS_KV`,
+  namespace `project-room-backups`): parts of at most 16 MiB, each with its
+  sha256, plus a manifest carrying the whole file's size and sha256, written
+  last. Every key expires after 35 days. `GET /api/health/jobs` reported
+  `room-backup: ok`, last success 2026-10-14T06:30Z. Mechanics:
+  [BACKUPS.md](BACKUPS.md).
+- **It is a single copy.** R2 is not enabled on the Cloudflare account, so
+  there is no second backup target. Enabling R2 (account action, then the
+  `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.
+- **Operator export works.** `GET /api/operator/export` streams the same
+  NDJSON when `ROOM_BACKUP_TOKEN` is configured on the owning script.
+- **Restore paths:**
+  - *File replay (the working route today):* `scripts/replay-room-export.mjs`
+    loads an export into a **new** Node sqlite store. Rehearsed end-to-end on
+    2026-10-07: 14,489 events, digests matched. Nothing in this path writes to
+    Cloudflare.
+  - *DO-native restore:* `POST /api/operator/restore` replays an export into
+    an empty Durable Object, fail-closed (404 token unconfigured, 401 bad
+    token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
+    **It cannot restore the current backup:** the 2026-10-14 backup is
+    87,606,592 bytes — over the 64 MiB cap (#3409).
+
+## Known disaster-recovery defects (all open, all verified)
+
+Disaster recovery for the real production backup is currently broken in
+independent ways. None of these is fixed by rehearsing harder; each needs its
+engineering fix, proven against a production-sized export, not a fixture.
+
+- **#3409 (High)** — the current backup exceeds the 64 MiB DO restore cap, so
+  the only DO-native restore path rejects it with 413.
+- **#3407 (High)** — the nightly KV writer certifies an export by trailer
+  event *count* only, never the trailer hash. (The R2 writer checks both.)
+  A torn export can be stored as a healthy backup and fail only at restore
+  time.
+- **#3324** — open-store restore ignores the public-claim writer permit.
+- **#3325** — restore verification pins only the event log.
+
+Until #3409 lands, the recovery route for a DO loss is file replay into a new
+Node sqlite store (above), not the restore endpoint.
 
 ## Honest RPO / RTO
 
-- **RPO: unbounded (total loss) until the R2 backup is enabled.** Cloudflare
-  replicates Durable Object storage internally, but there is no
-  user-facing snapshot or point-in-time recovery for DO SQLite. If the
-  object's storage is lost (catastrophic platform failure, or an operator
-  migration error — the realistic way SQLite gets "lost"), everything goes:
-  rooms, members, credentials, work claims, bounties, history.
-- **RTO: untested end-to-end; realistically hours, not minutes.** The replay
-  itself is exercised in CI (node suite + a Miniflare drill against real
-  Workers SQLite). What is NOT automated: re-issuing credentials (see
-  below), re-applying revocations made after the backup, and re-onboarding
-  members. There is no runbook rehearsal against production — and there
-  must never be one that touches production data.
+- **RPO: ~24 hours.** Nightly backups bound the loss window to the last
+  successful daily export. Cloudflare also replicates Durable Object storage
+  internally, but there is no user-facing snapshot or point-in-time recovery
+  for DO SQLite — the nightly export is the recovery point.
+- **RTO: hours, not minutes.** File replay is rehearsed, but re-issuing
+  credentials and re-applying post-backup revocations (below) are manual.
+  There is no runbook rehearsal against production — and there must never be
+  one that touches production data.
 
 ## What a restore recovers — and what it destroys
 
@@ -50,48 +73,31 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    after a true loss there is no "current" store left to reconcile against,
    so this step is manual.
 
-## Enabling the daily backup (operator steps)
-
-The backup job needs an R2 bucket. Code cannot create it; the operator must:
-
-1. `wrangler r2 bucket create project-room-backups` (in the Cloudflare account that
-   owns the `project-room` worker).
-2. Add the binding to the production env in `cloudflare/wrangler.jsonc`
-   and deploy. (The file is parsed as plain JSON by the runtime packager —
-   do not leave `//` comments in it.)
-   ```json
-   "r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
-   ```
-3. `wrangler secret put ROOM_BACKUP_TOKEN --env production` — a long
-   random token. This also enables `/api/operator/export`.
-4. Verify: `GET /api/health/jobs` should show `room-backup: ok` with a
-   fresh `lastSuccessAt` after the next daily tick, and the
-   `room-backups/YYYY-MM-DD.ndjson` object should exist in the
-   `project-room-backups` bucket.
-
-The job writes one object per day (`room-backups/YYYY-MM-DD.ndjson`) and
-skips when the day's object already exists. The bucket is the only backup;
-there is no second copy — consider R2 object versioning or replication for
-the bucket itself.
-
 ## Restore runbook (operator)
 
-1. Confirm the DO's store is empty (fresh object, or storage lost).
-   The endpoint refuses a non-empty store with 409 — it never overwrites.
-2. Obtain the NDJSON: the R2 object, or `GET /api/operator/export` with the
-   operator token.
-3. `POST /api/operator/restore` with the NDJSON body and
-   `Authorization: Bearer <ROOM_BACKUP_TOKEN>`. A 200 answers
-   `{ ok: true, verified: true, events, tables, backedUpAt }`.
-4. Re-issue every credential, and re-apply post-backup revocations (see
+1. Obtain the NDJSON: reassemble the day's KV parts per the manifest in
+   BACKUPS.md, or `GET /api/operator/export` with the operator token.
+2. Replay into a new store. From the nightly KV copy,
+   `node scripts/restore-room-backup.mjs --kv <YYYY-MM-DD> --to <new sqlite path>`
+   checks each part's sha256 and the whole file's sha256 against the manifest
+   before replaying; from a saved export file, use the same script with
+   `--from <export>` (or `scripts/replay-room-export.mjs` directly).
+   A failed replay leaves the destination unpromoted.
+3. Re-issue every credential, and re-apply post-backup revocations (see
    above). Treat the restored room as authoritative **as of `backedUpAt`**.
+
+(The DO-native endpoint runbook applies only to exports under the 64 MiB cap
+until #3409 is fixed: confirm the DO store is empty — the endpoint refuses a
+non-empty store with 409 — then POST the NDJSON with
+`Authorization: Bearer <ROOM_BACKUP_TOKEN>`.)
 
 ## What was deliberately not done
 
-- Creating the R2 bucket and provisioning `ROOM_BACKUP_TOKEN` need the
-  Cloudflare account; they are operator steps above, not code.
-- The 64 MiB single-request restore cap: larger rooms need chunked restore
-  tooling (future work).
+- Enabling R2 and provisioning tokens need the Cloudflare account; they are
+  operator steps, not code.
+- Chunked / KV-native in-DO restore for backups over 64 MiB is the #3409 fix,
+  not a runbook step.
 - No automated production restore drill: rehearsing against the live DO
   would risk the live room. The Miniflare drill in
-  `cloudflare/store.check.mjs` is the standing proof instead.
+  `cloudflare/store.check.mjs` and the 2026-10-07 file-replay rehearsal are
+  the standing proofs instead.
