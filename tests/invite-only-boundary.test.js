@@ -159,9 +159,10 @@ const PROBES = {
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
   // Invite preview (#3259: POST-only, code in the body): a bare probe (no
-  // code) gets 422 invalid_invite; the retired GET form gets 405.
-  "POST /api/agent-invites/preview": [undefined, 422],
-  "GET /api/agent-invites/preview": [undefined, 405],
+  // code) gets 422 invalid_invite. The retired GET form is not an open
+  // route and so has no probe here; its 405 is pinned in
+  // tests/agent-invite-preview-post.test.js.
+  "POST /api/agent-invites/preview": [{}, 422],
   // Referral invite preview/redeem: a forged token is indistinguishable from
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
