@@ -601,7 +601,9 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       if (ok && index % step === 0) {
         let posted = null;
         try { posted = JSON.parse(eventAt.get(roomId, row.seq)?.body); } catch { /* fails below */ }
-        ok = posted?.type === POSTED && (posted.data?.messageId || posted.id) === message.id;
+        // An also-send-to-channel copy is posted by its thread reply's event as `<id>:channel`.
+        const postedId = posted?.data?.messageId || posted?.id;
+        ok = posted?.type === POSTED && (postedId === message.id || (Boolean(posted.data?.alsoSendToChannel) && `${postedId}:channel` === message.id));
       }
       if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
     }
