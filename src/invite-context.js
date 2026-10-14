@@ -159,14 +159,12 @@ export function inviteRequestDoor(preview) {
   return { roomId: preview.roomId, roomTitle: preview.roomTitle || "Project Room" };
 }
 
-// The permissions a stranger asks for: what the dead invitation would have
-// granted, falling back to a minimal ask when the preview carries none. The
-// owner still chooses the final grant at decision time.
+// The permissions the consolidated request-access door asks for: a
+// minimal ask; the owner chooses the final grant at decision time.
+// (The dead-invite dialog used to ask for the dead invitation's own
+// permissions via a defaultRequestPermissions helper — retired with
+// its inline form in #3293 step 3: a dead grant is not a live intent.)
 export const FALLBACK_REQUEST_PERMISSIONS = Object.freeze(["accept_work"]);
-export function defaultRequestPermissions(preview) {
-  const fromInvite = Array.isArray(preview?.permissions) ? preview.permissions.filter(p => typeof p === "string" && p) : [];
-  return fromInvite.length ? fromInvite : [...FALLBACK_REQUEST_PERMISSIONS];
-}
 
 // Client-side mirror of the server's displayName/note limits, so the form
 // fails fast before any network call.

@@ -14,6 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -26,7 +27,6 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import {
   REQUESTABLE_INVITE_STATUSES,
   inviteRequestDoor,
-  defaultRequestPermissions,
   FALLBACK_REQUEST_PERMISSIONS,
   validateAccessRequestForm,
   newAccessRequestId,
@@ -83,11 +83,23 @@ test("QAJ-001: door opens for dead invites that name the room, stays shut otherw
   assert.equal(inviteRequestDoor({ status: "expired", roomId: "" }), null);
 });
 
-test("QAJ-001: requested permissions default to the dead invite's grant, else a minimal ask", () => {
-  assert.deepEqual(defaultRequestPermissions({ permissions: ["steer", "accept_work"] }), ["steer", "accept_work"]);
-  assert.deepEqual(defaultRequestPermissions({ permissions: [] }), [...FALLBACK_REQUEST_PERMISSIONS]);
-  assert.deepEqual(defaultRequestPermissions({}), [...FALLBACK_REQUEST_PERMISSIONS]);
-  assert.deepEqual(defaultRequestPermissions(null), [...FALLBACK_REQUEST_PERMISSIONS]);
+test("QAJ-001: the consolidated door's ask is the minimal fallback set", () => {
+  // The dead invite's own permissions are no longer inherited (#3293
+  // step 3): every door files the same minimal ask and the owner
+  // chooses the real grant.
+  assert.deepEqual([...FALLBACK_REQUEST_PERMISSIONS], ["accept_work"]);
+});
+
+test("QAJ-001 (#3293 step 3): the dead-invite dialog links out to the room's join-page door", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+  // The dialog carries ONE link; the inline form is gone.
+  assert.match(html, /<a id="invitation-request-access" class="button secondary">Request access<\/a>/);
+  assert.doesNotMatch(html, /invitation-request-(form|name|note|referred|submit|status)/);
+  // app.js points the link at the room's own address (join page), with
+  // the receipt referrer riding along when one is stashed.
+  assert.match(app, /`\$\{mount\}\/rooms\/\$\{encodeURIComponent\(door\.roomId\)\}/);
+  assert.doesNotMatch(app, /submitRequestAccessForm|openRequestAccessForm|invitation\.requestAccess/);
 });
 
 test("QAJ-001: form validation mirrors the server limits before any network call", () => {

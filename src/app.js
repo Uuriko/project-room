@@ -32,7 +32,7 @@ import { installInbox } from "./inbox-ui.js";
 import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
-import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
@@ -350,7 +350,7 @@ let roomActionsContext = null;
 let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
-  opener: null, openerSelection: null, requestAccess: null
+  opener: null, openerSelection: null
 };
 const invitationIsCommitting = () => ["authenticating", "accepting", "opening"].includes(invitation.phase)
   || (humanAuthBusy && Boolean(invitation.secret));
@@ -1554,7 +1554,7 @@ function closeInvitation({ returnFocus = true } = {}) {
   const opener = invitation.opener;
   invitation.version += 1;
   const selection = invitation.openerSelection;
-  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null, requestAccess: null });
+  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null });
   resetRequestAccessDoor();
   clearPendingInvite(window.sessionStorage);
   setInvitationFeedback("");
@@ -1598,8 +1598,7 @@ async function openInvitation(fragment) {
     preview: null,
     redemptionId: null,
     opener,
-    openerSelection,
-    requestAccess: null
+    openerSelection
   });
   setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
   renderInvitation();
@@ -1648,113 +1647,37 @@ async function previewCurrentInvitation() {
     renderInvitation();
   }
 }
-// RC-2026-09-19-071 (QAJ-001): the request-access door. When the invitation
-// dialog lands terminal on a preview that still names the room, the stranger
-// gets a way in: file a self-serve access request against that room. The
-// pure policy (which previews qualify, form validation, stash keys) lives in
-// src/invite-context.js; this is the dialog wiring.
+// RC-2026-09-19-071 (QAJ-001) origin; #3293 step 3: the request-access
+// link-out. When the invitation dialog lands terminal on a preview that
+// still names the room, the stranger gets a way in: a link to the join
+// page at the room's own address, which carries the one request-access
+// door (human-map §8.1). The inline form that used to live here filed
+// through a hand-rolled copy of the general flow and had drifted from
+// it (a fresh requestId per submit, where the consolidated flow reuses
+// the stashed one). The dead invite's own permissions are NOT carried
+// across: a dead grant is not a live intent — the consolidated door
+// files the minimal ask and the owner approves the real grant. The
+// receipt referrer still rides along (?ref=, GR1). The pure policy
+// (which previews qualify) stays in src/invite-context.js.
 function requestAccessDoor() {
   return invitation.phase === "terminal" ? inviteRequestDoor(invitation.preview) : null;
 }
 function resetRequestAccessDoor() {
-  invitation.requestAccess = null;
   $("#invitation-request-door").hidden = true;
-  $("#invitation-request-access").hidden = false;
-  $("#invitation-request-access").disabled = false;
-  $("#invitation-request-form").hidden = true;
-  $("#invitation-request-form").reset();
-  $("#invitation-request-status").textContent = "";
+  $("#invitation-request-access").removeAttribute("href");
 }
 function syncRequestAccessDoor() {
   const door = requestAccessDoor();
   const block = $("#invitation-request-door");
   if (!door) { block.hidden = true; return; }
-  // A fresh terminal preview resets the door; an in-flight submit keeps its
-  // state across renderInvitation calls (phase does not change mid-submit).
-  if (!invitation.requestAccess) resetRequestAccessDoor();
+  const mount = location.pathname.startsWith("/room/") ? "/room" : "";
+  const query = new URLSearchParams();
+  const ref = receiptReferrer();
+  if (ref) query.set("ref", ref);
+  const qs = query.toString();
+  $("#invitation-request-access").href = `${mount}/rooms/${encodeURIComponent(door.roomId)}${qs ? `?${qs}` : ""}`;
   block.hidden = false;
 }
-function openRequestAccessForm() {
-  const door = requestAccessDoor();
-  if (!door || invitation.requestAccess) return;
-  invitation.requestAccess = { phase: "form", roomId: door.roomId };
-  $("#invitation-request-access").hidden = true;
-  const stashed = readAccessRequest(window.sessionStorage, door.roomId);
-  if (stashed?.displayName) $("#invitation-request-name").value = stashed.displayName;
-  // GR1: prefill the receipt footer referrer when the field is still empty.
-  const referred = $("#invitation-request-referred");
-  const fromReceipt = receiptReferrer();
-  if (referred && !referred.value && fromReceipt) referred.value = fromReceipt;
-  $("#invitation-request-form").hidden = false;
-  $("#invitation-request-status").textContent = stashed
-    ? `You already asked to join “${door.roomTitle}” from this browser. Sending again files a second request for the owner.`
-    : "";
-  queueMicrotask(() => $("#invitation-request-name").focus({ preventScroll: true }));
-}
-function setRequestAccessStatus(text, error = false) {
-  const node = $("#invitation-request-status");
-  node.textContent = text;
-  node.classList.toggle("error", error);
-}
-async function submitRequestAccessForm(event) {
-  event.preventDefault();
-  const flow = invitation.requestAccess;
-  const door = requestAccessDoor();
-  if (!door || !flow || flow.phase !== "form") return;
-  const checked = validateAccessRequestForm({
-    displayName: $("#invitation-request-name").value,
-    note: $("#invitation-request-note").value,
-    referredBy: $("#invitation-request-referred")?.value,
-  });
-  if (!checked.ok) { setRequestAccessStatus(checked.error, true); return; }
-  const submit = $("#invitation-request-submit");
-  submit.disabled = true;
-  flow.phase = "sending";
-  setRequestAccessStatus("Sending your request…");
-  try {
-    // Reuse this browser's identity for the room so a retry does not mint
-    // (and rate-limit-burn) a fresh identity per click.
-    let stashed = readAccessRequest(window.sessionStorage, door.roomId);
-    let identityId = stashed?.identityId ?? null, secret = stashed?.secret ?? null;
-    if (!identityId) {
-      const minted = await accountClient.mintAccessIdentity(checked.displayName);
-      identityId = minted?.identityId; secret = minted?.secret ?? null;
-      if (!identityId) throw new Error("The identity service did not return an identity.");
-    }
-    const requestId = newAccessRequestId();
-    // Stash BEFORE the submit (M-37): a failed submit must not orphan the
-    // freshly minted identity — the record stays stashed so the retry reuses
-    // it instead of burning another mint.
-    stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
-    await accountClient.submitAccessRequest({
-      roomId: door.roomId,
-      identityId,
-      secret,
-      displayName: checked.displayName,
-      requestedPermissions: defaultRequestPermissions(invitation.preview),
-      note: checked.note,
-      referredBy: checked.referredBy,
-      requestId,
-    });
-    flow.phase = "sent";
-    $("#invitation-request-form").hidden = true;
-    setRequestAccessStatus(`Request sent — the owner of “${door.roomTitle}” has been notified and will review it. Your request ID is ${requestId}.`);
-  } catch (error) {
-    flow.phase = "form";
-    submit.disabled = false;
-    const message = error?.code === "rate_limited" || error?.status === 429
-      ? "Too many requests from this browser — wait a little and try again."
-      : error?.code === "already_member"
-        ? "This identity is already in the room — ask the owner directly if you need anything."
-        : typeof error?.message === "string" && error.message
-          ? error.message
-          : "Could not send the request. Check your connection and try again.";
-    setRequestAccessStatus(message, true);
-    queueMicrotask(() => $("#invitation-request-name").focus({ preventScroll: true }));
-  }
-}
-$("#invitation-request-access").addEventListener("click", openRequestAccessForm);
-$("#invitation-request-form").addEventListener("submit", submitRequestAccessForm);
 async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } = {}) {
   invitation.phase = "opening";
   invitation.secret = null;
