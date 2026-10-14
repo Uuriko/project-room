@@ -45,6 +45,19 @@ function assertLimited(error) {
   return true;
 }
 
+test("the flood-guard 429 names its bucket (AUX-13 follow-up)", t => {
+  const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
+  const f = openStore(t, () => clock.now);
+  for (let i = 0; i < 30; i++) post(f, "owner", i);
+  assert.throws(() => post(f, "owner", 30), (error) => {
+    assert.equal(error.status, 429);
+    assert.equal(error.code, "rate_limited");
+    assert.equal(error.headers["Retry-After"], "2");
+    assert.equal(error.headers["X-RateLimit-Bucket"], "chat-flood", "the 429 names the bucket that refused it");
+    return true;
+  });
+});
+
 test("30 posts pass, the 31st is 429, and a refilled bucket posts again", t => {
   const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
   const f = openStore(t, () => clock.now);
