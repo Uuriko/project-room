@@ -2411,7 +2411,10 @@ export class BountyEscrow {
       // transaction the outer store transaction rolls the DB back to the
       // snapshot below; restoring the Map entry to the same snapshot keeps
       // the two stores consistent and the dispute decidable again.
-      const disputeBefore = dispute;
+      // Deep copy, not a reference: decide/finalize mutate the record in
+      // place, so a by-reference "snapshot" would mutate along with it and
+      // the restore below would restore the decided state it exists to undo.
+      const disputeBefore = dispute ? JSON.parse(JSON.stringify(dispute)) : dispute;
       try {
         try {
           const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
@@ -2828,7 +2831,8 @@ export class BountyEscrow {
         // failure and continues with nothing applied for that bounty. The
         // summary is updated only after the isolated transaction succeeds,
         // so summary bookkeeping can never claim a rolled-back action.
-        const disputeBefore = bounty.disputeId ? this._disputeRecords?.get(bounty.disputeId) : undefined;
+        const disputeRecord = bounty.disputeId ? this._disputeRecords?.get(bounty.disputeId) : undefined;
+        const disputeBefore = disputeRecord ? JSON.parse(JSON.stringify(disputeRecord)) : disputeRecord;
         try {
           const outcome = this.store.transaction(() => {
             if (bounty.state === "approved") {
