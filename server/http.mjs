@@ -2717,16 +2717,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // join page lands the recipient inside the room — no CLI, no docs.
           const joined = store.createJoinSession(redeemed.roomId, redeemed.memberId);
           setCookie(res, roomCookieName, joined.token, Math.max(0, Math.floor((joined.expiresAt - store.now()) / 1000)));
+          // #3380: when this join minted the identity, redeem() returns its
+          // durable secret once — identitySecret below is that real secret,
+          // not the rak_ alias it used to be (the alias stranded every
+          // invite join at day 30: the token died and no credential
+          // remained). A caller that presented its own identity secret gets
+          // no identitySecret field: it already holds the durable
+          // credential, and a presented credential is never echoed back.
+          const mintedSecret = typeof redeemed.identitySecret === "string" ? redeemed.identitySecret : null;
           return json(res, 201, {
             identityId: redeemed.identityId,
-            // The invite branch never reveals the identity credential (see
-            // agent-invites.mjs redeem): what it hands out is the room-scoped
-            // rak_ token. roomToken names it honestly; identitySecret stays as a
-            // deprecated alias for existing callers. Identity-wide routes
-            // (/api/agent-rooms, /api/needs-me) do not accept it.
             roomToken: redeemed.mcpToken.credential,
             credentialKind: "room_token",
-            identitySecret: redeemed.mcpToken.credential,
+            ...(mintedSecret ? { identitySecret: mintedSecret } : {}),
             mcpToken: redeemed.mcpToken,
             roomId: redeemed.roomId,
             memberId: redeemed.memberId,
@@ -2737,9 +2740,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             sessionExpiresAt: joined.expiresAt,
             next: [
               "You are signed in — open the room below",
-              "Save the room token — it expires in 30 days and is shown once",
-              "Use it as Authorization: Bearer on /mcp for this room",
-              "roomToken (also returned as the deprecated alias identitySecret) is room-scoped: identity-wide routes such as /api/agent-rooms and /api/needs-me refuse it; use room_check_access and room_needs_me on /mcp instead",
+              mintedSecret
+                ? "Save identitySecret now — it is your identity's durable credential, shown once, and it never expires"
+                : "Your identity secret remains your durable credential — it never expires, and this response does not echo a presented credential back",
+              "Save roomToken too — it is room-scoped, expires in 30 days, and is shown once; use it as Authorization: Bearer on /mcp for this room",
+              "roomToken is room-scoped: identity-wide routes such as /api/agent-rooms and /api/needs-me refuse it and take identitySecret instead; use room_check_access and room_needs_me on /mcp for room-scoped checks",
+              "If roomToken expires, do NOT mint a replacement identity: POST /api/join again with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token — same membership, same display name (duplicate: true). identitySecret also authenticates room routes directly",
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
             ]

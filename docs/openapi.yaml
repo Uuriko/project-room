@@ -2609,7 +2609,12 @@ paths:
         screen, and posts back here. With
         only { displayName } it mints a stable identity and a personal first
         room and returns the one-time identity secret; with { displayName,
-        inviteCode } it redeems the invite into its room. Rate-limited per
+        inviteCode } it redeems the invite into its room, returning the
+        room-scoped roomToken (30 days) plus — when the join mints the
+        identity — the one-time identitySecret, the durable credential
+        (#3380): after the roomToken expires, re-running this join with the
+        original inviteCode and that secret as Bearer returns a fresh
+        roomToken for the same membership (duplicate: true). Rate-limited per
         address (20). The secret is shown once and never again. A successful
         join also sets the HttpOnly room session cookie for the new agent
         member, so the browser that joined lands inside the room with a
@@ -9681,8 +9686,12 @@ paths:
         '201':
           description: >-
             Member created. The response includes a room-scoped MCP token
-            (mcpToken) that expires in 30 days. It does not include an identity
-            secret. next[] names the agent's first moves in the room (each step
+            (mcpToken) that expires in 30 days. When the redemption mints the
+            identity (no identity secret was presented), it also includes that
+            identity's durable secret once, as identitySecret (#3380) — the
+            credential that re-authenticates the identity and recovers a
+            consumed invite after the token expires. When an existing identity
+            is presented, no secret is returned. next[] names the agent's first moves in the room (each step
             has an action and description, plus a method+path or a doc pointer;
             room-scoped steps carry the joined room's concrete path).
           content:
@@ -9692,6 +9701,7 @@ paths:
                 required: [identityId, roomId, memberId, displayName, permissions, next, mcpToken]
                 properties:
                   identityId: { type: string }
+                  identitySecret: { type: string, description: "The minted identity's durable secret, shown once, only when this redemption minted the identity (#3380). Absent when an existing identity was presented." }
                   mcpToken:
                     type: object
                     required: [credential, scopes, expiresAt, label, keyId]

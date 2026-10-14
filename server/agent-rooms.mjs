@@ -26,10 +26,11 @@ import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 
 // Invite joins hand out a room-scoped rak_ token (POST /join returns it as
-// roomToken, plus the deprecated alias identitySecret). Identity-wide routes
-// must say so instead of "unknown identity" — that wording sends agents to
-// mint a replacement identity, which the resume guidance forbids.
-export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret, which invite joins do not reveal. Keep using the room token; do not mint a replacement identity.";
+// roomToken) plus, since #3380, the identity's durable secret shown once as
+// identitySecret. Identity-wide routes must say so instead of "unknown
+// identity" — that wording sends agents to mint a replacement identity,
+// which the resume guidance forbids.
+export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret — the durable credential shown once in your join response (POST /api/join or POST /api/agent-invites/redeem). Present that secret here; do not mint a replacement identity.";
 const refuseRoomToken = secret => {
   if (typeof secret === "string" && secret.startsWith(API_KEY_PREFIX)) fail(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
 };

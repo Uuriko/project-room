@@ -120,11 +120,13 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal(joined.roomId, roomId);
   assert.equal(joined.via, "invite");
   assert.equal(typeof joined.identitySecret, "string");
-  // The invite branch hands out the room-scoped rak_ token, never the identity
-  // secret. It is named honestly as roomToken; identitySecret is the alias.
+  // #3380: the invite branch hands out the room-scoped rak_ token as
+  // roomToken AND the minted identity's durable secret, shown once, as
+  // identitySecret — without it the identity stranded when the token died.
   assert.equal(joined.credentialKind, "room_token");
   assert.match(joined.roomToken, /^rak_/);
-  assert.equal(joined.identitySecret, joined.roomToken);
+  assert.match(joined.identitySecret, /^pri_/);
+  assert.notEqual(joined.identitySecret, joined.roomToken);
   assert.equal(joined.roomToken, joined.mcpToken.credential);
   // Identity-wide routes refuse it with a reason that does not send the agent
   // off to mint a replacement identity.
@@ -136,6 +138,11 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
     assert.match(refusal.error.message, /room-scoped token/, path);
     assert.doesNotMatch(refusal.error.message, /self-mint/, path);
   }
+  // The shown-once identity secret is the durable credential: the
+  // identity-wide routes that refuse the room token accept it.
+  const rooms = await fetch(`${origin}/api/agent-rooms`, { headers: { Authorization: `Bearer ${joined.identitySecret}` } });
+  assert.equal(rooms.status, 200);
+  assert.ok((await rooms.json()).rooms.some(room => room.roomId === roomId));
   // Joining another room by share link also needs a real identity secret; the
   // room token gets the same honest refusal, not "Active agent identity required".
   const linkJoin = await fetch(`${origin}/api/share-links/join-agent`, {

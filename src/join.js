@@ -441,7 +441,9 @@ async function boot() {
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }
-    // roomToken is the honest name for the room-scoped credential; identitySecret is its deprecated alias.
+    // The page displays the room-scoped roomToken; since #3380 the response's
+    // identitySecret is the identity's durable secret, shown once at join for
+    // the API caller to save — the browser flow rides its session cookie.
     const { roomId, displayName, sessionExpiresAt } = joined.body ?? {};
     const identitySecret = joined.body?.roomToken ?? joined.body?.identitySecret;
     if (typeof identitySecret !== "string" || typeof roomId !== "string") {
