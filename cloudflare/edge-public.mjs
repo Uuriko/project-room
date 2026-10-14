@@ -19,6 +19,7 @@ const assetType = path => path.endsWith('.js') || path.endsWith('.mjs') ? 'text/
   : path.endsWith('.html') ? 'text/html'
   : path.endsWith('.png') ? 'image/png'
   : path.endsWith('.ttf') ? 'font/ttf'
+  : path.endsWith('.woff2') ? 'font/woff2'
   : path.endsWith('.txt') ? 'text/plain'
   : path.endsWith('.svg') ? 'image/svg+xml'
   : path.endsWith('.webmanifest') ? 'application/manifest+json'
