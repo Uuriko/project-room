@@ -8953,6 +8953,84 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '409': { description: Stale expectedSessionRevision }
         '422': { description: invalid_logout }
+  /api/account/sessions:
+    get:
+      summary: List the account's live account sessions
+      description: |
+        CX4. Account-session read (account_session cookie plus
+        X-Session-Binding). One entry per live account-session slot the
+        account holds — browser sessions and native (desktop) sessions
+        alike, because the native desktop exchange retires its OAuth grant
+        at redemption and keeps only the slot; those sessions never appear
+        in /api/oauth/sessions. Each entry names the login method recorded
+        at sign-in (a desktop session says method "desktop"), the slot's
+        creation time, its authenticated-until and expiry, and whether it
+        is the caller's own current session. A caller only ever sees their
+        own sessions.
+      security:
+        - accountSession: []
+      responses:
+        '200':
+          description: "{ sessions: [{ id, method, methodRef, createdAt, authenticatedUntil, expiresAt, current }] }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, createdAt, authenticatedUntil, expiresAt, current]
+                      properties:
+                        id: { type: string, description: "Public session id (the :id for DELETE /api/account/sessions/{id}); a one-way derivation, never a credential" }
+                        method: { type: [string, "null"], description: "Login method kind recorded at sign-in (desktop, magic, password, passkey, google, access-key, ...); null for sessions minted before methods were recorded" }
+                        methodRef: { type: [string, "null"], description: "Public login-method handle recorded at sign-in, when the method carries one" }
+                        createdAt: { type: integer, description: "Slot creation, ms epoch" }
+                        authenticatedUntil: { type: integer, description: "End of the authenticated window, ms epoch" }
+                        expiresAt: { type: integer, description: "Slot expiry, ms epoch" }
+                        current: { type: boolean, description: "True for the caller's own session" }
+        '401': { description: unauthenticated }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
+  /api/account/sessions/{id}:
+    delete:
+      x-room-permission: self
+      summary: Revoke one account session owned by the account
+      description: |
+        CX4 targeted revocation. Account-session write (X-CSRF-Token,
+        Origin, X-Session-Binding), 60 per minute per address. Ends exactly
+        the named account session — browser or native — effective
+        immediately: its cookie, reads, and streams are denied from the
+        next request. The account's other sessions and every OAuth
+        session are untouched, and POST /api/oauth/sessions/revoke-all
+        keeps its OAuth-only semantics (it never reached these slots).
+        Unknown ids, already-dead sessions, and other accounts' sessions
+        all answer 404 session_not_found, so a caller cannot probe for
+        them.
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: "{ revoked }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, description: "1 when the named live session was revoked" }
+        '401': { description: unauthenticated }
+        '403': { description: csrf_denied }
+        '404': { description: session_not_found }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
   /api/auth/recovery-codes/generate:
     post:
       summary: Mint or regenerate the account's recovery-code set (slice 6)
