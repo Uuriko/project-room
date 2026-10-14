@@ -2672,21 +2672,29 @@ export class BountyEscrow {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     // Sweep what is actually approved (a split leaves only the worker's half
     // here); the 1% fee applies only on payouts that actually release.
+    // The approved bucket can legitimately be ZERO: a split of a 1-milli
+    // bounty vests floor(1/2) = 0 with the worker (#3263). The claim-bond
+    // settlement and the terminal transition must not be gated on the
+    // payout amount — with 0 approved there is simply no payout/fee move
+    // (the journal rejects zero-amount movements), but the bounty still
+    // completes to `paid` (worker 0, fee 0) and the bond still comes home.
     const amount = this._approvedMillis(roomId, bounty.claimant, bountyId);
-    check(amount > 0, "invalid_state", "nothing approved to sweep");
     const fee = Math.floor(amount * FEE_NUMERATOR / FEE_DENOMINATOR);
     const earner = amount - fee;
     const lotId = newId("lot_");
-    // Finality: payout requires the bounty to sit in approved (vested).
-    this._requireFinalityMove(bounty, "payout");
-    const movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
-      amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
-      receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
-        grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
-    if (fee > 0) {
-      this._requireFinalityMove(bounty, "fee");
-      this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
-        amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
+    let movement = null;
+    if (amount > 0) {
+      // Finality: payout requires the bounty to sit in approved (vested).
+      this._requireFinalityMove(bounty, "payout");
+      movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
+        amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
+        receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
+          grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
+      if (fee > 0) {
+        this._requireFinalityMove(bounty, "fee");
+        this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
+          amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
+      }
     }
     // The claim bond was an anti-flake lock, not a fee: it comes home now.
     this._settleClaimBond(bounty, at, { forfeit: false, actor });
@@ -2698,7 +2706,7 @@ export class BountyEscrow {
     this._saveBounty(bounty);
     this._event(roomId, "bounty.paid",
       { bountyId, actor, before: "approved", after: "paid", data: { earner: bounty.claimant, paid: toCredits(earner), fee: toCredits(fee) } });
-    return { paid: toCredits(earner), fee: toCredits(fee), signed: movement.receipt ? [movement.receipt] : [] };
+    return { paid: toCredits(earner), fee: toCredits(fee), signed: movement?.receipt ? [movement.receipt] : [] };
   }
 
   // One mechanical pass over a single bounty; returns { action, signed } or null.

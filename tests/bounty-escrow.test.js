@@ -712,3 +712,49 @@ test("dispute SPLIT of a 1-milli bounty: zero worker half vests nothing, whole m
   assert.equal(bal(escrow, "pool").payable, 0);
   expectConserved(escrow);
 });
+
+// #3263 regression: the split above lands the bounty in `approved` holding
+// ZERO approved millis. The epoch sweep must not gate the claim-bond
+// settlement (or the terminal transition) on a positive payout amount:
+// closeEpoch completes the bounty to `paid` with worker 0 / fee 0 and
+// returns the claimant's flat 1000ms claim bond, instead of recording
+// "nothing approved to sweep" in summary.failed on every epoch forever.
+test("dispute SPLIT of a 1-milli bounty: epoch sweep settles the claim bond and pays out zero (#3263)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToSubmitted(escrow, { amount: 0.001, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
+  escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
+  assert.equal(bal(escrow, GROK).locked, 1, "claim bond (1000ms = 1 credit) still locked before the sweep");
+  const epoch = escrow.closeEpoch(ROOM, {});
+  assert.equal(epoch.summary.failed, undefined, `epoch must not fail the zero-approved bounty: ${JSON.stringify(epoch.summary.failed)}`);
+  assert.deepEqual(epoch.summary.swept, [bounty.bountyId]);
+  assert.deepEqual(epoch.summary.paid, [{ bountyId: bounty.bountyId, paid: 0, fee: 0 }]);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "paid");
+  assert.equal(bal(escrow, GROK).locked, 0, "claim bond settled by the sweep");
+  assert.equal(bal(escrow, GROK).payable, 100, "claim bond returned in full; zero payout adds nothing");
+  assert.equal(bal(escrow, "pool").payable, 0, "no fee on a zero payout");
+  // Terminal now: a second epoch neither retries nor fails the bounty.
+  const epoch2 = escrow.closeEpoch(ROOM, {});
+  assert.equal(epoch2.summary.failed, undefined);
+  assert.deepEqual(epoch2.summary.swept, []);
+  expectConserved(escrow);
+});
+
+test("dispute SPLIT of a 1-milli bounty from accepted: epoch sweep also completes it (#3263)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAccepted(escrow, { amount: 0.001, verifier: INSTINCT });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
+  escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
+  assert.equal(bal(escrow, GROK).approved, 0);
+  const epoch = escrow.closeEpoch(ROOM, {});
+  assert.equal(epoch.summary.failed, undefined, `epoch must not fail the zero-approved bounty: ${JSON.stringify(epoch.summary.failed)}`);
+  assert.deepEqual(epoch.summary.swept, [bounty.bountyId]);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "paid");
+  assert.equal(bal(escrow, GROK).locked, 0, "claim bond settled by the sweep");
+  assert.equal(bal(escrow, GROK).payable, 100);
+  expectConserved(escrow);
+});
