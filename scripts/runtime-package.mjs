@@ -203,7 +203,7 @@ optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
 optional.push("server/work-claim-integrity.mjs"); // SEC-2: Board input bounds, event budget and status cache (imported by server/work-claim-routes.mjs; imports src/display-name-guard.js via server/display-name-guard.mjs and server/store.mjs limits)
-optional.push("server/work-claim-mirror.mjs"); // projection claims mirrored onto the work-claims board (imported by server/store.mjs)
+optional.push("server/work-claim-mirror.mjs"); // decision #10 transition: no production caller since the step-2 write-path cutover (server/work-item-board.mjs syncs instead); kept until the stack's final PR cuts it (decision #34)
 optional.push("server/work-item-board.mjs"); // decision #10: workItems -> board claims migration core (imported by server/store.mjs)
 optional.push("server/receipt-cards.mjs"); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
 optional.push("server/room-guide.mjs"); // ACT-1a: Room Guide demo agent (imported by cloudflare/room.mjs and server/starter-room.mjs)
