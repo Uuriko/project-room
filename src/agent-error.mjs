@@ -445,7 +445,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Keep your saved connection. Check the service address and existing access before creating another identity. If the failed credential is an expired room token (rak_), your identity secret has not expired — use it instead.",
+      hint: "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
       next: [
         tool("room_check_access"),
         path("/api/agent-rooms"),
