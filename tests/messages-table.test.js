@@ -731,3 +731,27 @@ test("the recovery audit passes on the fully seeded recovery fixture after old m
   assert.ok(done.archived > 0, "the fixture has old messages to archive");
   assert.equal(auditRecovery(f.store).rooms, 2);
 });
+
+test("conversation history still reaches archived messages after a new write leaves the table uncertified, DMs stay private", async t => {
+  const { readConversation } = await import("../server/conversation-sync.mjs");
+  const f = fixture(t);
+  for (let i = 0; i < 8; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `m${i}`, body: `b${i}`, ...(i === 2 ? { toMemberId: "agent" } : {}) });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "m9", body: "b9" });
+  const all = token => {
+    const ids = [];
+    let cursor = null;
+    for (let page = 0; page < 20; page++) {
+      const result = readConversation(f.store, token, "commons", { limit: 3, cursor });
+      ids.unshift(...result.messages.map(message => message.id));
+      if (!(cursor = result.nextCursor)) break;
+    }
+    return ids;
+  };
+  const everything = ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7", "m9"];
+  assert.deepEqual(all(f.human), everything, "the author sees the whole history, tail and archive");
+  assert.deepEqual(all(f.stranger), everything.filter(id => id !== "m2"), "an archived DM stays hidden from a stranger");
+  assert.equal(readConversation(f.store, f.human, "commons", { messageId: "m1" }).messages[0].id, "m1");
+});
