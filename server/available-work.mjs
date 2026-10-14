@@ -8,24 +8,24 @@
 // and needs-me alone counted unclaimed board claims. A surface could not
 // express "nothing is claimable anywhere" because no surface saw anywhere.
 //
-// This projection computes availability ONCE, over every work store, and
-// emits one shape. Execution stays with the engines (board, work items,
-// public-work facade) — each item carries a claimAction descriptor naming
-// the route that acts on it, so reads unify while writes keep their
-// semantics. Availability rule, aligned to the strictest proven definition
-// (needs-me's openWorkOf, server/needs-me.mjs):
+// This projection computes availability ONCE, over the work stores, and
+// emits one shape. Execution stays with the engines — each item carries
+// a claimAction descriptor naming the route that acts on it, so reads
+// unify while writes keep their semantics. Availability rule, aligned
+// to the strictest proven definition (needs-me's openWorkOf,
+// server/needs-me.mjs):
 //   board claim  — not invalidated (no premiseFlag, not supersededBy),
 //                  state "unclaimed", kind "work", every dependsOn done,
 //                  and (when a viewer is named) the viewer may write claims.
-//   work item    — state "accepted" (proposed items are not claimable yet)
-//                  with no live claim holder.
 //   public task  — the facade packet's claim.state is "unclaimed" (no
 //                  submitted receipt, no live owner after lease release).
+// Work items are not a separate source: decision #10 migrated them onto
+// the board (server/work-item-board.mjs), so an accepted work item IS a
+// board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
-import { WORK_STATES } from "../src/events.js";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 
-export const AVAILABLE_WORK_SOURCES = ["board", "workItem", "publicTask"];
+export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
 
 const usableClaim = item => Boolean(item) && !item.premiseFlag && !item.supersededBy;
 
@@ -55,30 +55,6 @@ const boardItem = (roomId, item) => ({
     method: "POST",
     endpoint: `/api/rooms/${roomId}/work-claims/${item.id}/claim`,
     params: { requestId: "<uuid>" }
-  }
-});
-
-const workItemAvailable = (item, nowMs) => {
-  if (!item || item.state !== WORK_STATES.ACCEPTED) return false;
-  const claim = item.claim ?? null;
-  if (!claim?.holderId) return true;
-  const expiresMs = Date.parse(claim.expiresAt ?? "");
-  return Number.isFinite(expiresMs) && expiresMs <= nowMs;
-};
-
-const workItemItem = (roomId, item) => ({
-  id: item.id,
-  title: item.title ?? item.id,
-  source: "workItem",
-  roomId,
-  state: item.state,
-  owner: null,
-  leaseExpiresAt: null,
-  untrusted: true,
-  claimAction: {
-    method: "POST",
-    endpoint: `/api/rooms/${roomId}/commands`,
-    params: { type: "claim.acquired", data: { workItemId: item.id, expectedRevision: item.revision ?? 0 } }
   }
 });
 
@@ -117,33 +93,19 @@ export function availableClaimsFromBoard(board, roomId, { viewerId = null, state
   return availableBoardRows(board).map(item => boardItem(roomId, item));
 }
 
-// Room-scoped AvailableWork: board claims + work items for one room.
-// Returns { items, total } — an empty items list with total 0 is the
-// explicit zero-inventory signal (the #2988 state, now expressible).
-export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50, now = null } = {}) {
-  const nowMs = now ?? store.now();
-  const { state } = store.room(roomId);
-  let board = [];
-  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
-  const claims = availableClaimsFromBoard(board, roomId, { viewerId, state });
-  // Decision #10 transition: a work item with a board card is offered
-  // once, as the board claim (its claim action is the board door). The
-  // workItem source below only covers items the migration has not
-  // reached yet; PR-3 (board-only) removes it outright.
-  const cardedWorkItemIds = new Set(board.map(item => item?.workItemId).filter(id => typeof id === "string"));
-  const items = Object.values(state.workItems ?? {})
-    .filter(item => workItemAvailable(item, nowMs) && !cardedWorkItemIds.has(item.id))
-    .map(item => workItemItem(roomId, item));
-  const all = [...claims, ...items];
-  return { items: all.slice(0, limit), total: all.length };
-}
-
-// Decision #10 shadow read: the board-only form of availableWorkInRoom
-// (no workItem source). The migration's equivalence harness compares
-// this against the dual-source read; once a room's backfill has
-// converged the two agree on the work inventory, and the consumer
-// cutover flips availableWorkInRoom itself to the board-only definition.
-export function availableWorkInRoomBoardOnly(store, roomId, { viewerId = null, limit = 50 } = {}) {
+// Room-scoped AvailableWork: board claims for one room. Returns
+// { items, total } — an empty items list with total 0 is the explicit
+// zero-inventory signal (the #2988 state, now expressible).
+//
+// Decision #10, final consumer step: this read is BOARD-ONLY. It used
+// to union a second source (projection work items read straight from
+// state.workItems); the migration (backfill + write-path sync in
+// server/work-item-board.mjs) puts every accepted-or-later work item on
+// the board, so the board is the one availability definition (decision
+// #5) with no second source to diverge or double-count. The `now`
+// option is accepted for caller compatibility and no longer consulted:
+// board availability is a property of the stored rows.
+export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50 } = {}) {
   const { state } = store.room(roomId);
   let board = [];
   try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }

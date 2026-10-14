@@ -16,7 +16,7 @@ import {
   boardClaimId, boardClaimForWorkItem, planWorkItemBoardBackfill,
   diffRoomWorkItems, sameClaimRow,
 } from "../server/work-item-board.mjs";
-import { availableWorkInRoom, availableWorkInRoomBoardOnly } from "../server/available-work.mjs";
+import { availableWorkInRoom } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { updateWork } from "../server/work-claims.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
@@ -423,30 +423,32 @@ test("store: the open-time backfill runs on reopen (auto mode) and the marker ma
   assert.equal(JSON.stringify(f.store.workClaims.list("commons")), snapshot);
 });
 
-test("store: AvailableWork board-only shadow read equals the dual-source read after backfill (and not before)", async (t) => {
+test("store: AvailableWork is board-only after the flip — the board is the one availability definition", async (t) => {
   const f = fixture(t);
   driveLifecycle(f);
-  // A board-native claim too: both reads must carry it throughout.
+  // A board-native claim too: the read must carry it throughout.
   const { createWork } = await import("../server/work-claims.mjs");
   f.store.workClaims.set("commons", createWork({ id: "board-native", title: "Board native" }, { now: Date.now(), agentId: "owner" }));
-  // Stage the pre-migration gap: the work-item cards are absent (the
-  // sync wrote them during driveLifecycle; a legacy database has none),
-  // so the board-only read must miss task-open until the backfill runs.
-  f.store.db.prepare("DELETE FROM work_claims WHERE room_id='commons' AND claim_id IN ('task-open', 'task-done', 'task-idle')").run();
   const identities = entries => new Set(entries.map(entry => {
     if (entry.source === "workItem") return entry.id;
     return f.store.workClaims.get("commons", entry.id)?.workItemId ?? entry.id;
   }));
-  const before = identities(availableWorkInRoom(f.store, "commons", { limit: 50 }).items);
-  const boardBefore = identities(availableWorkInRoomBoardOnly(f.store, "commons", { limit: 50 }).items);
-  assert.deepEqual(before, new Set(["board-native", "task-open"]));
-  assert.deepEqual(boardBefore, new Set(["board-native"])); // the gap, pre-migration
-
+  // With the migration in place (sync + cards present), the board-only
+  // read offers exactly the available work: the accepted-unclaimed item
+  // (as its board claim) and the board-native claim.
+  assert.deepEqual(identities(availableWorkInRoom(f.store, "commons", { limit: 50 }).items),
+    new Set(["board-native", "task-open"]));
+  // The flip's contract: availability flows ONLY through the board. An
+  // item whose card is missing (a legacy database the backfill has not
+  // reached) is NOT offered through any second source...
+  f.store.db.prepare("DELETE FROM work_claims WHERE room_id='commons' AND claim_id IN ('task-open', 'task-done', 'task-idle')").run();
+  assert.deepEqual(identities(availableWorkInRoom(f.store, "commons", { limit: 50 }).items),
+    new Set(["board-native"]));
+  // ...and the backfill restores it, which is why the open-time pass
+  // (PR-1) is the flip's precondition.
   f.store.backfillRoomWorkItemClaims("commons");
-  const after = identities(availableWorkInRoom(f.store, "commons", { limit: 50 }).items);
-  const boardAfter = identities(availableWorkInRoomBoardOnly(f.store, "commons", { limit: 50 }).items);
-  assert.deepEqual(boardAfter, after);
-  assert.deepEqual(boardAfter, new Set(["board-native", "task-open"]));
+  assert.deepEqual(identities(availableWorkInRoom(f.store, "commons", { limit: 50 }).items),
+    new Set(["board-native", "task-open"]));
 });
 
 // ---------------------------------------------------------------------------
