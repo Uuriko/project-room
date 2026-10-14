@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { openapiOperations, routeCandidates } from "./open-routes.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
+import { HEALTH_ALIAS_PATHS } from "../deploy/agent-discovery.mjs";
 
 export const templateKey = path => path.replace(/\{[^}]+\}|:[A-Za-z]+/g, "{}");
 
@@ -126,6 +127,17 @@ export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, wo
   for (const row of ROUTES) {
     const key = templateKey(row.path);
     if (!served.has(key)) served.set(key, row.path);
+  }
+  // Constant-routed /api paths are invisible to the literal/regex extractors
+  // above: the health aliases are path constants (deploy/agent-discovery.mjs)
+  // served by the same http.mjs branch as /api/health. Their /api members
+  // belong to the gated set like any other /api template; the bare and /room
+  // twins stay with the door-mirror family, outside this gate's /api scope.
+  for (const path of HEALTH_ALIAS_PATHS) {
+    if (!path.startsWith("/api/")) continue;
+    const clean = path.replace(/\/+$/, "");
+    const key = templateKey(clean);
+    if (clean && !served.has(key)) served.set(key, clean);
   }
   if (served.size < 50 || !served.has("/api/health") || !served.has("/api/rooms/{}/commands") || !served.has("/api/health/jobs")) throw new Error("server route extraction sanity failed");
   return served;

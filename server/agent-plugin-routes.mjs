@@ -392,7 +392,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-skill-card:${remoteAddress}`, 60);
     const card = store.membersDirectory.publicCard(identityId);
     if (!card) reject(404, "unknown_skill_card", "No published skill card for this identity");
-    return json(res, 200, card);
+    return json(res, 200, card, req.method === "HEAD");
   });
 
   // Directory reads: public without a credential; an authenticated room
@@ -416,7 +416,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const origin = serviceOrigin(req);
     return json(res, 200, member
       ? store.agentPlugin.memberCard(agentId, member.identityId, origin)
-      : store.agentPlugin.publicCard(agentId, origin));
+      : store.agentPlugin.publicCard(agentId, origin), req.method === "HEAD");
   });
 
   // ---- Plug-in manifest (derived; also at the module's well-known path) ----
@@ -731,7 +731,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
 
   const listIdentityKeys = translate(async (req, res, { identityId }) => {
     if (!store.identities.get(identityId)) reject(404, "identity_not_found", "No such agent identity");
-    return json(res, 200, { identityId, keys: store.keyRegistry.keysFor(identityId) });
+    return json(res, 200, { identityId, keys: store.keyRegistry.keysFor(identityId) }, req.method === "HEAD");
   });
 
   const rotateIdentityKey = translate(async (req, res, { remoteAddress, identityId }) => {
@@ -958,13 +958,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     if (keyActionMatch) { await keyAction(req, res, { remoteAddress, keyId: keyActionMatch[1], action: keyActionMatch[2] }); return true; }
     if (pathname === "/api/agent-directory/cards" && method === "POST") { await publishCard(req, res, { remoteAddress }); return true; }
     if (pathname === "/api/agent-skills" && method === "POST") { await publishSkills(req, res, { remoteAddress }); return true; }
-    const skillCardMatch = method === "GET" ? SKILL_CARD_ROUTE.exec(pathname) : null;
+    const skillCardMatch = (method === "GET" || method === "HEAD") ? SKILL_CARD_ROUTE.exec(pathname) : null;
     if (skillCardMatch) { await skillCardDocument(req, res, { remoteAddress, identityId: skillCardMatch[1] }); return true; }
     if (pathname === "/api/agent-directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
     if (pathname === "/api/agents/directory" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
     const cardMatch = method === "DELETE" ? CARD_ROUTE.exec(pathname) : null;
     if (cardMatch) { await withdrawCard(req, res, { remoteAddress, agentId: cardMatch[1] }); return true; }
-    const publicCardMatch = method === "GET" ? PUBLIC_CARD_ROUTE.exec(pathname) : null;
+    const publicCardMatch = (method === "GET" || method === "HEAD") ? PUBLIC_CARD_ROUTE.exec(pathname) : null;
     if (publicCardMatch) { await cardDocument(req, res, { agentId: publicCardMatch[1] }); return true; }
     if ((pathname === "/api/agent-manifest" || pathname === WELL_KNOWN_PATH) && method === "GET") { await manifest(req, res); return true; }
     if (pathname === "/api/agent-webhooks" && method === "GET") { await listWebhooks(req, res); return true; }
@@ -996,7 +996,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // RC-2026-09-24-210: identity-holder proof-of-possession mint.
     const linkCodeMatch = method === "POST" ? LINK_CODE_ROUTE.exec(pathname) : null;
     if (linkCodeMatch) { await mintIdentityLinkCode(req, res, { remoteAddress, identityId: pathId(linkCodeMatch[1]) }); return true; }
-    const keyListMatch = method === "GET" ? KEY_LIST_ROUTE.exec(pathname) : null;
+    const keyListMatch = (method === "GET" || method === "HEAD") ? KEY_LIST_ROUTE.exec(pathname) : null;
     if (keyListMatch) { await listIdentityKeys(req, res, { identityId: pathId(keyListMatch[1]) }); return true; }
     const keyRotateMatch = method === "POST" ? KEY_ROTATE_ROUTE.exec(pathname) : null;
     if (keyRotateMatch) { await rotateIdentityKey(req, res, { remoteAddress, identityId: pathId(keyRotateMatch[1]) }); return true; }

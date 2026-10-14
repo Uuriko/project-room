@@ -250,6 +250,10 @@
       "path": "/api/agent-identities/{id}/keys"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agent-identities/{id}/keys"
+    },
+    {
       "method": "POST",
       "path": "/api/agent-identities/{id}/keys/revoke"
     },
@@ -362,11 +366,19 @@
       "path": "/api/agents/{id}/card"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agents/{id}/card"
+    },
+    {
       "method": "GET",
       "path": "/api/agents/directory"
     },
     {
       "method": "GET",
+      "path": "/api/agents/directory/{id}"
+    },
+    {
+      "method": "HEAD",
       "path": "/api/agents/directory/{id}"
     },
     {
@@ -4012,6 +4024,10 @@
       "path": "/api/agent-identities/{id}/keys"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agent-identities/{id}/keys"
+    },
+    {
       "method": "POST",
       "path": "/api/agent-identities/{id}/keys/revoke"
     },
@@ -4124,11 +4140,19 @@
       "path": "/api/agents/{id}/card"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agents/{id}/card"
+    },
+    {
       "method": "GET",
       "path": "/api/agents/directory"
     },
     {
       "method": "GET",
+      "path": "/api/agents/directory/{id}"
+    },
+    {
+      "method": "HEAD",
       "path": "/api/agents/directory/{id}"
     },
     {

@@ -19,6 +19,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { openRoutes, openapiOperations, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
 import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
+import { HEALTH_ALIAS_PATHS } from "../deploy/agent-discovery.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 const openapi = read("../docs/openapi.yaml");
@@ -39,6 +40,10 @@ const SERVED_CANDIDATES = [
   // server/http.mjs. All four routes 401 for anonymous callers, so they are
   // guarded, never served open.
   ...nextActionsRouteTemplates(read("../server/next-actions-routes.mjs")),
+  // The health aliases are path constants (deploy/agent-discovery.mjs),
+  // served by the same http.mjs branch as /api/health but invisible to the
+  // literal/regex extractors above. Only the /api members join this sweep.
+  ...new Set(HEALTH_ALIAS_PATHS.filter(path => path.startsWith("/api/")).map(path => path.replace(/\/+$/, ""))),
 ];
 assert.ok(DECLARED_OPEN.length >= 10, "openapi open-route parse sanity");
 assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/health") && SERVED_CANDIDATES.includes("/api/rooms/{id}/commands"),
@@ -56,6 +61,8 @@ const PROBES = {
   "GET /api/auth/desktop/callback": [undefined, 422],
   "POST /api/auth/desktop/session": [{ code: `oac_${"A".repeat(32)}`, verifier: "A".repeat(43) }, 401],
   "HEAD /api/health": [undefined, 200],
+  "GET /api/healthz": [undefined, 200],
+  "HEAD /api/healthz": [undefined, 200],
   "HEAD /api/version": [undefined, 200],
   "HEAD /api/ready": [undefined, 200],
   "HEAD /api/guest-agent-links": [undefined, 200],
