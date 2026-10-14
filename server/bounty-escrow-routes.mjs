@@ -232,8 +232,12 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       // and the journal replay check have already run (see idem above), so
       // established denials keep their precedence, a replay never reaches
       // here and is never charged, and the reservation settles atomically
-      // with the write — a refusal rolls both back.
-      const spend = chargeSpendBeforeCall(store, credential, "bounty_post", { roomId });
+      // with the write — a refusal rolls both back. A null credential
+      // (account-session callers; http.mjs passes null in that mode) runs
+      // uncharged, mirroring withSpendCharge's guard at every other door.
+      const spend = typeof credential === "string" && credential.length > 0
+        ? chargeSpendBeforeCall(store, credential, "bounty_post", { roomId })
+        : null;
       const { bounty, receipt } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
           deadline: payload.deadline, verifierId: payload.verifierId ?? null,
