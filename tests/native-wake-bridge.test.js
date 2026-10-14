@@ -51,6 +51,27 @@ test("the web restore lifecycle keeps its persisted gate", () => {
   assert.ok(restore > gate, "the gated handler drives the existing client.restore() lifecycle");
 });
 
+test("the wake handler treats a superseded restore as cancellation, never as wrong-room", () => {
+  // Codex review P1 (PR #3476): restore() returns null when a newer
+  // lifecycle supersedes it (client generation guard). The handler must
+  // return on that sentinel before any teardown, and the account
+  // continuation must be fenced to the wake that initiated it.
+  const handler = app.indexOf('window.addEventListener("pageshow", e => {');
+  assert.ok(handler !== -1, "the restore pageshow handler exists");
+  const probe = app.indexOf("const joined = await client.restore();", handler);
+  assert.ok(probe > handler, "the handler probes the room-cookie session");
+  const sentinel = app.indexOf("if (joined === null) return null;", probe);
+  assert.ok(sentinel > probe, "a superseded (null) restore returns before any teardown");
+  const mismatch = app.indexOf("client.endAccess();", probe);
+  assert.ok(mismatch > sentinel, "the wrong-room teardown sits after the supersession sentinel");
+  const fence = app.indexOf("const probeGeneration = client.generation;", sentinel);
+  const accountProbe = app.indexOf("const account = await ensureAccountSession();", fence);
+  assert.ok(accountProbe > fence, "the account continuation is fenced to this wake's generation");
+  const destinationFence = app.indexOf("selectedRoomFromLocation() !== roomId", fence);
+  assert.ok(destinationFence > fence && destinationFence < accountProbe + 200,
+    "the account continuation also re-checks the selected destination");
+});
+
 test("the web presence refresh keeps its persisted + visible gate", () => {
   const handler = app.indexOf('window.addEventListener("pageshow", event => {');
   assert.ok(handler !== -1, "the presence pageshow handler exists");

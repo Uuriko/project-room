@@ -6594,12 +6594,24 @@ window.addEventListener("pageshow", e => {
     let accessEnded = false;
     try {
       const joined = await client.restore();
+      // A superseded restore returns null (the client generation guard):
+      // a newer wake or a room/account switch cancelled this attempt
+      // mid-flight. That is a cancellation, never a wrong-room result —
+      // touch nothing and let the newer lifecycle own the current access.
+      if (joined === null) return null;
       if (joined?.roomId === roomId) return joined;
       client.endAccess(); accessEnded = true;
     } catch (error) {
       if (![401, 403].includes(error.status)) throw error;
     }
+    // Fence the account continuation to this wake: baseline the client
+    // generation now that this wake's own restore has settled, and bail if
+    // a newer lifecycle (second wake, room/account switch) began while the
+    // account session was being restored — restoring over it could end
+    // the access it just established.
+    const probeGeneration = client.generation;
     const account = await ensureAccountSession();
+    if (client.generation !== probeGeneration || selectedRoomFromLocation() !== roomId) return null;
     if (account?.authenticated) return client.restore(roomId);
     // Neither credential restored the session: the access this page held is
     // over. End it through the lifecycle's own teardown (the same one a

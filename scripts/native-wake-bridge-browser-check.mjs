@@ -113,3 +113,69 @@ test("macOS wake signal: bounded revalidation for a live session, stale access d
   assert.equal(writes(), 0, "the revoked wake performs no writes either");
   assert.equal(errors.join("\n"), "");
 });
+
+test("overlapping wakes: an older wake completion cannot end the newer wake's access", { timeout: 90000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-native-wake-overlap-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom());
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", command(T.MEMBER_ADDED, {
+    memberId: "waker", displayName: "Wake Tester", kind: "human", permissions: []
+  }));
+  const waker = store.issueAccessKey("commons", "waker");
+  store.command(waker, "commons", command(T.MESSAGE_POSTED, { body: "seed message posted before sleep" }));
+  const server = createRoomServer({ store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let browser, page;
+  t.after(async () => {
+    await browser?.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(`${origin}/`);
+  await signInFixture(page, waker);
+  await page.locator("#message-list").getByText("seed message posted before sleep").waitFor();
+  await page.fill("#message-input", "draft that must survive overlapping wakes");
+  const wakeScript = bridgeWakeScript();
+
+  // Hold the first wake's session response in transport (its real 200 is
+  // fetched but not delivered), let a second wake restore fully, then
+  // release the first. The older restore resumes superseded: restore()
+  // returns null, and that cancellation must not be read as wrong-room —
+  // the newer wake's access, draft, and room must all survive.
+  let release, began, count = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { began = resolve; });
+  await page.route("**/api/session", async route => {
+    if (route.request().method() === "GET" && ++count === 1) {
+      const response = await route.fetch();
+      began();
+      await gate;
+      await route.fulfill({ response });
+    } else await route.continue();
+  });
+  await page.evaluate(wakeScript);
+  await started;
+  const newerRestored = page.waitForResponse(response => response.url().endsWith("/api/session")
+    && response.request().method() === "GET" && response.ok());
+  await page.evaluate(wakeScript);
+  await newerRestored;
+  await page.waitForTimeout(300);
+  release();
+  await page.waitForTimeout(500);
+  await page.unroute("**/api/session");
+  assert.equal((await page.context().request.get(`${origin}/api/session`)).status(), 200,
+    "the credential is still valid after the overlapping wakes");
+  assert.equal(await page.locator("#main").isVisible(), true,
+    "the older cancelled restore must not end the newer wake's access");
+  assert.equal(await page.locator("#message-input").inputValue(), "draft that must survive overlapping wakes",
+    "the unsent draft survives the overlapping wakes");
+  assert.equal(await page.locator("#message-list").getByText("seed message posted before sleep").count(), 1,
+    "the delivered message is not duplicated by the overlapping wakes");
+  assert.equal(errors.join("\n"), "");
+});
