@@ -329,6 +329,14 @@ export class AgentInvites {
       const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
         : row.display_name || DEFAULT_INVITE_NAME;
       if (name.length > 80) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+      // #3382: an already-linked identity redeeming a fresh code must get
+      // the reconcile answer BEFORE the name guard runs — when it re-joins
+      // under its own member name, the guard's collision IS its own
+      // membership, and the rename suggestion teaches rename-instead-of-
+      // reconcile (decision #28: advice must be state-aware). The same
+      // check below still backstops the identity-minting path.
+      if (existingIdentity && this.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId))
+        fail(409, "identity_already_linked", "Identity already joined; reuse its saved connection");
       // The name becomes this room's member name. Refuse reserved labels,
       // hidden characters, and skeletons that match someone already here
       // before an identity or membership row is written.
