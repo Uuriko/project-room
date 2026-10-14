@@ -117,12 +117,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingLink) return "account-switch";
     if (emailMethod === "forgot") return "forgot";
     if (emailMethod === "reset") return `reset-${resetPhase}`;
-    return emailMethod === "password" ? `password-${passwordMode}` : `magic-${magicPhase}`;
+    // The merged form is the only email entry (#3341): a magic state in
+    // its request phase reports as the password view it renders.
+    if (emailMethod === "magic") return magicPhase === "sent" ? "magic-sent" : `password-${passwordMode}`;
+    return `password-${passwordMode}`;
   }
   function showView(view) {
     if (busy || pendingTerms) return false;
     const valid = ["welcome", "password-login", "password-signup", "forgot", "reset-request", "reset-sent", "reset-form", "magic-request", "magic-sent", "account-switch"];
     if (!valid.includes(view)) return false;
+    // "magic-request" is a retired view name (#3341 merge); stored
+    // history entries and older hosts still ask for it — it lands on
+    // the merged form.
+    if (view === "magic-request") view = "password-login";
     // An unconfigured-mail deployment has no magic views to show.
     if (view.startsWith("magic-") && !mailConfigured) view = "password-login";
     if (view === "account-switch") { if (!pendingLink) return false; }
@@ -150,22 +157,31 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingTerms) return uiText("signin.copy.005", { fragmentA: busy ? "disabled" : "" });
     if (welcome) return uiText("signin.copy.004");
     if (pendingLink) return uiText("signin.copy.006", { fragmentA: busy ? "disabled" : "" });
-    if (emailMethod === "forgot") {
+    // #3341 (one-email-field merge): there is no separate magic-request
+    // view anymore — the password form IS the email form. emailMethod
+    // "magic" survives only in its sent phase (a link/code is on its
+    // way); any other magic state renders the merged form below.
+    const method = emailMethod === "magic" && magicPhase !== "sent" ? "password" : emailMethod;
+    if (method === "forgot") {
       const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
       return uiText("signin.copy.007") + (mailConfigured ? uiText("signin.magic.action") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
-    if (emailMethod === "reset") {
+    if (method === "reset") {
       if (resetPhase === "sent") return uiText("signin.copy.008", { fragmentA: escapeHtml(resetEmail) });
       if (resetPhase === "form") return uiText("signin.copy.009", { fragmentA: busy ? "disabled" : "" });
       const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
       return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (mailConfigured ? uiText("signin.magic.instead") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
-    if (emailMethod === "password") {
+    if (method === "password") {
       const signup = passwordMode === "signup";
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10"' : "", fragmentD: "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
+      // The merged form: in login mode the password is optional whenever
+      // this deployment can email a sign-in link instead — the input
+      // carries `required` only for signup, or when mail is
+      // unconfigured and a password is the only way in. The hint in
+      // fragmentD teaches the blank-password path.
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'required minlength="10"' : (mailConfigured ? "" : "required"), fragmentD: !signup && mailConfigured ? uiText("signin.copy.035") : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
     }
-    if (magicPhase === "sent") return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
-    return uiText("signin.copy.015", { fragmentA: escapeHtml(magicEmail), fragmentB: busy ? "disabled" : "" });
+    return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
   }
   function render() {
     const node = surface();
@@ -211,6 +227,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (error.code === "magic_account_mismatch") pendingLink = { kind: "magic", email, code };
       throw error;
     }
+  }
+  // Ask the server to email a sign-in link/code for this address (the
+  // merged form's blank-password path, #3341). The endpoint answers
+  // uniformly whether or not the address has an account, so nothing
+  // leaks about which addresses are registered. Returns true when the
+  // sent view should show; on the honest "unavailable" answer it sets
+  // the status itself and returns false.
+  async function requestEmailLink(session, email) {
+    const returnTo = onMagicLinkRequest?.();
+    const reply = await api(session, "/api/auth/magic/request", { email, ...(returnTo ? { returnTo } : {}) });
+    if (reply?.status === "unavailable") { setStatus(reply.message || uiText("signin.copy.030"), true); return false; }
+    if (reply?.status !== "sent") throw new Error(uiText("signin.copy.031"));
+    emailMethod = "magic"; magicEmail = email; magicPhase = "sent"; magicManualCode = false;
+    return true;
   }
   const onClick = async event => {
     if (busy) return;
@@ -258,7 +288,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (recovery) {
       const email = surface()?.querySelector('[name="email"]')?.value?.trim();
       if (email) passwordEmail = magicEmail = resetEmail = email;
-      showView(recovery.dataset.recoveryOption === "reset" ? "reset-request" : "magic-request"); return;
+      // The "email me a link" recovery option lands on the merged form
+      // (#3341): submitting it with a blank password sends the link.
+      showView(recovery.dataset.recoveryOption === "reset" ? "reset-request" : "password-login"); return;
     }
     const method = event.target?.closest?.("[data-email-method]");
     const mode = event.target?.closest?.("[data-password-mode]");
@@ -266,8 +298,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       welcome = false;
       const currentEmail = surface()?.querySelector('[name="email"]')?.value;
       if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
-      if (method) emailMethod = method.dataset.emailMethod === "password" || !mailConfigured ? "password" : "magic";
-      if (mode) emailMethod = "password";
+      // One merged email form (#3341): every method/mode switch lands
+      // on it; the mode switch still chooses login vs signup.
+      emailMethod = "password";
       if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
       pendingLink = null; magicPhase = "request"; setStatus(""); render();
       surface()?.querySelector('[name="email"]')?.focus(); return;
@@ -340,7 +373,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (passwordMode === "signup" && (fields.password?.length < 10 || fields.password?.length > 256)) {
         setStatus(uiText("signin.copy.024"), true); return;
       }
-      if (await beforeSignIn?.() === false) return;
+      // Merged form (#3341): in login mode with mail configured, a blank
+      // password is a link request, not a sign-in attempt — like the old
+      // magic-request submit it does not consult beforeSignIn (asking
+      // for a link signs nothing in and clears nothing; the host's gate
+      // applies when a password is presented or a code/link redeemed).
+      const linkRequest = passwordMode !== "signup" && !fields.password && mailConfigured;
+      if (!linkRequest && await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();
         if (passwordMode === "signup") {
@@ -366,6 +405,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
           }
           return;
         }
+        if (linkRequest) { await requestEmailLink(session, passwordEmail); return; }
         const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
         await finish(view);
       }); return;
@@ -375,17 +415,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (!magicManualCode || !code || await beforeSignIn?.() === false) return;
       await withBusy(() => redeem(magicEmail, code)); return;
     }
-    const resetting = form.dataset.signinForm === "reset-request";
-    if (!resetting && form.dataset.signinForm !== "magic-request") return;
+    if (form.dataset.signinForm !== "reset-request") return;
     const email = [...form.querySelectorAll('input[name]')].find(input => input.name === "email")?.value?.trim() ?? "";
-    if (resetting) resetEmail = email; else magicEmail = email;
+    resetEmail = email;
     await withBusy(async () => {
       const session = await authedSession();
       const returnTo = onMagicLinkRequest?.();
-      const reply = await api(session, resetting ? "/api/auth/password/reset/request" : "/api/auth/magic/request", { email, ...(returnTo ? { returnTo } : {}) });
+      const reply = await api(session, "/api/auth/password/reset/request", { email, ...(returnTo ? { returnTo } : {}) });
       if (reply?.status === "unavailable") { setStatus(reply.message || uiText("signin.copy.030"), true); return; }
       if (reply?.status !== "sent") throw new Error(uiText("signin.copy.031"));
-      if (resetting) resetPhase = "sent"; else magicPhase = "sent"; magicManualCode = false;
+      resetPhase = "sent";
       render();
     });
   };
@@ -457,15 +496,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     showWelcome() { return showView("welcome"); },
     showPassword(mode = "login") { return showView(mode === "signup" ? "password-signup" : "password-login"); },
     showMagic() {
+      // #3341: there is no separate magic view to open — the merged
+      // form is the email entry (a blank password asks for the link).
+      // Kept as the hosts' "open email sign-in" entry point; coercion
+      // for unconfigured mail is now simply what the form is.
       if (busy) return false;
-      if (!mailConfigured) return showView("password-login");
-      welcome = false; emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
+      return showView("password-login");
     },
     openEmail(mode = "magic", panel) {
       if (busy) return false;
       if (panel && container && !panel.contains?.(container)) panel.prepend?.(container);
       if (panel) panel.hidden = false;
-      emailMethod = mode === "password" || !mailConfigured ? "password" : "magic";
+      // The mode argument is retained for host compatibility; both
+      // modes open the one merged form (#3341).
+      emailMethod = "password";
       render(); return true;
     },
     closeEmail() { return back(); },

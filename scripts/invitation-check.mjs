@@ -106,9 +106,9 @@ async function fillInvitationEmail(page, fixtureKey) {
   const email = fixtureLogins.get(fixtureKey);
   assert.ok(email, "test account has a synthetic email login");
   await page.locator("#invitation-email").click();
-  await page.locator("#invitation-methods [data-forgot-password]").click();
-  await page.locator('#invitation-methods [data-email-method="magic"]').click();
-  const request = page.locator('#invitation-methods [data-signin-form="magic-request"]');
+  // #3341: one merged form — the email-link path is this form
+  // submitted with a blank password (no recovery detour anymore).
+  const request = page.locator('#invitation-methods [data-signin-form="password"]');
   await request.locator('[name="email"]').fill(email);
   await request.locator('button[type="submit"]').click();
   const form = page.locator('#invitation-methods [data-signin-form="magic-code"]');
@@ -466,9 +466,7 @@ test("delivered email link opens its intended invitation in a fresh browser tab"
   const context = await f.browser.newContext(); const opener = await context.newPage();
   await opener.goto(`${f.origin}/#invite/${f.invitationToken}`);
   await opener.locator('#invitation-email').click();
-  await opener.locator('#invitation-methods [data-forgot-password]').click();
-  await opener.locator('#invitation-methods [data-email-method="magic"]').click();
-  const form = opener.locator('#invitation-methods [data-signin-form="magic-request"]');
+  const form = opener.locator('#invitation-methods [data-signin-form="password"]');
   const email = fixtureLogins.get(f.targetAccountKey);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();

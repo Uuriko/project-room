@@ -111,9 +111,13 @@ test("email sign-in is not offered when delivery is unconfigured", { timeout: 30
     globalThis.document.querySelectorAll('#auth-signin-ui [data-email-method="magic"]').length === 0);
   assert.equal(await controller.locator('[data-email-method="magic"]').count(), 0);
   if (await controller.locator('[data-password-mode="login"]').isVisible()) await controller.locator('[data-password-mode="login"]').click();
+  // Merged form (#3341): with no mail configured there is no
+  // blank-password link path to offer — the password is simply
+  // required, and the hint that teaches the link path is absent.
+  assert.equal(await controller.locator('[data-signin-form="password"] [name="password"][required]').count(), 1);
+  assert.equal(await controller.locator("text=Leave it blank").count(), 0);
   await controller.locator("[data-forgot-password]").click();
   assert.equal(await controller.locator('[data-recovery-option="magic"]').count(), 0);
-  assert.equal(await controller.locator('[data-signin-form="magic-request"]').count(), 0);
   assert.equal(await page.locator("#auth-panel").isVisible(), true);
   assert.equal(await page.locator("#inbox-panel").isVisible(), false);
 });
@@ -140,8 +144,8 @@ test("sign-in UI: email link returns to the existing account with a configured m
   const magic = await freshPage();
   await magic.goto(origin + "/?account=1");
   await openMagicSignin(magic);
-  await magic.locator('#auth-signin-ui [data-signin-form="magic-request"] [name="email"]').fill("magic-browser@example.invalid");
-  await magic.locator('#auth-signin-ui [data-signin-form="magic-request"] button[type="submit"]').click();
+  await magic.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').fill("magic-browser@example.invalid");
+  await magic.locator('#auth-signin-ui [data-signin-form="password"] button[type="submit"]').click();
   await magic.locator("#email-auth-panel").getByText(/Check .* for your sign-in link/).waitFor();
   assert.equal(sent.length, 1);
   assert.ok(typeof sent[0].code === "string" && sent[0].code.length > 0);
