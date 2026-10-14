@@ -717,3 +717,17 @@ test("reports can be filed against archived messages and keep their context, an 
   assert.equal(reports.length, 1);
   assert.equal(reports[0].message?.body, "rude old message");
 });
+
+test("the recovery audit passes on the fully seeded recovery fixture after old messages are archived", async t => {
+  const { createRecoveryFixture } = await import("../scripts/recovery-fixture.mjs");
+  const { seedRecoveryCoverage } = await import("../scripts/recovery-coverage.mjs");
+  const directory = mkdtempSync(join(tmpdir(), "room-recovery-archive-"));
+  const f = createRecoveryFixture(join(directory, "source.sqlite"));
+  t.after(() => { f.store.close(); rmSync(directory, { recursive: true, force: true }); });
+  await seedRecoveryCoverage(f);
+  for (let i = 0; i < 50; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  const done = f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false });
+  assert.ok(done.archived > 0, "the fixture has old messages to archive");
+  assert.equal(auditRecovery(f.store).rooms, 2);
+});

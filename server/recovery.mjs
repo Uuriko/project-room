@@ -7,7 +7,7 @@ import { auditTextResults } from "./text-results.mjs";
 import { auditCharters } from "../src/room-charter.js";
 import { auditReplyRequests } from "./reply-requests.mjs";
 import { auditWorkHelp } from "./work-help.mjs";
-import { compactReplayLikeArchive } from "./messages-store.mjs";
+import { compactReplayLikeArchive, archivedMessageIds } from "./messages-store.mjs";
 
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -118,7 +118,7 @@ export function auditRecovery(store) {
       });
       auditTextResults(store.db, actual.state, history);
       auditCharters(actual.state, history, checkpoint);
-      auditReplyRequests(actual.state, history, checkpoint);
+      auditReplyRequests(actual.state, history, checkpoint, archivedMessageIds(store.db, row.id));
       auditWorkHelp(actual.state, history, checkpoint);
       eventCount += history.length;
       rooms.set(row.id, actual.state);
