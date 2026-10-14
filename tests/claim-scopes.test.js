@@ -7,7 +7,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 import { claimScope, conflictingClaim } from '../server/claim-scopes.mjs';
-import { boardClaimId } from '../server/work-claim-mirror.mjs';
+import { boardClaimId } from '../server/work-item-board.mjs';
 import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 

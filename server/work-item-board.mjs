@@ -44,8 +44,8 @@ const BLOB_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const BOARD_SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 // The claim id a work item maps to on the board. Moved here verbatim
-// from server/work-claim-mirror.mjs (which re-exports it during the
-// migration; the mirror cut removes that module, not this mapping):
+// from the former server/work-claim-mirror.mjs in step 1 of the
+// migration (the mirror module itself was cut in step 2):
 // ids that are already board-safe pass through unchanged, so existing
 // cards — and receipts, rc_<claim id> — keep their ids. Any other id is
 // encoded reversibly instead of squashed: "_" is the escape character
@@ -770,10 +770,14 @@ export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force
 // Write-path cutover (decision #10 step 2): the command layer writes
 // board claims directly, from post-command projection state, through the
 // same mapping the backfill uses — replacing the work-claim-mirror's
-// event translation (decision #34: the mirror is frozen, and its cut is
-// the final step of this stack). Because sync and backfill share the
-// mapping, the board converges to the same rows by construction; the
-// room diff (diffRoomWorkItems) stays empty across live command flow.
+// event translation, and the mirror module is deleted in this same step
+// (the repo's reachability gate does not allow a shipped module with no
+// runtime importer to linger for a later cleanup PR; decision #34's
+// intent — the mirror dies only once its replacement is live in the
+// same change, never before — is preserved). Because sync and backfill
+// share the mapping, the board converges to the same rows by
+// construction; the room diff (diffRoomWorkItems) stays empty across
+// live command flow.
 //
 // The mirror's transactional guards carry over exactly: the room
 // open-claim cap and the per-member open-claim cap throw 409s that roll

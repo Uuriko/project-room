@@ -16,7 +16,6 @@ import {
   boardClaimId, boardClaimForWorkItem, planWorkItemBoardBackfill,
   diffRoomWorkItems, sameClaimRow,
 } from "../server/work-item-board.mjs";
-import { boardClaimId as mirrorBoardClaimId } from "../server/work-claim-mirror.mjs";
 import { availableWorkInRoom, availableWorkInRoomBoardOnly } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { updateWork } from "../server/work-claims.mjs";
@@ -54,14 +53,24 @@ const factsFor = events => {
   return { events, byEventId, pullRequests: [], blocks: [], supersedeEvents: events.filter(e => e.type === "work.superseded") };
 };
 
-test("boardClaimId: identical to the mirror's mapping for every id shape", () => {
-  const samples = ["task-a", "task.1", "task:1", "task_1", "tâche.2", "a".repeat(200), "", "UPPER_case-9", "x".repeat(128), "café:menu.1"];
-  for (const sample of samples) assert.equal(boardClaimId(sample), mirrorBoardClaimId(sample), sample);
-  assert.equal(boardClaimId("task.1"), "_etask_p1");
-  assert.equal(boardClaimId("task:1"), "_etask_c1");
-  assert.equal(boardClaimId("task_1"), "task_1"); // "_" is board-safe: passes through
-  assert.equal(boardClaimId("task-a"), "task-a"); // board-safe passes through: receipt ids stay stable
-  assert.match(boardClaimId("a".repeat(200)), /^_h[0-9a-f]{40}$/);
+test("boardClaimId: the id mapping is pinned character-for-character (existing cards and receipt ids depend on it)", () => {
+  // Expectations generated from the pre-migration mirror implementation
+  // (the function moved verbatim to server/work-item-board.mjs in step 1
+  // and the mirror was cut in step 2 — these literals are now the pin).
+  const samples = new Map([
+    ["task-a", "task-a"],           // board-safe: passes through unchanged
+    ["task.1", "_etask_p1"],
+    ["task:1", "_etask_c1"],
+    ["task_1", "task_1"],           // "_" is board-safe: passes through
+    ["tâche.2", "_et_xe2_che_p2"],  // non-ASCII: code-point escape
+    ["", "workitem"],
+    ["UPPER_case-9", "UPPER_case-9"],
+    ["café:menu.1", "_ecaf_xe9__cmenu_p1"],
+  ]);
+  for (const [input, expected] of samples) assert.equal(boardClaimId(input), expected, input);
+  assert.equal(boardClaimId("x".repeat(128)), "x".repeat(128)); // at the limit: still a pass-through
+  assert.match(boardClaimId("a".repeat(200)), /^_h[0-9a-f]{40}$/); // over the limit: hash fallback
+  assert.equal(boardClaimId("a".repeat(200)), "_hc2a908d98f5df987ade41b5fce213067efbcc21e");
 });
 
 test("mapping: proposed items map to NO card (unaccepted work must not become board-claimable)", () => {
