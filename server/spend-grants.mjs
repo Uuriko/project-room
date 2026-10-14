@@ -45,7 +45,11 @@
 //     the lease and releases their room reservations. It runs
 //     opportunistically at the top of authorizeSpend's transaction, so
 //     the cap math always sees live reservations; no separate reaper
-//     process is needed (#1525).
+//     process is needed (#1525). The settle paths enforce the lease in
+//     the transition itself (#3268): a post-lease settle deterministically
+//     records no charge whether or not the reaper has run yet — the row
+//     stays 'reserved' for the reaper (or a void) to release, exactly as
+//     a crashed caller's orphan does.
 //
 // Money is integer cents as TEXT (string-decimal, no floats, D12). Only the
 // "credits" denomination exists in v1; "usdc" issuance is refused fail-closed.
@@ -479,6 +483,21 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
   }
 
   const transition = (to, settledAt) => {
+    // #3268: the settle transition itself is lease-aware, with the
+    // reaper's exact deadline — COALESCE(expires_at, created_at + lease)
+    // for pre-#1525 rows — and its exact boundary (a reservation at its
+    // deadline is expired). Without this, a post-lease settle succeeded
+    // whenever no unrelated authorize had run the reaper first, so the
+    // money outcome depended on other room activity. Void is NOT
+    // lease-gated: releasing an expired reservation is cleanup, never a
+    // charge.
+    if (to === "settled") {
+      const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
+        WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
+          AND COALESCE(expires_at, created_at + ?) > ?`)
+        .run(to, settledAt, roomId, agentId, nonce, RESERVE_LEASE_MS, settledAt);
+      return info.changes > 0;
+    }
     const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
       .run(to, settledAt, roomId, agentId, nonce);
@@ -510,16 +529,23 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     priceCents: replayedReserved ? outcome.priceCents : priceCents,
     remainingAfterCents: replayedReserved ? remainingNowCents() : intToCents(outcome.remainingAfter),
     ...(replayedReserved ? { replayed: "reserved" } : {}),
-    settle() {
+    settle(nowMs = Date.now()) {
       // #2959: the transition, the room-reservation release, and the
       // single-use revocation are one atomic unit. Splitting them left a
       // settled authorization whose room reservation stayed 'active'
       // forever (the reaper only voids still-'reserved' rows) — or a
       // settled single-use grant that was never revoked — if the process
       // died or a write failed between the steps.
+      // #3268: the settle instant is the lease check, so it is injectable
+      // like authorizeSpend's nowMs; production callers pass nothing.
+      const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
       return transact(db, () => {
-        const moved = transition("settled", Date.now());
-        releaseRoomReservation();
+        const moved = transition("settled", at);
+        // Release only on a real transition (the standalone forms below
+        // already do): a post-lease settle that did not move leaves the
+        // row 'reserved', so its room reservation stays 'active' with it
+        // until the reaper or a void releases both together.
+        if (moved) releaseRoomReservation();
         // Single-use grants are consumed by their first settled call.
         if (moved) {
           const terms = rowToTerms(db.prepare(
@@ -578,11 +604,18 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
 // the authorization transition and the room-reservation release commit
 // together or not at all, so a failure between them cannot strand an
 // 'active' room reservation behind a settled/voided authorization.
-export function settleSpend(db, { roomId, agentId, nonce } = {}) {
+export function settleSpend(db, { roomId, agentId, nonce, nowMs = Date.now() } = {}) {
+  // #3268: lease-aware like the handle form — the same COALESCE deadline
+  // and boundary the reaper uses, evaluated at the settle instant (nowMs
+  // is injectable for clock-controlled tests; callers pass nothing). A
+  // post-lease settle returns false and leaves the row 'reserved' for
+  // the reaper or a void, whether or not the reaper has already run.
+  const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
   return transact(db, () => {
     const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
-      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-      .run(Date.now(), roomId, agentId, nonce);
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
+        AND COALESCE(expires_at, created_at + ?) > ?`)
+      .run(at, roomId, agentId, nonce, RESERVE_LEASE_MS, at);
     if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
     return info.changes > 0;
   });
