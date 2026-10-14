@@ -916,7 +916,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       onWake: () => { woken = true; done(); },
     });
     try {
-      const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId });
+      // notePoll gets waiterHostId — the REGISTERED host id (room-key
+      // credentials register under the prefixed form) — so WorkWakes
+      // consent matching sees the same host heartbeat() reports for.
+      const immediate = store.agentHeartbeats.notePoll({ agentId: auth.identityId, roomId, hostId: waiterHostId });
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
@@ -938,7 +941,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const current = heartbeatActor(req, requiredScope("heartbeats:read"));
       if (current.identityId !== auth.identityId || (current.roomId ?? null) !== roomId)
         reject(403, "identity_changed", "Credential binding changed during wake wait");
-      const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId });
+      const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
