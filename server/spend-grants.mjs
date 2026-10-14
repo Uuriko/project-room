@@ -412,13 +412,20 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
   if (tierOf(db, roomId, agentId) === "t1_readonly")
     refuse(403, "spend_grant_denied", "t1_readonly agents cannot hold spend grants");
 
+  // #1525 + #3377: crash recovery. Void reservations orphaned past their
+  // lease (a caller crashed between reserve and settle/void) BEFORE the cap
+  // math below, so they can never permanently consume grant cap or room
+  // allowance. Runs on every authorization — the next priced call after a
+  // crash reaps what the crashed one left behind. The reap runs in its OWN
+  // transaction, ahead of the authorization transaction: every refusal
+  // below throws, and a throw inside the shared transaction rolled the
+  // reap back with it, stranding the headroom until some later authorize
+  // happened to commit (a revoked grant refused forever and never reaped
+  // at all). The voided-replay path below already follows this rule —
+  // recovery commits before any refusal is raised.
+  reapExpiredSpendAuthorizations(db, { roomId, nowMs });
+
   const outcome = transact(db, () => {
-    // #1525: crash recovery. Void reservations orphaned past their lease
-    // (a caller crashed between reserve and settle/void) BEFORE the cap
-    // math below, so they can never permanently consume grant cap or room
-    // allowance. Runs on every authorization — the next priced call after
-    // a crash reaps what the crashed one left behind.
-    reapExpiredSpendAuthorizations(db, { roomId, nowMs });
     // Replay first: a re-presented nonce never authorizes twice, no matter
     // the cap state. 'settled' returns its receipt (exactly-once charging
     // for completed-request replay, no fresh headroom needed); 'reserved'
@@ -691,6 +698,13 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   const priceCents = priceForTool(name, room.state);
   if (priceCents === null) return null;
   const nowMs = store.now();
+  // #3377: reap BEFORE the projection snapshot and the charge transaction
+  // below. This wrapper's store.transaction is the outermost transaction
+  // on the production path — a reap left inside authorizeSpend's own
+  // transaction scope would still share it and roll back with a refused
+  // charge. Reaping here commits independently (the reaper transacts on
+  // its own) and the snapshot then prices against the reaped state.
+  reapExpiredSpendAuthorizations(store.db, { roomId, nowMs });
   const report = spendAllowanceReport(room.state, nowMs);
   // The check+reserve MUST run inside the store's platform transaction.
   // authorizeSpend's transact() now delegates to the store's platform
