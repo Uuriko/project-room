@@ -204,8 +204,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
-  route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById",
-    { operationIds: { GET: "getAgentWebhook", DELETE: "deleteAgentWebhook" } }),
+  route("/api/agent-webhooks/{subscriptionId}", ["DELETE"], "agent-credential", "Delete one webhook subscription.", "agentWebhookById",
+    { operationIds: { DELETE: "deleteAgentWebhook" } }),
   route("/api/agent-webhooks/{subscriptionId}/deliveries", ["GET"], "agent-credential", "Delivery journal for one subscription.", "agentWebhookDeliveries"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.

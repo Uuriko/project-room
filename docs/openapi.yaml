@@ -8628,6 +8628,24 @@ paths:
       security: []
       responses:
         '200': { description: Response headers only }
+  /api/healthz:
+    get:
+      summary: Liveness (health-check alias)
+      description: >-
+        Open (also HEAD). Alias of GET /api/health with the identical
+        payload, advertised for health-check tooling that probes the
+        conventional /healthz name (deploy/agent-discovery.mjs
+        HEALTH_ALIAS_PATHS; bare /health stays 404 by contract). The
+        Public Host aliases are served identically.
+      security: []
+      responses:
+        '200': { description: "{ status: ok, mode, emailVerification: enforced | relaxed-no-mailer }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/health/jobs:
     get:
       summary: Cron job heartbeat and open public-report count

@@ -364,6 +364,15 @@ function scanSource(source, bag, { names, matchers, bindings }) {
     for (const path of paths) addRoute(bag, match[2], path);
   }
 
+  // Disjunctive method gates: const x = (method === "GET" || method === "HEAD")
+  // ? ROUTE.exec(pathname) — the readMethod pairs the plugin dispatcher uses
+  // for its documented HEAD reads.
+  for (const match of source.matchAll(/const (\w+) = \((method(?: === "[A-Z]+")(?: \|\| method === "[A-Z]+")*)\) \? (\w+)\.exec\(pathname\)/g)) {
+    const consts = indexRegexConsts(source);
+    const paths = consts.get(match[3]) ?? [];
+    for (const method of match[2].matchAll(/"([A-Z]+)"/g)) for (const path of paths) addRoute(bag, method[1], path);
+  }
+
   for (const match of source.matchAll(/const (\w+) = (?:routePattern\("([^"]+)"\)|\/\^([\s\S]*?)\$\/)\.exec\(url\.pathname\);\s*if \(\1 && ([^)]*)\)/g)) {
     const paths = match[2] ? [match[2]] : regexToTemplates(match[3]);
     const methods = methodsFrom(match[4], "");
