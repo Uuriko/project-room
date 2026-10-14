@@ -164,6 +164,11 @@ export const SAFE_ENTROPY_TOKENS = [
   "archive/docs/history/EXPORT-RETENTION-DELETION.md", // server/room-export-html.mjs header citation
   "archive/docs/history/SAFE-DIAGNOSTICS.md", // docs/INCIDENT-RUNBOOK.md companion citation (also embedded in server/wiki-data.mjs)
   "archive/docs/history/V8-RECOVERY-RUNBOOK.md", // docs/INCIDENT-RUNBOOK.md companion citation (also embedded in server/wiki-data.mjs)
+  // Repo-relative archive paths cited after the E7 Phase 3 archive
+  // moves. File paths, not credentials; the dated filenames push the
+  // joined path token over the entropy threshold.
+  "archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt", // DESIGN.md citation
+  "archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md", // scripts/grok-room-host.mjs pointer string
 ];
 
 // Directories scanned: source code where a real secret could hide.

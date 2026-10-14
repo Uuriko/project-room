@@ -20,7 +20,7 @@ this path is now [archived](archive/docs/history/DESIGN-2026-09-20.md).
 
 This file carries forward the direction we already had. It doesn't replace
 it.
-- [docs/HUMAN-EXPERIENCE-PLAN-20261006.txt](docs/HUMAN-EXPERIENCE-PLAN-20261006.txt):
+- [archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt](archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt):
   "A conversation with your friends and one helpful assistant, where projects
   get done without everyone having to manage the machinery behind the
   assistant." Its five design rules still hold:

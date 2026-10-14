@@ -58,7 +58,7 @@ The machine relay is a separate Worker in [../relay/README.md](../relay/README.m
 
 ## Security
 
-Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [DATA-BOUNDARIES.md](DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md). The quarterly internal audit contest is [AUDIT-CONTEST.md](AUDIT-CONTEST.md). Data retention is [security/data-retention-policy.md](security/data-retention-policy.md); the pen-test checklist is [security/pentest-checklist.md](security/pentest-checklist.md).
+Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in [SECURITY-MODEL.md](SECURITY-MODEL.md) and [DATA-BOUNDARIES.md](DATA-BOUNDARIES.md). Agent-card custody is [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). Secret scanning is [SECRET-SCAN.md](SECRET-SCAN.md). Rotation is [SECRETS-ROTATION.md](SECRETS-ROTATION.md). Incident steps are [INCIDENT-RUNBOOK.md](INCIDENT-RUNBOOK.md) and [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md). The quarterly internal audit contest is [AUDIT-CONTEST.md](../archive/docs/plans/AUDIT-CONTEST.md). Data retention is [security/data-retention-policy.md](security/data-retention-policy.md); the pen-test checklist is [security/pentest-checklist.md](security/pentest-checklist.md). The security folder index — living policies here, point-in-time audits archived — is [security/README.md](security/README.md).
 
 ## Contribute
 

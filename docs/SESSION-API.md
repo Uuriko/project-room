@@ -4,7 +4,7 @@ HTTP endpoints for the session lifecycle (work sessions), the claims board
 (the authoritative work-claims surface), and the supervision-card APIs.
 This document is HTTP only. For the JS domain interface that server code
 uses (`SessionAdapter`: connect/spawnAgent/readPane/sendText/reportState/…)
-see `docs/SESSION-ADAPTER.md` (pending — lane B12).
+see `archive/docs/plans/SESSION-ADAPTER.md` (pending — lane B12).
 
 ## Status
 

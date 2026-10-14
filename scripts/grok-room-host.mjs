@@ -231,7 +231,7 @@ function nextFor(code) {
     return "Save a connection with: node scripts/agent-inbox.mjs join '<invite>' ~/.project-room/grok-build --name \"Grok Build\"";
   }
   if (code === "unauthenticated") return "The saved secret was rejected. Reuse the existing identity directory; do not mint a replacement until this one is proven dead.";
-  return "See docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
+  return "See archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
 }
 
 async function planAndJournal({ connection, items, env, execute, runner, now, extra = {} }) {

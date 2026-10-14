@@ -113,9 +113,9 @@ Workers use it only for their own pane:
 Everything else in the socket API (cross-pane reads/sends, server control,
 plugins, worktree, layout apply) is denied by the bridge allowlist —
 workers never need it. The JS domain interface behind these calls is
-documented in `docs/SESSION-ADAPTER.md` (pending — lane B12); the operator
+documented in `archive/docs/plans/SESSION-ADAPTER.md` (pending — lane B12); the operator
 side (isolation, fencing, audit) is in
-`docs/HERDR-OPERATOR-RUNBOOK.md` (pending — lane B12).
+`archive/docs/plans/HERDR-OPERATOR-RUNBOOK.md` (pending — lane B12).
 
 ## See also
 
