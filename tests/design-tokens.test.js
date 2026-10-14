@@ -59,7 +59,9 @@ const surfaces = {
   "public face": faceHtml(),
   receipts,
   "room export": renderRoomExportHtml([]),
-  "room health": readFileSync(new URL("../docs/room-health.html", import.meta.url), "utf8")
+  // docs/room-health.html is a generated artifact and no longer committed; the
+  // fixture preserves a real generated page shell (style block verbatim).
+  "room health": readFileSync(new URL("fixtures/room-health.html", import.meta.url), "utf8")
 };
 
 test("every surface embeds the same dark and light tokens", () => {
