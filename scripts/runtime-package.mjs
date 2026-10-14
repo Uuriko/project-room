@@ -9,6 +9,22 @@ import { pathToFileURL } from "node:url";
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
 export const publicAssets = ["src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/strings.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js", "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/open-questions-ui.js", "src/retention-ui.js", "src/board-ui.js", "src/board-keyboard.mjs", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/emoji.js", "src/emoji-catalog.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Read the selected source's explicit asset declaration, never today's list for
+// (scripts/build-agent-docs.mjs renders them from the committed docs/agents/*.md
+// sources) — decision #32: generated output is never committed — so an
+// exact-commit package can never contain them, and they are not part of this
+// package's asset contract. Cloudflare (the canonical runtime, decision #16)
+// builds and serves them at deploy; the Node package accepts a 404 on
+// /docs/agents while the pilot is parked. Synthesize-at-package-time
+// (Option B) is the recorded path if the Node package ever un-parks. The
+// pages stay registered in `allowed` (DX-1a, below) so historical packages
+// that do contain them still verify; registration alone never ships a file —
+// only a packaged source's own declaration, filtered here, creates the
+// obligation, and every other advertised asset remains fail-closed below.
+const generatedAgentPages = new Set(["docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html",
+  "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html",
+  "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html"]);
+// Read the selected source's explicit asset declaration, never today's list for
+
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.
 function assetsFor(files) {
@@ -26,7 +42,8 @@ function assetsFor(files) {
     check(!text.replace(/["'][A-Za-z0-9_./-]+["']/g, "").replace(/[\s,]/g, ""), `${path} has unsupported asset expressions`);
     return values;
   };
-  const assets = [...literals(parts[1]), ...literals(parts[2]).map(file => "src/" + file), ...literals(parts[5])];
+  const assets = [...literals(parts[1]), ...literals(parts[2]).map(file => "src/" + file), ...literals(parts[5])]
+    .filter(asset => !generatedAgentPages.has(asset));
   check(assets.includes("index.html") && new Set(assets).size === assets.length && assets.every(asset => allowed.has(asset)), `${path} advertises invalid or unregistered assets`);
   return assets;
 }
@@ -346,6 +363,9 @@ optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collecto
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
 optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/routes/inbox.mjs", "server/routes/auth.mjs", "server/routes/desktop-auth.mjs", "server/routes/signin-options.mjs", "server/routes/work-claims.mjs"); // batch RT: declarative route table (imported by server/http.mjs); signin-options added by H3 #3341
 // DX-1a begin: installer, agent docs, and the example pages those docs link to.
+// The docs/agents/*.html entries stay registered for historical packages only:
+// current sources no longer commit the pages and assetsFor() no longer holds a
+// package to them (decision #36, see generatedAgentPages above).
 const dx1aAssets = ["scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md"];
 
 optional.push(...dx1aAssets, "server/connect-snippets.mjs");
