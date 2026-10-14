@@ -4662,8 +4662,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (!batch.length) break;
         const nextThrough = batch[batch.length - 1].sequence - 1;
         for (const row of batch) {
-          const event = JSON.parse(row.body);
-          const current = currentById.get(event.data?.messageId ?? row.eventId);
+          const logged = JSON.parse(row.body);
+          const current = currentById.get(logged.data?.messageId ?? row.eventId);
           if (current?.deletedAt) continue;
           if (rows.length < limit) rows.push(row);
         }
