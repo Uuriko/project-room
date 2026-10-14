@@ -9009,6 +9009,20 @@ paths:
       responses:
         '200': { description: "{ configured, remaining (null when no set) }" }
         '401': { description: unauthenticated }
+  /api/auth/signin-options:
+    get:
+      summary: Public sign-in capability feed for the logged-out wall (H3, #3341)
+      description: >-
+        Unauthenticated read: honest provider configuration status
+        `{ providers: { github: { configured }, google: { configured }, passkey: { configured }, mail: { configured } } }`
+        so the sign-in wall never offers a method this deployment cannot
+        serve (e.g. email-code sign-in with no mail provider configured).
+        Configuration booleans only — no account data; the session-scoped
+        `/api/auth/methods` reports the same status plus the account's own
+        methods.
+      security: []
+      responses:
+        '200': { description: "{ providers }" }
   /api/auth/methods:
     get:
       summary: List the account's linked sign-in methods (slice 7)

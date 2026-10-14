@@ -8,10 +8,16 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
 
 async function setup(t, viewport) {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  // This check's subject is keyboard navigation and room state; the magic
+  // sign-in form is its vehicle. Since #3430 the wall only offers email
+  // sign-in when the deployment can send mail, so the fixture runs with a
+  // configured mailer (the no-mail surface is pinned elsewhere).
+  const magicLinkMailer = createMagicLinkMailer({ send: async () => {} });
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60, magicLinkMailer });
   let browser;
   t.after(async () => {
     await browser?.close();

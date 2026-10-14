@@ -1115,6 +1115,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
         signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider,
+        githubClient: github, googleClient: google,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
         gmail, channelWebhooks, telegram, telegramStatus,
@@ -2322,24 +2323,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const providerConfigured = probe => {
         try { return probe() !== null; } catch { return false; }
       };
-      // Public sign-in capability feed for the logged-out wall (H3, #3341):
-      // the same configuration probes /api/auth/methods reports to a
-      // signed-in account, minus anything account-shaped. Configuration
-      // booleans are not secret — the magic request route already answers
-      // mail_not_configured to anyone — and the wall needs them BEFORE a
-      // session exists so it never offers a method this deployment cannot
-      // serve (e.g. email-code sign-in with no mail provider configured).
-      if (url.pathname === "/api/auth/signin-options") {
-        if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
-        return json(res, 200, {
-          providers: {
-            github: { configured: providerConfigured(() => github()) },
-            google: { configured: providerConfigured(() => google()) },
-            passkey: { configured: resolvePasskeyParams(expectedOrigin()) !== null },
-            mail: { configured: magicMailer.isConfigured() }
-          }
-        });
-      }
       if (url.pathname === "/api/auth/methods") {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const session = requireAccountSession();
