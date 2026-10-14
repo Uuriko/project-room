@@ -471,10 +471,9 @@ function seedClaim(store, item) {
 
 // Rendering, dependency navigation and readiness are the UI boundary here.
 // The projection matrix separately owns classification/old-completion filtering.
-// Quarantined flakes (tests/quarantine.json): both browser tests below fail
-// intermittently on green main. They run in the non-blocking lane
-// (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
+// Both formerly quarantined board browser tests have been repaired and
+// re-admitted to the blocking suite (#3291 via PR #3338; the draft-PR
+// linking test via the #3290 repair), and tests/quarantine.json is empty.
 // Timeout budget: this journey makes two full viewport passes plus a
 // held-route refresh race. Measured on a CPU-oversubscribed runner (load
 // ~13 on 2 cores) completed passes take 79-103s and one run was censored by
