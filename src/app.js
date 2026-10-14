@@ -751,6 +751,7 @@ $("#account-profile-close").textContent = uiText("profile.close");
 const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
+  loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
   onViewChange: syncSigninView,
   onBack: handleSigninBack,
   onPasswordResetComplete: async () => {

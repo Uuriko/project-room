@@ -87,6 +87,7 @@ const PROBES = {
   "GET /api/project-offers/{}/brief.md": [undefined, 404],
   "HEAD /api/project-offers/{}/brief.md": [undefined, 404],
   "GET /api/auth/gmail/callback": [undefined, 200],
+  "GET /api/auth/signin-options": [undefined, 200],
   "GET /api/health": [undefined, 200],
   "GET /api/health/jobs": [undefined, 200],
   "HEAD /api/health/jobs": [undefined, 200],

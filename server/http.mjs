@@ -1116,6 +1116,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         checkOrigin, protectWrite, exact, pathId, expectedOrigin,
         accountCookieName, roomCookieName, tokenPattern, accountView: sessionAccountView,
         signInSlotToken, magicMailer, magicEmailLimit, passkeys, oauthProvider,
+        githubClient: github, googleClient: google,
         magicRequestEmailLimiter, magicConsumeEmailLimiter,
         resetRequestEmailLimiter, resetConsumeEmailLimiter, signupEmailLimiter,
         gmail, channelWebhooks, telegram, telegramStatus,

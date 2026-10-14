@@ -3,6 +3,8 @@
 // Email verification, password set, recovery codes, and OAuth stay on the
 // legacy chain. Handler bodies keep their checks; the dispatcher only
 // adds 405 Allow for a wrong method on one of these paths.
+// GET /api/auth/signin-options (H3, #3341) lives in its own table group
+// (server/routes/signin-options.mjs) — this group stays POST-only.
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "../service-error.mjs";
@@ -81,6 +83,8 @@ export async function handleAuthGroup(ctx) {
   // (redacted) so operators can see why mail is not arriving.
   const deliverSignupMail = fn => attemptMailDelivery(fn, "signup");
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
+
+
 
   // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
   //

@@ -94,14 +94,26 @@ test("account settings: methods render, disable/enable/remove, recovery codes, h
   assert.ok(codes.every(code => /^[a-z0-9_-]{8}-[a-z0-9_-]{8}$/.test(code)));
 });
 
-test("email sign-in reports unconfigured delivery without pretending to send", { timeout: 30000 }, async t => {
+test("email sign-in is not offered when delivery is unconfigured", { timeout: 30000 }, async t => {
+  // Since #3430 the wall asks the deployment first (GET
+  // /api/auth/signin-options): with no mail provider configured, the
+  // email-code offers are not rendered at all — the honest answer moved
+  // from a submit-time error to the offer itself. The submit-time
+  // mail_not_configured response remains as the API backstop.
   const { page, origin } = await setup(t);
+  const optionsSeen = page.waitForResponse(response =>
+    response.url().endsWith("/api/auth/signin-options") && response.status() === 200);
   await page.goto(origin + "/?account=1");
-  await openMagicSignin(page);
-  const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
-  await form.locator('[name="email"]').fill("magic-browser@example.invalid");
-  await form.locator('button[type="submit"]').click();
-  await page.locator('#auth-signin-ui [data-signin-status]').filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  const controller = page.locator("#auth-signin-ui");
+  await controller.waitFor({ state: "visible" });
+  await optionsSeen;
+  await page.waitForFunction(() =>
+    globalThis.document.querySelectorAll('#auth-signin-ui [data-email-method="magic"]').length === 0);
+  assert.equal(await controller.locator('[data-email-method="magic"]').count(), 0);
+  if (await controller.locator('[data-password-mode="login"]').isVisible()) await controller.locator('[data-password-mode="login"]').click();
+  await controller.locator("[data-forgot-password]").click();
+  assert.equal(await controller.locator('[data-recovery-option="magic"]').count(), 0);
+  assert.equal(await controller.locator('[data-signin-form="magic-request"]').count(), 0);
   assert.equal(await page.locator("#auth-panel").isVisible(), true);
   assert.equal(await page.locator("#inbox-panel").isVisible(), false);
 });
