@@ -353,6 +353,7 @@ test("flagship #3055 codes name their catalogued recovery, not 'no known recover
     ["peer_not_found", 404, "That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.", /get_room_context/],
     ["invite_unavailable", 404, "No invite was issued for this code. Ask the inviter for a fresh code", /fresh code/],
     ["credential_too_old", 410, "This credential is too old; ask the owner for a new invite.", /fresh|expired/i],
+    ["discussion_reset_required", 409, "Discussion changed; discard retained discussion and restart a consistent read", /Discard all retained discussion text/],
     ["cursor_stale", 409, "The list changed; start again without a cursor", /without a cursor/],
     ["ndjson_required", 415, "Use application/x-ndjson", /NDJSON/],
     ["wake_dead", 409, "This wake is dead; requeue it explicitly.", /[Rr]equeue/],

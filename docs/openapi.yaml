@@ -14460,7 +14460,7 @@ paths:
   /api/rooms/{roomId}/work-discussion:
     get:
       summary: Discussion thread for one work item
-      description: Member read (docs/WORK-DISCUSSION.md). `workItemId` is required; `cursor` or `since` selects continuation; `limit` is 1–50. Use `workItemId`, not `taskId`. Directed messages are visible only to sender and recipient; `scope.messageVisibility` describes this rule. The legacy v1 `targetedMessages` discriminator is retained for installed-client compatibility.
+      description: Member read (docs/history/WORK-DISCUSSION.md; durable mode in docs/WORK-CONTEXT.md). `workItemId` is required; `cursor` or `since` selects continuation; `limit` is 1–50. Use `workItemId`, not `taskId`. Directed messages are visible only to sender and recipient; `scope.messageVisibility` describes this rule. The legacy v1 `targetedMessages` discriminator is retained for installed-client compatibility. Opt into consistent reads to receive a completed resumeToken; it validates retained discussion before returning a delta. A changed history or viewer scope requires clearing retained text and restarting. Numeric since remains an unanchored legacy filter.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: workItemId
@@ -14469,6 +14469,14 @@ paths:
           schema: { type: string }
         - name: cursor
           in: query
+          schema: { type: string }
+        - name: consistent
+          in: query
+          description: Supply true to opt into content-validated discussion windows; omit for legacy reads. Cannot be combined with numeric since.
+          schema: { type: boolean, enum: [true] }
+        - name: resumeToken
+          in: query
+          description: Completed consistent-read token. Mutually exclusive with cursor and since; never an access grant.
           schema: { type: string }
         - name: since
           in: query
@@ -14480,6 +14488,7 @@ paths:
         '401': { description: unauthenticated }
         '200': { description: "{ contractVersion, roomId, workItemId, viewer*, selection, discussion, current, scope }" }
         '404': { description: work_not_found }
+        '409': { description: discussion_reset_required in consistent mode; discard retained discussion and restart without a token. Legacy reads may return discussion_ahead or discussion_history_changed. }
         '422': { description: invalid_discussion }
   /api/rooms/{roomId}/context:
     get:
