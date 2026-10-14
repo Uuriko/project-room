@@ -7898,7 +7898,9 @@ paths:
         Derived balances per lane: payable, locked, attributed, approved,
         plus paid-only reputation (completedBounties, earnedCredits,
         earnedCredits30d). Credits are valueless ledger units. API keys
-        need `rooms:read`.
+        need `rooms:read`. Scoped to the lane itself or the room owner:
+        any other member (guests included) gets 403 not_authorized,
+        matching the MCP tools, which read only the caller's own lane.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: identity
@@ -7916,6 +7918,7 @@ paths:
                   roomId: { type: string }
                   balances: { $ref: '#/components/schemas/CreditBalances' }
         '401': { description: unauthenticated }
+        '403': { description: not_authorized (only the lane itself or the room owner) }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/credits/history/{identity}:
     get:
@@ -7925,6 +7928,9 @@ paths:
         (debit + credit pair), actor-attributed, with before/after
         (account, lot_state) values and hash-chain links. Filter by
         resulting lot state and since timestamp. API keys need `rooms:read`.
+        Scoped to the lane itself or the room owner: any other member
+        (guests included) gets 403 not_authorized, matching the MCP tools,
+        which read only the caller's own lane.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: identity
@@ -7952,6 +7958,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/CreditReceipt' }
         '401': { description: unauthenticated }
+        '403': { description: not_authorized (only the lane itself or the room owner) }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/credits/transfer:
     post:

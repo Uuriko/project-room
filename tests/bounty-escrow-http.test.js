@@ -127,6 +127,39 @@ test("post → fund → claim → submit → accept → epoch-close → balances
   assert.equal(balances.reputation.completedBounties, 1, "paid-only reputation accrues");
 });
 
+test("credit balances/history are scoped to the lane itself or the room owner (#3281)", async t => {
+  const { origin, keys } = await startServer(t);
+  // startServer seeds a genesis movement for the producer lane. A non-party
+  // member and a guest member must not read that lane's balances or its
+  // bilateral history (both legs of every movement producer touched).
+  for (const [label, key] of [["non-party member", keys.reviewer], ["guest member", keys.guest]]) {
+    for (const door of ["balances", "history"]) {
+      const res = await get(origin, `/api/rooms/${ROOM}/credits/${door}/producer`, key);
+      const parsed = await res.json();
+      assert.equal(res.status, 403, `${label} must not read producer ${door}`);
+      assert.equal(parsed.error.code, "not_authorized");
+      assert.equal(parsed.balances, undefined, "a refused balances read leaks no balances");
+      assert.equal(parsed.receipts, undefined, "a refused history read leaks no receipts");
+    }
+  }
+
+  // The lane itself (a party to its own movements) still succeeds.
+  const selfBalances = await get(origin, `/api/rooms/${ROOM}/credits/balances/producer`, keys.producer);
+  assert.equal(selfBalances.status, 200);
+  assert.equal((await selfBalances.json()).balances.payable, 100, "producer sees its own seeded balances");
+  const selfHistory = await get(origin, `/api/rooms/${ROOM}/credits/history/producer`, keys.producer);
+  assert.equal(selfHistory.status, 200);
+  assert.ok((await selfHistory.json()).receipts.length >= 1, "producer sees its own history");
+
+  // The room owner still succeeds for another lane.
+  const ownerBalances = await get(origin, `/api/rooms/${ROOM}/credits/balances/producer`, keys.owner);
+  assert.equal(ownerBalances.status, 200);
+  assert.equal((await ownerBalances.json()).balances.payable, 100);
+  const ownerHistory = await get(origin, `/api/rooms/${ROOM}/credits/history/producer`, keys.owner);
+  assert.equal(ownerHistory.status, 200);
+  assert.ok((await ownerHistory.json()).receipts.length >= 1);
+});
+
 test("triage quartet: decline, duplicate, snooze", async t => {
   const { origin, keys } = await startServer(t);
 
