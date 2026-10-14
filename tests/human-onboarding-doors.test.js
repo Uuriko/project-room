@@ -59,10 +59,13 @@ test("GET / offers GitHub sign-in beside Google on the front door", async t => {
   assert.ok(github > google, "GitHub sits beside Google inside the sign-in methods");
   assert.match(auth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start">/);
   assert.match(auth, /Continue with GitHub/);
-  // Parity with Google in app.js: the pending-invite stash runs before the
-  // OAuth navigation, and the welcome view hides the button.
+  // Parity with Google: the pending-invite stash runs before the OAuth
+  // navigation (app.js), and the welcome view hides the button — the toggle
+  // lives in the shared sign-in navigation controller (src/signin-navigation.js)
+  // since the #3068 entry split; app.js's syncSigninView delegates to it.
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(app, /\$\("#github-signin"\)\.hidden = view === "welcome";/);
+  const navigation = readFileSync(new URL("../src/signin-navigation.js", import.meta.url), "utf8");
+  assert.match(navigation, /\$\("#github-signin"\)\.hidden = view === "welcome";/);
   const stash = app.match(/githubButton\.addEventListener\("click", stashInviteForOAuth\)/);
   assert.ok(stash, "GitHub anchor stashes a pending invite like Google does");
 });

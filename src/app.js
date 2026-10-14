@@ -1,4 +1,5 @@
 import { uiText } from "./strings.js";
+import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
@@ -45,6 +46,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
 // Keep a connector/native consent journey through password or provider login.
@@ -355,7 +357,6 @@ const invitation = {
 };
 const invitationIsCommitting = () => ["authenticating", "accepting", "opening"].includes(invitation.phase)
   || (humanAuthBusy && Boolean(invitation.secret));
-const accountClient = new AccountClient();
 document.addEventListener("focusin", event => {
   if (!$("#invitation-dialog").contains(event.target)
     && event.target.matches?.("button, input, textarea, select, a[href], [tabindex]")) lastInvitationOpener = event.target;
@@ -721,7 +722,8 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
 let humanAuthBusy = false;
-let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
+let resetJourneyPending = false;
+const signinNavigation = createSigninNavigation({ getUI: () => signinUI, active: mainSigninHost });
 let resumeResetJourney = false;
 function ensureAccountSession() {
   if (accountClient.session) return Promise.resolve(accountClient.session);
@@ -3698,30 +3700,7 @@ function mainSigninHost() {
 function focusSignin() {
   signinUI.focus();
 }
-function syncSigninView(view) {
-  const previous = signinView;
-  signinView = view;
-  if (!mainSigninHost()) return;
-  const auxiliary = view !== "welcome" && !view.startsWith("password-");
-  if (!signinHistoryReplay && (auxiliary || previous === "welcome" && view.startsWith("password-")) && previous !== view) {
-    if (previous.startsWith("password-")) {
-      const base = { ...history.state };
-      base.roomSigninView = previous; delete base.roomSigninStep;
-      history.replaceState(base, "", location.href);
-    }
-    const sameFlow = previous.startsWith("magic-") && view.startsWith("magic-")
-      || previous.startsWith("reset-") && view.startsWith("reset-");
-    history[sameFlow ? "replaceState" : "pushState"]({ ...history.state, roomSigninView: view }, "", location.href);
-  }
-  $(auxiliary ? "#email-auth-panel" : "#signin-controller").prepend($("#auth-signin-ui"));
-  $("#email-auth-panel").hidden = !auxiliary;
-  $("#email-auth-step").hidden = !auxiliary;
-  $("#signin-methods").hidden = auxiliary;
-  $("#signin-entry-routes").hidden = auxiliary;
-  $("#google-signin").hidden = view === "welcome";
-  $("#github-signin").hidden = view === "welcome";
-  $("#terms-notice").hidden = view === "welcome";
-}
+function syncSigninView(view) { signinNavigation.sync(view); }
 function showSigninMethods() {
   $("#signin-controller").prepend($("#auth-signin-ui"));
   signinUI.showPassword();
@@ -3729,25 +3708,10 @@ function showSigninMethods() {
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
   if (!signinUI.canLeave()) return;
-  signinHistoryReplay = !recordHistory;
-  try { mode === "password" ? signinUI.showPassword() : signinUI.showMagic(); }
-  finally { signinHistoryReplay = false; }
+  signinNavigation.withReplay(!recordHistory, () => mode === "password" ? signinUI.showPassword() : signinUI.showMagic());
   focusSignin();
 }
-function handleSigninBack() {
-  if (mainSigninHost() && history.state?.roomSigninView) {
-    history.back(); return false;
-  }
-  return true;
-}
-window.addEventListener("popstate", event => {
-  if ($("#auth-panel").hidden || !mainSigninHost()) return;
-  if (!signinUI.canLeave()) { history.forward(); return; }
-  signinHistoryReplay = true;
-  try { signinUI.showView(event.state?.roomSigninView || "password-login"); }
-  finally { signinHistoryReplay = false; }
-  focusSignin();
-});
+function handleSigninBack() { return signinNavigation.back(); }
 // Preserve guide deep links through sign-in, then open the Advanced guide.
 $("#connect-guide-copy").innerHTML = uiText("guide.instructions");
 let pendingAgentGuide = location.hash === "#join-agent";
@@ -3820,6 +3784,7 @@ const setSessionMenuOpen = open => {
   sessionMenuButton.setAttribute("aria-expanded", String(open));
 };
 sessionMenuButton.addEventListener("click", () => setSessionMenuOpen(!sessionMenu.classList.contains("open")));
+sessionMenuButton.disabled = false;
 $("#clear-session-menu")?.addEventListener("click", () => { setSessionMenuOpen(false); void clearSavedBrowserSession(); });
 $("#create-account-button")?.addEventListener("click", () => {
   setSessionMenuOpen(false);
@@ -3944,6 +3909,7 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
+$("#refresh-button").disabled = false;
 // A DM refused by the explicit-denial gate (blocked/rejected/revoked) names
 // the recipient and the next step, instead of surfacing the raw gate
 // message. Returns null when the error is not a DM denial.
@@ -7810,8 +7776,10 @@ configureAuthPanel();
   }
 }
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
-(async () => {
+const ready = (async () => {
   const initialResult = await initialSignin;
+  if (restoreRoomSession) { await client.restore(); return; }
+  if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {
     resetJourneyPending = true;
     $("#auth-panel").hidden = false;
@@ -7999,3 +7967,9 @@ if (initialInvitationFragment && !initialInvitationFragment.redirect && !initial
   render = () => { if (!state) { squadsPanel.reset(); return; } priorSquadsRender(); squadsPanel.sync(); };
 }
 // --- end W board ---
+
+return ready;
+}
+
+// Cached HTML from before the entry split still names this module directly.
+if (document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();
