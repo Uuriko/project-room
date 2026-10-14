@@ -242,9 +242,12 @@ function downgradeTo(fixture, version) {
 
 // Table-name → sorted row digests. room_schema_stamp is excluded: the
 // version bump is the migration's purpose and is asserted directly.
-// sqlite internal tables carry no user data.
+// work_item_board_backfill is excluded for the same reason: it is
+// decision-#10 migration bookkeeping that opening a current store writes
+// (its per-room marker), not user data this schema migration must
+// preserve byte-identically. sqlite internal tables carry no user data.
 function snapshot(db, stripAttachmentMessageId) {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'room_schema_stamp' ORDER BY name").all().map(r => r.name);
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'room_schema_stamp' AND name != 'work_item_board_backfill' ORDER BY name").all().map(r => r.name);
   const out = {};
   for (const table of tables) {
     let columns = "*";

@@ -1733,7 +1733,12 @@ const ROWS = [
         "room_id"
       ]
     }
-  }
+  },
+  // Decision #10: per-room marker for the workItems -> board-claims
+  // backfill (server/work-item-board.mjs). Room-owned migration state:
+  // deleted with the room (a purged room must not leave a marker behind;
+  // the table is lazy-additive, hence optional).
+  { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
