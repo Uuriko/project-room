@@ -526,25 +526,15 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     });
   }
 
-  const transition = (to, settledAt) => {
-    // #3268: the settle transition itself is lease-aware, with the
-    // reaper's exact deadline — COALESCE(expires_at, created_at + lease)
-    // for pre-#1525 rows — and its exact boundary (a reservation at its
-    // deadline is expired). Without this, a post-lease settle succeeded
-    // whenever no unrelated authorize had run the reaper first, so the
-    // money outcome depended on other room activity. Void is NOT
-    // lease-gated: releasing an expired reservation is cleanup, never a
-    // charge.
-    if (to === "settled") {
-      const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
-        WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
-          AND COALESCE(expires_at, created_at + ?) > ?`)
-        .run(to, settledAt, roomId, agentId, nonce, RESERVE_LEASE_MS, settledAt);
-      return info.changes > 0;
-    }
-    const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
+  // The settle transition lives in settleAuthorization below — one
+  // implementation shared by this handle and the standalone settleSpend
+  // (#3390). Only the void transition remains local: void is NOT
+  // lease-gated (releasing an expired reservation is cleanup, never a
+  // charge — #3268), so it differs from settle in exactly that guard.
+  const voidTransition = () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided', settled_at = NULL
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-      .run(to, settledAt, roomId, agentId, nonce);
+      .run(roomId, agentId, nonce);
     return info.changes > 0;
   };
   const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, agentId, nonce);
@@ -574,34 +564,15 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     remainingAfterCents: replayedReserved ? remainingNowCents() : intToCents(outcome.remainingAfter),
     ...(replayedReserved ? { replayed: "reserved" } : {}),
     settle(nowMs = Date.now()) {
-      // #2959: the transition, the room-reservation release, and the
-      // single-use revocation are one atomic unit. Splitting them left a
-      // settled authorization whose room reservation stayed 'active'
-      // forever (the reaper only voids still-'reserved' rows) — or a
-      // settled single-use grant that was never revoked — if the process
-      // died or a write failed between the steps.
       // #3268: the settle instant is the lease check, so it is injectable
-      // like authorizeSpend's nowMs; production callers pass nothing.
+      // like authorizeSpend's nowMs; production callers pass nothing. The
+      // body is settleAuthorization — shared with the standalone form.
       const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
-      return transact(db, () => {
-        const moved = transition("settled", at);
-        // Release only on a real transition (the standalone forms below
-        // already do): a post-lease settle that did not move leaves the
-        // row 'reserved', so its room reservation stays 'active' with it
-        // until the reaper or a void releases both together.
-        if (moved) releaseRoomReservation();
-        // Single-use grants are consumed by their first settled call.
-        if (moved) {
-          const terms = rowToTerms(db.prepare(
-            `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
-          if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
-        }
-        return moved;
-      });
+      return settleAuthorization(db, { roomId, agentId, nonce, at });
     },
     void() {
       return transact(db, () => {
-        const moved = transition("voided", null);
+        const moved = voidTransition();
         releaseRoomReservation();
         return moved;
       });
@@ -648,25 +619,47 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
   });
 }
 
-// #2959: the standalone forms share the handle forms' atomicity rule —
-// the authorization transition and the room-reservation release commit
-// together or not at all, so a failure between them cannot strand an
-// 'active' room reservation behind a settled/voided authorization.
-export function settleSpend(db, { roomId, agentId, nonce, nowMs = Date.now() } = {}) {
-  // #3268: lease-aware like the handle form — the same COALESCE deadline
-  // and boundary the reaper uses, evaluated at the settle instant (nowMs
-  // is injectable for clock-controlled tests; callers pass nothing). A
-  // post-lease settle returns false and leaves the row 'reserved' for
-  // the reaper or a void, whether or not the reaper has already run.
-  const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
+// #2959 + #3268 + #3390: the ONE settle implementation, shared by the
+// authorize handle's settle() and the standalone settleSpend below — the
+// two public forms must never carry different money semantics.
+// - #3268: the transition is lease-aware, with the reaper's exact
+//   deadline — COALESCE(expires_at, created_at + lease) for pre-#1525
+//   rows — and its exact boundary (a reservation at its deadline is
+//   expired), evaluated at the settle instant `at`. A post-lease settle
+//   returns false and leaves the row 'reserved' for the reaper or a
+//   void, whether or not the reaper has already run.
+// - #2959: the transition, the room-reservation release, and the
+//   single-use revocation are one atomic unit. Splitting them left a
+//   settled authorization whose room reservation stayed 'active'
+//   forever (the reaper only voids still-'reserved' rows) — or a
+//   settled single-use grant that was never revoked — if the process
+//   died or a write failed between the steps.
+// - #3390: single-use consumption (read the CURRENT terms, revoke the
+//   edge on a real transition) used to live only in the handle's
+//   settle(), so a single-use grant settled through this standalone
+//   form stayed live and reusable. Release and consumption happen only
+//   on a real transition: a settle that did not move the row changes
+//   nothing else.
+function settleAuthorization(db, { roomId, agentId, nonce, at }) {
   return transact(db, () => {
     const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
         AND COALESCE(expires_at, created_at + ?) > ?`)
       .run(at, roomId, agentId, nonce, RESERVE_LEASE_MS, at);
-    if (info.changes > 0) releaseRoomReservationRow(db, roomId, agentId, nonce);
-    return info.changes > 0;
+    const moved = info.changes > 0;
+    if (moved) releaseRoomReservationRow(db, roomId, agentId, nonce);
+    if (moved) {
+      const terms = rowToTerms(db.prepare(
+        `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
+      if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
+    }
+    return moved;
   });
+}
+
+export function settleSpend(db, { roomId, agentId, nonce, nowMs = Date.now() } = {}) {
+  const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
+  return settleAuthorization(db, { roomId, agentId, nonce, at });
 }
 
 export function voidSpend(db, { roomId, agentId, nonce } = {}) {
