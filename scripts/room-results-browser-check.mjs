@@ -355,3 +355,61 @@ test("combined journey: sign in, read inline, continue once, reconnect with draf
   assert.equal(f.state().messages.filter(message => message.body === "Continue from this exact result").length, 1);
   assert.equal(await p.locator("#main").isVisible(), true);
 });
+
+// A deterministic stdio MCP peer qualifies transport, not a model/provider.
+test("saved scoped channel: human assignment to inline result, continuation and restart", { timeout: 60000 }, async t => {
+  const { channelJourneyFixture, channelPeer } = await import("./channel-journey-fixture.mjs");
+  const f = await channelJourneyFixture(t), browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const p = await browser.newPage(); p.setDefaultTimeout(10000);
+  const errors = []; p.on("pageerror", error => errors.push(error.message));
+  await p.goto(f.origin); await signInFixture(p, f.ownerKey);
+  await openComposerOptions(p); await p.locator("#new-work-button").click();
+  await p.locator("#work-title-input").fill("Transport result");
+  await p.locator("#work-done-input").fill("Return one exact local transport result");
+  await p.locator("#work-options > summary").click();
+  await p.locator("#assignee-select").selectOption(f.connection.memberId);
+  await p.locator("#require-verification").uncheck();
+  await p.locator("#require-decision").uncheck();
+  await p.locator("#create-work-button").click();
+  await p.locator("#work-dialog").waitFor({ state: "hidden" });
+  const first = channelPeer(t, f); await first.initialize(); first.send({ method: "notifications/initialized" });
+  await first.wait(frame => frame.method === "notifications/claude/channel");
+  const call = async (peer, name, args = {}) => {
+    const frame = await peer.rpc("tools/call", { name, arguments: args });
+    assert.equal(frame.error, undefined, `${name}: protocol refusal`);
+    assert.notEqual(frame.result?.isError, true, `${name}: ${JSON.stringify(frame.result)}`);
+    return frame.result.structuredContent;
+  };
+  const listed = await call(first, "room_list_work"), task = listed.work.find(item => item.title === "Transport result");
+  assert.ok(task);
+  let context = await call(first, "room_read_work", { workItemId: task.id });
+  await call(first, "room_accept_work", { requestId: "transport-accept", workItemId: task.id, expectedRevision: context.work.revision });
+  context = await call(first, "room_read_work", { workItemId: task.id });
+  const body = `Deterministic transport result: ${context.work.definitionOfDone}`;
+  const draftArgs = { requestId: "transport-result", workItemId: task.id, packetId: "transport-packet", basisRevision: context.work.revision, body };
+  const draft = await call(first, "room_post_draft", draftArgs);
+  const completion = { requestId: "transport-complete", workItemId: task.id, expectedRevision: context.work.revision,
+    summary: "Local transport result", nextAction: "Read and continue", evidenceMessageId: draft.messageId,
+    evidenceMessageEventId: draft.eventId, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: f.connection.memberId };
+  await call(first, "room_submit_text_result", completion);
+  const card = p.locator(`[data-work-record-id="${task.id}"]`);
+  await card.locator("[data-read-result]").click();
+  await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
+  assert.equal(await card.locator("#result-dialog").count(), 1);
+  await p.locator("#result-discuss").click();
+  await p.locator("#message-input").fill("Continue this transport result");
+  await p.locator('#message-form button[type="submit"]').click();
+  await p.waitForFunction(() => !document.querySelector("#message-input").value);
+  await p.locator("#message-input").fill("Keep my unsent follow-up");
+  await first.stop();
+  const second = channelPeer(t, f); await second.initialize(); second.send({ method: "notifications/initialized" });
+  const replay = await call(second, "room_post_draft", draftArgs);
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.messageId, draft.messageId);
+  const reread = await call(second, "room_read_work", { workItemId: task.id, includeDiscussion: true, includeResult: true });
+  assert.ok(JSON.stringify(reread).includes("Continue this transport result"), "fresh process reads human continuation itself");
+  assert.equal(f.store.room("commons").state.messages.filter(message => message.body === body).length, 1);
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep my unsent follow-up");
+  assert.deepEqual(errors, []);
+});
