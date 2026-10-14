@@ -1,12 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, mkdir, symlink, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
-import { templateAssetPaths } from '../server/public-assets.mjs';
+import { templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
+
+// Decision #36 (#3254, Option A): the generated agent pages are build output
+// and never committed, so a plain checkout (and every exact-commit package)
+// legitimately lacks them; the deploy build generates them first (the
+// wrangler command asserted in the first test). The packaged/served contract
+// below is therefore stated against the allowlist minus the generated pages
+// absent from this tree — everything else must always be present.
+const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
@@ -18,15 +27,16 @@ async function fixture(t) {
 test('asset build produces and refreshes exactly the allowlisted application files', async t => {
   const output = await fixture(t);
   const packaged = [...assetPaths, ...templateAssetPaths];
-  assert.equal(await buildAssets(output), packaged.length);
+  const produced = packaged.filter(file => !absentGenerated(file));
+  assert.equal(await buildAssets(output), produced.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
   await buildAssets(output);
   // Derived from the allowlist rather than written down: 'connectors' was
   // added to publicAssets and this line still said ['index.html', 'src'].
-  const topLevel = [...new Set(packaged.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
+  const topLevel = [...new Set(produced.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
   assert.deepEqual((await readdir(output)).sort(), topLevel);
-  assert.deepEqual((await readdir(new URL('src/', output))).sort(), packaged.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
-  for (const file of packaged) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
+  assert.deepEqual((await readdir(new URL('src/', output))).sort(), produced.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
+  for (const file of produced) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   assert.equal(config.build.command, 'node ../scripts/build-agent-docs.mjs && node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-assets.mjs', 'deploy builds the generated agent pages first, then stamps the committed revision before building exact assets');
 });
@@ -39,8 +49,13 @@ test('the deployment allowlist and the runtime package agree on the public asset
   // up as a missing file but as `createRuntimePackage` refusing to build at
   // all, failing seven tests across five files with an error about an import
   // closure. This states the invariant in one line so the next one says so.
-  const { publicAssets } = await import('../scripts/runtime-package.mjs');
+  const { publicAssets, generatedAgentPages: packagedGenerated } = await import('../scripts/runtime-package.mjs');
   assert.deepEqual([...publicAssets].sort(), [...assetPaths].sort());
+  // The standalone package verifier keeps its own copy of the generated-page
+  // set (it parses declarations as text and cannot import this module); the
+  // two copies must name exactly the same pages or the package filter and
+  // the server/build behavior drift apart silently.
+  assert.deepEqual([...packagedGenerated].sort(), [...generatedAgentPages].sort());
 });
 
 test('every local browser import is included in the deployment allowlist', async () => {
@@ -57,10 +72,16 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const path of assetPaths) {
+  for (const path of assetPaths.filter(file => !absentGenerated(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+  }
+  // Absent generated pages are the designed package state (decision #36):
+  // the server answers 404 for them, never a 500.
+  for (const path of assetPaths.filter(absentGenerated)) {
+    const response = await fetch(origin + '/' + path);
+    assert.equal(response.status, 404, path);
   }
 });
 test('asset build rejects unknown files without uploading or deleting them', async t => {

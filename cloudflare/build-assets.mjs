@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, readdir, lstat } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { publicAssetPaths, templateAssetPaths } from '../server/public-assets.mjs';
+import { publicAssetPaths, templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 export const assetPaths = publicAssetPaths;
 const packagedPaths = [...publicAssetPaths, ...templateAssetPaths];
 
@@ -24,12 +24,11 @@ async function checkOutput(directory, prefix = '') {
 // exact-commit runtime package does not contain them, and building assets
 // from inside a package skips the absent pages. Any other missing or
 // non-regular source remains an error.
-const generatedAgentPage = /^docs\/agents\/[^/]+\.html$/;
 export async function buildAssets(output = new URL('./public/', import.meta.url)) {
   const present = [];
   for (const file of packagedPaths) {
     const isFile = await lstat(new URL('../' + file, import.meta.url)).then(info => info.isFile(), error => {
-      if (error.code === 'ENOENT' && generatedAgentPage.test(file)) return false;
+      if (error.code === 'ENOENT' && generatedAgentPages.includes(file)) return false;
       throw error;
     });
     if (isFile) present.push(file);

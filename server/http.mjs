@@ -6,7 +6,7 @@ import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSe
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
-import { publicAssetPaths } from "./public-assets.mjs";
+import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
 import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -2103,7 +2103,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- end GR2 ---
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
-        const data = await loadAsset(path);
+        let data = null;
+        try {
+          data = await loadAsset(path);
+        } catch (error) {
+          // Decision #36 (#3254, Option A): the generated agent pages are
+          // build output an exact-commit package deliberately does not
+          // contain, so their absence is the designed state — fall through
+          // to the standard not-found handling below (404), never a 500.
+          // Any other missing or failed asset stays fail-closed.
+          if (error?.code !== "ENOENT" || !generatedAgentPages.includes(path)) throw error;
+        }
+        if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_SEARCH_CSP));
@@ -2124,6 +2135,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : data);
+        }
       }
       if (url.pathname === "/api/account-rooms" && req.method === "GET") {
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
