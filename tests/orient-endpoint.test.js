@@ -140,8 +140,13 @@ test("orient surfaces unclaimed board claims as availableClaims, separate from o
   const payload = await (await getOrient(origin, ROOM, f.workerKey)).json();
   // A fresh agent owns nothing claimable, yet the room HAS claimable work:
   // it must be visible as available, or pack-style orientation reads as
-  // "no work here" (the #3020 stall).
+  // "no work here" (the #3020 stall). Decision #10: the fixture's
+  // accepted work item is a board claim now too, so it leads the list.
   assert.deepEqual(payload.availableClaims, [
+    { id: "orient-work-1", title: "Fix the orient 404", source: "board", roomId: ROOM, state: "unclaimed",
+      owner: null, leaseExpiresAt: null, untrusted: true,
+      claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/orient-work-1/claim`,
+        params: { requestId: "<uuid>" } } },
     { id: "board-open-1", title: "Pick me up", source: "board", roomId: ROOM, state: "unclaimed",
       owner: null, leaseExpiresAt: null, untrusted: true,
       claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/board-open-1/claim`,

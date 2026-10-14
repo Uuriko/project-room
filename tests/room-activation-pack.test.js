@@ -138,24 +138,30 @@ test("pack eventCursor round-trips through events + SSE resume (#3222)", async t
 
 test("pack surfaces unclaimed board claims as openClaims (#3020)", async t => {
   const f = fixture(t);
-  // The room's only pickup work lives on the work-claim board, not in Work
-  // Items: one unclaimed claim, one already claimed, one unclaimed but
-  // superseded. Before the fix the pack showed no trace of any of them, so
-  // a pack-oriented agent concluded there was no claimable work (#3020).
+  // Pickup work lives on the work-claim board: one board-native unclaimed
+  // claim, one already claimed, one unclaimed but superseded — plus the
+  // fixture's accepted work item pack-work-2, which decision #10's
+  // migration puts on the board as an unclaimed claim. Before #3020's fix
+  // the pack showed no trace of any of them, so a pack-oriented agent
+  // concluded there was no claimable work.
   f.store.workClaims.set(ROOM, { id: "board-open-1", title: "Pick me up", state: "unclaimed", owner: null, history: [] });
   f.store.workClaims.set(ROOM, { id: "board-taken-1", title: "Already claimed", state: "claimed", owner: "worker", history: [] });
   f.store.workClaims.set(ROOM, { id: "board-superseded-1", title: "Superseded", state: "unclaimed", owner: null, history: [], supersededBy: "board-open-1" });
   const origin = await serve(t, f.store);
   const pack = await (await getPack(origin, ROOM, f.workerKey)).json();
   assert.deepEqual(pack.openClaims, [
+    { id: "pack-work-2", title: "Document the norms", source: "board", roomId: ROOM, state: "unclaimed",
+      owner: null, leaseExpiresAt: null, untrusted: true,
+      claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/pack-work-2/claim`,
+        params: { requestId: "<uuid>" } } },
     { id: "board-open-1", title: "Pick me up", source: "board", roomId: ROOM, state: "unclaimed",
       owner: null, leaseExpiresAt: null, untrusted: true,
       claimAction: { method: "POST", endpoint: `/api/rooms/${ROOM}/work-claims/board-open-1/claim`,
         params: { requestId: "<uuid>" } } }
   ]);
-  // The embedded orient agrees: the same claim is the worker's available
-  // work, while its own-claims list stays scoped to the viewer (the seeded
-  // board claim plus the fixture's mirrored pack-work-1 claim).
+  // The embedded orient agrees: the same claims are the worker's
+  // available work, while its own-claims list stays scoped to the viewer
+  // (the seeded board claim plus the fixture's pack-work-1 claim).
   assert.deepEqual(pack.orient.availableClaims, pack.openClaims);
   assert.deepEqual(pack.orient.claims.map(claim => claim.id).sort(), ["board-taken-1", "pack-work-1"]);
 });
