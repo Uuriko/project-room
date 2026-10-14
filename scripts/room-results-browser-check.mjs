@@ -5,13 +5,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
+import { textVersion } from "../server/text-results.mjs";
 import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0 } = {}) {
-  const f = createResultsFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+async function setup(t, { mobile = false, guest = false, theme = "dark", expectedWrites = 0, privateResult = false } = {}) {
+  const f = createResultsFixture();
+  if (privateResult) {
+    f.send("owner", T.WORK_PROPOSED, { workItemId: "private-result", title: "Private notes", definitionOfDone: "Private result",
+      accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
+    f.change("private-result", T.WORK_ACCEPTED, {}, "owner");
+    const posted = f.send("owner", T.MESSAGE_POSTED, { messageId: "private-result-text", workItemId: "private-result", toMemberId: "guest", body: f.body });
+    f.change("private-result", T.WORK_COMPLETED, { summary: "Private result", nextAction: "Read", producerId: "owner",
+      evidenceKind: "room_text", previousCompletionEventId: null, evidenceMessageId: "private-result-text", evidenceMessageEventId: posted.event.id,
+      evidenceVersion: textVersion(f.body) }, "owner");
+  }
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
   let browser;
   t.after(async () => {
     await browser?.close(); server.closeStreams(); server.closeAllConnections();
@@ -37,7 +48,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
   const open = async () => { await clickChrome(p, "#topbar-settings"); await p.locator("#results-panel > summary").click(); };
-  const read = () => row("native-result").locator("[data-read-result]").click();
+  const read = () => row(privateResult ? "private-result" : "native-result").locator("[data-read-result]").click();
   const ready = () => p.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   const capture = async name => {
     mkdirSync("test-results/room-results-20260908", { recursive: true });
@@ -179,6 +190,7 @@ test("returning from a result preserves an uncertain send's exact target and ret
   f.send("producer", T.MESSAGE_POSTED, { messageId: "result-peer-reply", body: "Which part needs another look?", replyToId: resultId });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   await messageAction(p, "result-peer-reply", "reply");
+  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
   await p.locator("#message-input").fill("Please expand the second point");
   const attempts = [];
   await p.route("**/rooms/commons/commands", route => {
@@ -195,6 +207,7 @@ test("returning from a result preserves an uncertain send's exact target and ret
   assert.equal(attempts.length, 2);
   assert.deepEqual(attempts[1], attempts[0], "same command and reply target are retried");
   assert.equal(attempts[1].data.replyToId, "result-peer-reply");
+  assert.equal(attempts[1].data.toMemberId, "guest", "an uncertain private send never becomes public");
   assert.equal(f.state().messages.filter(message => message.body === "Please expand the second point").length, 1);
 });
 
@@ -235,4 +248,31 @@ for (const mobile of [false, true]) test(`automatic Results shortcut ${mobile ? 
   await p.locator("#settings-close").click();
   f.reopen("native-result"); f.reopen("approved-result");
   await p.locator("#room-results-open").waitFor({ state: "hidden" });
+});
+
+for (const guest of [false, true]) test(`private result continuation keeps its audience: ${guest ? "recipient phone light" : "author desktop dark"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { privateResult: true, guest, mobile: guest, theme: guest ? "light" : "dark" }), p = f.p;
+  await p.locator("#message-input").fill("Keep my existing draft");
+  await f.open(); await f.read(); await f.ready();
+  const before = structuredClone(f.state().workItems["private-result"]);
+  const discuss = p.locator("#result-discuss");
+  assert.equal(await discuss.isVisible(), false, "private text stays readable without an unsafe public reply shortcut");
+  await discuss.evaluate(node => node.click());
+  assert.equal(await p.locator("#result-dialog").isVisible(), true, "retained control cannot bypass the audience guard");
+  await f.capture(guest ? "private-result-phone-light" : "private-result-desktop-dark");
+  await p.locator("#close-result").click();
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep my existing draft");
+  assert.deepEqual(f.state().workItems["private-result"], before);
+});
+
+for (const mobile of [false, true]) test(`public result preserves an authored private draft: ${mobile ? "phone light" : "desktop dark"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile, theme: mobile ? "light" : "dark" }), p = f.p;
+  await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
+  await p.locator("#message-input").fill("Private follow-up for the guest");
+  await p.locator("#thread-back").click();
+  await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
+  await f.read(); await f.ready(); await p.locator("#result-discuss").click();
+  assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
+  assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
 });
