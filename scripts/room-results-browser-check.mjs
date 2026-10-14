@@ -73,6 +73,9 @@ for (const mobile of [false, true]) test(`results ${mobile ? "touch" : "desktop"
   assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await f.capture(mobile ? "touch-list" : "desktop-list");
   await f.read(); await f.ready();
+  assert.equal(await f.row("native-result").locator("#result-dialog").count(), 1, "exact result expands inside its selected row");
+  assert.equal(await p.locator("#result-dialog").getAttribute("role"), "region");
+  assert.equal(await p.locator("dialog:modal").count(), 1, "reading adds no second modal over Results");
   assert.equal(await p.locator("#result-body").textContent(), f.body);
   await f.capture(mobile ? "touch-reader" : "desktop-reader");
   await p.keyboard.press("Escape");
@@ -275,4 +278,29 @@ for (const mobile of [false, true]) test(`public result preserves an authored pr
   await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
   assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
+});
+
+for (const mobile of [false, true]) test(`inline result leaves conversation usable: ${mobile ? "phone light" : "desktop dark"}`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile, theme: mobile ? "light" : "dark" }), p = f.p;
+  await f.open(); await f.row("native-result").locator("[data-result-work]").click();
+  const card = p.locator('[data-work-record-id="native-result"]');
+  await card.locator("[data-read-result]").click(); await f.ready();
+  assert.equal(await card.locator("#result-dialog").count(), 1);
+  assert.equal(await p.locator("dialog:modal").count(), 0);
+  assert.equal(await p.locator("#result-title").evaluate(node => { const box = node.getBoundingClientRect(); return node === document.activeElement && box.top >= 0 && box.bottom <= innerHeight; }), true, "opening starts at the result heading");
+  await f.capture(mobile ? "inline-result-initial-phone-light" : "inline-result-initial-desktop-dark");
+  await p.locator("#message-input").fill("My next thought while reading");
+  assert.equal(await p.locator("#result-body").textContent(), f.body);
+  const receipt = structuredClone(f.state().workItems["native-result"].receipt);
+  await p.locator("#close-result").focus();
+  f.reopen("native-result");
+  await p.waitForFunction(() => document.querySelector("#result-status").textContent.startsWith("Earlier result"));
+  assert.equal(await card.locator("#result-body").textContent(), f.body, "rerender keeps the inspected version inline");
+  assert.equal(await p.locator("#close-result").evaluate(node => node === document.activeElement), true);
+  assert.deepEqual(f.state().workItems["native-result"].receipt, receipt);
+  await f.capture(mobile ? "inline-result-phone-light" : "inline-result-desktop-dark");
+  await p.keyboard.press("Escape");
+  assert.equal(await p.locator("#result-dialog").isVisible(), false);
+  assert.equal(await card.locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
+  assert.equal(await p.locator("#message-input").inputValue(), "My next thought while reading");
 });
