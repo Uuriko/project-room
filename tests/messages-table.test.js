@@ -684,15 +684,20 @@ test("the archived-reply thread lookup ignores a same-id message in another room
 
 test("a file committed onto an archived DM stays visible to the DM's parties only", t => {
   const f = fixture(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-pub", body: "public" });
   f.send(f.human, T.MESSAGE_POSTED, { messageId: "old-dm", toMemberId: "agent", body: "private" });
   for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `x-${i}`, body: `x ${i}` });
   for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
   f.store.checkMessagesParity();
   assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
   assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-dm"), false);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-pub"), false, "old-pub is archived too");
   const files = f.store.roomAttachments, index = files.messageIndex("commons");
   const row = { state: "committed", message_id: "old-dm", uploader_id: "human" };
   assert.equal(files.visibleTo(row, index, "human"), true);
   assert.equal(files.visibleTo(row, index, "agent"), true);
   assert.equal(files.visibleTo(row, index, "stranger"), false);
+  // An archived public message is visible to a stranger; a never-posted message falls back to its uploader only.
+  assert.equal(files.visibleTo({ ...row, message_id: "old-pub" }, index, "stranger"), true);
+  assert.equal(files.visibleTo({ ...row, message_id: "never-posted" }, index, "stranger"), false);
 });
