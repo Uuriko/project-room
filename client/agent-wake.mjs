@@ -138,10 +138,9 @@ export class AgentWakeClient {
     requireConnection(after);
     // Authority reads and a slow poll can outlive the lease. Revalidate
     // before dispatch; a newly acquired token cannot bless the old page.
-    if (pendingWakes.length) {
-      const renewed = await this.setup({ hostId, cadenceSeconds, listener: true });
-      if (!renewed.listener.acquired || this.#fencingToken !== receivingToken) return contended(after);
-    }
+    // Even an empty page can trigger startup attention from its observations.
+    const renewed = await this.setup({ hostId, cadenceSeconds, listener: true });
+    if (!renewed.listener.acquired || this.#fencingToken !== receivingToken) return contended(after);
     return { version: 1, status: pendingWakes.length ? 'signals_received' : 'wait_completed', hostId, pendingWakes,
       timedOut: value.timedOut, waitedMs: value.waitedMs, acknowledged: false,
       observations: { before, after }, sourceCursorsAre: 'read_observations_not_handled', execution: 'not_observed' };

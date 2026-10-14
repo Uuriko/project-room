@@ -132,3 +132,18 @@ test('separate CLI-style ack resumes the same host lease without storing its tok
  const ack=new AgentWakeClient({connection:f.connection});
  assert.deepEqual((await ack.ack({hostId:'cli-host',signalIds:[signal.signalId]})).acknowledged,[signal.signalId]);
 });
+
+test('empty wake pages also revalidate ownership before startup attention may dispatch', async t=>{
+ const f=await fixture(t);let release,entered;
+ const gate=new Promise(r=>release=r), started=new Promise(r=>entered=r);
+ const first=new AgentWakeClient({connection:f.connection,fetchImpl:async(url,options)=>{
+  const response=await fetch(url,options);
+  if(String(url).includes('/api/agent-wakes/poll')){entered();await gate;}
+  return response;
+ }});
+ const pending=first.wait({hostId:'old-empty',cadenceSeconds:60,waitMs:0});await started;
+ f.store.db.prepare('UPDATE agent_wake_listener_leases SET lease_expires_at=0 WHERE agent_id=?').run(f.setup.identityId);
+ const next=new AgentWakeClient({connection:f.connection});
+ await next.wait({hostId:'new-empty',cadenceSeconds:60,waitMs:0});
+ release();assert.equal((await pending).status,'listener_contended');
+});
