@@ -74,6 +74,7 @@ optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by
 optional.push("src/error-copy.js"); // Human error copy (imported by src/client.js, src/friend-bond.js, src/operator-ui.js)
 optional.push("src/room-layout.js", "src/member-display-names.js");
 optional.push("src/needs-attention.js", "src/updates-ui.js"); // #662: owner "needs your attention" card (imported by src/app.js)
+optional.push("src/owner-cockpit.js"); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
 optional.push("src/emoji.js", "src/emoji-catalog.js"); // Unicode emoji catalog + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
 optional.push("src/display-name-guard.js"); // Member display-name admission (imported by src/events.js and re-exported by server/display-name-guard.mjs)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
@@ -180,6 +181,7 @@ optional.push("server/discoverability.mjs"); // Appendix A route table + generat
 optional.push("server/matchmaking-routes.mjs", "server/work-matchmaking.mjs", "server/work-declarations.mjs", "server/agent-lanes.mjs"); // work matchmaking routes (imported by server/http.mjs)
 optional.push("server/attention.mjs");
 optional.push("server/owner-attention.mjs"); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
+optional.push("server/owner-overview.mjs"); // #3342: cross-room owner overview read model (imported by server/http.mjs)
 optional.push("server/mention-lifecycle.mjs"); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
 optional.push("server/moderation.mjs");
 optional.push("server/channel-connection.mjs", "server/channel-import.mjs", "server/channel-adapters/index.mjs", "server/channel-adapters/email.mjs", "server/channel-adapters/telegram.mjs", "server/channel-adapters/telegram-rotation.mjs", "server/channel-adapters/gmail.mjs", "server/channel-adapters/whatsapp.mjs", "server/channel-adapters/sms.mjs", "server/channel-adapters/messenger.mjs");

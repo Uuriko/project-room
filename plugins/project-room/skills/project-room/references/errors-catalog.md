@@ -550,6 +550,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_orient` | 422 | focus, q, and maxTokens are the orient query parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_origin` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_outside_agent` | 422 | This read takes no query filters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_overview_query` | 422 | window must be one of 24h, 7d, 30d, given once | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_owed_query` | 422 | limit must be an integer from 1 to 100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pagination` | 422 | limit must be an integer from 1 to 200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_passkey` | 422 | A verified credential record is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
