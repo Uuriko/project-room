@@ -3320,9 +3320,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // exactly as a sign-out leaves it (its row survives for share-link
   // receipt tombstones); no other session — browser, native, or OAuth —
   // is touched, and the OAuth endpoints keep their own semantics. Returns
-  // 1 when a live session was revoked; 0 when the id is malformed,
-  // unknown, already dead, or belongs to another account, so the HTTP
-  // layer answers 404 without distinguishing those cases (no probing).
+  // 1 when a live session was revoked; 0 when the id is unknown, already
+  // dead, or belongs to another account, so the HTTP layer answers 404
+  // without distinguishing those cases (no probing). A malformed id
+  // (non-string, empty, or over 128 chars) throws 422 invalid_session_id
+  // instead of returning 0.
   revokeAccountSession(accountId, sessionId) {
     if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
     if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > 128) fail(422, "invalid_session_id", "A session id is required");

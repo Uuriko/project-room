@@ -8,7 +8,9 @@
 // explicit account-session surface: any live account session may list the
 // account's sessions and end exactly one of them. A revocation names one
 // session id; sibling sessions — browser or native — are untouched, and an
-// unknown, already-ended, or other-account id all answer the same 404.
+// unknown, already-ended, or other-account id all answer the same 404. A
+// malformed id (over the 128-char path bound) names no session at all and
+// answers the catalogued 422 invalid_session_id instead.
 //
 // Handlers enforce their own authorization (the production dispatch does
 // not set ctx.pipeline), mirroring the OAuth family's discipline:
@@ -21,9 +23,16 @@ function requireAccountSession(ctx) {
   const { req, store, cookie, accountCookieName, accountBinding, reject } = ctx;
   const slotToken = cookie(req, accountCookieName);
   if (!slotToken) reject(401, "account_session_required", "Sign in to manage your sessions");
+  // The binding is evaluated OUTSIDE the try, mirroring the OAuth
+  // family's unwrapped call in server/http.mjs: a missing binding is the
+  // documented 422 session_binding_required, and authentication's own
+  // 409 session_binding_changed for a stale binding propagates too.
+  // Only a dead slot itself collapses to 401 (F-3496-1).
+  const binding = accountBinding(req);
   try {
-    return store.authenticateAccountSession(slotToken, null, accountBinding(req));
-  } catch {
+    return store.authenticateAccountSession(slotToken, null, binding);
+  } catch (error) {
+    if (error?.code === "session_binding_changed") throw error;
     reject(401, "account_session_required", "Sign in to manage your sessions");
   }
 }

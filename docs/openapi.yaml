@@ -9029,7 +9029,7 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: csrf_denied }
         '404': { description: session_not_found }
-        '422': { description: session_binding_required }
+        '422': { description: session_binding_required or invalid_session_id }
         '429': { description: rate_limited }
   /api/auth/recovery-codes/generate:
     post:

@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { ACCOUNT_SESSION_ROUTES } from "../server/routes/account-sessions.mjs";
 
 const route = method => ACCOUNT_SESSION_ROUTES.find(row => row.method === method);
-function fixture({ token = "saved-session", authError = false, csrfError = false, revoked = 1 } = {}) {
+function fixture({ token = "saved-session", authError = false, bindingError = null, csrfError = false, revoked = 1 } = {}) {
   const calls = [], auth = { account: { id: "owner-account" }, credentialHash: "current-slot" };
   const reject = (status, code) => { throw Object.assign(new Error(code), { status, code }); };
   const methods = {
     authenticateAccountSession(value, room, binding) {
       calls.push(["authenticate", value, room, binding]);
-      if (authError) reject(401, "unauthenticated");
+      if (authError) { const e = authError === true ? { status: 401, code: "unauthenticated" } : authError; reject(e.status, e.code); }
       return auth;
     },
     listAccountSessions(account, current) { calls.push(["list", account, current]); return [{ id: "public-slot" }]; },
@@ -21,7 +21,8 @@ function fixture({ token = "saved-session", authError = false, csrfError = false
   const ctx = {
     req: {}, res: {}, store, params: { id: "public-slot" }, accountCookieName: "account_session",
     cookie: (_req, name) => { assert.equal(name, "account_session"); return token; },
-    accountBinding: () => "session-binding", remoteAddress: "127.0.0.1", reject,
+    accountBinding: () => { if (bindingError) reject(bindingError.status, bindingError.code); return "session-binding"; },
+    remoteAddress: "127.0.0.1", reject,
     rate: (key, max) => { assert.equal(max, 60); calls.push(["rate", key]); },
     protectWrite: (_req, value, required) => {
       assert.equal(value, auth); assert.equal(required, false); calls.push(["csrf"]);
@@ -39,6 +40,31 @@ test("account session routes refuse anonymous and revoked callers before invento
     assert.equal(f.calls.some(call => ["list", "revoke"].includes(call[0])), false);
     // Wrong-method dispatch uses this same authentication hook before 405.
     assert.throws(() => route(method).authenticate(f.ctx), { status: 401, code: "account_session_required" });
+  }
+});
+
+test("binding failures propagate as the documented 422/409 instead of collapsing to 401", async () => {
+  for (const method of ["GET", "DELETE"]) {
+    // Missing binding: accountBinding throws the documented 422. It is
+    // evaluated outside requireAccountSession's catch-all, mirroring the
+    // OAuth family's unwrapped call (F-3496-1; the old mock never threw,
+    // which is why the collapse to 401 was invisible).
+    const missing = fixture({ bindingError: { status: 422, code: "session_binding_required" } });
+    await assert.rejects(route(method).handler(missing.ctx), { status: 422, code: "session_binding_required" });
+    assert.equal(missing.calls.some(call => ["authenticate", "list", "revoke"].includes(call[0])), false);
+    assert.throws(() => route(method).authenticate(missing.ctx), { status: 422, code: "session_binding_required" });
+    // A binding-layer 409 (stale binding named at evaluation) propagates too.
+    const staleBinding = fixture({ bindingError: { status: 409, code: "session_binding_changed" } });
+    await assert.rejects(route(method).handler(staleBinding.ctx), { status: 409, code: "session_binding_changed" });
+    // The production 409 source: authenticateAccountSession itself throws
+    // session_binding_changed for a stale binding; the catch-all must let
+    // it through rather than re-labeling it 401.
+    const staleAuth = fixture({ authError: { status: 409, code: "session_binding_changed" } });
+    await assert.rejects(route(method).handler(staleAuth.ctx), { status: 409, code: "session_binding_changed" });
+    assert.equal(staleAuth.calls.some(call => ["list", "revoke"].includes(call[0])), false);
+    // A genuinely dead slot still collapses to the uniform 401.
+    const dead = fixture({ authError: true });
+    await assert.rejects(route(method).handler(dead.ctx), { status: 401, code: "account_session_required" });
   }
 });
 
