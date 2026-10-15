@@ -2,9 +2,13 @@ import { validId, roomPolicy } from '../src/events.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
+import { PublicWorkSettlement } from './public-work-settlement.mjs';
 
-// Private review is a separate fact. Submission bytes, public receipt, leases,
-// work gates, credit balances and payment state are never changed here.
+// Private review is a separate fact. Submission bytes, public receipt, leases
+// and work gates are never changed here. For PAID tasks only, an accept/reject
+// decision additionally settles credits through the escrow rail
+// (server/public-work-settlement.mjs) in this same transaction; unpaid tasks
+// keep the historical feedback-only behavior exactly.
 export const publicWorkReviewsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_reviews (
   receipt_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL
@@ -86,14 +90,16 @@ export class PublicWorkReviews {
     return evidence?.verdict === 'PASS' && evidence.fingerprint === scope.fingerprint && this.permissions(scope, evidence.actorId).verify;
   }
   needsPass(scope) { return scope.offer.approvalPolicy.mode !== 'human' || scope.policy.requireIndependentReview || scope.work?.independentVerificationRequired; }
+  settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
   view(scope) {
     const review = this.current(scope), permissions = this.permissions(scope, scope.actorId);
+    const settlement = this.settlementService().viewForOffer(scope.receipt.taskId);
     const followUp = this.store.publicWorkSuccessors?.link(scope.receipt.receiptId);
     const terminal = ['accepted', 'rejected'].includes(review.state);
     const ready = !this.needsPass(scope) || this.passCurrent(scope, review);
     const { fingerprint: ignored, ...evidence } = review.verification ?? {};
     void ignored;
-    return { ...(followUp ? { followUp } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
+    return { ...(followUp ? { followUp } : {}), ...(settlement ? { settlement } : {}), receipt: scope.receipt, offer: { id: scope.offer.id, title: scope.offer.title, summary: scope.offer.summary, acceptanceCriteria: scope.offer.acceptanceCriteria,
         exclusions: scope.offer.exclusions, repositoryUrl: scope.offer.repositoryUrl, status: scope.offer.status, approvalPolicy: scope.offer.approvalPolicy },
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
@@ -183,7 +189,15 @@ export class PublicWorkReviews {
       current.revision += 1;
       this.db.prepare('INSERT INTO public_work_reviews VALUES (?,?,?,?) ON CONFLICT(receipt_id) DO UPDATE SET revision=excluded.revision,state_json=excluded.state_json')
         .run(receiptId, roomId, current.revision, JSON.stringify(current));
+      // Settlement fires on an actual verdict only (accepted/rejected, in
+      // this same transaction, so a settlement failure records no verdict).
+      // revision_requested and verify actions never settle, reviewer
+      // silence never settles (the VIII.1 free-miss flip is John-gated and
+      // not implemented), and unpaid tasks have no link and skip entirely.
+      const settlement = action === 'decide' && ['accepted', 'rejected'].includes(input.decision)
+        ? this.settlementService().settleOnVerdict(roomId, scope.receipt.taskId, { decision: input.decision, reason: input.reason }) : null;
       const outcome = this.view(scope);
+      if (settlement) outcome.settlement = settlement;
       this.db.prepare('INSERT INTO public_work_review_requests VALUES (?,?,?,?,?)').run(roomId, actorId, input.requestId, encoded, JSON.stringify(outcome));
       return outcome;
     });
