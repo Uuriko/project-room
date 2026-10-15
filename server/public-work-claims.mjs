@@ -469,36 +469,42 @@ export class PublicWorkClaims {
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
         if (reward !== 'volunteer') return outcome;
-        const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
-        outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
-        const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
-        const candidates = page.tasks.filter(task => {
-          if (task.claim.state !== 'unclaimed') return false;
-          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
-            other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
-        }).map(task => {
-          const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
+        // The candidate window comes from the AvailableWork projection
+        // (redesign charter B-2): which tasks in this offer_id-ordered
+        // page are available is the projection's classification, never a
+        // second filter here. Preference scoring, the age tiebreak and
+        // the path-overlap exclusion stay as the ranking layer over it,
+        // and recommendations still carry facade packets (materialized
+        // via read() for the few that surface).
+        const win = availablePublicTasks(this.store, { window: true, after: input.after ?? '' });
+        outcome.inspected = win.inspected; outcome.hasMore = win.hasMore; outcome.nextCursor = win.nextCursor;
+        const ages = new Map(win.items.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${win.items.map(() => '?').join(',')})`).all(...win.items.map(item => item.id)).map(row => [row.offer_id, row.created_at]) : []);
+        const candidates = win.items.filter(item =>
+          !releaseExpired(this.store.workClaims.list(item.roomId), this.store.now()).some(other =>
+            other.id !== item.id && other.owner && other.files.some(path => item.files.some(file => overlaps(path, file)))))
+        .map(item => {
+          const text = [item.title, ...item.acceptanceCriteria].join(' ').toLowerCase();
           const matched = [...new Set(preferences.filter(value => text.includes(value)))];
-          return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
-        }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
-        outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
+          return { item, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
+        }).sort((left, right) => right.score - left.score || ages.get(left.item.id) - ages.get(right.item.id) || (left.item.id < right.item.id ? -1 : left.item.id > right.item.id ? 1 : 0));
+        outcome.recommendations = candidates.slice(0, limit).map(({ item, reasons }) => ({ task: this.read(item.id), reasons }));
         // Machine-readable complement to a bare empty list (#2988): tasks
         // were inspected but none of them is claimable. Deliberately named
         // reasonCode, not reason/guidance — those are human-readable fields
         // used by other (stale) proposals for this same outcome object.
-        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)) outcome.reasonCode = 'no_claimable_tasks';
+        if (!candidates.length && outcome.inspected > 0 && win.items.length === 0) outcome.reasonCode = 'no_claimable_tasks';
         if (input.autoClaim === true && candidates.length) {
           // #3271: an auto-claim is a claim — count it against the ceiling
           // here, where a claim actually happens (see the note above).
           this.enforceIdentityRateLimit(identity.identityId);
-          const selected = candidates[0].task;
-          const claimInput = { expectedTermsVersion: selected.termsVersion };
+          const selected = candidates[0].item;
+          const claimInput = { expectedTermsVersion: selected.terms.termsVersion };
           // The outer @match journal owns this choice; direct-command keys cannot alias it.
           if (input.leaseHours !== undefined) claimInput.leaseHours = input.leaseHours;
-          outcome.claim = this.apply(selected.taskId, identity, 'claim', claimInput, false);
+          outcome.claim = this.apply(selected.id, identity, 'claim', claimInput, false);
           outcome.recommendations = [{ task: outcome.claim.task, reasons: candidates[0].reasons }, ...candidates.slice(1).filter(candidate =>
-            candidate.task.namespaceId !== selected.namespaceId || !candidate.task.files.some(path => selected.files.some(file => overlaps(path, file))))
-            .slice(0, limit - 1).map(({ task, reasons }) => ({ task, reasons }))];
+            candidate.item.roomId !== selected.roomId || !candidate.item.files.some(path => selected.files.some(file => overlaps(path, file))))
+            .slice(0, limit - 1).map(({ item, reasons }) => ({ task: this.read(item.id), reasons }))];
         }
         return outcome;
       };
