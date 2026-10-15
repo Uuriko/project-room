@@ -967,6 +967,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // hosts). With no hosts at all the waiter is skipped and notePoll
     // answers 404 agent_not_registered — the sequencing error a cold
     // agent needs first (heartbeat before poll), not the parameter error.
+    // A scoped credential whose identity's hosts all live under another
+    // credential's namespace derives its own credential slot instead (see
+    // the derivation below) — never another host's slot, and never no
+    // waiter at all.
     const rawHostId = url.searchParams.get("hostId");
     let waiterHostId = null;
     if (rawHostId !== null) {
@@ -981,6 +985,22 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       else if (own.length > 1) reject(422, "invalid_wake_poll", auth.roomId
         ? "hostId is required: this credential has several registered hosts — pass the hostId you heartbeat with (one wake waiter per host)"
         : `hostId is required: this identity has several registered hosts (${own.map(host => host.hostId).join(", ")}) — pass the hostId you heartbeat with (one wake waiter per host)`);
+      else if (auth.roomId && hosts.length > 0) {
+        // The identity IS registered, but every host sits under another
+        // credential's namespace — the standard shape since CX5: hosts
+        // heartbeated by the saved rak_ setup (ak_ namespace) while a
+        // legacy room key (rk_ namespace) polls, or the reverse. Deriving
+        // across namespaces would wedge that host's waiter slot (the
+        // two-host livelock the per-host keying exists to prevent), and
+        // notePoll's registration check is namespace-blind, so without a
+        // fallback this poll registered NO waiter and rode out the full
+        // waitMs on the bare timer — signals still arrived (the post-wait
+        // notePoll is host-independent) but never promptly. Park the wait
+        // on the polling credential's own namespaced derived slot
+        // instead: prompt release on this room's signals, no real host's
+        // slot touched, no other host's wait disturbed.
+        waiterHostId = auth.scopedKey ? scopedKeyHostId(auth, "derived") : roomKeyHostId(auth, "derived");
+      }
     }
     const rawWait = url.searchParams.get("waitMs");
     let waitMs = 25000;
@@ -1001,8 +1021,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // Registering the waiter first is load-bearing: a reconnect with the
     // same hostId replaces only that host's previous wait, and the notePoll
     // right after closes the race where a signal landed between requests.
-    // waiterHostId is null only when no host is registered, where notePoll
-    // rejects 404 before any wait can happen — no waiter is needed.
+    // waiterHostId is null only when the identity has no registered host
+    // at all, where notePoll rejects 404 before any wait can happen — no
+    // waiter is needed. (Scoped credentials with hosts only under another
+    // credential's namespace derive a credential slot above, so a
+    // registered identity's held poll always has a release channel.)
     let woken = false, clientGone = false, done = null;
     const donePromise = new Promise(resolve => { done = resolve; });
     const release = waiterHostId === null ? () => {} : store.agentHeartbeats.addWakeWaiter(auth.identityId, waiterHostId, {
