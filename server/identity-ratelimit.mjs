@@ -62,12 +62,26 @@ export function createRateLimiter({ store, now, capacity = 60, refillPerSecond =
     return Object.freeze({ allowed: false, retryAfterMs,
       message: `Rate limit reached. Please wait ${seconds} second${seconds === 1 ? "" : "s"} and try again.` });
   };
+  // Return one token spent by an earlier check() — for callers whose action
+  // failed after the check, so a rejected attempt does not burn quota the
+  // caller cannot roll back itself (e.g. an in-memory bucket beside a
+  // database transaction). No bucket means nothing was spent under this key,
+  // so nothing is created; the bucket is capped at capacity, so a refund can
+  // never mint budget beyond a full bucket.
+  const refundLimit = identityId => {
+    check(typeof identityId === "string" && identityId.length > 0, "identityId must be a non-empty string");
+    if (!buckets.has(identityId)) return Object.freeze({ identityId, tokens: capacity, capacity });
+    const bucket = bucketFor(identityId);
+    refill(bucket);
+    bucket.tokens = Math.min(capacity, bucket.tokens + 1);
+    return Object.freeze({ identityId, tokens: Math.floor(bucket.tokens), capacity });
+  };
   // Get current bucket state (for dashboards).
   const state = identityId => {
     const bucket = bucketFor(identityId);
     refill(bucket);
     return Object.freeze({ identityId, tokens: Math.floor(bucket.tokens), capacity });
   };
-  return Object.freeze({ check: checkLimit, state, capacity, refillPerSecond });
+  return Object.freeze({ check: checkLimit, refund: refundLimit, state, capacity, refillPerSecond });
 }
 export { RateLimitError };

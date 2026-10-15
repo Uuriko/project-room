@@ -51,6 +51,26 @@ test("sybil-like name close to an existing member pushes toward review", () => {
   assert.ok(sybil.value > 0.7, `similarity component ${sybil.value}: ${sybil.detail}`);
 });
 
+test("exact duplicate of an existing member's name scores sybilName 1", () => {
+  // Regression: sybilNameScore used to skip any existing name equal to the
+  // candidate, so the strongest impersonation signal scored zero risk and
+  // the detail claimed the name was distinct.
+  for (const [displayName, existingDisplayNames] of [
+    ["Quill", ["Quill"]],
+    [" quill ", ["Quill"]], // case/whitespace-insensitive exact match
+    ["QUILL", ["Someone Else", "Quill"]],
+  ]) {
+    const decision = evaluateAdmission(base({
+      identityAgeMs: 30 * 24 * 60 * 60 * 1000,
+      displayName,
+      existingDisplayNames,
+    }));
+    const sybil = decision.signals.find(s => s.key === "sybilName");
+    assert.equal(sybil.value, 1, `${JSON.stringify(displayName)} vs ${JSON.stringify(existingDisplayNames)}: ${sybil.detail}`);
+    assert.match(sybil.detail, /100% similar to member "Quill"/);
+  }
+});
+
 test("machine-pattern names (digit tail, repetition, low entropy) score high on sybilName", () => {
   for (const name of ["bot12938475", "xxxxaaaa0000", "agent000001"]) {
     const decision = evaluateAdmission(base({ displayName: name }));
@@ -100,7 +120,7 @@ test("decision mapping honors the documented thresholds", () => {
   assert.equal(jevAdmissionReviewThreshold, 0.45);
   assert.equal(jevAdmissionRejectThreshold, 0.75);
   assert.ok(jevAdmissionPaths.includes("access-request:approve"));
-  assert.ok(jevAdmissionPaths.includes("guest-agent-link:join"));
+  assert.ok(jevAdmissionPaths.includes("guest-invite:redeem"));
 });
 
 test("weights sum to a stable legend", () => {

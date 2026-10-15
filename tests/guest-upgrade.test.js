@@ -151,3 +151,25 @@ test("a guest upgrade request with extra fields is refused", async t => {
   const { post, guest } = await start(t);
   assert.equal((await post("/api/auth/guest/upgrade", { email: "x@example.invalid", accountId: "other" }, guest())).status, 422);
 });
+
+test("a failed password link does not burn the verify code or leave a magic method behind (#2956)", async t => {
+  const { f, post, guest, codeFor } = await start(t);
+  const g = guest(), email = "atomic@example.invalid";
+  await post("/api/auth/guest/upgrade", { email }, g);
+  const code = codeFor(email);
+  assert.ok(code, "a verify code was mailed");
+  // Force linkPasswordMethod's insert to fail after consumeEmailVerifyCode
+  // has succeeded, the way a racing tab setting a password first would:
+  // only the password-method insert is denied, the magic insert is not.
+  f.store.db.exec(`CREATE TRIGGER deny_password_link_2956 BEFORE INSERT ON account_login_methods
+    WHEN NEW.type='password' BEGIN SELECT RAISE(ABORT,'test password link failure'); END;`);
+  const failed = await post("/api/auth/guest/upgrade/confirm", { email, code, password: PASSWORD }, g);
+  assert.notEqual(failed.status, 200, "the confirm fails when the password cannot be linked");
+  f.store.db.exec("DROP TRIGGER deny_password_link_2956");
+  assert.equal(f.store.accountLogins.listMethods(g.accountId).length, 0,
+    "no magic or password method is left behind by the failed confirm");
+  const retry = await post("/api/auth/guest/upgrade/confirm", { email, code, password: PASSWORD }, g);
+  assert.equal(retry.status, 200, `the same code still confirms after the failure: ${await retry.clone().text()}`);
+  assert.equal(f.store.accountLogins.emailVerification(g.accountId).status, "verified");
+  assert.ok(f.store.accountLogins.readPasswordVerifier(g.accountId), "the retry linked the password");
+});

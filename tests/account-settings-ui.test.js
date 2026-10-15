@@ -155,8 +155,11 @@ function stubClient(responses) {
   const calls = [];
   return {
     calls,
+    generation: 0,
     session: { authenticated: true, account: { id: "acct" }, sessionRevision: 1, csrf: "c", sessionBinding: "b" },
     currentSession() { return this.session; },
+    // Mirrors src/client.js: owns() is generation equality plus session identity.
+    owns(generation, session) { return generation === this.generation && this.session === session; },
     async request(path, { method = "GET", data } = {}) {
       calls.push({ path, method, data });
       const response = responses[path];
@@ -278,4 +281,51 @@ test("an unverified account sees the email verification form after mount (emailV
   const container2 = fakeContainer();
   await ui2.mount(container2);
   assert.equal(container2.innerHTML.includes('data-form="email-verify"'), false, "a verified account sees no form");
+});
+
+// --- Regression: refresh() must not repaint a previous account after reset/sign-out (#2970) ---
+const gatedContainer = () => ({ ...fakeContainer(), replaceChildren() { this.innerHTML = ""; } });
+const previousMethod = { id: "m1", type: "password", label: "Password", email: "prev@b.c",
+  createdAt: 1, lastUsedAt: null, disabled: false };
+
+test("a refresh response landing after reset does not repaint the previous account's methods", async () => {
+  let resolveMethods;
+  const gate = new Promise(resolve => { resolveMethods = resolve; });
+  const client = stubClient({ "/api/auth/methods": () => gate });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = gatedContainer();
+  const mounted = ui.mount(container);
+  ui.reset();
+  resolveMethods({ methods: [previousMethod], providers: null });
+  await mounted;
+  assert.equal(container.innerHTML.includes("prev@b.c"), false, "late response must not repaint after reset");
+  assert.equal(ui.html().includes("prev@b.c"), false, "late response must not overwrite state after reset");
+});
+
+test("a refresh error landing after reset does not repaint the previous account", async () => {
+  let rejectMethods;
+  const gate = new Promise((resolve, reject) => { rejectMethods = reject; });
+  const client = stubClient({ "/api/auth/methods": () => gate });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = gatedContainer();
+  const mounted = ui.mount(container);
+  ui.reset();
+  rejectMethods(new Error("boom"));
+  await mounted;
+  assert.equal(container.innerHTML, "", "late error must not repaint after reset");
+});
+
+test("a refresh response landing after sign-out (session/generation change) is dropped", async () => {
+  let resolveMethods;
+  const gate = new Promise(resolve => { resolveMethods = resolve; });
+  const client = stubClient({ "/api/auth/methods": () => gate });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = gatedContainer();
+  const mounted = ui.mount(container);
+  client.generation++;
+  client.session = { authenticated: false, account: null, sessionRevision: 2, csrf: "c2", sessionBinding: "b2" };
+  resolveMethods({ methods: [previousMethod], providers: null });
+  await mounted;
+  assert.equal(container.innerHTML.includes("prev@b.c"), false, "late response must not repaint after sign-out");
+  assert.equal(ui.html().includes("prev@b.c"), false, "late response must not overwrite state after sign-out");
 });

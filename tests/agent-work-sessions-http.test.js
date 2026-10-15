@@ -65,7 +65,7 @@ test("work-sessions next[] teaches claim-session for an open session", async t =
   const reqRes = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Friend",
     requestedPermissions: ["accept_work"], note: null, requestId: "ws-req-1",
-  });
+  }, friend.secret);
   assert.equal(reqRes.status, 201);
   const decideRes = await post(origin, `/api/rooms/${roomId}/access-requests/ws-req-1/decide`, {
     decision: "approve", permissions: ["accept_work"], note: null,

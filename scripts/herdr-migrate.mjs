@@ -64,11 +64,13 @@ const LIVE_CLAIM_STATES = new Set(["claimed", "in_progress", "blocked"]);
 const TERMINAL_CLAIM_STATES = new Set(["done", "failed"]);
 // Host classes that cannot host a herdr pane (D5 §1.2).
 const NO_HERDR_HOST_CLASSES = new Set(["paste-relay", "pull-only"]);
+// Only a COMPLETED operation is terminal for idempotency. The *_aborted
+// kinds journal a failed attempt whose own detail text tells the operator
+// to re-run once the blocking path lands (D5 §1.4: resumable) — treating
+// them as terminal made every aborted claim unretryable forever (#2884).
 const TERMINAL_JOURNAL_KINDS = new Set([
   "backfill_done",
-  "backfill_aborted",
   "reverse_done",
-  "reverse_aborted",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -377,6 +379,14 @@ export function classifyClaim(claim, ctx) {
 // ---------------------------------------------------------------------------
 // Idempotency (D5 §1.4): key backfill:<room_id>:<claim_id>; the journal is
 // append-only, so "exists" = a terminal row with the same key.
+//
+// The key is per CLAIM, shared by both directions on purpose: it is the
+// claim's lane history, and direction is carried by the entry kind. A
+// command is therefore a no-op only when the LATEST terminal entry is its
+// own *_done kind (see directionTerminalEntry): a backfill_done must not
+// block reverse — being on herdr is exactly what reverse undoes — and a
+// reverse_done must not block a later re-migrate. *_aborted rows are never
+// terminal (see TERMINAL_JOURNAL_KINDS), so aborted work always retries.
 // ---------------------------------------------------------------------------
 
 export function idempotencyKey(roomId, claimId) {
@@ -393,6 +403,14 @@ export function findTerminalEntry(entries, key) {
     if (e.idempotency_key === key && isTerminalKind(e.kind)) return e;
   }
   return null;
+}
+
+// Direction-aware terminal check for one command: returns the terminal
+// entry only when the claim's latest completed operation is this
+// direction's own *_done kind; otherwise null (the command must run).
+export function directionTerminalEntry(entries, key, doneKind) {
+  const latest = findTerminalEntry(entries, key);
+  return latest && latest.kind === doneKind ? latest : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -575,6 +593,17 @@ export function renderHonestSummary(report) {
 // entries with a session_id (pre-B5 source; B5's herdr_sessions table becomes
 // canonical when it lands). Used for the already_herdr idempotency check and
 // for drain/orphan inventory.
+// The resume cursor for ONE room: the cursor on its latest
+// migration_cursor entry. Cursor entries are room-scoped — the executor
+// writes cursor = next plan index for the room it just processed, and
+// buildPlan slices one room's eligible list — so a resume must never read
+// another room's cursor (#2885). cmdStatus reads them per room the same
+// way. A room with no cursor entry resumes from the start.
+export function resumeCursorForRoom(journal, roomId) {
+  const cursors = (journal ?? []).filter((e) => e.kind === "migration_cursor" && e.room_id === roomId);
+  return cursors.length > 0 ? cursors[cursors.length - 1].cursor ?? 0 : 0;
+}
+
 export function linkedClaimIds(journal, roomId) {
   const out = new Set();
   for (const e of journal ?? []) {
@@ -635,7 +664,7 @@ export function aggregateDrainStatus({ roomId, flagParsed, sessions, claims, bri
 // Reverse-migration plan (herdr -> legacy, D5 §4.2 per-lane rollback).
 export function planReverse({ roomId, claim, marker }) {
   return [
-    `journal reverse_start for backfill:${roomId}:${claim.id} (idempotency: skip if reverse_done/reverse_aborted already journaled)`,
+    `journal reverse_start for backfill:${roomId}:${claim.id} (idempotency: skip only if the latest completed entry is reverse_done; reverse_aborted is retryable)`,
     `verify claim ${claim.id} is herdr-linked (marker: ${marker ?? "unknown"}) and live (state ${claim.state})`,
     `release the herdr session via the adapter (pane close), keeping the claim row untouched`,
     `re-issue the claim WITHOUT the herdr marker (sessionBackend omitted) so the next session attaches legacy`,
@@ -1050,12 +1079,17 @@ async function cmdMigrate(flags, deps) {
   const nowMs = Date.now();
   const attachCap = await probeAttachCapability(bridgeBase);
 
-  let startIndex = 0;
-  if (flags.fromCursor != null) startIndex = flags.fromCursor;
-  else if (flags.resume) {
-    const cursors = journal.filter((e) => e.kind === "migration_cursor");
-    if (cursors.length > 0) startIndex = cursors[cursors.length - 1].cursor ?? 0;
-  }
+  // Resume is PER ROOM (#2885): migration_cursor entries are room-scoped
+  // (see resumeCursorForRoom). Taking the journal's last cursor globally
+  // and applying it to every room's plan skipped unmigrated claims in any
+  // room whose cursor lagged the global one, and re-ran finished rooms
+  // whose cursor led it. An explicit --from-cursor stays a single
+  // operator override applied to all rooms, as given.
+  const startIndexForRoom = (roomId) => {
+    if (flags.fromCursor != null) return flags.fromCursor;
+    if (!flags.resume) return 0;
+    return resumeCursorForRoom(journal, roomId);
+  };
 
   const results = [];
   let systemic = false;
@@ -1082,14 +1116,14 @@ async function cmdMigrate(flags, deps) {
       });
       classified.push({ roomId, claim, ...c });
     }
-    const { plan } = buildPlan(classified, { fromCursor: startIndex, limit: flags.limit ?? null });
+    const { plan } = buildPlan(classified, { fromCursor: startIndexForRoom(roomId), limit: flags.limit ?? null });
     const batches = batchPlan(plan, flags.batch);
 
     for (const batch of batches) {
       for (const item of batch) {
         const key = item.idempotency_key;
         try {
-          const terminal = findTerminalEntry(readJournal(journalPath), key);
+          const terminal = directionTerminalEntry(readJournal(journalPath), key, "backfill_done");
           if (terminal) {
             results.push({ claim_id: item.claim_id, room_id: roomId, outcome: "skipped", reason: "already_terminal", terminal_kind: terminal.kind });
             continue;
@@ -1162,7 +1196,7 @@ async function cmdReverse(flags, deps) {
     return EXIT_OK;
   }
 
-  const terminal = findTerminalEntry(readJournal(journalPath), key);
+  const terminal = directionTerminalEntry(readJournal(journalPath), key, "reverse_done");
   if (terminal) {
     emit(flags, { command: "reverse", claim_id: claim.id, outcome: "skipped", reason: "already_terminal", terminal_kind: terminal.kind },
       (o) => `reverse ${o.claim_id}: skipped (${o.terminal_kind} already journaled)`);

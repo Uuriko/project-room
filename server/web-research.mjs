@@ -62,6 +62,7 @@ export const WEB_RESEARCH_MAX_URLS = 10;
 export const WEB_RESEARCH_MAX_TAGS = 20;
 export const WEB_RESEARCH_TAG_CHARS = 64;
 export const WEB_RESEARCH_SOURCES = ["room", "docs", "fetch", "provider"];
+export const WEB_RESEARCH_DOCS_CACHE_TTL_MS = 60_000;
 export const WEB_RESEARCH_DOCS_MAX_FILES = 300;
 export const WEB_RESEARCH_DOCS_MAX_BYTES = 1024 * 1024;
 export const WEB_RESEARCH_DOCS_MAX_FILE_BYTES = 200 * 1024;
@@ -164,7 +165,25 @@ export function providerStatus(requested) {
 // ---------------------------------------------------------------------------
 // Docs corpus (Node only; lazy file list, capped)
 // ---------------------------------------------------------------------------
-let docsFileCache = null;
+// File lists are cached per corpus roots: keying by the roots keeps two
+// WebResearch instances with different docsRoots from silently searching
+// each other's corpus, and the TTL keeps the list from going permanently
+// stale — a doc added after the first research call becomes searchable
+// once the cached list for its roots expires.
+const docsFileCache = new Map();
+
+function docsFileCacheKey(roots) {
+  return JSON.stringify([roots.docsDir, roots.extraFiles ?? []]);
+}
+
+function listDocsFilesCached(roots, now) {
+  const key = docsFileCacheKey(roots);
+  const hit = docsFileCache.get(key);
+  if (hit && now - hit.listedAt < WEB_RESEARCH_DOCS_CACHE_TTL_MS) return hit.files;
+  const files = listCorpusFiles(roots.docsDir, roots.extraFiles ?? []);
+  docsFileCache.set(key, { files, listedAt: now });
+  return files;
+}
 
 function defaultCorpusRoots() {
   try {
@@ -460,10 +479,7 @@ export class WebResearch {
     if (isWorkersRuntime()) return [];
     const roots = this.opts.docsRoot ?? defaultCorpusRoots();
     if (!roots) return [];
-    if (docsFileCache === null) {
-      docsFileCache = listCorpusFiles(roots.docsDir, roots.extraFiles ?? []);
-    }
-    const files = this.opts.docsFiles ?? docsFileCache;
+    const files = this.opts.docsFiles ?? listDocsFilesCached(roots, now);
     const scored = [];
     let bytesRead = 0;
     for (const file of files) {

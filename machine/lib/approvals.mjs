@@ -92,8 +92,17 @@ export async function takeApproval({ home = configHome(), origin, roomId, secret
     }
     return { ok: false, reason: "approval_required" };
   }
-  row.used = true;
-  pending[code] = row;
-  save(home, pending);
+  // The scan above awaited the network, so `pending` can be stale: another
+  // caller may have consumed a code or requested a new one meanwhile (the
+  // bot and the daemon share this file). Reload and revalidate before
+  // saving — as the not-found path does — so this save cannot resurrect a
+  // code consumed in the window or drop one requested in it.
+  const latest = load(home);
+  const current = latest[code];
+  if (!current || current.used || now >= current.expiresAt) {
+    return { ok: false, reason: "approval_denied" };
+  }
+  current.used = true;
+  save(home, latest);
   return { ok: true };
 }
