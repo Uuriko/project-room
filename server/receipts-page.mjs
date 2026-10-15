@@ -27,6 +27,8 @@ a{color:var(--blue)}
 .card,.detail{overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .card{border-top:1px solid var(--line);padding:1rem 0}
 .meta{color:var(--muted);font-size:.9rem}
+.receipt-next{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
+.receipt-next p{margin:0}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}`;
@@ -116,6 +118,7 @@ ${pr}${merged}${hashes}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+<nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
 <footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
