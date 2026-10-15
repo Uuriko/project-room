@@ -134,10 +134,18 @@ export const ALLOWLIST = [
 export const SAFE_ENTROPY_TOKENS = [
   // Public release artifact URLs in the herdr pin manifest; they contain no
   // credentials. Exact tokens retain scanning of all neighboring values.
+  // Both releases are listed: pkg-v2 is the pin this branch introduces,
+  // pkg-v1 is still the pin on origin/main, whose tree is scanned with this
+  // same config by the zero-false-positives-on-main test. Drop the pkg-v1
+  // entries once main's pin manifest is on pkg-v2.
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-linux-aarch64",
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-linux-x86_64",
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-macos-aarch64",
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-macos-x86_64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-linux-aarch64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-linux-x86_64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-macos-aarch64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-macos-x86_64",
   // Public operator runbook socket-path example; not an authentication token.
   "HERDR_SOCKET_PATH=/srv/herdr/tenants/T/socket/herdr.sock",
   "ROOM_WATCH_WATERMARK:-$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt",
