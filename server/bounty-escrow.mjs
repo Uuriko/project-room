@@ -587,6 +587,19 @@ export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
 
+// The journal hash core — the ONE computation _append writes with, the
+// conservation audit re-checks with, and receipt verification at read time
+// (server/receipt-verify.mjs) re-validates with. Track attribution joins
+// the core only when the row carries one, so pre-track rows keep verifying
+// against their original 12-element core.
+export function journalEntryHash(entry) {
+  const coreParts = [entry.prev_hash, entry.entry_id, entry.account_id, entry.at, entry.kind,
+    entry.bounty_id ?? "", entry.lot_id ?? "", String(entry.amount), entry.lot_state,
+    entry.memo ?? "", entry.actor_kind ?? "", entry.actor_id ?? ""];
+  if (entry.track != null) coreParts.push(entry.track);
+  return sha256(coreParts.join("|"));
+}
+
 // Slice 10: sybil-cluster detection thresholds (integration map #10).
 // Review-only: crossing a threshold creates an arbiter-review flag — it
 // never auto-bans, auto-slashes, or moves balances, bonds, or reputation.
@@ -1059,11 +1072,9 @@ export class BountyEscrow {
     // genesis/transfer) keep the original 12-element core so their stored
     // hashes keep verifying.
     const track = trackOfJournalKind(kind);
-    const coreParts = [prevHash, entryId, accountId, at, kind, bountyId ?? "", lotId ?? "", String(amount),
-      lotState, memo ?? "", actorKind ?? "", actorId ?? ""];
-    if (track != null) coreParts.push(track);
-    const core = coreParts.join("|");
-    const hash = sha256(core);
+    const hash = journalEntryHash({ prev_hash: prevHash, entry_id: entryId, account_id: accountId,
+      at, kind, bounty_id: bountyId, lot_id: lotId, amount, lot_state: lotState, memo,
+      actor_kind: actorKind, actor_id: actorId, track });
     this.db.prepare(`INSERT INTO bounty_journal
       (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -3120,14 +3131,7 @@ export class BountyEscrow {
         let prev = "genesis";
         for (const e of this.db.prepare("SELECT * FROM bounty_journal WHERE room_id=? AND account_id=? ORDER BY seq").all(roomId, account_id)) {
           if (e.prev_hash !== prev) { violations.push(`hash chain break for ${account_id} at ${e.entry_id}`); break; }
-          // Mirror _append: the track element joins the core only when the
-          // row carries one, so pre-track rows verify against their original
-          // 12-element core.
-          const coreParts = [e.prev_hash, e.entry_id, e.account_id, e.at, e.kind, e.bounty_id ?? "", e.lot_id ?? "",
-            String(e.amount), e.lot_state, e.memo ?? "", e.actor_kind ?? "", e.actor_id ?? ""];
-          if (e.track != null) coreParts.push(e.track);
-          const core = coreParts.join("|");
-          if (sha256(core) !== e.hash) { violations.push(`hash mismatch for ${account_id} at ${e.entry_id}`); break; }
+          if (journalEntryHash(e) !== e.hash) { violations.push(`hash mismatch for ${account_id} at ${e.entry_id}`); break; }
           prev = e.hash;
         }
       }
