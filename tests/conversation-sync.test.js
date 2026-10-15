@@ -1,3 +1,4 @@
+import { createSquad } from "../server/squads.mjs";
 // Test gate: actual HTTP + SQLite protects viewer privacy, current-record
 // reconstruction and reset semantics. Existing full snapshot tests cannot
 // exercise signed bounded continuations. No production test seam.
@@ -244,4 +245,33 @@ test('history exclusions precede LIMIT for fallback and certified nonmonotonic h
     assert.deepEqual(page.value.messages.map(m => m.id), ['future-time-earlier-position', 'after']);
     assert.equal(page.value.nextCursor, null);
   }
+});
+
+for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'projection fallback'}: selected message addressing follows canonical mention rules without changing pages`, async t => {
+  const f = await setup(t, indexed);
+  f.post('topic', 'A human topic');
+  f.post('explicit-reply', '@alice inspect this', { replyToId: 'topic' });
+  f.post('implicit-reply', 'Thanks for the answer', { replyToId: 'explicit-reply' });
+  f.post('silent-reply', '@_alice inspect this', { replyToId: 'topic' });
+  assert.equal((await f.get({ messageId: 'explicit-reply' }, f.alice)).value.addressing.explicitlyMentioned, true);
+  assert.equal((await f.get({ messageId: 'explicit-reply' }, f.bob)).value.addressing.explicitlyMentioned, false);
+  assert.equal((await f.get({ messageId: 'implicit-reply' }, f.alice)).value.addressing.explicitlyMentioned, false);
+  assert.equal((await f.get({ messageId: 'silent-reply' }, f.alice)).value.addressing.explicitlyMentioned, false);
+  createSquad(f.store, f.owner, 'commons', { name: 'helpers', memberIds: ['alice'] });
+  f.post('squad-reply', '@squad/helpers inspect this', { replyToId: 'topic' });
+  assert.equal((await f.get({ messageId: 'squad-reply' }, f.alice)).value.addressing.explicitlyMentioned, true);
+  assert.equal((await f.get({ messageId: 'squad-reply' }, f.bob)).value.addressing.explicitlyMentioned, false);
+  for (const [id, name] of [['alex-one', 'Alex Smith'], ['alex-two', 'Alex Jones']]) {
+    f.command(f.owner, 'member.added', { memberId: id, displayName: name, kind: 'agent', permissions: [] });
+  }
+  const alex = f.store.issueAccessKey('commons', 'alex-one');
+  f.post('ambiguous-reply', '@Alex inspect this', { replyToId: 'topic' });
+  f.post('complete-reply', '@Alex Smith inspect this', { replyToId: 'topic' });
+  assert.equal((await f.get({ messageId: 'ambiguous-reply' }, alex)).value.addressing.explicitlyMentioned, false);
+  assert.equal((await f.get({ messageId: 'complete-reply' }, alex)).value.addressing.explicitlyMentioned, true);
+  const alias = f.store.identities.create('Global Helper');
+  f.store.identities.link(f.owner, 'commons', { identityId: alias.identityId, memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
+  f.post('alias-reply', '@Global Helper inspect this', { replyToId: 'topic' });
+  assert.equal((await f.get({ messageId: 'alias-reply' }, alias.secret)).value.addressing.explicitlyMentioned, true);
+  assert.equal(Object.hasOwn((await f.get({ limit: 10 }, f.alice)).value, 'addressing'), false);
 });

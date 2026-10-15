@@ -3,11 +3,13 @@
 // orientation (about.html), first action (join.html invite flow, Rooms panel).
 //
 // Frictions found in the 2026-10-08 walkthrough:
-//  F1. #account-request-access summary ("Request access to a room" — the
-//      self-serve door on the signed-in Rooms panel) had no min-height rule,
+//  F1. The request-access door's primary control had no min-height rule,
 //      rendering ~24px tall on phones: below the 44px coarse-pointer floor
-//      the repo established in #2034. Sibling .account-room-create summary
-//      already had the 44px rule; this one was missed.
+//      the repo established in #2034. The door then lived on the signed-in
+//      Rooms panel as the #account-request-access disclosure summary; the
+//      #3293 consolidation moved the door to the join page, and the floor
+//      follows it to the door's submit control (#join-request-submit — a
+//      bare .button renders ~34px).
 //  F2. .join-secret-row input (join.html access-key row) used flex:1 with no
 //      min-width:0, so the input could not shrink below its intrinsic
 //      ~20ch width and pushed the row past the card at <=320px widths /
@@ -43,16 +45,16 @@ function minHeightPx(body) {
   return m[2] === "rem" ? parseFloat(m[1]) * 16 : parseFloat(m[1]);
 }
 
-test("F1: request-access disclosure meets the 44px coarse-pointer floor", () => {
-  const bodies = ruleBodies(a11yCss, "#account-request-access summary");
+test("F1: request-access door control meets the 44px coarse-pointer floor", () => {
+  const bodies = ruleBodies(a11yCss, "#join-request-submit");
   assert.ok(
     bodies.length > 0,
-    "#account-request-access summary needs an explicit rule in src/public-a11y.css",
+    "#join-request-submit needs an explicit rule in src/public-a11y.css",
   );
   const heights = bodies.map(minHeightPx).filter((h) => h !== null);
   assert.ok(
     heights.some((h) => h >= 44),
-    `#account-request-access summary min-height must be >= 44px (got ${heights.join(",") || "none"})`,
+    `#join-request-submit min-height must be >= 44px (got ${heights.join(",") || "none"})`,
   );
 });
 

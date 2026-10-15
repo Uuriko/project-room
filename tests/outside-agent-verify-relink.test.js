@@ -96,3 +96,43 @@ test("server: exact retries still dedupe - re-posting the same link and decision
   const repeat = f.net.verify(f.keys.owner, "commons", { externalRef: "bus:cursor", decision: "approved" });
   assert.equal(repeat.recorded, "replay");
 });
+
+// Bughunt 2026-10-10 (buildqa, on #2435): deciding on an agent with no link
+// in effect was allowed once a decision existed. deny -> approve (no re-link)
+// posted a verify record that assembly honored as verified=true with
+// linkedMemberId=null - a "verified" link to nobody - so the member's next
+// re-link skipped the pending-decision step entirely and landed verified.
+// A decision must belong to a link that is actually in effect.
+test("planner: deciding on an agent with no link in effect is 422 outside_agent_unlinked", () => {
+  const m = [msg(intro, "p", "1"), msg(link, "p", "2")];
+  const d1 = planOutsideAgentVerify(m, members, "r", "owner", { externalRef: "bus:x", decision: "denied" }, { verifiers });
+  assert.equal(d1.recorded, "verify");
+  const denied = [...m, msg(d1.record, "owner", "3")];
+  assert.throws(() => planOutsideAgentVerify(denied, members, "r", "owner",
+    { externalRef: "bus:x", decision: "approved" }, { verifiers }),
+    { code: "outside_agent_unlinked" },
+    "no link in effect: the approval must be rejected, not recorded");
+  // A repeated deny on the same (absent) link stays an idempotent replay.
+  const denyAgain = planOutsideAgentVerify(denied, members, "r", "owner",
+    { externalRef: "bus:x", decision: "denied" }, { verifiers });
+  assert.equal(denyAgain.recorded, "replay");
+});
+
+test("server: approve after a denial with no re-link is 422, and the next re-link goes back to pending", t => {
+  const f = fixture(t);
+  f.net.record(f.keys.producer, "commons", {
+    externalRef: "bus:cursor", displayName: "Cursor", origin: "bus", reach: "bus:cursor",
+  });
+  f.net.link(f.keys.producer, "commons", { externalRef: "bus:cursor", memberId: "producer" });
+  f.net.verify(f.keys.owner, "commons", { externalRef: "bus:cursor", decision: "denied" });
+  assert.throws(() => f.net.verify(f.keys.owner, "commons",
+    { externalRef: "bus:cursor", decision: "approved" }),
+    { code: "outside_agent_unlinked" },
+    "no link in effect: the decision must be rejected, not pre-recorded");
+  const link2 = f.net.link(f.keys.producer, "commons", { externalRef: "bus:cursor", memberId: "producer" });
+  const relinked = link2.agents.find(a => a.externalRef === "bus:cursor");
+  assert.equal(relinked.linkedMemberId, "producer");
+  assert.equal(relinked.verified, false,
+    "the re-link must wait on a human decision, not inherit a phantom approval");
+  assert.equal(relinked.verificationPending, true);
+});

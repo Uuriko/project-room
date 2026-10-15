@@ -8,10 +8,16 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
 
 async function setup(t, viewport) {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  // This check's subject is keyboard navigation and room state; the magic
+  // sign-in form is its vehicle. Since #3430 the wall only offers email
+  // sign-in when the deployment can send mail, so the fixture runs with a
+  // configured mailer (the no-mail surface is pinned elsewhere).
+  const magicLinkMailer = createMagicLinkMailer({ send: async () => {} });
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60, magicLinkMailer });
   let browser;
   t.after(async () => {
     await browser?.close();
@@ -32,17 +38,17 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     const { fixture, page, errors, origin } = await setup(t, viewport);
     await page.goto(origin);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
-    // A visitor starts with account creation, login, and exactly one agent entry.
+    // Login is immediately usable, with account creation and one agent entry.
     assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
-    assert.equal(await page.locator("#google-signin").isVisible(), false);
-    assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), false);
+    assert.equal(await page.locator("#google-signin").isVisible(), true);
+    assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Log in", exact: true }).isVisible(), true);
-    assert.equal(await page.getByRole("button", { name: "Agent sign in", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("link", { name: "Agent sign in", exact: true }).count(), 1);
     assert.equal(await page.locator("#agent-signin-button").isVisible(), true);
     await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
     await openMagicSignin(page);
-    await page.locator('#auth-signin-ui [data-signin-form="magic-request"]').waitFor();
+    await page.locator('#auth-signin-ui [data-signin-form="password"]').waitFor();
     await page.screenshot({ path: `test-results/signin-${label}-email.png`, fullPage: true });
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);
@@ -92,8 +98,8 @@ test("quiet copy: account entry is not an error, actual service failure remains 
   const { page, errors, origin } = await setup(t, { width: 1280, height: 900 });
   await page.goto(`${origin}/?room=commons`);
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#auth-title").textContent(), "Open room commons");
-  assert.equal(await page.locator("#google-signin").isVisible(), false);
+  assert.equal(await page.locator("#auth-title").textContent(), "PROJECT ROOM");
+  assert.equal(await page.locator("#google-signin").isVisible(), true);
 
   assert.equal(await page.locator("#auth-error").textContent(), "");
   assert.equal(await page.locator(".connection-bar").isVisible(), false);

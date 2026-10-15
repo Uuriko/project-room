@@ -54,7 +54,7 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
    return store.publicWorkClaims.read(args.taskId);
   });
   else if (name === 'public_work_my_review') value = store.publicWorkReviews.contributorReview(secret, args.receiptId);
-  else { const { taskId, ...input } = args; value = store.publicWorkClaims.act(taskId, secret, name.slice('public_work_'.length), input); }
+  else { const { taskId, ...input } = args; const identity = secret ? store.identities.resolveGlobalIdentitySecret(secret) : null; if (identity) store.publicWorkClaims.enforceIdentityRateLimit(identity.identityId); value = store.publicWorkClaims.act(taskId, secret, name.slice('public_work_'.length), input); }
   if (value.receipt) {
    const base = new URL(mcpUrl);
    const prefix = base.pathname.startsWith('/room/mcp') ? '/room' : '';

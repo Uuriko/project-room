@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
+import { readResumablePreparation } from "../client/work-context-cache.mjs";
 
 export async function readPreparation(client, workItemId, since = 0) {
   if (!Number.isSafeInteger(since) || since < 0) throw new Error("Invalid checkpoint");
@@ -66,11 +67,13 @@ export function needsReview(preparation, checkout) {
 
 async function main() {
   const [directory, workItemId, sinceText = "0", ...extra] = process.argv.slice(2);
-  if (!directory || !workItemId || extra.length || !/^\d+$/.test(sinceText)) {
-    throw new Error("Usage: node scripts/agent-work-preflight.mjs PRIVATE_CONNECTION_DIRECTORY WORK_ID [CHECKPOINT]");
+  if (!directory || !workItemId || extra.length || (sinceText !== "--resume" && !/^\d+$/.test(sinceText))) {
+    throw new Error("Usage: node scripts/agent-work-preflight.mjs PRIVATE_CONNECTION_DIRECTORY WORK_ID [CHECKPOINT|--resume]");
   }
-  const client = new RoomAgentClient(readAgentConnection(directory));
-  const preparation = await readPreparation(client, workItemId, Number(sinceText));
+  const connection = readAgentConnection(directory), client = new RoomAgentClient(connection);
+  const preparation = sinceText === "--resume"
+    ? await readResumablePreparation(client, workItemId, { connection, directory })
+    : await readPreparation(client, workItemId, Number(sinceText));
   const checkout = inspectCheckout(process.cwd());
   const review = needsReview(preparation, checkout);
   console.log(JSON.stringify({

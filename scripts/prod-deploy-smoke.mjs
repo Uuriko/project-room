@@ -53,7 +53,7 @@ import {
   AGENT_CARD_AGENT_ID,
   AGENT_CARD_KEY_ID,
   AGENT_CARD_PUBLIC_KEY,
-} from "../deploy/agent-card-key.mjs";
+} from "../server/agent-card-key.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback = "") => {
@@ -149,7 +149,7 @@ export function checkAgentCard({ card, expectedRevision = null, publicKey = AGEN
 
 // Which build served this card? The card names its own build in
 // deployed.revision, and signedRevision is only attached when the signature
-// covers the serving build's revision (deploy/agent-discovery.mjs). Pure.
+// covers the serving build's revision (server/agent-discovery.mjs). Pure.
 export function cardServedByRevision(card, expectedRevision) {
   if (!expectedRevision || card === null || typeof card !== "object") return false;
   return card.deployed?.revision === expectedRevision || card.signedRevision === expectedRevision;

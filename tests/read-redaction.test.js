@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { redactEventPage, redactSnapshotState } from "../server/redact-read.mjs";
 
 // Reads go through server/redact-read.mjs. One edited message and one deleted
 // message: earlier wording is absent on every listed read, and the edited
@@ -132,4 +133,37 @@ test("edited and deleted message text is absent from projection, events, MCP, an
   absent("export html", html);
   assert.match(html, new RegExp(CURRENT));
   assert.match(html, /Message deleted/);
+});
+
+// The snapshot windows messages and the event log independently (last 100
+// messages vs last 100 events), so an event can reference a message that is
+// no longer in the read's message index. Redaction must fail closed for
+// such events: the tombstone (null), never the logged body — the message
+// may have been edited or deleted after the event was written.
+test("events whose message is outside the read window redact to the tombstone", () => {
+  const LEAKED = "outside-window-quill-7f3e";
+  const messages = [{ id: "present", body: CURRENT, editHistory: [] }];
+  const state = {
+    messages,
+    eventLog: [
+      { type: T.MESSAGE_POSTED, data: { messageId: "trimmed", body: LEAKED } },
+      { type: T.MESSAGE_EDITED, data: { messageId: "trimmed", body: LEAKED } },
+      { type: T.MESSAGE_POSTED, data: { messageId: "present", body: PRIOR } },
+      { type: "room.updated", data: { body: LEAKED } }
+    ]
+  };
+  const redacted = redactSnapshotState(state);
+  assert.equal(redacted.eventLog[0].data.body, null, "posted body for a trimmed message is the tombstone");
+  assert.equal(redacted.eventLog[1].data.body, null, "edited body for a trimmed message is the tombstone");
+  assert.equal(redacted.eventLog[2].data.body, CURRENT, "indexed message still shows its current body");
+  assert.equal(redacted.eventLog[3].data.body, LEAKED, "non-message events are not message redaction's concern");
+  assert.equal(state.eventLog[0].data.body, LEAKED, "redaction copies; the stored log is untouched");
+
+  const page = { events: [
+    { event: { type: T.MESSAGE_POSTED, data: { messageId: "trimmed", body: LEAKED } } },
+    { event: { type: T.MESSAGE_POSTED, data: { messageId: "present", body: PRIOR } } }
+  ] };
+  const redactedPage = redactEventPage(page, messages);
+  assert.equal(redactedPage.events[0].event.data.body, null, "event pages fail closed the same way");
+  assert.equal(redactedPage.events[1].event.data.body, CURRENT);
 });

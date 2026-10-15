@@ -30,6 +30,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public let webView: WKWebView
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
+    private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
     private var localTools: LocalToolsWindow?
     private var authentication: (any RoomAuthenticationSession)?
     private let acceptanceAuthenticationFactory: RoomAuthenticationFactory?
@@ -87,6 +88,12 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             let button = NSButton(title: title, target: self, action: action)
             button.bezelStyle = .rounded; bar.addArrangedSubview(button)
         }
+        cancelSignInButton.target = self
+        cancelSignInButton.action = #selector(cancelSignIn)
+        cancelSignInButton.keyEquivalent = "\u{1b}"
+        cancelSignInButton.keyEquivalentModifierMask = []
+        cancelSignInButton.isHidden = true
+        bar.addArrangedSubview(cancelSignInButton)
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -100,8 +107,16 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let current = self.webView.url, RoomLocation.sameOrigin(current, self.origin) else { return }
-                // Existing shared owner revalidates availability without replaying writes.
-                self.webView.evaluateJavaScript("window.dispatchEvent(new Event('pageshow'))", completionHandler: nil)
+                // Wake recovery contract: the page is already loaded, so signal
+                // "shown again" with the platform event both web recovery
+                // handlers are written for. The session-restore lifecycle and
+                // the presence refresh in src/app.js run only when
+                // `event.persisted` is true; a bare Event('pageshow') carries
+                // persisted=false and was ignored by both, so wake recovery
+                // never fired. The restore lifecycle revalidates availability
+                // without replaying writes; ordinary page loads never receive
+                // this synthetic event and keep the handlers' persisted gate.
+                self.webView.evaluateJavaScript("window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))", completionHandler: nil)
             }
         }
         open(url)
@@ -116,6 +131,9 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     @objc public func back() {
         if signInPending { cancelAuthentication(message: "Sign-in cancelled. Your room is unchanged.") }
         else { webView.goBack() }
+    }
+    @objc public func cancelSignIn() {
+        if signInPending { cancelAuthentication(message: "Sign-in cancelled. Your room is unchanged.") }
     }
     @objc public func forward() { if !signInPending { webView.goForward() } }
     @objc public func reload() { if !signInPending { webView.reload() } }
@@ -132,6 +150,8 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         let attempt = UUID()
         signInAttempt = attempt
         signInPending = true
+        cancelSignInButton.isHidden = false
+        cancelSignInButton.isEnabled = true
         authenticationTimeoutTask = Task { @MainActor [weak self, timeout = authenticationTimeoutNanoseconds] in
             do { try await Task.sleep(nanoseconds: timeout) } catch { return }
             guard let self, self.currentAuthentication(attempt) else { return }
@@ -227,6 +247,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         guard currentAuthentication(attempt) else { return }
         authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
         signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
+        cancelSignInButton.isHidden = true
         cookieCommitPending = false; cookieCommitWaitExpired = false
         signInSlot = nil; pendingDestination = nil; authentication = nil; webView.isHidden = false
     }
@@ -256,6 +277,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             guard currentAuthentication(attempt) else { return }
             guard let tuple = slot as? String, tuple == signInSlot else { tell("The account changed while signing in. Your current session was kept."); return }
             cookieCommitPending = true
+            cancelSignInButton.isEnabled = false
             status.stringValue = "Finishing sign-in…"
             authenticationTimeoutTask?.cancel()
             authenticationTimeoutTask = Task { @MainActor [weak self, timeout = cookieCommitTimeoutNanoseconds] in

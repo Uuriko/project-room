@@ -158,3 +158,35 @@ test("public-a11y.css gives claim-card headings a visible keyboard focus ring", 
   assert.match(css, /\.claim-card h4:focus-visible\s*\{[^}]*outline:/,
     "claim-card h4 (tabindex=-1 focus target after re-render and for j/k nav) needs a :focus-visible outline");
 });
+
+// R27-1: the browser loads this file with import("./board-keyboard.mjs") from
+// src/app.js. The server sends X-Content-Type-Options: nosniff, so the module
+// only runs when it is served with a JavaScript MIME type. It was served as
+// text/markdown, Chrome refused it, and the .catch() in app.js hid the failure,
+// so j/k never worked in a real browser even though every test above passed.
+test("board-keyboard.mjs is served as JavaScript, so the browser actually loads it", async t => {
+  const { createAcceptanceFixture } = await import("../scripts/acceptance-fixture.mjs");
+  const { createRoomServer } = await import("../server/http.mjs");
+  const { rmSync } = await import("node:fs");
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeAllConnections?.(); await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/src/board-keyboard.mjs`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") || "", /^text\/javascript\b/,
+    "a module script served as anything but JavaScript is refused by the browser under nosniff");
+  assert.match(await res.text(), /export function attachBoardKeyboard/);
+});
+
+test("board-keyboard.mjs is served as JavaScript by the production edge too", async () => {
+  const { edgePublicResponse } = await import("../cloudflare/edge-public.mjs");
+  const env = { ROOM_ORIGIN: "https://room.example.test", ASSETS: { fetch: async () => new Response("export function attachBoardKeyboard() {}") } };
+  const url = new URL("https://room.example.test/src/board-keyboard.mjs");
+  const res = await edgePublicResponse(new Request(url), env, url);
+  assert.equal(res.status, 200, "src/board-keyboard.mjs is a public asset on the edge");
+  assert.match(res.headers.get("content-type") || "", /^text\/javascript\b/,
+    "prod (cloudflare-production) answered text/markdown on 8c2b308b, so the browser refused the module");
+});

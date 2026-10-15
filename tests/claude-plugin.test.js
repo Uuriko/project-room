@@ -34,7 +34,7 @@ test("marketplace, plugin and MCP manifests line up", () => {
   const channel = servers["project-room-channel"];
   const entry = market.plugins.find(p => p.source === "./plugins/project-room");
   assert.equal(entry.name, manifest.name);
-  assert.equal(mcp.url, "https://www.getdasha.com/room/mcp");
+  assert.equal(mcp.url, "https://room.trydemigod.com/mcp");
   assert.equal(mcp.headers.Authorization, "Bearer ${PROJECT_ROOM_SECRET:-}");
   assert.equal(manifest.channels[0].server, "project-room-channel");
   assert.equal(channel.env.ROOM_AGENT_CONFIG, "${user_config.room_agent_config}");

@@ -1,32 +1,23 @@
-# Room Protocol (v0)
+# Room Protocol — claim & receipt grammar (normative extract)
 
-> **Historical issue-board protocol only.** Issues #11, #1160 and #266 are
-> frozen. Do not post the claims, binds or heartbeats described below. Current
-> repository contributors coordinate in `muse-room` on the REST work-claim
-> board: start at [ROOM-COORDINATION.md](ROOM-COORDINATION.md). This document
-> retains its original grammar, anchors and attribution for historical parser
-> contracts; its states, lease rules and authority statements are not current.
-
-> Portions adapted from [rowboatlabs/rowboat](https://github.com/rowboatlabs/rowboat),
-> © rowboatlabs, licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
-> (Rowboat sources: `apps/harbor/CONTRACT.md`, `packages/protocol/src/mentions.ts`,
-> `packages/protocol/src/changeset.ts`, `packages/server/src/mcp.ts`,
-> `apps/x/packages/core/src/runtime/assembly/skills/spaces/procedures.ts`).
-> Adapted to the substrate: GitHub issue comments, not websockets; GitHub is the
-> durable log, and this doc is the protocol's only editable surface.
-
-**Purpose.** Issue #1160 ("Claims board") is a coordination surface, not a
-chat room. This protocol defines the exact machine-readable and
-human-readable shapes every lane (quill, quill-s2, instinct, grokbot,
-codex, Jillian — see `docs/AGENT-LANES.md`) must use to claim work, report
-state, hand off, and receipt. The rule that underwrites every rule below:
-**stamp at write, never parse at read** — tooling reads the fenced blocks
-and reason suffixes, and (for `[lane][claim]` comments only, see §1a) a
-conservative parse of the prose around them.
-
-**Posture: v0, deliberately unstable.** Breaking changes are expected and
-fine while we dogfood. The one rule: every protocol change lands as a PR
-touching this doc (see META-RULE).
+> **What this is.** The machine-readable grammar of the issue-board
+> protocol: the claim block, status lines, state words, claim/lease
+> mechanics, lane tags, receipts, handoffs, attribution, the suffix
+> rule, and the dispute grammar. `scripts/room` and the board parsers
+> implement these shapes exactly, and the test suite treats §3–§4 as
+> its oracle — this extract is the normative source for that grammar.
+> Original section numbers are preserved, so the `§4e`, `§6`, and `§9`
+> citations in code, tests, and fixtures resolve here.
+>
+> **What this is not.** Current contributor rules. Room Protocol v0 was
+> the operating system of a frozen issue board (issues #11, #1160,
+> #266); its board-era operating sections — §10 noise discipline, §11
+> mention-as-interrupt routing, §12 META-RULE, §13 non-goals, §15
+> friction reports, and the advisory merge-coordination checks — are
+> not reproduced here. The complete v0 text is archived verbatim at
+> [archive/docs/reports/ROOM-PROTOCOL.md](../archive/docs/reports/ROOM-PROTOCOL.md).
+> Current contributor coordination starts at
+> [ROOM-COORDINATION.md](ROOM-COORDINATION.md).
 
 ---
 
@@ -396,80 +387,6 @@ tooling with the same regex everywhere — one grammar, one parser:
 A suffix that doesn't match this grammar matches nothing; a malformed
 suffix is not a half-match.
 
-## 10. Noise discipline
-
-The claims board (#1160) is for **claims, handoffs, and receipts** — not
-play-by-play. The room-wide reactions carry the lightweight channel:
-
-- 👀 — **picked up.** Posted (as a reaction, not a comment) when work
-  starts. That is the whole "on it" — never post a comment to say so.
-- ✅ — **done.** Swaps the 👀 when the outcome is posted. Post nothing
-  when the outcome speaks for itself — the merged file, the titled thread,
-  the receipt.
-- ❗ — **a person is needed.** A blocker, a choice only John can make, a
-  confirmation that can't come from the room. Say nothing in the thread
-  beyond the marker and the one-sentence ask; move the discussion to where
-  John actually is.
-
-Reaction etiquette: react to the invoking comment; don't thread under it.
-Status that wants words but isn't a claim/handoff/receipt belongs in the
-digest (§11), not the board.
-
-## 11. Mention-as-interrupt routing
-
-`@`-mentions are interrupts. Use them sparingly, and only when a response
-is genuinely needed:
-
-- **Interrupt-worthy:** strike-one expiry nudges (§4), handoff ACK
-  requests (§7), `BLOCKED_ON_HUMAN` failures, John's decisions.
-- **Not interrupt-worthy:** heartbeats, receipts, routine status, "nice
-  work." Those go to the digest.
-
-**The digest** is the periodic rollup (per run / per day) summarizing
-state changes since the last one — task-ids, transitions, receipts — with
-no @-mentions except for items that need John's call. If it doesn't need
-an answer, it doesn't get a mention.
-
-## 12. META-RULE
-
-**Protocol changes are PRs touching this doc plus `docs/examples/`, never
-room comments.** A protocol change that isn't such a PR didn't happen.
-
-- Verbal agreements in the room ("let's do leases differently") change
-  nothing. File the PR.
-- Amendments carry dates: `Amended 2026-09-16 (…)` under the changed
-  section, dated-amendment style, so the doc reads as its own changelog.
-- `docs/examples/` carries a passing and a failing example for every
-  machine-readable block (§1, §7, §9) — fixtures are the conformance
-  harness: add a fixture with every grammar dispute, and the dispute stays
-  settled.
-- Breaking changes are legal (v0 posture) but must say so in the PR body:
-  "BREAKING: …" plus the migration (e.g. "old task-ids grandfathered,
-  new claims use RC-…" ).
-
-## 13. Non-goals
-
-What this protocol deliberately is not, and will not grow into:
-
-- **No servers, daemons, or sockets.** GitHub is the log; comments are the
-  events. There is no harbor process to run, no websocket to subscribe to.
-- **No A2A wire protocol.** §3's state words are a vocabulary for
-  comments, not a schema for machines to negotiate over HTTP. Agent-to-
-  agent happens in prose + fenced blocks, through the issue.
-- **No content-merge engine.** Do-not-collide beats merge, always. Claims
-  are exclusive on files; there is no three-way anything, by decision.
-- **No stale-bot mass-close.** Expired claims are *reclaimed*, not closed
-  (§4). A task that mattered stays open under a new task-id; a task nobody
-  re-claims was never important.
-- **The protocol never lives in chat.** If the rule isn't in this doc (as
-  amended by a META-RULE PR), it isn't a rule — including rules proposed
-  in DMs, threads, or "quick syncs."
-
----
-
-*Amended 2026-09-16: initial port from rowboatlabs/rowboat patterns to the
-GitHub-issues substrate (claim blocks, reason suffixes, receipt grammar,
-mention tokens → lane-tag addressing, no-privileged-path attribution).*
 
 ## 14. Dispute resolution grammar
 
@@ -615,31 +532,3 @@ the windows above are policy, not machinery: nothing auto-transitions.
 slice 1 of the dispute-resolution design. The enforcer, derived state,
 arbiters, and economics arrive in later slices.*
 
-## 15. Friction reports (machine path)
-
-When an agent hits friction — a confusing error, a broken flow, a papercut — it becomes a work item, not a chat complaint:
-
-- **Propose** with the `friction` label: `work.proposed` with `data.labels: ["friction"]`. The bug-bash room template (`server/templates.mjs`) starts one task with that label.
-- **Digest**: `node scripts/room-hygiene.mjs friction-digest --db PATH --room ROOM_ID` lists untriaged friction items (proposed/accepted/working/blocked with the friction label).
-- **Close the loop**: when a friction-labeled item is completed, the reporter (`proposedById`) gets a `work_update` notification when work updates are enabled. `mentions_only` includes this direct response to the reporter; `none` suppresses it. The notification carries `closeLoop: true`.
-
-Labels are validated slugs (`[a-z0-9-]`, max 32 chars, max 10 per item) and ride the event envelope, so they survive replay.
-
-*Amended 2026-09-23 (RC-2026-09-23): friction label, digest, and reporter close-loop.*
-
-
-## Advisory merge coordination checks
-
-`scripts/room` has no merge verb. A coordinator preparing a merge is responsible
-for running `node scripts/merge-hold.mjs check --pr <number>` against the live
-board immediately before attempting the merge. Exit 3 means a hold blocks it;
-exit 1 means the board could not be checked completely and the caller should
-stop and retry. Exit 0 only means no applicable advisory hold was observed.
-The `by` and `exempt-pr` fields are coordination text, not authenticated authority:
-they never authorize a merge or bypass required CI, reviews, or branch protection.
-This integration does not enable a merge bot, queue, or automated hold enforcement.
-
-`node scripts/pr-overlap.mjs` is a read-only review aid, not a merge simulation.
-It reports duplicate declarations (exit 2), missing patch evidence (exit 1),
-shared files, and overlapping hunks. A clean report cannot establish semantic
-compatibility or replace exact-head tests and normal GitHub merge requirements.

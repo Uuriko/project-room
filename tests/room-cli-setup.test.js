@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, utimesSync, rmSync, chmodSync, realpathSync, symlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, utimesSync, rmSync, chmodSync, existsSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
@@ -8,7 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 import { main } from "../cli/main.mjs";
-import { readPointer } from "../cli/paths.mjs";
+import { connectionHome, connectionsRoot, readPointer, safeName, writePointer } from "../cli/paths.mjs";
 import { nodeSatisfies } from "../cli/commands/doctor.mjs";
 
 const ORIGIN = "http://127.0.0.1:9";
@@ -282,6 +282,29 @@ test("login stores the connection as a private file and the printed result has n
   assert.equal(token.out, saved.token + "\n");
 });
 
+
+test("dot-only agent names cannot escape the connections root (#2877)", t => {
+  const root = mkdtempSync(join(tmpdir(), "room-cli-dots-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, "home");
+  mkdirSync(home, { recursive: true });
+  const env = envFor(home);
+  // "." is the connections root itself and ".." is its parent; hyphen
+  // trimming used to turn "-..-", "-." and "..-" into exactly those slugs.
+  for (const name of [".", "..", "-..-", "-.", ".-", "..-", "-..", "---..---"]) {
+    assert.throws(() => safeName(name), /Choose an agent name of 1–80 characters/, name);
+    assert.throws(() => connectionHome(name, env), /Choose an agent name of 1–80 characters/, name);
+    assert.throws(() => writePointer(name, join(home, "cfg"), env), /Choose an agent name of 1–80 characters/, name);
+  }
+  // Nothing was written at the escape targets: no pointer in the parent of
+  // the connections root (~/.project-room) and none in the root itself.
+  assert.equal(existsSync(join(home, ".project-room", "pointer.json")), false);
+  assert.equal(existsSync(join(connectionsRoot(env), "pointer.json")), false);
+  // Ordinary dotted names still work and stay strictly inside the root.
+  assert.equal(safeName("My.Agent_1"), "my.agent_1");
+  assert.equal(connectionHome("My.Agent_1", env), join(connectionsRoot(env), "my.agent_1"));
+  assert.ok(connectionHome("..ada", env).startsWith(connectionsRoot(env) + "/"));
+});
 
 test("saved connections accept a canonical home alias and reject symlinks escaping its root", t => {
   const { root, home, cleanup } = layout();

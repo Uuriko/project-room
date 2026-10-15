@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 // (ROOM_MCP_SERVER_NAME / ROOM_MCP_PUBLIC_URL). They are duplicated here so
 // this file stays servable standalone (see GET /room/mcp-init.mjs, deferred).
 const SERVER_NAME = "project-room";
-const DEFAULT_MCP_URL = "https://www.getdasha.com/room/mcp";
+const DEFAULT_MCP_URL = "https://room.trydemigod.com/mcp";
 
 const INSTALL_TARGETS = ["claude", "cursor", "codex", "antigravity", "vscode", "copilot"];
 

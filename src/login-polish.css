@@ -1,0 +1,30 @@
+/* Keep authentication usable in small windows and with a phone keyboard. */
+#auth-panel.auth-panel {
+  width: min(100% - 2rem, 25rem);
+  margin: clamp(1rem, 5vh, 3rem) auto 2rem;
+}
+#auth-panel .signin-logo { display: block; margin: 0 auto var(--space-3); border-radius: var(--radius-lg); }
+#auth-panel #auth-title { margin-bottom: var(--space-5); }
+#auth-panel #google-signin { display: flex; align-items: center; gap: var(--space-3); }
+#auth-panel #google-signin svg { flex: none; }
+#auth-panel .signin-divider { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--text-sm); }
+#auth-panel .signin-divider::before, #auth-panel .signin-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+#auth-panel [data-signin-form="password"] { gap: var(--space-3); }
+#auth-panel [data-signin-form="password"] > label { margin: 0; font-size: var(--text-sm); }
+#auth-panel input { min-height: 44px; font-size: var(--text-md); }
+#auth-panel .signin-password-field { display: flex; position: relative; }
+#auth-panel .signin-password-field input { width: 100%; padding-right: 3rem; }
+#auth-panel [data-password-visibility] { position: absolute; right: 0; top: 0; width: 44px; height: 100%; min-height: 44px; display: grid; place-items: center; color: var(--muted); }
+#auth-panel [data-password-visibility] svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+#auth-panel [data-password-visibility][aria-pressed="true"] { color: var(--blue); }
+#auth-panel .signin-secondary { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-3); }
+#auth-panel .text-button { min-height: 44px; font-size: var(--text-sm); font-weight: 400; }
+#auth-panel [data-signin-status]:empty { display: none; }
+#auth-panel #agent-signin-button { font-size: var(--text-sm); }
+#auth-panel #terms-notice { line-height: 1.5; }
+#auth-panel #terms-notice a { display: inline-block; min-height: 24px; }
+@media (max-height: 600px) {
+  #auth-panel.auth-panel { margin-top: var(--space-3); }
+  #auth-panel .signin-logo { width: 36px; height: 36px; }
+  #auth-panel #auth-title { font-size: var(--text-lg); margin-bottom: var(--space-3); }
+}

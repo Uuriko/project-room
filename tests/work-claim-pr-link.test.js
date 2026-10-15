@@ -234,7 +234,10 @@ test("a GitHub 403 backs off every open pull until the reset, and the next tick 
   const second = await syncClaimPullRequests(store, { fetchImpl, token: null, nowMs: nowMs + 60_000 });
   assert.equal(second.checked, 0);
   assert.equal(second.rateLimited, true);
-  assert.equal(calls.length, 1);
+  // No second core (pulls) call until the reset. The one call is the search
+  // batch, which has its own quota (bug-claim-pr-sync-rate-limited-no-settle).
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].endpoint, /^https:\/\/api\.github\.com\/search\/issues\?/);
 });
 
 test("an open pull sends If-None-Match, and a 304 keeps the claim", async t => {
