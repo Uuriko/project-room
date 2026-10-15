@@ -8,12 +8,29 @@ import { pathToFileURL } from "node:url";
 
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
-export const publicAssets = ["src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/strings.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js", "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/open-questions-ui.js", "src/retention-ui.js", "src/board-ui.js", "src/board-keyboard.mjs", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/emoji.js", "src/emoji-catalog.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Read the selected source's explicit asset declaration, never today's list for
+export const publicAssets = ["src/entry.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/strings.js", "src/human-experience.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js", "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/referral-board.js", "src/land-queue-board.js", "src/open-questions-ui.js", "src/retention-ui.js", "src/board-ui.js", "src/board-keyboard.mjs", "src/board.css", "src/squads-ui.js", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/work-recipes.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/updates-ui.js", "src/emoji.js", "src/emoji-catalog.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Decision #36 (#3254, Option A): the generated agent pages are build output
+// (scripts/build-agent-docs.mjs renders them from the committed docs/agents/*.md
+// sources) — decision #32: generated output is never committed — so an
+// exact-commit package can never contain them, and they are not part of this
+// package's asset contract. Cloudflare (the canonical runtime, decision #16)
+// builds and serves them at deploy; the Node package accepts a 404 on
+// /docs/agents while the pilot is parked. Synthesize-at-package-time
+// (Option B) is the recorded path if the Node package ever un-parks. The
+// pages stay registered in `allowed` (DX-1a, below) so historical packages
+// that do contain them still verify; registration alone never ships a file —
+// only a packaged source's own declaration, filtered here, creates the
+// obligation, and every other advertised asset remains fail-closed below.
+export const generatedAgentPages = new Set(["docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html",
+  "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html",
+  "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html"]);
+// Read the selected source's explicit asset declaration, never today's list for
 // an older schema. Parse only this repository's data-only array/spread/map shape;
 // do not execute packaged JavaScript. Missing advertised assets remain errors.
 function assetsFor(files) {
-  const path = files.has("deploy/public-assets.mjs") ? "deploy/public-assets.mjs" : "cloudflare/build-assets.mjs";
-  const name = path.startsWith("deploy/") ? "publicAssetPaths" : "assetPaths";
+  // public-assets.mjs moved deploy/ -> server/ (2026-10); genuine historical
+  // packages still carry it under deploy/, so probe both before the fallback.
+  const path = files.has("server/public-assets.mjs") ? "server/public-assets.mjs" : files.has("deploy/public-assets.mjs") ? "deploy/public-assets.mjs" : "cloudflare/build-assets.mjs";
+  const name = path === "cloudflare/build-assets.mjs" ? "assetPaths" : "publicAssetPaths";
   const source = files.get(path)?.toString();
   const declaration = source?.match(new RegExp(`export const ${name} = ([\\s\\S]*?);`))?.[1];
   const expression = declaration?.startsWith("Object.freeze(") ? declaration.slice(14, -1) : declaration;
@@ -24,7 +41,8 @@ function assetsFor(files) {
     check(!text.replace(/["'][A-Za-z0-9_./-]+["']/g, "").replace(/[\s,]/g, ""), `${path} has unsupported asset expressions`);
     return values;
   };
-  const assets = [...literals(parts[1]), ...literals(parts[2]).map(file => "src/" + file), ...literals(parts[5])];
+  const assets = [...literals(parts[1]), ...literals(parts[2]).map(file => "src/" + file), ...literals(parts[5])]
+    .filter(asset => !generatedAgentPages.has(asset));
   check(assets.includes("index.html") && new Set(assets).size === assets.length && assets.every(asset => allowed.has(asset)), `${path} advertises invalid or unregistered assets`);
   return assets;
 }
@@ -96,6 +114,7 @@ optional.push("server/jev-receipts.mjs"); // Jev-harness receipt gate (imported 
 optional.push("server/required-reading.mjs"); // W012: per-lane required reading (imported by server/work-claim-routes.mjs; pure, imports server/work-claims.mjs)
 optional.push("server/jev-shadow-journal.mjs"); // Jev shadow-decision journal (imported by server/store.mjs; imports ServiceError from server/service-error.mjs)
 optional.push("server/service-error.mjs"); // shared ServiceError (imported by server/store.mjs — re-exported — and server/jev-shadow-journal.mjs; pure, no imports of its own)
+optional.push("server/run-once.mjs"); // runOnce idempotency primitive (imported by server/attention.mjs and server/buyer-signoff.mjs; imports ServiceError and src/events.js validId)
 optional.push("server/csv-export.mjs"); // structured CSV/JSON export (imported by server/inbox-outbox.mjs for the send-journal audit export; pure, no imports of its own)
 optional.push("scripts/stamp-version.mjs");
 optional.push("server/email-envelope.mjs", "server/graph-email.mjs", "server/email-import.mjs");
@@ -107,21 +126,24 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js");
 optional.push("src/inbox-quarantine-ui.js"); // quarantine review surface (imported by src/inbox-ui.js)
 optional.push("src/inbox-send-ui.js");
 optional.push("src/room-roster.js");
-optional.push("deploy/public-assets.mjs", "deploy/public-search.mjs"); // Shared live manifest; historical packages predate it.
-optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/guest-agent-links.mjs");
-optional.push("deploy/agent-card-key.mjs", "deploy/agent-card-signed.mjs"); // RC-2026-09-23-105: room card signing key (public half) + build-time signature (imported by deploy/agent-discovery.mjs; pure)
-optional.push("deploy/procedures-index.mjs"); // W008: baked shared-procedure index (imported by deploy/agent-discovery.mjs; generated by scripts/procedures-index.mjs, never hand-edited)
+optional.push("deploy/public-assets.mjs", "deploy/public-search.mjs", "server/public-assets.mjs", "server/public-search.mjs"); // Shared live manifest; historical packages predate it. The library modules moved deploy/ -> server/ (2026-10); the deploy/ registrations stay so genuine historical packages remain packagable and verifiable.
+optional.push("deploy/agent-discovery.mjs", "deploy/room-entry.mjs", "server/agent-discovery.mjs", "server/room-entry.mjs", "server/guest-agent-links.mjs");
+optional.push("deploy/agent-card-key.mjs", "deploy/agent-card-signed.mjs", "server/agent-card-key.mjs", "server/agent-card-signed.mjs"); // RC-2026-09-23-105: room card signing key (public half) + build-time signature (imported by server/agent-discovery.mjs; pure)
+optional.push("deploy/procedures-index.mjs", "server/procedures-index.mjs"); // W008: baked shared-procedure index (imported by server/agent-discovery.mjs; generated by scripts/procedures-index.mjs, never hand-edited)
 optional.push("server/guest-invites.mjs"); // RC-2026-09-23-100: GX-invite public handoff for external agents (imported by server/store.mjs + server/http.mjs)
 optional.push("server/web-fetch.mjs"); // RC-2026-09-23-102: room-side web fetch (imported by server/store.mjs + server/http.mjs)
 optional.push("server/web-research.mjs"); // RC-2026-09-24-310: knowledge router (imported by server/store.mjs; imports server/web-fetch.mjs)
 optional.push("server/claim-validate.mjs"); // RC-2026-09-24-204: synchronous pre-post claim-block validation (imported by server/http.mjs; pure, no imports of its own)
-optional.push("deploy/capabilities.mjs"); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
+optional.push("deploy/capabilities.mjs", "server/capabilities.mjs"); // #601: build-time route-family inventory (imported by server/agent-discovery.mjs)
 optional.push("src/room-mcp-join.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "server/mcp-http.mjs");
 optional.push("src/mcp-server-card.mjs"); // one MCP server card rendered from the live tool lists
+optional.push("src/mcp-tool-registry.js"); // one MCP tool registry: selection metadata (core/blurb/alias/focus) for every catalog tool (imported by src/room-mcp-join.js and server/mcp-discovery.mjs)
 optional.push("server/mcp-hosted-tools.mjs"); // hosted MCP tool definitions (imported by server/mcp-room-profile.mjs and server/mcp-discovery.mjs)
-optional.push("server/mcp-discovery.mjs"); // binds the server card to those live lists (imported by server/mcp-http.mjs and deploy/room-entry.mjs)
+optional.push("server/mcp-discovery.mjs"); // binds the server card to those live lists (imported by server/mcp-http.mjs and server/room-entry.mjs)
 optional.push("server/mcp-arg-errors.mjs"); // structured MCP tools/call errors (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-identity-mint.mjs"); // anonymous MCP identity mint (imported by server/mcp-http.mjs and server/mcp-room-profile.mjs)
+optional.push("server/mcp-action-search.mjs"); // room_search_actions, room_run_action and the lean profile (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
+optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin line on core and lean tool descriptions (imported by server/mcp-discovery.mjs)
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
 optional.push("server/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/mcp-room-profile.mjs, server/mcp-full-profile.mjs, server/http.mjs)
 optional.push("server/a2a-jsonrpc.mjs"); // public A2A JSON-RPC join reply at /a2a (imported by server/http.mjs)
@@ -153,7 +175,7 @@ optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment
 optional.push("server/attachments.mjs"); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
 optional.push("server/wake-queue.mjs", "server/request-runs.mjs");
 optional.push("server/wake-queue-limits.mjs"); // wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf, no store import)
-optional.push("server/governance.mjs"); // /.well-known/governance.json builder (imported by deploy/agent-discovery.mjs)
+optional.push("server/governance.mjs"); // /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
 optional.push("server/discoverability.mjs"); // Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
 optional.push("server/matchmaking-routes.mjs", "server/work-matchmaking.mjs", "server/work-declarations.mjs", "server/agent-lanes.mjs"); // work matchmaking routes (imported by server/http.mjs)
 optional.push("server/attention.mjs");
@@ -186,6 +208,7 @@ optional.push("server/inbox-collab-routes.mjs"); // Lane C: collab HTTP routes (
 optional.push("server/content-trust.mjs"); // structured untrusted markers for member-authored text (leaf; imported by store, http surfaces, MCP)
 optional.push("server/room-activation-pack.mjs"); // quill lane RC-2026-09-18-040: room activation pack (imported by server/http.mjs)
 optional.push("server/orient.mjs"); // jill lane RC-2026-09-28: orient endpoint builder (imported by server/http.mjs; pure, imports ../src/* only)
+optional.push("server/available-work.mjs"); // E1 AvailableWork projection (imported by server/orient.mjs and server/room-activation-pack.mjs; pure read projection, imports ../src/events.js + server/work-claim-routes.mjs)
 optional.push("server/wiki-read-api.mjs"); // W009: read-only wiki API for agents (imported by server/http.mjs; serves embedded wiki-data, no fs)
 optional.push("server/wiki-parse.mjs", "server/wiki-data.mjs"); // W009: pure wiki parsers (imported by wiki-read-api.mjs + scripts/wiki-build.mjs) and the build-time embedded wiki planes
 optional.push("server/updates.mjs"); // Updates projection (imported by server/http.mjs, server/needs-me.mjs, server/orient.mjs, server/store.mjs)
@@ -196,7 +219,8 @@ optional.push("server/claim-collisions.mjs");
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
 optional.push("server/work-claim-integrity.mjs"); // SEC-2: Board input bounds, event budget and status cache (imported by server/work-claim-routes.mjs; imports src/display-name-guard.js via server/display-name-guard.mjs and server/store.mjs limits)
-optional.push("server/work-claim-mirror.mjs"); // projection claims mirrored onto the work-claims board (imported by server/store.mjs)
+optional.push("server/work-item-board.mjs"); // decision #10: workItems -> board claims migration core + write-path sync (imported by server/store.mjs)
+optional.push("server/work-claim-mirror.mjs"); // decision #12: cut from the current tree (decision #10 step 2) — registration stays so genuine historical packages, whose store.mjs imports it, remain packagable and verifiable
 optional.push("server/receipt-cards.mjs"); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
 optional.push("server/room-guide.mjs"); // ACT-1a: Room Guide demo agent (imported by cloudflare/room.mjs and server/starter-room.mjs)
 optional.push("server/starter-room.mjs"); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
@@ -230,6 +254,7 @@ optional.push("server/agent-webhook-subscriptions.mjs"); // Lane D: per-agent we
 optional.push("server/webhook-dispatch.mjs"); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/identity-verification.mjs"); // RC-2026-09-18-049: pure agent verification tiers (imported by server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQLite bridge + ownership (imported by server/store.mjs and server/agent-plugin-routes.mjs)
+optional.push("server/agent-listener-contract.mjs"); // Shared HTTP/MCP receiving lease authority.
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
 optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
@@ -260,7 +285,7 @@ optional.push("server/resend-mailer.mjs"); // Resend-backed magic-link sender (i
 optional.push("src/password-auth.mjs"); // Email+password crypto (imported by server/http.mjs, slice 2)
 optional.push("src/account-settings-ui.js"); // Sign-in & security settings UI (imported by src/app.js, slice 7)
 optional.push("src/auth-signin-ui.js"); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
-optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/app.js, RC-2026-09-23)
+optional.push("src/agent-signin-ui.js"); // Agent browser sign-in choice UI (imported by src/agent-signin-page.js; formerly src/app.js, RC-2026-09-23)
 optional.push("src/agent-first-run.js"); // Agent first-run orientation card (imported by src/agent-signin-ui.js, RC-2026-09-24-213)
 optional.push("src/invite-context.js"); // Invitation context stashed at OAuth start (imported by src/app.js, RC-2026-09-18-007)
 optional.push("src/request-access.js"); // Request-access disclosure for signed-in users with no rooms (RC-2026-09-30-3611)
@@ -283,13 +308,15 @@ optional.push("server/redact-read.mjs"); // read-time message tombstone (importe
 optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
 optional.push("about.html");
 optional.push("join.html"); // Self-serve join template (loaded by GET /join, not a raw URL)
+optional.push("agent-signin.html"); // Standalone agent sign-in template (loaded by GET /agent-signin, not a raw URL)
 optional.push("favicon.svg", "icon.svg", "manifest.webmanifest", "src/public-a11y.css");
 // HB-3a: icons, offline page, install helper, and the push soft ask. The manifest PNG list waits on SEC-1.
 optional.push("offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js");
 optional.push("compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html"); // AEO buyer-intent pages (public assets)
 optional.push("og/home.png", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png"); // GR1 static share images
-optional.push("og/fonts/Inter-Regular.ttf", "og/fonts/OFL.txt"); // sign-in wordmark font (src/styles.css @font-face)
+optional.push("og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt"); // sign-in wordmark font (src/styles.css @font-face)
 optional.push("src/join.js"); // Join page logic (public asset, imported by join.html)
+optional.push("src/agent-signin-page.js"); // Agent sign-in page logic (public asset, imported by agent-signin.html)
 optional.push("src/join-watchdog.js"); // Join page loader watchdog (public asset, loaded by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
@@ -334,8 +361,11 @@ optional.push("server/capability-visibility.mjs"); // RC-2026-09-27-2731: withho
 optional.push("src/growth-emit.js", "src/growth-events.js", "src/growth-collector.js", "src/growth-mentions.js", "src/growth-fanout.js", "src/growth-persistence.js", "src/growth-summary.js", "src/growth-compare.js", "src/growth-alerts.js", "src/growth-watch.js", "src/growth-scheduler.js", "src/growth-http.js", "src/growth-digest.js");
 // Preserve redistribution terms; historical commits predate these documents.
 optional.push("LICENSE", "NOTICE", "THIRD_PARTY.md");
-optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/routes/inbox.mjs", "server/routes/auth.mjs", "server/routes/desktop-auth.mjs", "server/routes/work-claims.mjs"); // batch RT: declarative route table (imported by server/http.mjs)
+optional.push("server/routes/dispatch.mjs", "server/routes/table.mjs", "server/routes/inbox.mjs", "server/routes/auth.mjs", "server/routes/desktop-auth.mjs", "server/routes/account-sessions.mjs", "server/routes/signin-options.mjs", "server/routes/work-claims.mjs"); // batch RT: declarative route table (imported by server/http.mjs); signin-options added by H3 #3341
 // DX-1a begin: installer, agent docs, and the example pages those docs link to.
+// The docs/agents/*.html entries stay registered for historical packages only:
+// current sources no longer commit the pages and assetsFor() no longer holds a
+// package to them (decision #36, see generatedAgentPages above).
 const dx1aAssets = ["scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md"];
 
 optional.push(...dx1aAssets, "server/connect-snippets.mjs");
@@ -349,7 +379,8 @@ optional.push("src/human-experience.js", "src/human-experience.css", "server/roo
 
 optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/vetting-receipts.mjs", "server/demigod-offers.mjs", "server/demigod-contracts.mjs", "server/buyer-signoff.mjs", "server/routes/record-rails.mjs", "server/demigod-policy-adapter.mjs", "server/settlement-router.mjs", "server/fee-credit-ledger.mjs");
 
-optional.push("src/spend-pricing-ui.js", "src/polls.js");
+optional.push("src/spend-pricing-ui.js", "src/polls.js", "src/account-client.js");
+optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js");
 export const allowed = new Set([...required, ...optional]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the

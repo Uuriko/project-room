@@ -75,6 +75,75 @@ test("append PR keeps prior observations, invalidates approval, and needs a fres
   assert.equal(canCloseWork(fresh, "reviewer", policy), true);
 });
 
+// #2966: a deliberate identical re-review must be able to refresh a stale
+// basis. recordCi moves the CI head without touching reviews, so a reviewer
+// who approved head A with "LGTM" has to be able to re-approve head B with
+// the same text — otherwise the old approval fails the current-basis check
+// and reviewed completion is deadlocked. The re-review is deliberate, not
+// a blind retry: it names the current basis it reviewed (expectedBasis,
+// read back from the claim). A blind identical retry still never refreshes
+// a stale basis — it cannot silently approve changed work — and a replay
+// on the still-current basis stays a no-op, as does any identical replay
+// while CI is cleared (a newly linked PR has no head yet).
+test("identical re-review refreshes a stale basis when CI moves to a new head", async () => {
+  const { createWork, appendWorkPullRequest, recordReview, recordCi, canCloseWork } = await import("../server/work-claims.mjs");
+  const now = Date.parse("2026-10-03T13:00:00Z");
+  const basisOf = item => ({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
+    revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
+  let work = claimWork(createWork({ id: "re-review", reviewPolicy: "distinct_member" }, { now }), "quill", { now, leaseHours: 6 });
+  work = recordCi(work, { state: "success", headSha: "a".repeat(40) }, now).item;
+  work = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", now });
+  const policy = { reviewMembers: ["reviewer"] };
+  assert.equal(canCloseWork(work, "reviewer", policy), true);
+  // True replay: same content on the still-current basis changes nothing,
+  // with or without naming that basis.
+  const replay = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 1 });
+  assert.equal(replay.history, work.history);
+  assert.deepEqual(replay.reviews, work.reviews);
+  const namedReplay = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", expectedBasis: basisOf(work), now: now + 1 });
+  assert.equal(namedReplay.history, work.history);
+  assert.deepEqual(namedReplay.reviews, work.reviews);
+  // CI moves to a new head: the old approval is stale and cannot close.
+  const basisA = basisOf(work);
+  work = recordCi(work, { state: "success", headSha: "b".repeat(40) }, now + 2).item;
+  assert.equal(canCloseWork(work, "reviewer", policy), false);
+  // A blind identical retry still does not refresh: it cannot silently
+  // approve the changed head.
+  const blindRetry = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 3 });
+  assert.equal(blindRetry.history, work.history);
+  assert.deepEqual(blindRetry.reviews, work.reviews);
+  assert.equal(canCloseWork(blindRetry, "reviewer", policy), false);
+  // The deliberate identical re-review, naming the current basis, is a
+  // fresh review bound to the new head.
+  const refreshed = recordReview(work, "reviewer", { verdict: "approve", summary: "LGTM", expectedBasis: basisOf(work), now: now + 3 });
+  assert.ok(refreshed.history.length > work.history.length);
+  assert.equal(refreshed.reviews.at(-1).basis.headSha, "b".repeat(40));
+  assert.equal(canCloseWork(refreshed, "reviewer", policy), true);
+  // Naming a basis that is no longer current — the old head — is a
+  // conflict, not a review of the current head.
+  throwsCode(() => recordReview(refreshed, "reviewer", { verdict: "approve", summary: "LGTM", expectedBasis: basisA, now: now + 3 }), "work_claim_conflict");
+  // Linking another PR clears CI: with no current head, the identical
+  // replay still does not reapprove (the append-PR contract above) — not
+  // even one naming the cleared basis, as there is no head to bind to.
+  const basis = { expectedClaimedAt: refreshed.claimedAt, expectedHistoryLength: refreshed.history.length, now: now + 4 };
+  const added = appendWorkPullRequest(refreshed, "quill", { ...basis, pullRequest: "https://github.com/acme/repo/pull/2/" });
+  assert.equal(added.ci, null);
+  const clearedReplay = recordReview(added, "reviewer", { verdict: "approve", summary: "LGTM", now: now + 5 });
+  assert.equal(clearedReplay.history, added.history);
+  assert.deepEqual(clearedReplay.reviews, added.reviews);
+  assert.equal(canCloseWork(clearedReplay, "reviewer", policy), false);
+  const clearedNamed = recordReview(added, "reviewer", { verdict: "approve", summary: "LGTM", expectedBasis: basisOf(added), now: now + 5 });
+  assert.equal(clearedNamed.history, added.history);
+  assert.deepEqual(clearedNamed.reviews, added.reviews);
+  assert.equal(canCloseWork(clearedNamed, "reviewer", policy), false);
+  // Once CI records the new PR's head, the identical text refreshes again
+  // when the re-review names that current basis.
+  const withHead = recordCi(added, { state: "success", headSha: "c".repeat(40) }, now + 6).item;
+  const reapproved = recordReview(withHead, "reviewer", { verdict: "approve", summary: "LGTM", expectedBasis: basisOf(withHead), now: now + 7 });
+  assert.equal(reapproved.reviews.at(-1).basis.headSha, "c".repeat(40));
+  assert.equal(canCloseWork(reapproved, "reviewer", policy), true);
+});
+
 test("append PR refuses stale rounds, unsafe input and stopped ownership without changing work", async () => {
   const { appendWorkPullRequest, createWork, renewWork } = await import("../server/work-claims.mjs");
   const now = Date.parse("2026-10-03T13:00:00Z");

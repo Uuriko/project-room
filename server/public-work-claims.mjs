@@ -5,6 +5,7 @@ import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -52,8 +53,44 @@ const filesOf = input => {
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
 
+export const PUBLIC_WORK_IDENTITY_RATE_LIMIT = 60;
+export const PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS = 60000;
+// At most this many distinct identity buckets stay live, matching the bound
+// server/http.mjs sets for each of its rate families: a flood of foreign
+// identities evicts the least recently touched bucket instead of growing
+// memory or refusing every new identity.
+const PUBLIC_WORK_IDENTITY_RATE_KEYS = 2000;
+
 export class PublicWorkClaims {
-  constructor(store) { this.store = store; this.db = store.db; }
+  constructor(store) { this.store = store; this.db = store.db; this.identityRateBuckets = new Map(); }
+  // The one per-identity public-work claim ceiling (#3271): the bucket
+  // lives here so every door counts against the same state, and the doors
+  // invoke it — the REST act route and the MCP public-work handler before
+  // delegating to act(), and match() at its claim site when autoClaim
+  // actually claims. act()/apply() deliberately do not enforce: they are
+  // also the in-process domain entry (state seeding, keeper flows), which
+  // is not a network door and must be able to represent boards whose
+  // claims accumulated over time rather than within one window. Semantics mirror the fixed-window bucket the
+  // direct REST door used in server/http.mjs (60 per minute, same
+  // rate_limited shape and X-RateLimit-* headers): every authenticated
+  // attempt counts, including attempts that go on to fail downstream and
+  // journal replays, exactly as the REST door counted them before its
+  // transport-level bucket was folded into this one.
+  enforceIdentityRateLimit(identityId) {
+    const now = this.store.now();
+    for (const [key, entry] of this.identityRateBuckets) if (entry.until <= now) this.identityRateBuckets.delete(key);
+    let entry = this.identityRateBuckets.get(identityId);
+    if (entry) this.identityRateBuckets.delete(identityId);
+    else {
+      if (this.identityRateBuckets.size >= PUBLIC_WORK_IDENTITY_RATE_KEYS)
+        this.identityRateBuckets.delete(this.identityRateBuckets.keys().next().value);
+      entry = { n: 0, until: now + PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS };
+    }
+    entry.n++;
+    this.identityRateBuckets.set(identityId, entry);
+    if (entry.n > PUBLIC_WORK_IDENTITY_RATE_LIMIT) throw new ServiceError(429, 'rate_limited', 'Too many requests; retry after a minute',
+      { 'X-RateLimit-Limit': PUBLIC_WORK_IDENTITY_RATE_LIMIT, 'X-RateLimit-Remaining': 0, 'X-RateLimit-Reset': Math.ceil(entry.until / 1000), 'X-RateLimit-Bucket': 'public-work-identity' });
+  }
   verifySchema({ allowAbsent = false } = {}) {
     const definitions = publicWorkClaimsSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
     const shapes = definitions.map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
@@ -89,27 +126,64 @@ export class PublicWorkClaims {
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
     const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    const state = receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed';
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
-      claim: { state: receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed', generation: row.generation,
+      claimable: state === 'unclaimed',
+      claim: { state, generation: row.generation,
         identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
   }
   read(offerId) {
     return this.store.readTransaction(() => {
-      const row = this.task(offerId), offer = this.offer(row);
+      const row = this.task(offerId);
+      // Operator unpublish hides the task (and its submittedReceiptId) here too.
+      if (isUnpublished(this.db, 'room', row.room_id)) fail(404, 'public_work_not_found', 'Public task not found');
+      const offer = this.offer(row);
       return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer);
     });
   }
-  list({ limit = 20, after = '' } = {}) {
+  // claimableFirst defaults to claimable-first for browse callers (#2988).
+  // match() opts out: its `after` cursor is an offer_id-order scan position
+  // with its own documented continuation semantics, so it passes
+  // claimableFirst: false and keeps scanning in offer_id order.
+  list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
+    check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
     return this.store.readTransaction(() => {
-      if (!this.available()) return { tasks: [], nextCursor: null };
+      if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
-        JOIN rooms r ON r.id=t.room_id WHERE t.offer_id>? AND o.status='published' AND r.archived_at IS NULL
-        AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id LIMIT ?`).all(after, limit + 1);
-      return { tasks: rows.slice(0, limit).map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row))),
-        nextCursor: rows.length > limit ? rows[limit - 1].offer_id : null };
+        JOIN rooms r ON r.id=t.room_id WHERE o.status='published' AND r.archived_at IS NULL
+        AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id`).all();
+      // Claim state lives in the work-claims store and receipts, not in a
+      // column SQL can order by, so packets are materialized before ordering.
+      // Operator-unpublished rooms are dropped before materializing: their
+      // packets (including submittedReceiptId) must never be built or served.
+      let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
+        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
+      const claimableCount = tasks.filter(task => task.claimable).length;
+      if (claimable) tasks = tasks.filter(task => task.claimable);
+      if (claimableFirst) {
+        // Stable claimable-first order; rows arrive in offer_id order, which
+        // is the deterministic tiebreak inside each claimability group.
+        tasks = [...tasks.filter(task => task.claimable), ...tasks.filter(task => !task.claimable)];
+      }
+      // The cursor is the last returned task's offer_id; resuming finds that
+      // id in the (recomputed) ordering, so a page walk over a stable set
+      // visits each task exactly once, claimable tasks first. An unknown
+      // cursor falls back to the old offer_id boundary.
+      let start = 0;
+      if (after !== '') {
+        const index = tasks.findIndex(task => task.taskId === after);
+        if (index >= 0) start = index + 1;
+        else {
+          const fallback = tasks.findIndex(task => task.taskId > after);
+          start = fallback < 0 ? tasks.length : fallback;
+        }
+      }
+      const page = tasks.slice(start, start + limit);
+      return { tasks: page, claimableCount,
+        nextCursor: start + limit < tasks.length ? page.at(-1).taskId : null };
     });
   }
   enable(roomId, actorId, offerId, input) {
@@ -239,10 +313,18 @@ export class PublicWorkClaims {
     return run(() => {
       const identity = secret ? this.store.identities.resolveGlobalIdentitySecret(secret) : null;
       if ((secret || input.autoClaim === true) && !identity) fail(401, 'unauthenticated', 'Unknown or revoked identity');
+      // match with autoClaim is a claim door (#3271): when it actually
+      // claims, the claim counts against the same per-identity ceiling as a
+      // direct claim. The count is taken at the claim site below, not here:
+      // a search that matches nothing claimable performs no claim and must
+      // not burn ceiling (the recommendation page's empty-result recovery
+      // searches would otherwise lock the identity out for retrying). A
+      // plain recommendation (autoClaim not set, including MCP
+      // public_work_recommend) claims nothing and is never counted.
       const recommend = () => {
         const outcome = { recommendations: [], claim: null, inspected: 0, hasMore: false, nextCursor: null, supportedRewards: ['volunteer'] };
         if (reward !== 'volunteer') return outcome;
-        const page = this.list({ limit: 100, after: input.after ?? '' });
+        const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
         const candidates = page.tasks.filter(task => {
@@ -255,7 +337,15 @@ export class PublicWorkClaims {
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
         }).sort((left, right) => right.score - left.score || ages.get(left.task.taskId) - ages.get(right.task.taskId) || (left.task.taskId < right.task.taskId ? -1 : left.task.taskId > right.task.taskId ? 1 : 0));
         outcome.recommendations = candidates.slice(0, limit).map(({ task, reasons }) => ({ task, reasons }));
+        // Machine-readable complement to a bare empty list (#2988): tasks
+        // were inspected but none of them is claimable. Deliberately named
+        // reasonCode, not reason/guidance — those are human-readable fields
+        // used by other (stale) proposals for this same outcome object.
+        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)) outcome.reasonCode = 'no_claimable_tasks';
         if (input.autoClaim === true && candidates.length) {
+          // #3271: an auto-claim is a claim — count it against the ceiling
+          // here, where a claim actually happens (see the note above).
+          this.enforceIdentityRateLimit(identity.identityId);
           const selected = candidates[0].task;
           const claimInput = { expectedTermsVersion: selected.termsVersion };
           // The outer @match journal owns this choice; direct-command keys cannot alias it.
@@ -284,6 +374,12 @@ export class PublicWorkClaims {
        FROM public_work_receipts r LEFT JOIN public_work_tasks t ON t.offer_id = r.offer_id
        WHERE r.receipt_id = ?`).get(receiptId);
     if (!row) fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    // Operator unpublish overrides owner sharing on this public door, for the
+    // receipt itself and for its room — same predicate as public-read-model.
+    if (isUnpublished(this.db, 'receipt', receiptId)
+      || (row.roomId && isUnpublished(this.db, 'room', row.roomId))) {
+      fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    }
     return { receiptJson: row.receiptJson, roomId: row.roomId ?? null };
   }
   _requireReceiptVisible(roomId, memberId) {

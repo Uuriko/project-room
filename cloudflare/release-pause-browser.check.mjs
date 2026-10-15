@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
-import { publicAssetPaths } from '../deploy/public-assets.mjs';
+import { publicAssetPaths } from '../server/public-assets.mjs';
 import { signInFixture } from '../scripts/auth-signin.mjs';
 
 for (const touch of [false, true]) test(`release pause/resume preserves exact sends and privacy: ${touch ? 'touch' : 'desktop'}`, { timeout: 90000 }, async () => {

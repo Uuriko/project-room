@@ -195,6 +195,7 @@ export class DeliveryTracer {
     this.endpoint = cfg.endpoint;
     this.serviceName = cfg.serviceName;
     this._buffer = []; // finished spans awaiting export/flush
+    this._exportInFlight = null; // promise of the running export drain, if any
     // 2026-09-27 (deep audit 5850213111): bound the outage buffer. Without
     // a cap, a down OTLP endpoint leaves spans accumulating forever (the
     // export throws, the buffer is never cleared) — an unbounded memory
@@ -246,9 +247,10 @@ export class DeliveryTracer {
   bufferedSpanCount() { return this._buffer.length; }
   clearBuffer() { this._buffer.length = 0; }
 
-  // Build the OTLP/HTTP JSON payload for buffered spans without clearing.
-  otlpPayload() {
-    const spans = this._buffer.map(s => s.toOtlp(this.serviceName)).filter(Boolean);
+  // Build the OTLP/HTTP JSON payload for the given spans (default: the whole
+  // buffer) without clearing anything.
+  otlpPayload(source = this._buffer) {
+    const spans = source.map(s => s.toOtlp(this.serviceName)).filter(Boolean);
     return {
       resourceSpans: spans.length === 0 ? [] : [{
         resource: { attributes: [{ key: "service.name", value: { stringValue: this.serviceName } }] },
@@ -259,23 +261,48 @@ export class DeliveryTracer {
 
   // POST buffered spans to the OTLP endpoint, then clear. No-op without endpoint.
   async flush() {
-    if (!this.enabled || !this.endpoint || this._buffer.length === 0) return { exported: 0 };
+    if (!this.enabled || !this.endpoint) return { exported: 0 };
+    if (this._buffer.length === 0 && !this._exportInFlight) return { exported: 0 };
     const result = await this._export();
     return result;
   }
 
+  // Export buffered spans, serialized: at most one drain runs at a time and
+  // concurrent callers join it instead of POSTing overlapping snapshots.
+  // Each batch is a snapshot of the buffer; on success only that batch's
+  // spans are removed, so spans that end while a POST is in flight are
+  // neither delivered twice (they were never in the in-flight snapshot, and
+  // no second export runs concurrently) nor silently dropped (they stay
+  // buffered and the drain loop exports them in the next batch). On failure
+  // the batch stays buffered for a later retry.
   async _export() {
-    const payload = this.otlpPayload();
-    const count = this._buffer.length;
-    if (count === 0) return { exported: 0 };
-    const res = await fetch(this.endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`OTLP export failed: ${res.status}`);
-    this._buffer.length = 0;
-    return { exported: count };
+    if (this._exportInFlight) return this._exportInFlight;
+    if (this._buffer.length === 0) return { exported: 0 };
+    let exported = 0;
+    const run = (async () => {
+      try {
+        while (this._buffer.length > 0) {
+          const batch = [...this._buffer];
+          const payload = this.otlpPayload(batch);
+          const res = await fetch(this.endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) throw new Error(`OTLP export failed: ${res.status}`);
+          // Remove exactly the spans just delivered. Spans appended during
+          // the await are not in the batch and survive for the next pass.
+          const delivered = new Set(batch);
+          this._buffer = this._buffer.filter(span => !delivered.has(span));
+          exported += batch.length;
+        }
+        return { exported };
+      } finally {
+        if (this._exportInFlight === run) this._exportInFlight = null;
+      }
+    })();
+    this._exportInFlight = run;
+    return run;
   }
 }
 

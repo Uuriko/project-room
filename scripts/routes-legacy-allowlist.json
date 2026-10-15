@@ -250,6 +250,10 @@
       "path": "/api/agent-identities/{id}/keys"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agent-identities/{id}/keys"
+    },
+    {
       "method": "POST",
       "path": "/api/agent-identities/{id}/keys/revoke"
     },
@@ -279,6 +283,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/agent-invites/preview"
+    },
+    {
+      "method": "POST",
       "path": "/api/agent-invites/preview"
     },
     {
@@ -362,11 +370,19 @@
       "path": "/api/agents/{id}/card"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agents/{id}/card"
+    },
+    {
       "method": "GET",
       "path": "/api/agents/directory"
     },
     {
       "method": "GET",
+      "path": "/api/agents/directory/{id}"
+    },
+    {
+      "method": "HEAD",
       "path": "/api/agents/directory/{id}"
     },
     {
@@ -804,6 +820,10 @@
     {
       "method": "POST",
       "path": "/api/operator/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/restore-from-backup"
     },
     {
       "method": "GET",
@@ -4012,6 +4032,10 @@
       "path": "/api/agent-identities/{id}/keys"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agent-identities/{id}/keys"
+    },
+    {
       "method": "POST",
       "path": "/api/agent-identities/{id}/keys/revoke"
     },
@@ -4040,7 +4064,7 @@
       "path": "/api/agent-identities/{id}/verify"
     },
     {
-      "method": "GET",
+      "method": "POST",
       "path": "/api/agent-invites/preview"
     },
     {
@@ -4124,11 +4148,19 @@
       "path": "/api/agents/{id}/card"
     },
     {
+      "method": "HEAD",
+      "path": "/api/agents/{id}/card"
+    },
+    {
       "method": "GET",
       "path": "/api/agents/directory"
     },
     {
       "method": "GET",
+      "path": "/api/agents/directory/{id}"
+    },
+    {
+      "method": "HEAD",
       "path": "/api/agents/directory/{id}"
     },
     {
@@ -4213,30 +4245,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/guest-agent-links"
-    },
-    {
-      "method": "HEAD",
-      "path": "/api/guest-agent-links"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links/join"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links/preview"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-agent-links/refresh"
-    },
-    {
-      "method": "GET",
       "path": "/api/guest-invites"
     },
     {
@@ -4250,10 +4258,6 @@
     {
       "method": "POST",
       "path": "/api/guest-invites/redeem"
-    },
-    {
-      "method": "POST",
-      "path": "/api/guest-invites/request"
     },
     {
       "method": "POST",
@@ -4334,6 +4338,10 @@
     {
       "method": "POST",
       "path": "/api/operator/restore"
+    },
+    {
+      "method": "POST",
+      "path": "/api/operator/restore-from-backup"
     },
     {
       "method": "POST",
@@ -5554,10 +5562,6 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/files/{id}/commit"
-    },
-    {
-      "method": "POST",
-      "path": "/api/rooms/{id}/guest-agent-links"
     },
     {
       "method": "POST",

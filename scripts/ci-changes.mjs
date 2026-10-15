@@ -12,8 +12,8 @@
 // Outputs (GITHUB_OUTPUT): browser=true|false, eval=true|false, and
 // coverage=true|false.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
-import { dirname, resolve, basename } from "node:path";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { dirname, resolve, basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,8 +81,86 @@ function browserSuitePaths() {
   return String(pkg.scripts?.["test:browser"] ?? "").split(/\s+/).filter(path => path.startsWith("scripts/"));
 }
 
+// The browser checks do not only load the files named in the test:browser
+// script. Nearly every check creates the real room server (createRoomServer
+// from server/http.mjs, a few spawn server.mjs) and imports shared helpers
+// that are not themselves suite entries (scripts/acceptance-fixture.mjs,
+// scripts/auth-signin.mjs, scripts/room-chrome.mjs, scripts/helpers/*, the
+// server/ modules the server serves, …). A change to any of those runs
+// against the browser suite, so it must enable it: server code always does
+// (checks also reach it through dynamically built import URLs and spawned
+// processes that a static scan cannot see), and every other file does when
+// it is in the suite files' transitive relative-import closure. Computing
+// the closure from the suite itself keeps this correct as helpers are
+// added, without enabling the suite for unrelated scripts.
+const IMPORT_RES = [
+  /\bimport\s+(?:[^'"`;]*?\s+from\s+)?["']([^"']+)["']/g,
+  /\bexport\s+[^'"`;]*?\s+from\s+["']([^"']+)["']/g,
+  /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+];
+const CODE_EXTS = [".js", ".mjs", ".cjs"];
+
+function resolveImport(fromFile, spec) {
+  if (!spec.startsWith("./") && !spec.startsWith("../")) return null;
+  const base = resolve(root, dirname(fromFile), spec.split(/[?#]/)[0]);
+  const candidates = [base, ...CODE_EXTS.map(ext => base + ext), ...CODE_EXTS.map(ext => resolve(base, `index${ext}`))];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return relative(root, candidate).split("\\").join("/");
+  }
+  return null;
+}
+
+let cachedBrowserDeps = null;
+
+function browserDependencyPaths(suite) {
+  const key = suite.join("\n");
+  if (cachedBrowserDeps?.key === key) return cachedBrowserDeps.deps;
+  const deps = new Set(suite);
+  const seen = new Set(suite);
+  const queue = [...suite];
+  while (queue.length) {
+    const file = queue.shift();
+    if (!CODE_EXTS.some(ext => file.endsWith(ext))) continue;
+    let source;
+    try {
+      source = readFileSync(resolve(root, file), "utf8");
+    } catch {
+      continue; // A suite entry that is not on disk contributes no imports.
+    }
+    for (const re of IMPORT_RES) {
+      re.lastIndex = 0;
+      for (const match of source.matchAll(re)) {
+        const target = resolveImport(file, match[1]);
+        if (!target || target.startsWith("../")) continue;
+        deps.add(target);
+        if (!seen.has(target)) {
+          seen.add(target);
+          queue.push(target);
+        }
+      }
+    }
+  }
+  cachedBrowserDeps = { key, deps };
+  return deps;
+}
+
 export function classifyChanges(files, suite = browserSuitePaths()) {
-  const browser = files.some(file => BROWSER_EXACT.has(file) || file.startsWith("src/") || file.startsWith("og/") || file.startsWith("client/") || suite.includes(file));
+  let deps = null;
+  const browser = files.some(file => {
+    if (
+      BROWSER_EXACT.has(file) ||
+      file === "server.mjs" ||
+      file.startsWith("server/") ||
+      file.startsWith("src/") ||
+      file.startsWith("og/") ||
+      file.startsWith("client/") ||
+      suite.includes(file)
+    ) {
+      return true;
+    }
+    deps ??= browserDependencyPaths(suite);
+    return deps.has(file);
+  });
   const evalSuite = files.some(file => matchesAny(file, EVAL_PATTERNS));
   return { browser, eval: evalSuite, coverage: coverageRelevant(files) };
 }

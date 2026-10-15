@@ -210,6 +210,23 @@ export class MachineBot {
     // the board and consumed the wake, so nobody picked it up after resume.
     if (this.isHalted()) return { signalId, halted: true };
     if (await this.isPaused(roomId)) return { signalId, paused: true };
+    // An implicitly addressed public reply is a notification, not a new task.
+    // tryGo alone admits approval replies after checking sender and plan.
+    // Consume the observed notification without replying: two bots sending
+    // automatic plans/refusals back to each other would create endless wakes.
+    // Explicit mentions (including replies), directed messages and board work retain their
+    // existing admission paths; other clients still receive the reply wake.
+    if (source.replyToId && !source.toMemberId && source.explicitlyMentioned === false) {
+      if (source.updateId) {
+        const marked = await this.api.markUpdate(roomId, source.updateId, "done", source.basisToken);
+        if (!marked.ok) return { signalId, ignored: "unread" };
+      }
+      await this.api.ack([signalId]);
+      return { signalId, ignored: "reply_notification" };
+    }
+    // Keep unrelated work durable until this approval is resolved. This also
+    // prevents a second wake in the same page from overwriting the saved plan.
+    if (this.pending) return { signalId, deferred: "pending_approval" };
     const provider = await this.resolveProvider();
     if (provider.name === "none" || provider.missingKey === true) {
       await this.reply(roomId, provider.message, source.messageId, source.updateId, source.basisToken);
@@ -305,6 +322,9 @@ export class MachineBot {
       kind,
       roomId,
       messageId: message.id ?? messageId,
+      replyToId: message.replyToId ?? null,
+      toMemberId: message.toMemberId ?? null,
+      explicitlyMentioned: page.value?.addressing?.explicitlyMentioned,
       updateId: queued.updateId ?? null,
       basisToken: queued.basisToken ?? null,
       text: message.body,
@@ -351,6 +371,13 @@ export class MachineBot {
       return;
     }
     this.provider = await this.resolveProvider();
+    // Every task that reaches begin() is a new task, so reset the cached
+    // provider here: it otherwise keeps the previous task's conversation
+    // and never seeds the new task text (#2869). Resetting in begin() —
+    // not just on a provider-side task-text change — also covers a new
+    // task whose text is identical to the previous one. Providers without
+    // conversation state may omit reset().
+    this.provider?.reset?.();
     this.active = {
       roomId: source.roomId,
       messageId: source.messageId,

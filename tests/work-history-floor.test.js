@@ -29,6 +29,7 @@ test("work discussion and work source follow the since_join floor", t => {
   cmd(T.MESSAGE_POSTED, { messageId: "new-linked", body: "post-join note", workItemId: "w-1" });
 
   const discussion = store.workDiscussion(late, "commons", "w-1", {});
+  const consistent = store.workDiscussion(late, "commons", "w-1", { consistent: true });
   assert.deepEqual(discussion.discussion.items.map(item => item.message.id), ["new-linked"]);
   assert.equal(JSON.stringify(discussion).includes("secret"), false);
   const context = store.workContext(late, "commons", "w-1", { includeSource: true });
@@ -38,4 +39,9 @@ test("work discussion and work source follow the since_join floor", t => {
   // A full-history reader still sees everything.
   assert.deepEqual(store.workDiscussion(owner, "commons", "w-1", {}).discussion.items.map(item => item.message.id), ["src-msg", "old-linked", "new-linked"]);
   assert.equal(store.workContext(owner, "commons", "w-1", { includeSource: true }).context.source.status, "included");
+  cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "all" });
+  assert.throws(() => store.workDiscussion(late, "commons", "w-1", { resumeToken: consistent.discussion.resumeToken }),
+    { status: 409, code: "discussion_reset_required" });
+  assert.deepEqual(store.workDiscussion(late, "commons", "w-1", { consistent: true }).discussion.items.map(item => item.message.id),
+    ["src-msg", "old-linked", "new-linked"]);
 });

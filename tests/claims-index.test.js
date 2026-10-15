@@ -195,6 +195,100 @@ test("watermark and stats are consistent", () => {
   );
 });
 
+const strikeOne = (tid, stamp) =>
+  `[room-watch]RECLAIM (strike 1): @jill lease on ${tid} expired, no heartbeat seen\n\n<!-- room:strike-one:${tid}:${stamp} -->\n`;
+const strikeTwo = (tid, stamp) =>
+  `[room-watch]RECLAIM (strike 2): ${tid} released. No heartbeat 4h after the strike-one nudge.\n\n<!-- room:strike-two:${tid}:${stamp} -->\n`;
+
+test("strike-two alone never releases; grace boundary is strict; then release lands", () => {
+  const tid = "RC-2026-09-23-301";
+  const fx = [
+    C(4001, "2026-09-23T08:00:00Z", claimBlock(tid, "jill", "lease=72h")),
+    // lone strike-two, no prior strike-one -> ignored, claim stays held
+    C(4002, "2026-09-23T09:00:00Z", strikeTwo(tid, "2026-09-23T09:00:00Z")),
+    // strike-one recorded
+    C(4003, "2026-09-23T10:00:00Z", strikeOne(tid, "2026-09-23T10:00:00Z")),
+    // strike-two at exactly strike_one_at + 14400s -> still inside grace, ignored
+    C(4004, "2026-09-23T14:00:00Z", strikeTwo(tid, "2026-09-23T14:00:00Z")),
+    // one second past the grace -> release lands
+    C(4005, "2026-09-23T14:00:01Z", strikeTwo(tid, "2026-09-23T14:00:01Z")),
+  ];
+  const idx = run(fx);
+  const c = idx.claims.find((x) => x.task_id === tid);
+  assert.ok(c, "claim present");
+  assert.equal(c.state, "submitted");
+  assert.equal(c.lane, null);
+  assert.equal(c.released_at, "2026-09-23T14:00:01Z");
+  assert.equal(c.status, "released");
+  const ignored = idx.unregistered.filter((x) => x.kind === "ignored-strike");
+  assert.deepEqual(ignored.map((x) => x.comment_id), [4002, 4004],
+    "lone and early strike-two stamps are visible as ignored");
+  assert.match(ignored[0].reason, /no prior strike-one/);
+  assert.match(ignored[1].reason, /grace/);
+});
+
+test("strike-one records its stamp (set-once); post-strike-one heartbeat blocks strike-two", () => {
+  const tid = "RC-2026-09-23-302";
+  const fx = [
+    C(4101, "2026-09-23T08:00:00Z", claimBlock(tid, "jill", "lease=72h")),
+    // comment posted 10:10 but stamped 10:00 -> strike_one_at is the stamp
+    C(4102, "2026-09-23T10:10:00Z", strikeOne(tid, "2026-09-23T10:00:00Z")),
+    // duplicate strike-one must not reset the grace clock
+    C(4103, "2026-09-23T10:20:00Z", strikeOne(tid, "2026-09-23T10:20:00Z")),
+    // holder heartbeats after the strike-one
+    C(4104, "2026-09-23T11:00:00Z",
+      `[jill]STATUS: heartbeat ${tid} — still working (jill)\n\n` +
+      "```room-claim\n" +
+      `task-id: ${tid}\nlane: jill\nfiles: scripts/a.mjs\n` +
+      "lease: lease=72h\nstate: working\nreason: testing the indexer\n```"),
+    // 5h after the (first) strike-one the grace has elapsed, but the
+    // post-strike-one heartbeat blocks the release
+    C(4105, "2026-09-23T15:00:00Z", strikeTwo(tid, "2026-09-23T15:00:00Z")),
+  ];
+  const idx = run(fx);
+  const c = idx.claims.find((x) => x.task_id === tid);
+  assert.ok(c, "claim present");
+  assert.equal(c.strike_one_at, "2026-09-23T10:00:00.000Z",
+    "strike_one_at is the first stamp, not the comment time, never reset by a replay");
+  assert.equal(c.state, "working", "strike-two blocked by the post-strike-one heartbeat");
+  assert.equal(c.lane, "jill");
+  assert.equal(c.released_at, null);
+  const ignored = idx.unregistered.filter((x) => x.kind === "ignored-strike");
+  assert.deepEqual(ignored.map((x) => x.comment_id), [4103, 4105]);
+  assert.match(ignored[0].reason, /replay ignored/);
+  assert.match(ignored[1].reason, /heartbeat after strike-one/);
+});
+
+test("strikes against terminal or suspended claims are ignored", () => {
+  const done = "RC-2026-09-23-303";
+  const susp = "RC-2026-09-23-304";
+  const fx = [
+    C(4201, "2026-09-23T08:00:00Z", claimBlock(done, "instinct", "lease=12h")),
+    C(4202, "2026-09-23T09:00:00Z",
+      `[instinct]DONE: ${done}\n\n` + "```room-receipt\nmerged: deadbeef1234\n```"),
+    // strike stamps replayed against the completed claim must not flip it
+    // back to submitted (2026-09-19 incident class)
+    C(4203, "2026-09-23T10:00:00Z", strikeOne(done, "2026-09-23T10:00:00Z")),
+    C(4204, "2026-09-23T15:00:00Z", strikeTwo(done, "2026-09-23T15:00:00Z")),
+    // a suspended claim is not a strike target either
+    C(4205, "2026-09-23T08:30:00Z", claimBlock(susp, "jill", "lease=12h", "suspended")),
+    C(4206, "2026-09-23T10:00:00Z", strikeOne(susp, "2026-09-23T10:00:00Z")),
+  ];
+  const idx = run(fx);
+  const cDone = idx.claims.find((x) => x.task_id === done);
+  assert.equal(cDone.state, "completed", "completed claim is not flipped back to submitted");
+  assert.equal(cDone.lane, "instinct");
+  assert.equal(cDone.released_at, null);
+  assert.equal(cDone.strike_one_at, null);
+  const cSusp = idx.claims.find((x) => x.task_id === susp);
+  assert.equal(cSusp.state, "suspended");
+  assert.equal(cSusp.strike_one_at, null, "no strike recorded against a suspended claim");
+  const ignored = idx.unregistered.filter((x) => x.kind === "ignored-strike");
+  // entries land in event (chronological) order: 4203, 4206, then 4204
+  assert.deepEqual(ignored.map((x) => x.comment_id), [4203, 4206, 4204]);
+  assert.ok(ignored.every((x) => /not held/.test(x.reason)));
+});
+
 test("M-49: cross-lane STATUS:/DONE:/[receipt] transitions are ignored, same-lane apply", () => {
   const fx = [
     // jill holds the claim

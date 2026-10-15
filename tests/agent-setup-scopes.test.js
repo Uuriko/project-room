@@ -45,6 +45,9 @@ test("a key minted by CLI setup reaches the wake and inbox MCP tools like the on
     assert.notEqual(answer.result?.isError, true, `${name}: ${JSON.stringify(answer.result)}`);
   }
   // Still room-bound: the setup key reaches its own room and nothing wider.
+  // CX5-FIX added heartbeats:report/read so this saved credential can run
+  // the wake listener; under its single mcp:room: scope the server binds
+  // those heartbeat calls to this room alone (scoped-listener contract).
   const scopes = JSON.parse(f.store.db.prepare("SELECT scopes_json FROM agent_api_keys WHERE identity_id = ?").get(connected.identityId).scopes_json);
-  assert.deepEqual([...scopes].sort(), ["mcp:inbox", "mcp:room:commons", "mcp:wake", "rooms:read", "rooms:write"]);
+  assert.deepEqual([...scopes].sort(), ["heartbeats:read", "heartbeats:report", "mcp:inbox", "mcp:room:commons", "mcp:wake", "rooms:read", "rooms:write"]);
 });

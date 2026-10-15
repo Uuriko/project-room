@@ -490,7 +490,7 @@ export function decideSuggestions(card, live = {}) {
 //   start_confirm {suggestion}    {new,seen} -> acting         (confirm only)
 //   confirm {confirmed:true}      acting -> pending_undo       (zero-second window)
 //   retract                       pending_undo -> seen         (before deadline)
-//   fired                         {pending_undo,acting} -> dispatched
+//   fired                         pending_undo -> dispatched
 //   dismiss {note?}               {new,seen,pending_undo,acting,snoozed} -> dismissed
 //   snooze {untilMs}              {new,seen} -> snoozed
 //   wake                          snoozed -> new
@@ -558,8 +558,13 @@ export function applyCardTransition(card, event, { now = null } = {}) {
       return moved({ state: "seen", pickedSuggestion: undefined, undoDeadlineMs: undefined });
     }
     case "fired": {
-      if (card.state !== "pending_undo" && card.state !== "acting") illegal();
-      if (card.state === "pending_undo" && !(at >= card.undoDeadlineMs)) {
+      // 'fired' is only legal from pending_undo. A confirm-gated suggestion
+      // sits in 'acting' until the operator confirms (confirm {confirmed:true}
+      // is what moves it to pending_undo, with a zero window). Accepting
+      // 'fired' from 'acting' would let an unconfirmed confirm-class write be
+      // recorded as dispatched, skipping the confirm gate entirely.
+      if (card.state !== "pending_undo") illegal();
+      if (!(at >= card.undoDeadlineMs)) {
         fail("undo_window_open", "the undo window is still open — the write must not have fired yet");
       }
       return moved({ state: "dispatched", firedAtMs: at, pickedSuggestion: undefined, undoDeadlineMs: undefined });

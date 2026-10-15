@@ -10,6 +10,14 @@
  * in bridge.mjs (reads 3x; writes only on no-response with the same
  * idempotency key). `err.gotResponse` distinguishes "no response" (safe to
  * retry a write) from "response received" (never retry a write).
+ *
+ * A retry of a write must be a retransmission of the SAME request, not a
+ * new one: callers pass `opts.requestId` (for writes, the logical call's
+ * idempotency key) and every attempt reuses it, so the wire request id is
+ * the dedupe key a server can collapse duplicates on. Generating a fresh
+ * id per attempt would make a retry whose predecessor actually executed
+ * (timeout after execution, response lost) indistinguishable from a new
+ * write, duplicating its side effects (#2868).
  */
 import { createConnection } from 'node:net';
 import { randomUUID } from 'node:crypto';
@@ -24,10 +32,10 @@ function cleanSocketError(err) {
 }
 
 export class HerdrSocketClient {
-  callOnce(socketPath, method, params, timeoutMs) {
+  callOnce(socketPath, method, params, timeoutMs, opts = {}) {
     assertSocketMethodAllowed(method);
     return new Promise((resolve, reject) => {
-      const id = randomUUID();
+      const id = opts.requestId ?? randomUUID();
       let buf = '';
       let settled = false;
       let gotResponse = false;

@@ -107,7 +107,15 @@ export async function exportAnalytics(db, sink, { hour, now = Date.now() } = {})
   const body = rows.map(lineOf).join("\n") + "\n";
   await target.put(key, body);
   const stamped = now;
-  db.prepare(`UPDATE analytics_events SET exported_at=? WHERE at>=? AND at<?`).run(stamped, window.start, window.end);
+  // Stamp only the rows that were actually exported (by id), not every row
+  // in the time window: a row backfilled into the same hour while the sink
+  // put awaited I/O was never sent, so it must stay unexported for a later
+  // run. Chunk the id list to stay under SQLite's bound-variable limit.
+  const exportedIds = rows.map(row => row.id);
+  for (let i = 0; i < exportedIds.length; i += 900) {
+    const chunk = exportedIds.slice(i, i + 900);
+    db.prepare(`UPDATE analytics_events SET exported_at=? WHERE id IN (${chunk.map(() => "?").join(",")})`).run(stamped, ...chunk);
+  }
   db.prepare(`INSERT INTO analytics_daily(day, metric, value) VALUES(?,?,?)
     ON CONFLICT(day, metric) DO UPDATE SET value = excluded.value`).run(window.date, "export_rows", rows.length);
   db.prepare(`INSERT INTO analytics_daily(day, metric, value) VALUES(?,?,?)

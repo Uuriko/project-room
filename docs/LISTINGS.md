@@ -57,4 +57,4 @@ The same check records three responses from `https://room.trydemigod.com`:
 | `/llms.txt` | HTTP 200 and the words Project Room |
 | `/.well-known/oauth-protected-resource` | HTTP 200. The route is not served, so the row is missing until a later change serves it |
 
-Machine-readable rows, including the URLs, are in [listings.json](listings.json).
+Machine-readable rows, including the URLs, are in [listings.json](../scripts/listings.json).
