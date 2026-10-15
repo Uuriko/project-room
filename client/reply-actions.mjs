@@ -101,7 +101,8 @@ export function replyRefusal(cause, { name, args = {} } = {}) {
       status: ax.status, reason: code, hint: message, next };
   }
   const allowed = ["invalid_reply_action", "reply_action_too_large", "invalid_reply_selection", "invalid_reply_cursor", "reply_request_not_found", "reply_context_unavailable",
-    "reply_cursor_identity_changed", "reply_history_changed", "reply_entry_too_large", "reply_list_too_large", "command_rejected", "idempotency_conflict", "invalid_command"];
+    "reply_cursor_identity_changed", "reply_history_changed", "reply_entry_too_large", "reply_list_too_large", "command_rejected", "idempotency_conflict", "invalid_command",
+    "channel_archived"];
   const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: allowed.includes(cause?.code) ? cause.code : "not_confirmed", message: cause?.message });
   return { type: "reply_refused", code: allowed.includes(cause?.code) ? cause.code : "not_confirmed",
     outcome: ["invalid_reply_action", "reply_action_too_large"].includes(cause?.code) ? "this_attempt_not_sent" : [409, 422].includes(cause?.status) ? "this_attempt_refused" : "not_confirmed",

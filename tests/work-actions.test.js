@@ -60,6 +60,26 @@ test("strict action inputs preserve null/omission, reject extras and bound comma
   assert.equal(validWorkArguments("room_acquire_claim", { ...claim, paths: ["a".repeat(513)] }), false);
 });
 
+test("work actions require a caller-supplied requestId so retries keep one command id", () => {
+  // Regression (issue #2862): requestId used to be optional in every work
+  // tool schema and buildWorkCommand silently substituted randomUUID() when
+  // it was absent or invalid. A retry after an uncertain result therefore
+  // minted a second command id, the server could not deduplicate, and the
+  // claim/completion/handoff was applied twice.
+  for (const tool of workTools) assert.ok(tool.inputSchema.required.includes("requestId"), `${tool.name} requires requestId`);
+  for (const [action, , args] of cases) {
+    const name = "room_" + action, omitted = structuredClone(args); delete omitted.requestId;
+    assert.equal(validWorkArguments(name, omitted), false, `${name} refuses a missing requestId`);
+    assert.throws(() => buildWorkCommand(name, omitted), { code: "missing_request_id" });
+    const invalid = { ...args, requestId: "constructor" };
+    assert.equal(validWorkArguments(name, invalid), false, `${name} refuses an invalid requestId`);
+    assert.throws(() => buildWorkCommand(name, invalid), { code: "missing_request_id" });
+    // A retry is the exact same input, so it rebuilds the exact same
+    // command: one id, one idempotency key, one application.
+    assert.deepEqual(buildWorkCommand(name, structuredClone(args)), buildWorkCommand(name, structuredClone(args)));
+  }
+});
+
 test("exact receipts bind operation fingerprint, event identity, cause, ordered arrays and omitted fields", () => {
   const command = buildWorkCommand("room_record_completion", { ...base, ...completion });
   assert.equal(confirmsAgentCommand(receipt(command), command, identity), true);
