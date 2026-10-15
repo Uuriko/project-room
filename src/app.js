@@ -6801,7 +6801,8 @@ humanPushUi = installHumanPush({
   prefs: {
     box: $("#human-push-prefs"),
     mention: $("#human-push-pref-mention"),
-    dm: $("#human-push-pref-dm")
+    dm: $("#human-push-pref-dm"),
+    decision: $("#human-push-pref-decision")
   },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
 });
