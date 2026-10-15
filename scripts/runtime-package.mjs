@@ -298,6 +298,7 @@ optional.push("src/referral-board.js"); // People-rail referral board (imports a
 optional.push("src/land-queue-board.js"); // Land-queue board card (imported by src/app.js)
 optional.push("src/open-questions-ui.js"); // Open-questions radar (imported by src/app.js)
 optional.push("src/retention-ui.js"); // Retention dashboard (imported by src/app.js)
+optional.push("src/bounty-board.js");
 optional.push("src/board-ui.js", "src/board-keyboard.mjs", "src/board-mine.js", "src/first-room-copy.js", "src/board.css"); // Tasks › Board (imported by src/app.js)
 optional.push("src/squads-ui.js");
 optional.push("server/room-export-html.mjs");
