@@ -38,6 +38,7 @@ import {
   FEEDBACK_ID_PATTERN,
 } from "./feedback-store.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { ownMember } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 
 export { createFeedbackStore, validateFeedback };
@@ -107,7 +108,7 @@ function feedbackAuthorityOptions(roomId, store) {
     isReviewer: lane => {
       const a = authority();
       if (!a || typeof lane !== "string") return false;
-      return lane === a.ownerId || a.members?.[lane]?.role === "moderator";
+      return lane === a.ownerId || ownMember(a.members, lane)?.role === "moderator";
     },
     isReleaseAuthority: lane => {
       const a = authority();

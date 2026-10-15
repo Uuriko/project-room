@@ -13,7 +13,7 @@
 // second effect. tests/wake-queue.test.js proves the restart path.
 
 import { createHash } from "node:crypto";
-import { validId } from "../src/events.js";
+import { ownMember, validId } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { wakeQueueLimits as limits } from "./wake-queue-limits.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -104,7 +104,7 @@ export class WakeQueue {
     const authority = this.store.roomAuthority(roomId);
     if (!this.mayGovernWakes(auth, roomId, authority)) fail(403, "wake_pause_not_permitted", "You can pause your own wakes. Pausing another member requires the room owner or manage members.");
     if (!Object.hasOwn(authority.members, memberId)) fail(404, "member_not_found", "Unknown member");
-    if (change && authority.members[memberId].active === false) fail(409, "member_inactive", "This member's access has ended; its pause row is inert");
+    if (change && ownMember(authority.members, memberId).active === false) fail(409, "member_inactive", "This member's access has ended; its pause row is inert");
     return memberId;
   }
   pausedMembers(roomId) {

@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto";
 import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
-import { validId } from "../src/events.js";
+import { ownMember, validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
@@ -160,7 +160,7 @@ function projectRoom(store, roomId, memberId, identityId) {
   const flags = { mentions: false, peerDms: false, claims: false, invites: false, accessRequests: false, wakes: false };
   const room = store.room(roomId);
   const state = room.state;
-  const member = state.members?.[memberId];
+  const member = ownMember(state.members, memberId);
   if (!member || member.active === false) return { items: [], flags, skipped: true };
   const ownerId = state.room?.ownerId ?? null;
   const owner = memberId === ownerId;
@@ -303,7 +303,7 @@ function projectRoom(store, roomId, memberId, identityId) {
     ).all(roomId, memberId);
     for (const row of rows) {
       const event = JSON.parse(row.body), data = event.data ?? {};
-      const joined = state.members?.[data.memberId];
+      const joined = ownMember(state.members, data.memberId);
       if (!joined || joined.active === false) continue;
       const at = iso(event.at);
       items.push(draft({
@@ -445,7 +445,7 @@ function accountRooms(store, accountId) {
   const rows = store.db.prepare("SELECT room_id AS roomId, member_id AS memberId FROM member_accounts WHERE account_id=?").all(accountId);
   return rows.filter(row => {
     try {
-      const member = store.roomAuthority(row.roomId).members?.[row.memberId];
+      const member = ownMember(store.roomAuthority(row.roomId).members, row.memberId);
       return member && member.active !== false;
     } catch { return false; }
   });

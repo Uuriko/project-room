@@ -4,7 +4,7 @@
 // there for those time-based steps. This slice does not.
 //
 // ACT-1b waits on S1, RT, and GR2 deployed. ACT-3b humanClaimUrl waits on S1 and C.
-import { EVENT_TYPES, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES, isRoomArchived, ownMember } from "../src/events.js";
 import { claimWork, updateWork } from "./work-claims.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ROOM_GUIDE_ID, appendRoomEvent, stableEventId } from "./receipt-cards.mjs";
@@ -103,7 +103,7 @@ function step(store, roomId, now) {
   const room = store.room(roomId);
   const state = room.state;
   if (!state?.room?.starterSeeded || isRoomArchived(state)) return null;
-  const guide = state.members?.[ROOM_GUIDE_ID];
+  const guide = ownMember(state.members, ROOM_GUIDE_ID);
   if (!guide || guide.active === false) return null;
   const registry = store.workClaims;
   if (!registry) return null;

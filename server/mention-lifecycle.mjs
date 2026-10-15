@@ -1,4 +1,4 @@
-import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { MAX_MESSAGE_BODY_CHARS, ownMember } from "../src/events.js";
 
 // #658: mention lifecycle tracking — pure state machine, mention schema,
 // and member-resolution helper. Dependency-free and unit-testable without
@@ -220,7 +220,7 @@ export function mentionTargetWarnings(members, identityNames, text, senderMember
   if (typeof text !== "string" || text.length === 0 || text.length > MAX_MESSAGE_BODY_CHARS) return [];
   const candidates = mentionCandidates(members, identityNames);
   const displayOf = memberId => {
-    const name = members?.[memberId]?.displayName;
+    const name = ownMember(members, memberId)?.displayName;
     return typeof name === "string" && name.trim() ? name : memberId;
   };
   const lowerText = text.toLowerCase(), warnings = [], seen = new Set();

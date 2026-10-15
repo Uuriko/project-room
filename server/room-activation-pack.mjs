@@ -9,7 +9,7 @@
 // Reads the room projection through the store passed in; unknown rooms
 // surface the store's own 404 (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
-import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust } from "../src/events.js";
+import { pinnedMessages, roomKind, roomPolicy, WORK_STATES, roomTrust, ownMember } from "../src/events.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { buildOrient } from "./orient.mjs";
 import { availableClaimsInRoom } from "./available-work.mjs";
@@ -192,7 +192,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null) {
     eventCursor: sequence,
     generatedAt: now
   });
-  if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
+  if (typeof viewerId === "string" && viewerId && ownMember(state.members, viewerId)) {
     pack.orient = buildOrient(store, roomSlug, viewerId, { text: false });
   }
   return pack;
