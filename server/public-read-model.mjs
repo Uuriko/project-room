@@ -660,12 +660,39 @@ export function loadPublicRoom(store, slug) {
 }
 
 export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at FROM public_rooms ORDER BY slug ASC").all()
+  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all()
     .filter(row => !isUnpublished(store.db, "room", row.slug))
     .map(row => ({
       slug: row.slug,
       setAt: row.set_at,
+      receiptsEnabled: row.receipts_enabled === 1,
     }));
+}
+
+// What one public receipt actually proves, named by its source. Only a
+// work-claim receipt with a merge on it is server-verified: optedInRows
+// projects a claim solely after serverVerifiedMerge passed (the server's
+// own poll wrote pr_merged + syncedAt). A work-item receipt is the room's
+// own record of a completion. A public-work receipt records an artifact
+// hash; its checks are worker-reported (verification: "hash_only").
+export function proofLevelOf(receipt) {
+  if (receipt?.source === "work-claim" && receipt.mergedAt && receipt.pullRequest) return "server-verified-merge";
+  if (receipt?.source === "work-item") return "room-recorded-completion";
+  if (receipt?.source === "public-work") return "artifact-hash-recorded";
+  return "room-recorded";
+}
+
+// Every public receipt that belongs to one room, newest first — the proof
+// page's row set. Same room attribution as roomPageReceipts: rows naming
+// the room directly, plus the room's own work-claim / work-item receipts
+// (origin_room_id) which carry room_id only when the room is listed.
+// Operator unpublish applies here (HIDDEN_RECEIPT); the owner public-
+// receipts toggle is the receipts-live wrapper's job, like every other
+// public receipt read.
+export function roomProofRows(store, slug) {
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
+    WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
+    ORDER BY at DESC, id ASC`).all(slug, slug).map(rowToPublic);
 }
 
 // Newest-first page of receipts that name this room. `after` is the last row

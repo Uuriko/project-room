@@ -22,6 +22,7 @@ import {
   publicReceiptById as byIdUnderlying,
   listPublicReceiptSitemap as sitemapUnderlying,
   collectPublicReceipts as collectUnderlying,
+  roomProofRows as proofRowsUnderlying,
 } from "./public-read-model.mjs";
 
 export { PUBLIC_RECEIPT_ID, projectPublicWorkReceipt };
@@ -112,6 +113,13 @@ export function listPublicReceiptSitemap(store, limit) {
 
 export function collectPublicReceipts(store) {
   const receipts = collectUnderlying(store);
+  const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
+  return receipts.filter(receipt => !hidden.has(receipt.id));
+}
+
+// One room's proof-page rows with the owner toggle applied, newest first.
+export function queryRoomProof(store, slug) {
+  const receipts = proofRowsUnderlying(store, slug);
   const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
   return receipts.filter(receipt => !hidden.has(receipt.id));
 }

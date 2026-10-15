@@ -6,6 +6,27 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Per-room proof page
+
+`/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
+`project-room-public-room-proof/1`). It exists only when the room is
+publicly listed and its owner has public receipts on. It lists the room's
+own public receipts — the same records as above, through the same toggle
+and unpublish filters — and labels each with the level of proof its record
+carries:
+
+- **Server-verified merge** — a work claim this server recorded as merged
+  (`pr_merged` with `syncedAt`) before publishing. The strongest claim here.
+- **Room-recorded completion** — a completed work item with a receipt. The
+  room's own record; no server-verified merge backs it.
+- **Artifact hash recorded** — a public-work delivery whose artifact
+  sha256 was recorded at submission. Its checks are worker-reported
+  (`hash_only`): not an acceptance, not a payment.
+
+Every entry links to its `/receipts/<id>` record. No payment is proved on
+the proof page: bounty credit movements are proved by signed lot receipts,
+which are member-gated and have no public page.
+
 ## What is public
 
 - Public-work receipts are already public. They stay on this page.
