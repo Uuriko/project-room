@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { roomProofView, PROOF_LEVELS, PROOF_HONESTY } from "../server/proof-page.mjs";
+import { proofLevelOf } from "../server/public-read-model.mjs";
 
 const WCR = `wcr_${"ab".repeat(16)}`;
 const WIR = `wir_${"cd".repeat(16)}`;
@@ -72,6 +74,19 @@ async function raw(origin, path, { method = "GET", headers = {}, body } = {}) {
   const text = await res.text();
   return { status: res.status, headers: res.headers, text };
 }
+
+test("proofLevelOf names only what each record proves", () => {
+  const merged = { source: "work-claim", mergedAt: "2026-10-10T00:00:00.000Z", pullRequest: "https://github.com/Uuriko/project-room/pull/1" };
+  assert.equal(proofLevelOf(merged), "server-verified-merge");
+  // A work-claim record without a server-recorded merge never upgrades.
+  assert.equal(proofLevelOf({ source: "work-claim", mergedAt: null, pullRequest: null }), "room-recorded");
+  assert.equal(proofLevelOf({ source: "work-item" }), "room-recorded-completion");
+  assert.equal(proofLevelOf({ source: "public-work" }), "artifact-hash-recorded");
+  for (const level of Object.keys(PROOF_LEVELS)) assert.ok(PROOF_LEVELS[level].note.length > 0);
+  // The honesty block must never claim a payment proof.
+  assert.ok(PROOF_HONESTY.some(line => line.includes("No payment is proved")));
+  assert.equal(typeof roomProofView, "function");
+});
 
 test("proof page presents the room's results with honest proof levels", async t => {
   const { origin } = await serve(t);
