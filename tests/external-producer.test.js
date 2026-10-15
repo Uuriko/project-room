@@ -91,7 +91,7 @@ test("real MCP process preserves outside credit and exact completion retries acr
   assert.equal(result.result.receipt.externalProducer, args.externalProducer);
   assert.equal(result.result.receipt.producerAttribution, "external-reported");
   const after = f.store.snapshot(f.keys.producer, "commons");
-  assert.equal(after.sequence, before.sequence + 1); assert.equal(after.cursor, before.cursor);
+  assert.equal(after.sequence, before.sequence + 2); assert.equal(after.cursor, before.cursor); // completion + its board state_changed event (decision #10 cutover); the exact retry above added neither
   assert.deepEqual(after.state.members, before.state.members);
   assert.equal(after.state.workItems["test-handoff"].receipt.externalProducer, args.externalProducer);
   assert.equal(after.state.workItems["test-handoff"].verification, null);

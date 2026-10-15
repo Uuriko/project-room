@@ -38,6 +38,48 @@ test("join page is public: GET /join and /join/:code serve the page without auth
   }
 });
 
+test("join page consent and success screens stay short: form first, key behind a disclosure, no lecture", async t => {
+  // Grok P5 regression net (join-copy Intents 1, 2, 6). Asserted on the
+  // served doors only: /join.html is the unsubstituted asset, so the
+  // lecture/details assertions live here with the pages members open.
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
+    const html = await (await fetch(`${origin}${path}`)).text();
+
+    const consent = html.match(/<section id="join-consent"[\s\S]*?<\/section>/)?.[0];
+    assert.ok(consent, `${path} has the consent screen`);
+    // Intent 6: name + Join come first; the permissions move after the
+    // form, inside their disclosure; the identity-disclosure paragraph
+    // (joining-program copy, not Grok's) stays above the form.
+    const disclosureAt = consent.indexOf("Joining creates your Project Room identity");
+    const formAt = consent.indexOf('id="join-form"');
+    assert.ok(disclosureAt !== -1 && disclosureAt < formAt, `${path} keeps the identity disclosure above the form`);
+    const perms = consent.match(/<details class="join-permissions-details">[\s\S]*?<\/details>/)?.[0];
+    assert.ok(perms, `${path} wraps the permissions in a disclosure`);
+    assert.match(perms, /<summary>What you can do<\/summary>/, `${path} names the permissions disclosure`);
+    assert.ok(perms.includes('id="join-permissions"'), `${path} keeps the permission list inside the disclosure`);
+    assert.ok(formAt < consent.indexOf('id="join-permissions"'), `${path} puts the join form before the permissions`);
+    assert.ok(!consent.includes("As a member you"), `${path} drops the long permission lead-in`);
+
+    const success = html.match(/<section id="join-success"[\s\S]*?<\/section>/)?.[0];
+    assert.ok(success, `${path} has the success screen`);
+    // Intent 1: short heading, room demoted to a quiet hint line.
+    assert.match(success, /You&rsquo;re in, <span id="join-success-name">/, `${path} leads with the short success heading`);
+    assert.match(success, /<p id="join-success-room-line" class="form-hint"><span id="join-success-room">/, `${path} demotes the room name to a hint line`);
+    assert.ok(!success.includes("Welcome to"), `${path} drops the long welcome heading`);
+    // Intent 2: the one-time key sits inside its disclosure; the lecture
+    // paragraphs stay gone and the hint is one line.
+    const key = success.match(/<details class="join-key-details">[\s\S]*?<\/details>/)?.[0];
+    assert.ok(key, `${path} wraps the agent key in a disclosure`);
+    assert.match(key, /<summary>Agent key \(once\)<\/summary>/, `${path} names the key disclosure`);
+    assert.ok(key.includes('id="join-secret"'), `${path} keeps the key field inside the disclosure`);
+    assert.ok(key.includes('id="join-copy-secret"'), `${path} keeps the copy button inside the disclosure`);
+    assert.match(key, /Keep it like a password\./, `${path} keeps the one-line key hint`);
+    assert.ok(!success.includes("Save your access key too"), `${path} drops the save-your-key lecture`);
+    assert.ok(!success.includes("Anyone holding it"), `${path} drops the key-warning lecture`);
+  }
+});
+
 test("join page asset base follows the door", async t => {
   const { origin } = await serve(t);
   const root = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();
@@ -107,7 +149,7 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   })).json();
   assert.match(minted.code, /^RM-/);
 
-  const preview = await (await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`)).json();
+  const preview = await (await fetch(`${origin}/api/agent-invites/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: minted.code }) })).json();
   assert.equal(preview.roomId, roomId);
   assert.ok(Array.isArray(preview.permissions) && preview.permissions.length > 0);
   assert.ok(preview.expiresAt > Date.now());
@@ -120,11 +162,13 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal(joined.roomId, roomId);
   assert.equal(joined.via, "invite");
   assert.equal(typeof joined.identitySecret, "string");
-  // The invite branch hands out the room-scoped rak_ token, never the identity
-  // secret. It is named honestly as roomToken; identitySecret is the alias.
+  // #3380: the invite branch hands out the room-scoped rak_ token as
+  // roomToken AND the minted identity's durable secret, shown once, as
+  // identitySecret — without it the identity stranded when the token died.
   assert.equal(joined.credentialKind, "room_token");
   assert.match(joined.roomToken, /^rak_/);
-  assert.equal(joined.identitySecret, joined.roomToken);
+  assert.match(joined.identitySecret, /^pri_/);
+  assert.notEqual(joined.identitySecret, joined.roomToken);
   assert.equal(joined.roomToken, joined.mcpToken.credential);
   // Identity-wide routes refuse it with a reason that does not send the agent
   // off to mint a replacement identity.
@@ -136,6 +180,11 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
     assert.match(refusal.error.message, /room-scoped token/, path);
     assert.doesNotMatch(refusal.error.message, /self-mint/, path);
   }
+  // The shown-once identity secret is the durable credential: the
+  // identity-wide routes that refuse the room token accept it.
+  const rooms = await fetch(`${origin}/api/agent-rooms`, { headers: { Authorization: `Bearer ${joined.identitySecret}` } });
+  assert.equal(rooms.status, 200);
+  assert.ok((await rooms.json()).rooms.some(room => room.roomId === roomId));
   // Joining another room by share link also needs a real identity secret; the
   // room token gets the same honest refusal, not "Active agent identity required".
   const linkJoin = await fetch(`${origin}/api/share-links/join-agent`, {
@@ -154,7 +203,7 @@ test("full self-serve flow: mint invite, preview the consent screen, join by cod
   assert.equal((await created.json()).error.code, "room_token_not_identity");
 
   // The code is single-use: the join page's consent screen now reports it dead.
-  const previewAgain = await fetch(`${origin}/api/agent-invites/preview?code=${minted.code}`);
+  const previewAgain = await fetch(`${origin}/api/agent-invites/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: minted.code }) });
   assert.equal(previewAgain.status, 409);
 
   // Raw-code CLI redemption still works on a fresh invite.
@@ -251,6 +300,61 @@ test("join page no-JS fallback gives working, host-correct agent instructions", 
   assert.ok(!agentInstructions.includes("https://room.trydemigod.com"), "agent enrollment uses the self-hosted origin");
   assert.ok(!block.includes('"roomId":"muse-room"') && !block.includes("muse-room"), "no hardcoded room id");
   assert.match(block, /\/llms\.txt/, "points agents at the serving host's agent packet");
+});
+
+test("join page carries the code-entry card for humans holding a bare code (H-S3)", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/room/join"]) {
+    const html = await (await fetch(`${origin}${path}`)).text();
+    assert.match(html, /id="join-enter"/, `${path} has the code-entry card`);
+    assert.match(html, /id="join-enter-form"/, `${path} has the code-entry form`);
+    assert.match(html, /id="join-enter-code"/, `${path} has the code-entry input`);
+    assert.match(html, /id="join-enter-open"/, `${path} has the member open-room link for room mode`);
+  }
+});
+
+test("join page carries the consolidated request-access door", async t => {
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/room/join", "/rooms/commons"]) {
+    const html = await (await fetch(`${origin}${path}`, { headers: { Accept: "text/html" } })).text();
+    assert.match(html, /id="join-request"/, `${path} has the request-access card`);
+    assert.match(html, /id="join-request-form"/, `${path} has the request form`);
+    assert.match(html, /id="join-request-room"/, `${path} has the room field`);
+    assert.match(html, /id="join-request-name"/, `${path} has the name field`);
+    assert.match(html, /id="join-request-note"/, `${path} has the note field`);
+    assert.match(html, /id="join-request-referred"/, `${path} has the referrer field`);
+    assert.match(html, /id="join-request-submit"/, `${path} has the submit button`);
+    assert.match(html, /id="join-request-status"/, `${path} has the status line`);
+  }
+});
+
+test("room address serves the join page to browsers, JSON 404 to API clients (H-S1)", async t => {
+  const { origin } = await serve(t);
+  // A browser opening /rooms/<id> gets the join page (room mode), on both doors.
+  for (const path of ["/rooms/commons", "/rooms/johns-project-room", "/room/rooms/commons"]) {
+    const response = await fetch(`${origin}${path}`, { headers: { Accept: "text/html,application/xhtml+xml" } });
+    assert.equal(response.status, 200, path);
+    assert.match(response.headers.get("content-type"), /text\/html/);
+    const html = await response.text();
+    assert.match(html, /id="join-enter-form"/, `${path} serves the join entry`);
+    assert.ok(!html.includes("{{ASSET_BASE}}"), `${path} substitutes the asset base`);
+  }
+  // The www door's page points its assets at /room.
+  const doorHtml = await (await fetch(`${origin}/room/rooms/commons`, { headers: { Accept: "text/html" } })).text();
+  assert.match(doorHtml, /src="\/room\/src\/join\.js"/);
+  // HEAD works like GET without a body.
+  const head = await fetch(`${origin}/rooms/commons`, { method: "HEAD", headers: { Accept: "text/html" } });
+  assert.equal(head.status, 200);
+  assert.equal(await head.text(), "");
+  // Non-HTML clients keep the JSON 404 — no API route lives at /rooms/<id>.
+  const api = await fetch(`${origin}/rooms/commons`, { headers: { Accept: "application/json" } });
+  assert.equal(api.status, 404);
+  assert.match(api.headers.get("content-type"), /application\/json/);
+  // Writes are refused; multi-segment and malformed ids fall through to 404.
+  const post = await fetch(`${origin}/rooms/commons`, { method: "POST", headers: { Accept: "text/html" } });
+  assert.equal(post.status, 405);
+  const extra = await fetch(`${origin}/rooms/commons/extra`, { headers: { Accept: "text/html" } });
+  assert.equal(extra.status, 404);
 });
 
 test("join page loader cannot stick forever: external watchdog ships a no-invite fallback (#1608)", async t => {

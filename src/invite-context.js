@@ -92,14 +92,17 @@ export const PENDING_JOIN_KEY = "pr-pending-join";
 
 // #join/<token or legacy code> with optional purpose focus (#join/<token>/work/<id>
 // or /message/<id>). The fragment never leaves the browser, so the raw token
-// may touch sessionStorage only for the OAuth round-trip.
+// may touch sessionStorage only while a join attempt is live: the OAuth
+// round-trip, or the Join dialog before sign-in (mirrored at open, cleared
+// when the dialog settles; see share-links.js mirrorJoin).
 function isJoinFragment(value) {
   const token = typeof value === "string" && /^#join\/([^/?#]+)(\/(work|message)\/[^/?#]+)?$/.exec(value)?.[1];
   return Boolean(token && (INVITE_SECRET_PATTERN.test(token) || normalizeShareInviteCode(token)));
 }
 
-// Mirror the join fragment at OAuth-start so the round-trip cannot drop it.
-// Called only from the OAuth entry points — never on invitation preview.
+// Mirror the join fragment so a navigation that drops it cannot lose it:
+// at OAuth-start (the round-trip never carries the fragment) and while the
+// Join dialog holds the link before sign-in. Never on invitation preview.
 export function stashPendingJoin(storage, fragment) {
   if (!storage || !isJoinFragment(fragment)) return;
   try { storage.setItem(PENDING_JOIN_KEY, fragment); } catch { /* storage unavailable */ }
@@ -156,14 +159,12 @@ export function inviteRequestDoor(preview) {
   return { roomId: preview.roomId, roomTitle: preview.roomTitle || "Project Room" };
 }
 
-// The permissions a stranger asks for: what the dead invitation would have
-// granted, falling back to a minimal ask when the preview carries none. The
-// owner still chooses the final grant at decision time.
+// The permissions the consolidated request-access door asks for: a
+// minimal ask; the owner chooses the final grant at decision time.
+// (The dead-invite dialog used to ask for the dead invitation's own
+// permissions via a defaultRequestPermissions helper — retired with
+// its inline form in #3293 step 3: a dead grant is not a live intent.)
 export const FALLBACK_REQUEST_PERMISSIONS = Object.freeze(["accept_work"]);
-export function defaultRequestPermissions(preview) {
-  const fromInvite = Array.isArray(preview?.permissions) ? preview.permissions.filter(p => typeof p === "string" && p) : [];
-  return fromInvite.length ? fromInvite : [...FALLBACK_REQUEST_PERMISSIONS];
-}
 
 // Client-side mirror of the server's displayName/note limits, so the form
 // fails fast before any network call.

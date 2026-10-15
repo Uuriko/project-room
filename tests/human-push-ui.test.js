@@ -106,3 +106,44 @@ test('missing configuration, browser denial and server refusal never claim notif
   f.client.saveHumanPush = async () => ({ saved: false }); await f.ui.refresh();
   assert.equal(f.button.hidden, true); assert.match(f.note.textContent, /could|try|failed|unable/i);
 });
+
+test('a failed subscription is retried by a later refresh for the same member (#2977)', async t => {
+  const f = setup(t, { permission: 'granted' });
+  let attempts = 0;
+  f.client.saveHumanPush = async value => {
+    attempts++;
+    if (attempts === 1) return { saved: false }; // transient server refusal
+    f.saved.push(value); return { saved: true };
+  };
+  await f.ui.refresh();
+  assert.equal(attempts, 1);
+  assert.deepEqual(f.saved, []);
+  assert.match(f.note.textContent, /could|try|failed|unable/i);
+  // Without reset()/sign-out, a later refresh must retry subscribe() instead
+  // of returning at the resolvedFor guard as if the member were resolved.
+  await f.ui.refresh();
+  assert.equal(attempts, 2);
+  assert.equal(f.saved.length, 1);
+  assert.match(f.note.textContent, /mention/i);
+  // Once a subscription actually succeeds the member IS resolved: a further
+  // refresh must not subscribe again.
+  await f.ui.refresh();
+  assert.equal(attempts, 2);
+  assert.equal(f.saved.length, 1);
+});
+
+test('a thrown subscription error is retried by a later refresh for the same member (#2977)', async t => {
+  let registerAttempts = 0;
+  const f = setup(t, { permission: 'granted', register: () => {
+    registerAttempts++;
+    if (registerAttempts === 1) throw new Error('transient registration failure');
+    return f.registration;
+  } });
+  await f.ui.refresh();
+  assert.equal(registerAttempts, 1);
+  assert.deepEqual(f.saved, []);
+  await f.ui.refresh();
+  assert.equal(registerAttempts, 2);
+  assert.equal(f.saved.length, 1);
+});
+

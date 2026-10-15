@@ -44,7 +44,7 @@ test("POST /api/access-requests accepts referredBy null, omitted or text, and st
     const res = await post(origin, "/api/access-requests", {
       roomId, identityId: friend.identityId, displayName: `Ref ${label}`,
       requestedPermissions: ["accept_work"], note: null, ...extra,
-    });
+    }, friend.secret);
     assert.equal(res.status, status, `referredBy ${label} -> ${status}`);
     if (status === 201) assert.equal((await res.json()).status, "pending");
   }

@@ -107,8 +107,16 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let current = self.webView.url, RoomLocation.sameOrigin(current, self.origin) else { return }
-                // Existing shared owner revalidates availability without replaying writes.
-                self.webView.evaluateJavaScript("window.dispatchEvent(new Event('pageshow'))", completionHandler: nil)
+                // Wake recovery contract: the page is already loaded, so signal
+                // "shown again" with the platform event both web recovery
+                // handlers are written for. The session-restore lifecycle and
+                // the presence refresh in src/app.js run only when
+                // `event.persisted` is true; a bare Event('pageshow') carries
+                // persisted=false and was ignored by both, so wake recovery
+                // never fired. The restore lifecycle revalidates availability
+                // without replaying writes; ordinary page loads never receive
+                // this synthetic event and keep the handlers' persisted gate.
+                self.webView.evaluateJavaScript("window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))", completionHandler: nil)
             }
         }
         open(url)

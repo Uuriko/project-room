@@ -87,6 +87,25 @@ test("topMentionedAgents aggregates mention counts and orders descending", () =>
   ]);
 });
 
+test("allMentionedAgents keeps every mentioned agent while topMentionedAgents truncates", () => {
+  const collector = createCollector();
+  const record = (agentId, mentionCount) => {
+    const result = collector.record(ev("agent.mentioned", { roomId: "r1", messageId: `m-${agentId}`, mentionedAgentId: agentId, mentionCount }, "2026-09-11T10:00:00Z"));
+    assert.equal(result.ok, true, `fixture record failed: ${result.reason}`);
+  };
+  for (let i = 0; i < 10; i += 1) record(`agent-top-${i}`, 30);
+  record("agent-watched", 25);
+  const summary = summarize(collector);
+  assert.equal(summary.topMentionedAgents.length, DEFAULT_TOP_MENTIONED_AGENTS);
+  assert.equal(summary.topMentionedAgents.some(entry => entry.agentId === "agent-watched"), false);
+  assert.equal(summary.allMentionedAgents.length, 11);
+  assert.deepEqual(summary.allMentionedAgents.at(-1), { agentId: "agent-watched", mentions: 25 });
+  assert.deepEqual(summary.allMentionedAgents.slice(0, 10), summary.topMentionedAgents);
+  // An explicit topN caps only the top list, never the full list.
+  assert.equal(summarize(collector, { topN: 1 }).allMentionedAgents.length, 11);
+  assert.ok(Object.isFrozen(summary.allMentionedAgents));
+});
+
 test("topN caps the mentioned-agent list", () => {
   const summary = summarize(buildFixture(), { topN: 1 });
   assert.equal(summary.topMentionedAgents.length, 1);
