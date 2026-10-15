@@ -1,6 +1,6 @@
 import { RoomAgentClient, RoomClientError, assertServiceOrigin } from "../client/room-agent.mjs";
 import { agentConnectionFromEnvironment, connectionDiagnostic, ConnectionError } from "../client/agent-connection.mjs";
-import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
 
 // Library-only module: not directly executable. Invoke via:
 //   node scripts/agent-inbox.mjs doctor

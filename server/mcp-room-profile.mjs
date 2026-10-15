@@ -13,6 +13,9 @@ import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
+import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -38,7 +41,7 @@ import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./
 import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
-import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { withSpendCharge } from "./spend-grants.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -308,6 +311,7 @@ function validWakeArgs(name, args) {
   const selected = WAKE_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (name === "heartbeat_get" || name === "webhook_list") return true;
+  if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
       && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
@@ -321,7 +325,7 @@ function validWakeArgs(name, args) {
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
-  if (name === "heartbeat_ack") return validSignalIds(args.signalIds);
+  if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
   if (name === "wake_pause" || name === "wake_resume") {
     const reasonOk = args.reason === undefined || args.reason === null || typeof args.reason === "string" && args.reason.length <= 200;
     const memberOk = args.memberId === undefined || validId(args.memberId);
@@ -446,25 +450,14 @@ async function callLandTool(store, secret, name, args) {
 // Spend-primitive MVP (charge-then-forward): the tool is never invoked until
 // payment has settled against the agent's spend grant. Unpriced tools,
 // humans, and the room owner pass through untouched. A SpendGrantError means
-// refusal — the tool must not run. settle() after success, void() on any
-// failure; an idempotent duplicate retry is voided (the original call
-// already paid).
+// refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
+// single implementation of the settle/void contract — the REST doors run
+// the same helper, so a priced operation charges identically everywhere.
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
+  enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
-  const spend = chargeSpendBeforeCall(store, secret, name, args);
-  if (!spend) return dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
-  let result;
-  try {
-    result = dispatchRoomToolCall(store, secret, identity, name, args, agentRooms);
-  } catch (error) { spend.void(); throw error; }
-  return Promise.resolve(result).then(
-    value => {
-      if (value && typeof value === "object" && value.duplicate === true) spend.void();
-      else spend.settle();
-      return value;
-    },
-    error => { spend.void(); throw error; }
-  );
+  return withSpendCharge(store, secret, name, args,
+    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms));
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
@@ -539,7 +532,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
-    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.room(roomId).state.messages), auth.member.id);
+    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.redactionMessages(roomId)), auth.member.id);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
@@ -667,7 +660,7 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
-    next, pushConfigured: result.pushConfigured, reachability: result.reachability
+    next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {})
   };
 }
 
@@ -720,14 +713,38 @@ async function callWakeTool(store, secret, identity, name, args) {
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
     const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
-    if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
-    const result = store.agentHeartbeats.heartbeat({
-      agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification, workWakes: args.workWakes
-    });
-    return heartbeatReceipt(agentId, result);
+    // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
+    // API key gets the same pull-only guard and host namespace as HTTP.
+    {
+      const resolveAuth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } });
+      const initial = resolveAuth(null, MCP_WAKE_SCOPE);
+      const data = { ...args, mode, wakeUrl, cadenceSeconds, pushNotification };
+      if (initial.scopedKey) assertScopedKeyListener(store, initial.identityId, data);
+      else if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
+      return store.transaction(() => {
+        const auth = resolveAuth(null, MCP_WAKE_SCOPE);
+        if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+        const result = heartbeatWithListener(store, auth, data);
+        if (auth.scopedKey) result.host = { ...result.host, hostId: args.hostId };
+        return heartbeatReceipt(agentId, result);
+      });
+    }
   }
-  if (name === "heartbeat_get") return store.agentHeartbeats.statusOf(agentId);
-  if (name === "heartbeat_ack") return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds });
+  if (name === "heartbeat_get") {
+    // R269-1 v2: a room-scoped key reads the same scoped presence view as HTTP GET.
+    const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+    return auth.scopedKey ? scopedKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(agentId);
+  }
+  if (name === "heartbeat_ack") {
+    // R273-1: with or without a fencingToken, ack inside the credential's own
+    // scope like POST /api/agent-heartbeats/ack, so a room-scoped key cannot
+    // ack another room's wakes.
+    return store.transaction(() => {
+      const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+      if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null });
+    });
+  }
   if (name === "wake_pause") {
     const requestId = args.requestId ?? randomUUID();
     return store.wakeQueue.pause(secret, args.roomId, { requestId, reason: args.reason ?? null }, null, { memberId: args.memberId ?? null });
@@ -907,6 +924,11 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
         }
+        // R274-1: a webhook subscription fans out every room the identity is
+        // linked in, so hold API keys to webhooks:manage like /api/agent-webhooks.
+        if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
@@ -927,12 +949,53 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
  // wildcard rule in agent-plugin-routes.mjs.
 const MCP_INBOX_SCOPE = "mcp:inbox";
 const MCP_WAKE_SCOPE = "mcp:wake";
+const MCP_WEBHOOKS_SCOPE = "webhooks:manage";
 function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) return false;
   return (record.scopes ?? []).some(scope =>
     scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+// The HTTP room routes confine api-key callers to their stored scopes (reads
+// need rooms:read, writes need rooms:write; the room-route gate in
+// server/http.mjs). The hosted core-profile room tools call the same store
+// methods, so this gate, run in callRoomTool (the single funnel for them),
+// holds MCP to the same rule: a key without the matching scope gets 403
+// insufficient_scope instead of the member's full access. Owner identity
+// secrets and room credentials are not api keys and pass untouched. A key's
+// mcp:room:<id> scope only narrows which rooms it may reach (see
+// mcpRoomAllowlist); it grants no read or write by itself, and the onboarding
+// token carries rooms:read and rooms:write next to it.
+// Heartbeat, wake and webhook tools never reach callRoomTool; they run through
+// callWakeTool under the mcp:wake gate and are unchanged here.
+const MCP_ROOM_WRITE_TOOLS = new Set([
+  "room_create", "room_join",
+  "squads_create", "squads_update_members", "squads_disband",
+  "room_post_message", "room_react",
+  "add_land_item", "remove_land_item", "report_tip",
+  "room_put_file", "room_discard_file", "room_commit_file",
+  "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
+  "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
+  "dm_posted",
+]);
+export function mcpRoomToolScope(name) {
+  return MCP_ROOM_WRITE_TOOLS.has(name) ? "rooms:write" : "rooms:read";
+}
+function enforceMcpApiKeyRoomScope(store, secret, name, roomId) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
+  // A room-pinned key used on another room gets the same answer as REST and
+  // the full profile (store.authenticate), not a missing-scope answer.
+  const pinned = mcpRoomAllowlist(store, secret);
+  // room_create is the exception: a key can never create rooms, so it hears the
+  // real 401 room_token_not_identity from agentRooms.create, not a room limit.
+  if (pinned && name !== "room_create" && typeof roomId === "string" && !pinned.includes(roomId))
+    throw new ServiceError(403, "insufficient_scope", "This key is limited to its room");
+  const required = mcpRoomToolScope(name);
+  if (!required) return;
+  if (!mcpKeyGrantsScope(store, secret, required))
+    throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
 }
 
 function mcpRoomAllowlist(store, secret) {  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;

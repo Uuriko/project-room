@@ -247,7 +247,9 @@ function compare(actual, expected) {
 // Reconstruct only membership availability, work existence, messages and requests.
 // Unrelated historical work transitions may predate today's rules; do not replay
 // them to establish the request proof hidden behind a projection checkpoint.
-export function auditReplyRequests(state, history, checkpoint = null) {
+// archivedIds: messages moved out of the stored projection; the replay keeps them
+// (the checkpoint is a full copy) but the live state no longer does.
+export function auditReplyRequests(state, history, checkpoint = null, archivedIds = null) {
   const projected = { room: null, members: {}, workItems: {}, messages: [] }, posts = new Map(), ids = new Set();
   const ownMember = memberId => Object.hasOwn(projected.members, memberId) ? projected.members[memberId] : undefined;
   let checkpointChecked = !checkpoint;
@@ -330,5 +332,6 @@ export function auditReplyRequests(state, history, checkpoint = null) {
       compare(JSON.parse(checkpoint.projection), projected); checkpointChecked = true;
     }
   }
-  check(checkpointChecked); compare(state, projected);
+  check(checkpointChecked);
+  compare(state, archivedIds?.size ? { ...projected, messages: projected.messages.filter(message => !archivedIds.has(message.id)) } : projected);
 }

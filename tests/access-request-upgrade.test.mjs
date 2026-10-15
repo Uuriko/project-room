@@ -173,7 +173,7 @@ test("inactive or revoked memberships cannot file upgrades", async t => {
   }
 });
 
-test("HTTP upgrades and status require current identity-holder proof; admission stays public", async t => {
+test("HTTP upgrades, status and fresh admission require current identity-holder proof", async t => {
   const f = setup(t);
   const other = f.store.identities.create("Other Requester");
   const server = createRoomServer({ store: f.store });
@@ -204,7 +204,13 @@ test("HTTP upgrades and status require current identity-holder proof; admission 
   const status = await fetch(statusPath, { headers: { Authorization: `Bearer ${current.secret}` } });
   assert.equal(status.status, 200);
   assert.equal((await status.json()).status, "pending");
-  assert.equal((await post({ ...data, identityId: other.identityId, displayName: "Other Requester", requestId: "ar_public_join" })).status, 201);
+  // Issue #2912: fresh admission is not public either — filing under an
+  // identityId requires that identity's secret, and another identity's
+  // secret does not file in its name.
+  const joinData = { ...data, identityId: other.identityId, displayName: "Other Requester", requestId: "ar_public_join" };
+  assert.equal((await post(joinData)).status, 401);
+  assert.equal((await post(joinData, f.identity.secret)).status, 401);
+  assert.equal((await post(joinData, other.secret)).status, 201);
   assert.deepEqual(f.member().permissions, ["steer"]);
 });
 

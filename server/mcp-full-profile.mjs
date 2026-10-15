@@ -1,5 +1,6 @@
 import { RoomAssistant } from "./room-assistant.mjs";
 import { isAssistantTool } from "../client/assistant-tools.mjs";
+import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 // Hosted MCP full profile: the local stdio room tools, on the same URL as
 // the public join tools, behind Authorization: Bearer pri_….
@@ -10,7 +11,7 @@ import { OutsideAgents } from "./outside-agents.mjs";
 // Local attention tools stay off this URL: they read an operator directory.
 
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
-import { chargeSpendBeforeCall } from "./spend-grants.mjs";
+import { withSpendCharge } from "./spend-grants.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
@@ -19,13 +20,13 @@ import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
 
-import { prepareWork } from "../client/work-preparation.mjs";
+import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
 import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { workContextMarkdown, paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
+import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
@@ -91,7 +92,7 @@ async function roomMessages(store, secret, roomId, args, memberId) {
   const latest = args.latest ?? false;
   // Edit/delete redaction is per-event (projection-indexed), so applying it
   // per scanned page is equivalent to applying it to the whole log.
-  const currentMessages = store.room(roomId).state.messages;
+  const currentMessages = store.redactionMessages(roomId);
   const fetchPage = (cursor, pageLimit) =>
     redactEventPage(store.eventsAfter(secret, roomId, cursor, pageLimit), currentMessages);
   const mapMessage = ({ sequence, event }) => ({
@@ -158,6 +159,41 @@ function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
   if (denial) throw new ServiceError(denial.status, denial.code, denial.message);
 }
 
+// RC-2026-09-18-012 parity for the full-profile funnel (see the comment
+// in callHostedStdioTool): api-key callers need rooms:read for read tools
+// and rooms:write for write tools, mirroring the HTTP room-route gate.
+// Classification is explicit: every tool family that mutates room state
+// (help/reply/work/bounty writes, claims, assistant actions, outside-agent
+// directory writes) is a write; reads (room_read_*, room_list_*, trust
+// reads, bounty reads) default to rooms:read.
+const HOSTED_STDIO_WRITE_TOOLS = new Set([
+  "room_assistant_action",
+  "room_introduce_outside_agent",
+  "room_begin_work", "room_link_work_claim_pr", "room_set_member_claim_cap",
+  "room_post_draft", "room_close_work_claim",
+]);
+const HOSTED_STDIO_READ_BOUNTY_TOOLS = new Set([
+  "bounty_list", "bounty_read_balances", "bounty_read_history",
+]);
+function hostedStdioWriteTool(name) {
+  if (HOSTED_STDIO_WRITE_TOOLS.has(name)) return true;
+  if (isHelpTool(name)) return true;
+  if (isWorkTool(name)) return true;
+  if (isReplyTool(name)) return !replyRoute(name); // routed reply tools are reads
+  if (isBountyTool(name)) return !HOSTED_STDIO_READ_BOUNTY_TOOLS.has(name);
+  if (isTrustTool(name)) return false;
+  return false;
+}
+function enforceHostedStdioApiKeyScope(store, secret, name) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) throw new ServiceError(401, "unauthenticated", "Unknown, revoked, or expired API key");
+  const required = hostedStdioWriteTool(name) ? "rooms:write" : "rooms:read";
+  const granted = (record.scopes ?? []).some(scope =>
+    scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
+  if (!granted) throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
+}
+
 export async function callHostedStdioTool(store, secret, name, args) {
   // Spend-primitive MVP (charge-then-forward): same boundary as callRoomTool
   // in mcp-room-profile.mjs, adapted to this path's { value, isError }
@@ -167,9 +203,17 @@ export async function callHostedStdioTool(store, secret, name, args) {
   // throw, or unconfirmed outcome (never charge for a call whose outcome is
   // unknown); void an idempotent duplicate or idempotent replay (the
   // original call already paid).
+  // RC-2026-09-18-012 parity (same hole class as the core-profile room
+  // tools in mcp-room-profile.mjs): the HTTP routes confine api-key
+  // callers to rooms:read / rooms:write, but the hosted full-profile MCP
+  // tools never applied that gate — a scoped key with no room scopes
+  // could read boards, messages, claims and bounties over MCP while HTTP
+  // 403'd it. Classify explicitly: writes need rooms:write, everything
+  // else needs rooms:read.
   {
     const { roomId } = args;
     const auth = store.authenticate(secret, roomId);
+    enforceHostedStdioApiKeyScope(store, secret, name);
     enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
     // Denial hierarchy: autonomy outranks spend. t1_readonly and guest
     // agents keep their established denials (agent_readonly /
@@ -179,17 +223,12 @@ export async function callHostedStdioTool(store, secret, name, args) {
     if (tier === "t1_readonly" || isGuestAgentMemberId(auth.member.id))
       return dispatchHostedStdioTool(store, secret, name, args);
   }
-  const spend = chargeSpendBeforeCall(store, secret, name, args);
-  if (!spend) return dispatchHostedStdioTool(store, secret, name, args);
-  let outcome;
-  try {
-    outcome = await dispatchHostedStdioTool(store, secret, name, args);
-  } catch (error) { spend.void(); throw error; }
-  const value = outcome?.value;
-  if (outcome?.isError === true) spend.void();
-  else if (value && typeof value === "object" && (value.duplicate === true || value.idempotentReplay === true)) spend.void();
-  else spend.settle();
-  return outcome;
+  // The settle/void contract itself is withSpendCharge (spend-grants.mjs),
+  // shared with callRoomTool and the REST doors (#3269); this profile only
+  // adapts its { value, isError } outcome envelope to it.
+  return withSpendCharge(store, secret, name, args,
+    () => dispatchHostedStdioTool(store, secret, name, args),
+    { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
 async function dispatchHostedStdioTool(store, secret, name, args) {
@@ -315,20 +354,18 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
   }
   if (name === "room_read_work") {
-    const options = { includeSource: rest.includeSource ?? false, includeOffers: rest.includeOffers ?? false };
-    const context = rest.includeDiscussion ? await prepareWork({
-      workContext: (id, options) => store.workContext(secret, roomId, id, options),
-      workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options)
-    }, rest.workItemId, { ...options, discussionSince: rest.discussionSince }) : store.workContext(secret, roomId, rest.workItemId, options);
-    if (context.preparation?.nextRead) context.preparation.nextRead.arguments.roomId = roomId;
-    for (const request of context.replyRequestContext?.requests ?? []) request.nextRead.arguments.roomId = roomId;
-    if (context.replyRequestContext?.nextRead) context.replyRequestContext.nextRead.arguments.roomId = roomId;
-    if (!rest.brief) return { value: context, isError: false };
-    return { value: {
-      roomId: context.roomId, workItemId: context.work.id, revision: context.work.revision,
-      evaluatedThrough: context.evaluatedThrough, ...(context.toolFocus ? { toolFocus: context.toolFocus } : {}), brief: workContextMarkdown(context),
-      ...(context.preparation ? { preparation: context.preparation } : {})
-    }, isError: false };
+    try {
+      const value = await readWorkSelection({
+        workContext: (id, options) => store.workContext(secret, roomId, id, options),
+        workDiscussion: (id, options) => store.workDiscussion(secret, roomId, id, options),
+        workResult: (id, options) => store.workResult(secret, roomId, id, options)
+      }, rest, { hosted: true });
+      return { value, isError: false };
+    } catch (error) {
+      const value = workReadRefusal(error);
+      if (value) return { value, isError: true };
+      throw error;
+    }
   }
   if (name === "room_read_work_discussion") {
     return { value: store.workDiscussion(secret, roomId, rest.workItemId, {

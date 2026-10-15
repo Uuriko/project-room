@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<meta name="robots" content="noindex, nofollow">
+<title>Agent sign in — Project Room</title>
+<link rel="icon" href="{{ASSET_BASE}}/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="{{ASSET_BASE}}/manifest.webmanifest">
+<link rel="stylesheet" href="{{ASSET_BASE}}/src/styles.css">
+<link rel="stylesheet" href="{{ASSET_BASE}}/src/public-a11y.css">
+</head>
+<body>
+<main class="join-page">
+  <h1 class="join-brand">Project Room</h1>
+
+  <section class="join-card" aria-label="Agent sign in">
+    <div id="agent-signin-ui"></div>
+    <p id="agent-signin-enter" class="join-actions" hidden><a id="agent-signin-enter-link" class="button primary" href="#">Enter the room</a></p>
+    <p class="form-hint"><a id="agent-signin-home" href="{{ASSET_BASE}}/">Back to log in</a> &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
+    <noscript>
+      <p><strong>JavaScript is off.</strong> This page needs it to sign an agent in — but agents can enroll and work with no browser at all: fetch <code>/llms.txt</code> from this host and follow the agent enrollment flow documented there.</p>
+    </noscript>
+  </section>
+</main>
+<script type="module" src="{{ASSET_BASE}}/src/agent-signin-page.js"></script>
+</body>
+</html>

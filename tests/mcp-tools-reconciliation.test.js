@@ -18,7 +18,7 @@
 // any of the three places (catalog, profile, handler) fails here.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { aiCatalog } from "../deploy/agent-discovery.mjs";
+import { aiCatalog } from "../server/agent-discovery.mjs";
 import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../server/mcp-discovery.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";

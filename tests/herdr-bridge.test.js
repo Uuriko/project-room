@@ -34,6 +34,7 @@ function startFakeHerdr(socketPath, opts = {}) {
     calls: [], // {method, params, at}
     delayMs: 0,
     failConnect: false,
+    pingError: null,
     occupant: 'occ-1',
     panes: [{ paneId: 'pane-1', occupant: 'occ-1' }],
     subscribers: new Set(),
@@ -76,7 +77,9 @@ function startFakeHerdr(socketPath, opts = {}) {
   }
   function handle(method, params) {
     switch (method) {
-      case 'ping': return { ok: true, protocol: 22, herdrVersion: '0.0.0-test' };
+      case 'ping':
+        if (state.pingError) throw Object.assign(new Error('ping app error'), { code: state.pingError });
+        return { ok: true, protocol: 22, herdrVersion: '0.0.0-test' };
       case 'agent.start':
         return { paneId: 'pane-1', agentId: 'agent-1', occupant: state.occupant };
       case 'pane.read':
@@ -498,6 +501,61 @@ test('circuit breaker opens after 5 consecutive failures and probes back', async
     const afterProbe = await call();
     assert.ok([502, 503, 504].includes(afterProbe), 'probe attempted through half-open');
   } finally {
+    await b2.stop();
+  }
+});
+
+test('half-open probe failing with a non-transport error does not wedge the breaker', async () => {
+  // Regression (#2866): a probe claimed via canCall() that then failed with
+  // an application error (pane_not_found — proof the server is live) ran
+  // neither recordSuccess nor recordFailure, leaking halfOpenProbe=true and
+  // wedging the tenant's breaker open forever.
+  const dir2 = mkdtempSync(join(tmpdir(), 'herdr-bridge-cb-probe-'));
+  const tenantsFile2 = join(dir2, 'tenants.json');
+  const { writeFileSync } = await import('node:fs');
+  const socketPath = join(dir2, 'live.sock');
+  writeFileSync(tenantsFile2, JSON.stringify({ tenants: {
+    'tenant-a': { socketPath, uid: process.getuid?.() ?? 1000, workspaceRoot: dir },
+  }}));
+  const b2 = createBridge({
+    port: 0, bind: '127.0.0.1', masterSecret: MASTER, keyId: KEY_ID,
+    tenantsFile: tenantsFile2, auditLog: join(dir2, 'audit.jsonl'),
+    // A 1s open window (not the 250ms used above): the "breaker is open"
+    // assertion below must not race the window under full-suite load.
+    timeouts: { ping: 100 }, circuitOpenMs: 1_000,
+  });
+  await b2.start();
+  const base2 = `http://127.0.0.1:${b2.port}`;
+  const h = authed();
+  const call = () => fetch(`${base2}/v1/ping`, { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: '{}' })
+    .then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+  let live = null;
+  try {
+    // Trip the breaker: five logical transport failures against a dead socket.
+    for (let i = 0; i < 5; i++) {
+      const r = await call();
+      assert.ok([502, 504].includes(r.status), `failure ${i} should be a transport failure, got ${r.status}`);
+    }
+    assert.equal((await call()).status, 503, 'breaker is open after five failures');
+
+    // The server comes back, but the probe call itself fails with an
+    // application error: the server answered, so it is live.
+    live = await startFakeHerdr(socketPath);
+    live.state.pingError = 'pane_not_found';
+    await new Promise((r) => setTimeout(r, 1_200)); // past the open window
+    const probe = await call();
+    assert.equal(probe.status, 404, `probe should surface the application error, got ${probe.status}`);
+    assert.equal(probe.json.error.code, 'pane_not_found');
+
+    // The probe outcome must resolve the breaker: with the server now
+    // answering normally, the very next call goes through instead of
+    // failing fast as bridge_circuit_open forever.
+    live.state.pingError = null;
+    const recovered = await call();
+    assert.equal(recovered.status, 200, `breaker must not stay wedged after a non-transport probe failure, got ${recovered.status} (${recovered.json.error?.code ?? ''})`);
+    assert.equal(b2._internals.breaker.states.get(TENANT_A)?.halfOpenProbe, false, 'probe flag must not leak');
+  } finally {
+    live?.server.close();
     await b2.stop();
   }
 });

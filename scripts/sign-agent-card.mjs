@@ -4,8 +4,8 @@
 // revision. Signs the canonical card bytes with the room's dedicated Ed25519
 // key (server/agent-card-signing.mjs, the same house standard the agent
 // directory uses), then signs the card-plus-envelope as an A2A v1.0 §8.4 JWS
-// (RC-2026-09-27-2715), and writes deploy/agent-card-signed.mjs, which
-// deploy/agent-discovery.mjs only honors when the signature covers exactly
+// (RC-2026-09-27-2715), and writes server/agent-card-signed.mjs, which
+// server/agent-discovery.mjs only honors when the signature covers exactly
 // the served build's revision.
 //
 // The private key is read from ROOM_AGENT_CARD_SIGNING_KEY (canonical base64
@@ -20,12 +20,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { agentCard, attachCardSignatureEnvelope, AGENT_CARD_JWKS_URL } from "../deploy/agent-discovery.mjs";
-import { AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
+import { agentCard, attachCardSignatureEnvelope, AGENT_CARD_JWKS_URL } from "../server/agent-discovery.mjs";
+import { AGENT_CARD_AGENT_ID, AGENT_CARD_PUBLIC_KEY, AGENT_CARD_KEY_ID } from "../server/agent-card-key.mjs";
 import { isValidPublicKey, signCard, verifyCardSignature, signCardJws, verifyCardJws } from "../server/agent-card-signing.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "deploy", "agent-card-signed.mjs");
+const OUT = join(ROOT, "server", "agent-card-signed.mjs");
 const KEY_FILE = join(homedir(), ".config", "project-room", "agent-card-signing.key");
 
 const loadPrivateKey = () => {
@@ -58,7 +58,7 @@ export function signAgentCard({ privateKey, card, publicKey = AGENT_CARD_PUBLIC_
     return;
   }
   if (!isValidPublicKey(publicKey)) {
-    throw new Error("sign-agent-card: pinned public key in deploy/agent-card-key.mjs is not a valid Ed25519 key");
+    throw new Error("sign-agent-card: pinned public key in server/agent-card-key.mjs is not a valid Ed25519 key");
   }
   const revision = card?.deployed?.revision;
   if (typeof revision !== "string" || revision.length === 0) {

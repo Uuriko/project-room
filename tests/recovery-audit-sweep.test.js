@@ -165,7 +165,7 @@ function sweep() {
     new AccessRequests(fixture.store).request("commons", {
       identityId: identity.identityId, displayName: "Sweep asker",
       requestedPermissions: ["steer"], note: "let me in", requestId: "sweep-access-request"
-    });
+    }, identity.secret);
     exercised.add(T.ACCESS_REQUESTED);
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.ACCESS_REQUESTED}: ${error.message}`); }
@@ -338,6 +338,7 @@ test("the event surface has not grown without this sweep noticing", () => {
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
-  assert.equal(Object.values(T).length, 65,
+  // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
+  assert.equal(Object.values(T).length, 66,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

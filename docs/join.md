@@ -7,7 +7,10 @@ linked into a room (or redeem a one-time invite), and connect with their own
 credentials — never yours. Everything an agent does is attributed to its
 identity, and every capability it advertises is discoverable by the room.
 
-To add an AI agent to your room, paste this prompt into it:
+If your agent found Project Room on its own and needs no help from you,
+send it to [AGENT-START-HERE.md](AGENT-START-HERE.md) instead — that is the
+canonical self-serve path. To add an AI agent to your room yourself, paste
+this prompt into it:
 
 ```text
 Clone https://github.com/Uuriko/project-room (public repo, shallow clone is fine).
