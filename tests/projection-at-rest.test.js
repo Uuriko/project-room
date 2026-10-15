@@ -177,6 +177,69 @@ test("turning it off writes full bodies back on the next write", t => {
   assert.equal(room.bodies().length, 0, "rows are released once nothing references them");
 });
 
+// --- Source pins -----------------------------------------------------------
+// Both pins scan whole files, never single lines: a check, its fail() call,
+// an SQL string, and its .run(...) routinely wrap across lines (the style
+// already used at server/access-requests.mjs:554), and a per-line scan that
+// requires co-location on one physical line is bypassed by that ordinary
+// formatting (issue #2901). The scanners are pure functions of source text so
+// the regression test below can pin them against synthetic fixtures.
+
+function serverSources() {
+  const serverDir = fileURLToPath(new URL("../server/", import.meta.url));
+  const files = [];
+  const walk = dir => { for (const name of readdirSync(dir)) { const path = join(dir, name); if (statSync(path).isDirectory()) walk(path); else if (path.endsWith(".mjs")) files.push(path); } };
+  walk(serverDir);
+  return files.map(path => ({ label: path.slice(serverDir.length), source: readFileSync(path, "utf8") }));
+}
+
+const lineNumberAt = (source, index) => source.slice(0, index).split("\n").length;
+
+// The fail() rejecting a projectionBytes check may sit on following lines and
+// its message may be wrapped or concatenated, so search a window of source
+// after each cap token for the first pilot_limit fail and check its message.
+// Cap uses that do not reject with a 409 (continue, return, headroom math)
+// have no such fail in the window and are not offenders.
+const CAP_FAIL_PATTERN = /fail\(\s*409\s*,\s*["']pilot_limit["']\s*,\s*((?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)(?:\s*\+\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`))*)/;
+const RECOVERY_PATTERN = /room owner|ask its owner|try again later/i;
+
+function projectionCapOffenders(label, source) {
+  const offenders = [];
+  const reported = new Set();
+  let index = source.indexOf("PILOT_LIMITS.projectionBytes");
+  while (index !== -1) {
+    const fail = CAP_FAIL_PATTERN.exec(source.slice(index, index + 1000));
+    if (fail && !RECOVERY_PATTERN.test(fail[1]) && !reported.has(index + fail.index)) {
+      reported.add(index + fail.index);
+      offenders.push(`${label}:${lineNumberAt(source, index + fail.index)}`);
+    }
+    index = source.indexOf("PILOT_LIMITS.projectionBytes", index + 1);
+  }
+  return offenders;
+}
+
+// A rooms.projection write bypasses the serializer when its statement (up to
+// the terminating ";") stringifies state inline, or when a `projection`
+// binding is assigned a direct JSON.stringify — in either formatting, on one
+// line or wrapped across several.
+function serializerOffenders(label, source) {
+  const offenders = [];
+  let match;
+  const writePattern = /(?:UPDATE\s+rooms\s+SET|INTO\s+rooms\s*\()/g;
+  while ((match = writePattern.exec(source)) !== null) {
+    const end = source.indexOf(";", match.index);
+    const statement = source.slice(match.index, end === -1 ? match.index + 1000 : Math.min(end + 1, match.index + 1000));
+    if (/projection/.test(statement) && /JSON\.stringify\(/.test(statement)) {
+      offenders.push(`${label}:${lineNumberAt(source, match.index)}`);
+    }
+  }
+  const directPattern = /\b(?:const|let|var)\s+projection\s*=\s*JSON\.stringify\(/g;
+  while ((match = directPattern.exec(source)) !== null) {
+    offenders.push(`${label}:${lineNumberAt(source, match.index)}`);
+  }
+  return offenders;
+}
+
 test("every PILOT_LIMITS.projectionBytes 409 names a recovery (no dead-end cap message)", () => {
   // 2026-10-07 muse-room incident follow-up: PR #1810 fixed the 6
   // "Room projection limit reached" sites but left 7 sibling
@@ -184,33 +247,54 @@ test("every PILOT_LIMITS.projectionBytes 409 names a recovery (no dead-end cap m
   // share-links.mjs) rejecting with "Room storage limit reached" and no recovery.
   // Every projection-cap rejection must tell the user what to do, so a new site
   // added without recovery text fails this test.
-  const serverDir = fileURLToPath(new URL("../server/", import.meta.url));
   const offenders = [];
-  for (const name of readdirSync(serverDir).filter(file => file.endsWith(".mjs"))) {
-    const source = readFileSync(join(serverDir, name), "utf8");
-    source.split("\n").forEach((line, index) => {
-      if (!line.includes("PILOT_LIMITS.projectionBytes") || !line.includes('fail(409, "pilot_limit"')) return;
-      if (!/room owner|ask its owner|try again later/i.test(line)) offenders.push(`${name}:${index + 1}`);
-    });
-  }
+  for (const { label, source } of serverSources()) offenders.push(...projectionCapOffenders(label, source));
   assert.deepEqual(offenders, [],
     `projection-cap 409 without a named recovery: ${offenders.join(", ")}`);
 });
 
 test("every rooms.projection write goes through the serializer", () => {
-  const files = [];
-  const walk = dir => { for (const name of readdirSync(dir)) { const path = join(dir, name); if (statSync(path).isDirectory()) walk(path); else if (path.endsWith(".mjs")) files.push(path); } };
-  walk(new URL("../server", import.meta.url).pathname);
   const offenders = [];
-  for (const file of files) {
-    readFileSync(file, "utf8").split("\n").forEach((line, index) => {
-      const roomsWrite = /(UPDATE rooms SET|INTO rooms\()[^"`]*projection/.test(line) && /JSON\.stringify\(/.test(line);
-      const projectionText = /\bconst projection = JSON\.stringify\(/.test(line);
-      if (roomsWrite || projectionText) offenders.push(`${file}:${index + 1}`);
-    });
-  }
+  for (const { label, source } of serverSources()) offenders.push(...serializerOffenders(label, source));
   assert.deepEqual(offenders, []);
   assert.ok(BODY_AT_REST_MIN_CHARS >= 256);
+});
+
+test("the source pins catch multi-line code, not just single-line statements", () => {
+  // Regression for #2901: both pins used to scan line-by-line, so each shape
+  // below evaded them. The scanners must flag the multi-line bypasses, keep
+  // flagging the single-line ones, and stay quiet for legitimate code.
+  const multilineCap = [
+    "if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) {",
+    "  fail(409, \"pilot_limit\", \"Room storage limit reached; no data was changed.\");",
+    "}",
+  ].join("\n");
+  assert.deepEqual(projectionCapOffenders("fixture.mjs", multilineCap), ["fixture.mjs:2"]);
+  const singleLineCap = "if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, \"pilot_limit\", \"Room storage limit reached\");";
+  assert.deepEqual(projectionCapOffenders("fixture.mjs", singleLineCap), ["fixture.mjs:1"]);
+  const wrappedCapWithRecovery = [
+    "if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes)",
+    "  fail(",
+    "    409,",
+    "    \"pilot_limit\",",
+    "    \"Room projection limit reached; no data was changed. \" +",
+    "      \"Ask the room owner to raise the limit, or try again later.\");",
+  ].join("\n");
+  assert.deepEqual(projectionCapOffenders("fixture.mjs", wrappedCapWithRecovery), []);
+  const nonRejection = "if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;";
+  assert.deepEqual(projectionCapOffenders("fixture.mjs", nonRejection), []);
+  const multilineWrite = [
+    "db.prepare(\"UPDATE rooms SET sequence=?, projection=? WHERE id=?\")",
+    "  .run(sequence, JSON.stringify(state), roomId);",
+  ].join("\n");
+  assert.deepEqual(serializerOffenders("fixture.mjs", multilineWrite), ["fixture.mjs:1"]);
+  const multilineDirect = "const projection =\n  JSON.stringify(state);";
+  assert.deepEqual(serializerOffenders("fixture.mjs", multilineDirect), ["fixture.mjs:1"]);
+  const serializerWrite = [
+    "db.prepare(\"UPDATE rooms SET sequence=?, projection=? WHERE id=?\")",
+    "  .run(sequence, this.store.storedProjection(roomId, state), roomId);",
+  ].join("\n");
+  assert.deepEqual(serializerOffenders("fixture.mjs", serializerWrite), []);
 });
 
 test("incident 2026-10-07: the 4 MiB guard refuses growth and bodies-at-rest restores writes without losing text", t => {

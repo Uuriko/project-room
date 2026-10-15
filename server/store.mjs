@@ -1,5 +1,5 @@
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
-import { dmEventVisibility } from "./dm-event-visibility.mjs";
+import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
@@ -44,7 +44,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -90,7 +90,7 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
-import { mirrorProjectionClaim } from "./work-claim-mirror.mjs";
+import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -145,7 +145,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { AgentHeartbeats, agentHeartbeatSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
@@ -154,7 +154,7 @@ import {
   assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
-import { activitySchema, recordActivityEvents } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
+import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
@@ -546,6 +546,8 @@ const invitationSchema = `
     expires_at INTEGER NOT NULL,
     authenticated_until INTEGER,
     created_at INTEGER NOT NULL,
+    login_method_kind TEXT,
+    login_method_ref TEXT,
     CHECK(
       (account_id IS NULL AND account_auth_epoch IS NULL AND parent_credential_hash IS NULL AND authenticated_until IS NULL)
       OR
@@ -686,6 +688,13 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
+// Commands that name an existing message, and which field names it.
+const ARCHIVED_REF_FIELDS = Object.freeze({
+  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
+  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
+  [T.MESSAGE_POSTED]: "replyToId"
+});
+
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
@@ -704,7 +713,7 @@ const shapes = {
   // --- end GR2 ---
   [T.ROOM_ARCHIVED]: "reason",
   [T.OWNERSHIP_TRANSFERRED]: "toMemberId reason",
-  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy",
+  [T.MEMBER_ADDED]: "memberId displayName kind permissions accountableHumanId identityId agentType referredBy joinedVia",
   [T.MEMBER_ACCESS_CHANGED]: "memberId expectedMemberRevision permissions active",
   [T.MEMBER_STATUS_UPDATED]: "memberId message",
   [T.NOTIFICATION_PREFERENCES_SET]: "preferences",
@@ -812,6 +821,12 @@ export function validateCommand(command) {
     if (body.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
     if (!body.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
     if (/[\u202A-\u202E\u2066-\u2069]/u.test(body)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+    // r217 (reply-crew QA): ZWSP, Hangul filler and bare combining marks
+    // passed the trim() empty check, so a blank bubble posted and counted as
+    // unread. Refuse a body with no visible characters after stripping
+    // whitespace, default-ignorable code points and combining marks. ZWJ
+    // emoji, "e\u0301" and LRM/RLM marks keep working.
+    if (!body.replace(/[\s\p{Default_Ignorable_Code_Point}\p{M}]/gu, "")) fail(422, "invalid_command", "body must contain visible characters (whitespace, zero-width and combining-mark-only bodies are refused)");
   }
   if (messageBodyCommand && typeof command.data.body === "string" && command.data.body.length > MAX_MESSAGE_BODY_CHARS)
     fail(422, "invalid_command", `body must be at most ${MAX_MESSAGE_BODY_CHARS} characters`);
@@ -1020,6 +1035,20 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
     targets.set(dmId, "dm");
   }
+  // An in-thread reply to an agent's post wakes that agent the same way an
+  // @mention would: before this, a reply without an @name reached nobody
+  // and the agent never learned its post was answered. Targeted DMs already
+  // wake their recipient through the dm path above, and replies to a
+  // human's post stay on the human attention paths.
+  const replyToId = typeof data?.replyToId === "string" ? data.replyToId : "";
+  if (replyToId && !dmId) {
+    const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
+    const authorId = repliedTo?.authorId ?? "";
+    const author = authorId ? members[authorId] : null;
+    if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId && !targets.has(authorId)) {
+      targets.set(authorId, "mention");
+    }
+  }
   return targets;
 }
 
@@ -1042,7 +1071,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
-  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@1"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@2"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
@@ -1104,6 +1133,16 @@ const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_s
   projection_bytes INTEGER NOT NULL
 )`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+// #3334: tag an integrity failure with the sub-check that threw, so the job
+// layer can report WHICH check failed on the public health surface. Only the
+// sub-check name (a fixed enum in server/jobs.mjs) is attached — never record
+// ids, bodies, or other record content.
+export function tagIntegritySubcheck(error, subcheck) {
+  if (error && typeof error === "object" && !error.integritySubcheck) {
+    try { error.integritySubcheck = subcheck; } catch { /* frozen errors keep the generic classification path */ }
+  }
+  return error;
+}
 const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL,
@@ -1168,7 +1207,7 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1" } = {}) {
+    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1", workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     const coldStart = startColdStart();
@@ -1467,6 +1506,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
         this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
       }
+      // CX4 (targeted native-session revocation): account-session slots
+      // record the verified login method that authenticated them, so the
+      // account-session inventory can tell a native (desktop) session from
+      // a browser one. Additive nullable columns, no schema version bump;
+      // sessions minted before this shipped backfill NULL (method unknown).
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('account_session_slots') WHERE name='login_method_kind'").get()) {
+        this.db.exec("ALTER TABLE account_session_slots ADD COLUMN login_method_kind TEXT");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('account_session_slots') WHERE name='login_method_ref'").get()) {
+        this.db.exec("ALTER TABLE account_session_slots ADD COLUMN login_method_ref TEXT");
+      }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
       // room owner (no account) can be recorded honestly as the issuer.
@@ -1529,6 +1579,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
+      // Issue #2913: deployed wake-signal tables still carry the pre-room
+      // UNIQUE(agent_id, message_id); converge first (row-preserving
+      // rebuild), since IF NOT EXISTS cannot rewrite the stored DDL.
+      convergeWakeSignalRoomScope(this.db);
       this.db.exec(agentHeartbeatSchema);
       // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
       this.db.exec(workWakeSchema);
@@ -1832,6 +1886,38 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       phases.checksum = { ms: 0, rowsRead: 0 };
     }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
+    // Decision #10: backfill projection work items onto the work-claims
+    // board (server/work-item-board.mjs). Runs in both integrity modes —
+    // a deferred (Durable Object) database holds one room, so the pass is
+    // bounded there too; the versioned marker makes repeat opens a single
+    // marker read per room. "manual" defers the pass to an explicit
+    // backfillWorkItemClaims() call (tests staging a legacy corpus, or an
+    // operator-controlled rollout). A failing room never bricks the
+    // open: its marker stays behind and the next open retries it.
+    this.workItemBoardBackfillMode = workItemBoardBackfill;
+    if (workItemBoardBackfill !== "manual" && !this.readOnly) {
+      try {
+        this.workItemBoardBackfill = backfillAllRoomsWorkItemBoard(this, { nowMs: this.now() });
+        if (this.workItemBoardBackfill.errors.length > 0 || this.workItemBoardBackfill.diverged.length > 0) {
+          console.error(`work-item board backfill: ${this.workItemBoardBackfill.errors.length} error(s), ${this.workItemBoardBackfill.diverged.length} diverged item(s)`, JSON.stringify(this.workItemBoardBackfill).slice(0, 2000));
+        }
+      } catch (error) {
+        this.workItemBoardBackfill = { error: error?.message ?? String(error) };
+        console.error("work-item board backfill failed at open", error);
+      }
+    }
+  }
+
+  // Decision #10 operator/test surface: run (or re-run, with force) the
+  // workItems -> board-claims backfill, and read a room's shadow diff.
+  backfillWorkItemClaims({ force = false } = {}) {
+    return backfillAllRoomsWorkItemBoard(this, { nowMs: this.now(), force });
+  }
+  backfillRoomWorkItemClaims(roomId) {
+    return this.transaction(() => backfillRoomWorkItems(this, roomId, { nowMs: this.now() }));
+  }
+  workItemBoardDiff(roomId) {
+    return diffRoomWorkItems(this, roomId, { nowMs: this.now() });
   }
 
   coldStartExtra(deferIntegrity) {
@@ -1854,6 +1940,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.prepare(`INSERT INTO room_schema_stamp (singleton, version, stamp) VALUES (1, ?, ?)
       ON CONFLICT(singleton) DO UPDATE SET version=excluded.version, stamp=excluded.stamp`)
       .run(STORE_SCHEMA_VERSION, roomSchemaStamp());
+  }
+
+  // The current record of an archived message (no longer in the projection), else null.
+  archivedMessage(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    if (!row?.record_json) return null;
+    try { return JSON.parse(row.record_json); } catch { return null; }
+  }
+
+  // The projection messages plus a lookup for archived ones, for event-log redaction.
+  redactionMessages(roomId) {
+    const messages = [...this.room(roomId).state.messages];
+    Object.defineProperty(messages, "archivedLookup", { value: id => this.archivedMessage(roomId, id) });
+    return messages;
+  }
+
+  // [authorId, toMemberId] of an archived direct message, else null.
+  archivedDmParties(roomId, messageId) {
+    const row = archivedMessageRow(this.db, roomId, messageId);
+    return row && row.to_member_id ? [row.author_id, row.to_member_id] : null;
+  }
+
+  // The same lookup for one request: the archive marker is read once, on first
+  // use, instead of once per message id. Do not keep the reader across requests.
+  archivedDmPartiesReader(roomId) {
+    let marker = null;
+    return messageId => {
+      marker ??= archiveMarker(this.db, roomId);
+      const row = archivedMessageRow(this.db, roomId, messageId, marker);
+      return row && row.to_member_id ? [row.author_id, row.to_member_id] : null;
+    };
+  }
+
+  // Default-off compaction (dry run unless dryRun:false). See archiveRoomMessages.
+  archiveMessages(roomId, options = {}) {
+    return archiveRoomMessages(this, roomId, options);
   }
 
   // MSG-2: replay events into messages. Idempotent. A mid-batch stop keeps
@@ -1887,22 +2009,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // hibernated wake does not start at share links forever. Each step is the
   // same check the constructor used to run.
   async runDeferredIntegrityBatch({ deadline = Infinity, yieldBetween = async () => {} } = {}) {
+    // Step names double as the #3334 failure tags: when a step throws, the
+    // error carries the step's name so the health surface can name the
+    // failing sub-check instead of a bare "1 error(s) in tick".
     const steps = [
-      () => this.shareLinks.verify(),
-      () => this.agentConnections.verify(),
-      () => this.inbox.verify(),
-      () => this.email.verify(),
-      () => this.channelUpdates.verify(),
-      () => this.quarantineSplits.verify(),
-      () => verifyRoomLifecycle(this),
-      () => { if (!this.readOnly) this.identities.expireInactive(); },
-      () => this.backfillReferralDepth(500),
+      ["share_links", () => this.shareLinks.verify()],
+      ["agent_connections", () => this.agentConnections.verify()],
+      ["inbox", () => this.inbox.verify()],
+      ["email", () => this.email.verify()],
+      ["channel_updates", () => this.channelUpdates.verify()],
+      ["quarantine_splits", () => this.quarantineSplits.verify()],
+      ["room_lifecycle", () => verifyRoomLifecycle(this)],
+      ["identity_expiry", () => { if (!this.readOnly) this.identities.expireInactive(); }],
+      ["referral_depth", () => this.backfillReferralDepth(500)],
       // MSG-2: replay message events here, one budgeted batch per visit,
       // then check one caught-up room. This batch runs as the "integrity"
       // job in server/jobs.mjs, so the backfill inherits that job's cadence,
       // budget and runtimes without a second registry entry.
-      () => this.backfillMessages({ deadline }),
-      () => this.checkMessagesParity()
+      ["messages_backfill", () => this.backfillMessages({ deadline })],
+      ["messages_parity", () => this.checkMessagesParity()]
     ];
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
     if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
@@ -1917,7 +2042,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (ran > 0) remember(step);
         return { ran, next: step, budgetExceeded: 1 };
       }
-      steps[step]();
+      try {
+        steps[step][1]();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, steps[step][0]);
+      }
       step = (step + 1) % steps.length;
       ran += 1;
       await yieldBetween();
@@ -2034,7 +2163,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
-    const incremental = this.incrementalIntegrityCheck();
+    let incremental;
+    try {
+      incremental = this.incrementalIntegrityCheck();
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "incremental");
+    }
     if (incremental.ok) {
       await yieldBetween();
       if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
@@ -2050,25 +2184,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     await yieldBetween();
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
-    if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
-    const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
-    for (const id of ids) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-      this.verifyInvitationRecord(id);
-      await yieldBetween();
+    try {
+      const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
+      if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+      const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
+      for (const id of ids) {
+        if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+        this.verifyInvitationRecord(id);
+        await yieldBetween();
+      }
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "invitation_audit");
     }
     if (this.helpProjectionPresent()) {
       if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-      this.verifyHelpHistory();
+      try {
+        this.verifyHelpHistory();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, "help_history");
+      }
       await yieldBetween();
     }
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    try {
+      this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "snapshot");
+    }
     await yieldBetween();
-    const after = this.integrityChecksum();
-    this.writeIntegritySnapshot(after.text);
-    this.rememberIntegrityRoomState();
+    let after;
+    try {
+      after = this.integrityChecksum();
+      this.writeIntegritySnapshot(after.text);
+      this.rememberIntegrityRoomState();
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "snapshot");
+    }
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
@@ -2362,7 +2513,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // (account-deletion.mjs, "memberships"), so a deleted invitee has no
         // live membership to compare. The journal and projection matched above;
         // the joined event itself is still compared to the recorded invitation.
-        const retiredInvitee = !binding && this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0;
+        // The same holds for an invitee who left on their own and came back
+        // through a newer invitation: their old, inactive member gave up the
+        // binding, which now belongs to the new member in the same room.
+        const reboundInvitee = !binding && this.memberSelfLeft(stored.room_id, stored.intended_member_id, { members })
+          && Boolean(this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=? AND member_id<>?").get(stored.room_id, stored.intended_account_id, stored.intended_member_id));
+        const retiredInvitee = !binding && (this.db.prepare("SELECT active FROM accounts WHERE id=?").get(stored.intended_account_id)?.active === 0 || reboundInvitee);
         assertInvitationMembershipEvidence(stored, linked, binding, { sequence, state: { members } }, { retiredInvitee });
       }
       return replayed;
@@ -2678,12 +2834,33 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0));
     return value;
   }
-  // Phase 1a rollback: write every room back with full bodies in one
-  // transaction. The release trigger then empties projection_bodies.
+  // dm-consents: consent rows live in the dm_consents side table, but the
+  // requester/target pair needs a sequenced receipt so open sessions refresh
+  // live (12542). Mirrors the invitation-accept persist block: same pilot
+  // guards, same transaction as the caller's row write, so a throw rolls the
+  // consent change back with the event. Also the MSG-2/integrity replay rail:
+  // dm.consent_changed has a reducer no-op, so checkpoints replay clean.
+  appendSideTableEvent(roomId, event) {
+    const room = this.room(roomId);
+    refuseArchivedWrite(room.state);
+    if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+    let state;
+    try { state = compact(applyEvent(room.state, event)); }
+    catch (error) { fail(422, "invalid_side_table_event", error.message); }
+    const projection = this.storedProjection(roomId, state);
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    const sequence = room.sequence + 1;
+    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
+    this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    return sequence;
+  }
+  // Phase 1a/1b rollback: write every room back with full bodies and full
+  // message envelopes in one transaction. The release trigger then empties projection_bodies.
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%'").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+        restoreArchivedMessages(this, id);
         const state = this.room(id).state;
         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
         this._projectionCache?.clear?.();
@@ -2843,7 +3020,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!account.active) fail(403, "access_denied", "Active account required");
       if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Account access keys expire within 30 days");
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?").run(accountId);
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
     });
   }
@@ -2860,10 +3037,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const preserve = typeof preserveSlotToken === "string" && tokenPattern.test(preserveSlotToken) ? hash(preserveSlotToken) : null;
       if (preserve) {
         this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
+          parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
       } else {
         this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+          parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?`).run(accountId);
       }
     });
   }
@@ -2876,7 +3053,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         .run(accountId, accountId);
       // Retain slot tombstones referenced by immutable invitation receipts.
       this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+        parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?`).run(accountId);
     });
   }
   insertAccountCredential(accountId, expiresAt) {
@@ -2900,7 +3077,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=? AND hash != ?")
         .run(accountId, hash(keepToken));
       this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+        parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?`).run(accountId);
     });
   }
   // Revoke one specific account key (used to retire a minted-but-undelivered key).
@@ -3001,7 +3178,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
       const access = this.authenticateAccountAccessKey(accountAccessKey);
       const revision = expectedRevision + 1;
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='access-key',login_method_ref=NULL
         WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
       // Switching browser identity and retiring its former Room credential are one
       // commit. A storage failure must not report a rejected login after switching.
@@ -3034,8 +3211,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const revision = expectedRevision + 1;
       const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
       const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
-        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, slot.credentialHash, expectedRevision);
+      // CX4: persist the verified method on the slot itself (bounded,
+      // public data only — kind + the ref the login already treats as a
+      // public handle) so the session inventory can name how each live
+      // session signed in, native (desktop) sessions included.
+      const methodKind = method.kind.trim().slice(0, 64);
+      const methodRef = typeof method.ref === "string" && method.ref.trim() !== "" ? method.ref.trim().slice(0, 128) : null;
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind=?,login_method_ref=?
+        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, methodKind, methodRef, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);
@@ -3061,16 +3244,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!row || row.account_id === null) fail(409, "slot_not_authenticated", "Only an authenticated session slot can rotate its token");
       const token = key();
       this.db.prepare(`INSERT INTO account_session_slots
-        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at)
-        VALUES(?,?,?,?,?,?,?,?)`)
+        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at,login_method_kind,login_method_ref)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`)
         .run(hash(token), row.revision, row.account_id, row.account_auth_epoch, row.parent_credential_hash,
-          row.expires_at, row.authenticated_until, this.now());
+          row.expires_at, row.authenticated_until, this.now(), row.login_method_kind ?? null, row.login_method_ref ?? null);
       if (this.db.prepare("SELECT 1 FROM share_link_joins WHERE slot_hash=? LIMIT 1").get(slot.credentialHash)) {
         // Invitation receipts are immutable and retain this foreign key.
         // Leave an expired, unauthenticated tombstone: the old token cannot
         // resolve or authenticate, while its historical receipt stays valid.
         this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL,expires_at=? WHERE hash=?`).run(this.now(), slot.credentialHash);
+          parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL,expires_at=? WHERE hash=?`).run(this.now(), slot.credentialHash);
       } else {
         this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
       }
@@ -3104,7 +3287,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // exposed; the verified Google subject is the credential).
       const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
       const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='google',login_method_ref=NULL
         WHERE hash=? AND revision=?`).run(revision, accountId, accountAuthEpoch, parentCredentialHash,
         authenticatedUntil, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
@@ -3119,10 +3302,81 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const slot = this.accountSessionSlot(slotToken);
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing out");
-      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL
+      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL
         WHERE hash=? AND revision=?`).run(slot.credentialHash, expectedRevision).changes;
       if (changed !== 1) fail(409, "stale_session_revision", "Account session changed; refresh before signing out");
       return this.accountSessionSlot(slotToken);
+    });
+  }
+  // CX4: the public id of one account-session slot — a one-way derivation
+  // from the stored credential hash, so the session inventory can name a
+  // session without exposing anything that authenticates (the slot hash
+  // itself is never returned). Deterministic per slot row.
+  accountSessionPublicId(slotHash) {
+    return `acs_${hash(`account-session-id:${slotHash}`).slice(0, 24)}`;
+  }
+  accountSessionRows(accountId) {
+    return this.db.prepare(`SELECT s.*,c.revoked AS parent_revoked,c.expires_at AS parent_expiry,c.account_id AS parent_account_id,c.account_auth_epoch AS parent_account_auth_epoch,
+      a.active AS account_active,a.auth_epoch AS current_account_auth_epoch
+      FROM account_session_slots s LEFT JOIN account_credentials c ON c.hash=s.parent_credential_hash LEFT JOIN accounts a ON a.id=s.account_id
+      WHERE s.account_id=? ORDER BY s.created_at DESC, s.hash ASC`).all(accountId);
+  }
+  // The same validity window authenticateAccountSession enforces: the slot
+  // and its parent credential are both live, the credential belongs to the
+  // slot's account at the slot's epoch, and the account is active at its
+  // current epoch. A session outside this window does not authenticate, so
+  // it is neither listed nor revocable — it is already dead.
+  accountSessionRowLive(row, now) {
+    return row.expires_at > now && row.authenticated_until > now
+      && row.parent_revoked === 0 && row.parent_expiry > now
+      && row.parent_account_id === row.account_id && row.parent_account_auth_epoch === row.account_auth_epoch
+      && row.account_active === 1 && row.account_auth_epoch === row.current_account_auth_epoch;
+  }
+  // CX4 session inventory: the account's live account sessions — browser
+  // slots and native (desktop) sessions alike, since both are account-
+  // session slots (the desktop exchange retires its OAuth grant and keeps
+  // only the slot). The login method recorded at login time is what tells
+  // a native session from a browser one; sessions minted before methods
+  // were recorded report method null.
+  listAccountSessions(accountId, currentCredentialHash = null) {
+    if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
+    const now = this.now();
+    const sessions = [];
+    for (const row of this.accountSessionRows(accountId)) {
+      if (!this.accountSessionRowLive(row, now)) continue;
+      sessions.push(Object.freeze({
+        id: this.accountSessionPublicId(row.hash),
+        method: row.login_method_kind ?? null,
+        methodRef: row.login_method_ref ?? null,
+        createdAt: row.created_at,
+        authenticatedUntil: row.authenticated_until,
+        expiresAt: row.expires_at,
+        current: currentCredentialHash !== null && row.hash === currentCredentialHash
+      }));
+    }
+    return sessions;
+  }
+  // CX4 targeted revocation: end ONE of the account's live account
+  // sessions, named by its inventory id. The slot returns to anonymous
+  // exactly as a sign-out leaves it (its row survives for share-link
+  // receipt tombstones); no other session — browser, native, or OAuth —
+  // is touched, and the OAuth endpoints keep their own semantics. Returns
+  // 1 when a live session was revoked; 0 when the id is unknown, already
+  // dead, or belongs to another account, so the HTTP layer answers 404
+  // without distinguishing those cases (no probing). A malformed id
+  // (non-string, empty, or over 128 chars) throws 422 invalid_session_id
+  // instead of returning 0.
+  revokeAccountSession(accountId, sessionId) {
+    if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
+    if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > 128) fail(422, "invalid_session_id", "A session id is required");
+    return this.transaction(() => {
+      const now = this.now();
+      const row = this.accountSessionRows(accountId)
+        .find(candidate => this.accountSessionRowLive(candidate, now) && this.accountSessionPublicId(candidate.hash) === sessionId);
+      if (!row) return 0;
+      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL
+        WHERE hash=? AND revision=?`).run(row.hash, row.revision).changes;
+      return changed === 1 ? 1 : 0;
     });
   }
   authenticateAccountSession(token, roomId = null, expectedSessionBinding = null) {
@@ -3216,6 +3470,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!auth.account || auth.kind !== "session") fail(403, "account_session_required", "Invitation administration requires an account browser session");
     return auth;
   }
+  // The account's retained binding to a member who LEFT on their own (the last
+  // deactivation was the member's own act). Owner-removed members are not
+  // returned: a new invitation is not a way around a removal.
+  selfLeftBinding(roomId, accountId, state) {
+    const bound = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
+    return bound && this.memberSelfLeft(roomId, bound.member_id, state) ? bound.member_id : null;
+  }
+  // Inactive, and the last deactivation was the member's own act.
+  memberSelfLeft(roomId, memberId, state) {
+    if (state.members[memberId]?.active !== false) return false;
+    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.memberId')=? ORDER BY sequence DESC LIMIT 1")
+      .get(roomId, T.MEMBER_ACCESS_CHANGED, memberId);
+    const lastEvent = last ? JSON.parse(last.body) : null;
+    return Boolean(lastEvent) && lastEvent.data?.active === false && lastEvent.actorId === memberId;
+  }
   issueInvitation(accountSessionToken, roomId, details) {
     const {
       requestId, token, intendedAccountId, intendedMemberId, displayName, role, expiresAt,
@@ -3264,7 +3533,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const targetAccount = this.account(intendedAccountId);
       if (!targetAccount.active) fail(403, "access_denied", "Invitation target account is inactive");
       if (Object.hasOwn(room.state.members, intendedMemberId)) fail(409, "membership_conflict", "That Room member already exists");
-      if (this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, intendedAccountId)) fail(409, "membership_conflict", "That account already has a membership in this Room");
+      if (this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, intendedAccountId) && !this.selfLeftBinding(roomId, intendedAccountId, room.state)) fail(409, "membership_conflict", "That account already has a membership in this Room");
       if (this.db.prepare(`SELECT 1 FROM membership_invitations WHERE room_id=? AND status='pending' AND expires_at>? AND (intended_member_id=? OR intended_account_id=?) LIMIT 1`)
         .get(roomId, now, intendedMemberId, intendedAccountId)) fail(409, "invitation_conflict", "An active invitation already reserves that Room identity");
       if (this.db.prepare("SELECT 1 FROM membership_invitations WHERE token_hash=?").get(tokenHash)
@@ -3458,6 +3727,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         || !(room.state.room.ownerId === row.issuer_member_id || issuerMember.permissions.includes("manage_members"))) {
         fail(409, "invitation_authority_changed", "Inviter authority changed; ask a current Room administrator for a new invitation");
       }
+      // A member who left on their own comes back through a fresh invitation as
+      // a new member identity: their old, inactive member keeps its history but
+      // gives up the account binding (one binding per account per room).
+      const leftMemberId = this.selfLeftBinding(row.room_id, row.intended_account_id, room.state);
+      if (leftMemberId) this.db.prepare("DELETE FROM member_accounts WHERE room_id=? AND member_id=? AND account_id=?").run(row.room_id, leftMemberId, row.intended_account_id);
       if (Object.hasOwn(room.state.members, row.intended_member_id)
         || this.db.prepare("SELECT 1 FROM member_accounts WHERE room_id=? AND (member_id=? OR account_id=?) LIMIT 1").get(row.room_id, row.intended_member_id, row.intended_account_id)) {
         fail(409, "membership_conflict", "Invitation target already has a Room identity");
@@ -3509,7 +3783,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.agentConnections.revokeAccount(accountId);
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
       if (!active) this.reminders.retireAccount(accountId);
       return this.account(accountId);
@@ -3633,7 +3907,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // existing clients keep matching on them; only the message changes,
       // and only for expired (never revoked) guest credentials.
       if (!row.revoked && !row.parent_hash && row.expires_at <= this.now() && isGuestAgentMemberId(row.member_id)) {
-        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: self-serve guests re-run POST /api/guest-invites/request with a fresh signed joinRequest (a new requestId); invited guests ask the owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
+        fail(401, "unauthenticated", "Guest credential expired. It cannot be renewed \u2014 get a fresh pass: ask the room owner for a fresh invite code, then POST /api/guest-invites/redeem with the saved identity secret.");
       }
       fail(401, "unauthenticated", "Session or key expired or revoked");
     }
@@ -4170,10 +4444,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       // PRIV-2: a since_join reader sees no thread rooted before their join.
       const floor = this.historyFloor(roomId, auth.member.id);
-      const root = room.state.messages.find(m => m.id === messageId);
+      // Archived messages live only in the messages table; a DM there is shown to its parties only.
+      const archived = archivedThreadRecords(this.db, roomId, messageId)
+        .filter(m => !m.toMemberId || m.authorId === auth.member.id || m.toMemberId === auth.member.id);
+      const root = room.state.messages.find(m => m.id === messageId) ?? archived.find(m => m.id === messageId);
       if (!root || !messageInHistory(root, floor)) fail(404, "message_not_found", "Message not found");
       const byParent = new Map();
-      for (const m of room.state.messages) {
+      for (const m of [...archived, ...room.state.messages]) {
         if (!m.replyToId || !messageInHistory(m, floor)) continue;
         if (!byParent.has(m.replyToId)) byParent.set(m.replyToId, []);
         byParent.get(m.replyToId).push(m);
@@ -4212,7 +4489,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // a cursor is resolved, so a cursor can only point at a match this
         // caller would see anyway.
         const matches = [];
-        for (const m of room.state.messages ?? []) {
+        // Archived messages are not in the projection; they are older than every
+        // projected message, so they come first.
+        for (const m of [...archivedMatchingRecords(this.db, roomId, needle), ...(room.state.messages ?? [])]) {
           if (m.body == null) continue; // tombstone (deleted or redacted)
           if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
           if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
@@ -4338,19 +4617,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
+  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit });
+      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit, consistent, resumeToken });
       const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
-      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
+      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)
+        || window.basis && this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.basis.horizon)?.id !== window.basis.anchorId) fail(409, window.consistent ? "discussion_reset_required" : "discussion_history_changed", "Discussion history changed; restart after recovery");
       const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
+      const floor = this.historyFloor(roomId, auth.member.id, room.sequence);
+      const scope = window.consistent ? [roomId, workItemId, auth.member.id, auth.member.revision ?? 0, auth.credentialHash ?? null,
+        auth.account?.id ?? null, auth.account?.authEpoch ?? null, auth.sessionBinding ?? null, auth.sessionRevision ?? null,
+        this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=1").get(roomId)?.id ?? null,
+        floor ? [floor.sequence, floor.at, [...floor.sameInstant].sort()] : null] : null;
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
         now: this.now(), metadata, window, anchorId, cursor,
-        floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
+        floor, scope }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -4363,7 +4648,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       let value;
-      try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId }); }
+      try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId, viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, room.sequence) }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
@@ -4427,8 +4712,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
-      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events);
+      const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, this.archivedDmPartiesReader(roomId));
       const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
+        && dmConsentEventVisible(row.event, viewerId, isOwner)
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
@@ -4543,15 +4829,46 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // shown only to that message's two parties. A database from before the
   // #658 schema has no mention_states table and simply has no mentions.
   openDirectMentions(roomId, memberId, limit = 50, nowMs = this.now(), window = null) {
-    let rows;
+    // R211-1: the event log holds the body as originally posted; the live
+    // projection is the current state. A mention deleted after posting must
+    // not surface at all (it listed a tombstone with a room_reply next step),
+    // and an edited mention must show its current body, not the pre-edit
+    // text. Messages missing from the projection fall back to the logged
+    // body, as the #2941 fix did for room DMs. Deleted rows are skipped
+    // inside the scan so they never consume one of the caller's limit slots.
+    let liveMessages = [];
+    try { liveMessages = this.room(roomId).state?.messages ?? []; } catch { /* unknown room: no overlay */ }
+    const currentById = new Map(liveMessages.map(message => [message.id, message]));
+    const rows = [];
     try {
-      rows = this.db.prepare(
+      const stmt = this.db.prepare(
         `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
            AND e.sequence>? AND e.sequence<=?
          ORDER BY e.sequence DESC LIMIT ?`
-      ).all(roomId, memberId, window?.after ?? 0, window?.through ?? Number.MAX_SAFE_INTEGER, limit);
+      );
+      // R211-1 v2 (John's Tab r213, 13063): `after` stays fixed and each
+      // refill tightens `through`. Advancing the cursor instead re-read the
+      // newest rows, because the query orders DESC and the cursor took the
+      // batch's lowest sequence: once a deleted mention forced a refill the
+      // list repeated items and dropped older ones.
+      const after = window?.after ?? 0;
+      let through = window?.through ?? Number.MAX_SAFE_INTEGER;
+      while (rows.length < limit) {
+        const want = limit - rows.length + 1;
+        const batch = stmt.all(roomId, memberId, after, through, want);
+        if (!batch.length) break;
+        const nextThrough = batch[batch.length - 1].sequence - 1;
+        for (const row of batch) {
+          const logged = JSON.parse(row.body);
+          const current = currentById.get(logged.data?.messageId ?? row.eventId);
+          if (current?.deletedAt) continue;
+          if (rows.length < limit) rows.push(row);
+        }
+        if (batch.length < want) break;
+        through = nextThrough;
+      }
     } catch (error) {
       if (/no such table/i.test(error?.message ?? "")) return [];
       throw error;
@@ -4574,7 +4891,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         messageId: event.data.messageId ?? null,
         replyToId: event.data.messageId ?? row.eventId,
         from: event.actorId,
-        body: event.data.body,
+        body: currentById.get(event.data.messageId ?? row.eventId)?.body ?? event.data.body,
         at: event.at,
         state: row.state !== "timed_out" && row.timeoutAt <= nowMs ? "timed_out" : row.state,
         channel: event.data.channelId ?? "general",
@@ -4604,8 +4921,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
       const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
-      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items); // SEC-19
+      const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, this.archivedDmPartiesReader(roomId)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
+        && dmConsentEventVisible(row.event, auth.member.id, isOwner)
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
@@ -4641,6 +4959,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   command(token, roomId, command, expectedSessionBinding = null) {
     validateCommand(command);
+    // #2951: a flood token spent below lives in an in-memory bucket that the
+    // command transaction cannot roll back, so remember the spend and refund
+    // it in the catch if anything after consume() fails — validation, the
+    // reducer, persistence, or the transaction commit itself.
+    let floodSpend = null;
+    try {
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
@@ -4671,7 +4995,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
-      this.roomFlood.consume(roomId, auth.member.id, command.type);
+      if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
+        floodSpend = { memberId: auth.member.id, type: command.type };
+      }
       if (command.causationId && !this.db.prepare("SELECT 1 FROM events WHERE room_id=? AND id=?").get(roomId, command.causationId)) fail(422, "invalid_cause", "Causation event must exist in this room");
       // bond.list is a read. It does not append a ledger event, so an archived
       // room can still answer it. Writes below still hit refuseArchivedWrite.
@@ -4679,8 +5005,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const listed = this.room(roomId);
         return { sequence: listed.sequence, duplicate: false, event: null, bonds: this.bonds.listForMember(roomId, auth.member.id) };
       }
-      const room = this.room(roomId);
+      let room = this.room(roomId);
       refuseArchivedWrite(room.state);
+      // The author or the Room owner can still delete an archived message: bring
+      // that one message back into the projection (it stays retained) and let the
+      // normal delete and redaction run. Anyone else falls through to the
+      // archived-message refusal below, which confirms nothing to a non-party.
+      if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
+        const archivedRow = archivedMessageRow(this.db, roomId, command.data.messageId);
+        if (archivedRow && (archivedRow.author_id === auth.member.id || room.state.room?.ownerId === auth.member.id)
+            && restoreArchivedMessage(this, roomId, command.data.messageId)) room = this.room(roomId);
+      }
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a
@@ -4750,6 +5085,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
+      // Archived messages are not in the projection, so the reducer cannot change
+      // them or thread under them. Refuse with a clear error. A DM the actor is
+      // not a party to reads like an unknown id, so nothing about it is confirmed.
+      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
+      if (archivedRef) {
+        const refId = command.data?.[archivedRef];
+        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
+          const archivedRow = archivedMessageRow(this.db, roomId, refId);
+          const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
+          // An archived message can still hold a pin (older archives did not retain pins).
+          // Unpinning is allowed for anyone who may see the message and refused, like a
+          // live DM, for a non-party; the reducer cannot check it without the message.
+          const stillPinned = command.type === T.MESSAGE_UNPINNED && (room.state.pins ?? []).some(pin => pin.messageId === refId);
+          if (archivedRow && stillPinned) {
+            if (!party) fail(422, "command_rejected", "Cannot unpin a direct message you are not a party to");
+          } else if (party) {
+            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
+          }
+        }
+      }
+      // A new post cannot reuse the id of an archived message: the reducer only
+      // sees the projection, so it would otherwise accept a second message under
+      // that id. Same refusal as a live duplicate; it reads the same for a DM.
+      if (command.type === T.MESSAGE_POSTED) {
+        const newId = command.data?.messageId || command.id;
+        if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
+            && archivedMessageRow(this.db, roomId, newId)) {
+          fail(409, "command_rejected", "Message already exists");
+        }
+      }
       // A reaction on a DM is shown to its parties and the answer would
       // confirm the private id, so a non-party is told "no such message".
       // Live admission only; reactions already in a log keep replaying.
@@ -4759,6 +5124,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
             && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
           fail(422, "command_rejected", "Reaction must reference a message in this Room");
+        }
+      }
+      // r233: after a block, the blocked member's edit of its own DM (a new
+      // body in the blocker's view) or reaction to the blocker's DM (a new
+      // activity event for her) is new contact in the denied direction, so it
+      // gets the same consent check as a fresh DM. Retracting a reaction and
+      // deleting stay open; reply requests are room-threaded and exempt.
+      if ((command.type === T.MESSAGE_EDITED || (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true))
+          && typeof command.data?.messageId === "string") {
+        const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
+        if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)) {
+          const otherParty = target.authorId === auth.member.id ? target.toMemberId
+            : target.toMemberId === auth.member.id ? target.authorId : null;
+          if (otherParty && otherParty !== auth.member.id) this.dmConsents.requireDmAllowed(roomId, auth.member.id, otherParty);
         }
       }
       // A reply joins its parent's thread. A DM's thread belongs to its two
@@ -4794,7 +5173,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             && (typeof command.data.toMemberId !== "string" || !command.data.toMemberId)
             && (dmAncestor.authorId === auth.member.id || dmAncestor.toMemberId === auth.member.id)) {
           const otherParty = dmAncestor.authorId === auth.member.id ? dmAncestor.toMemberId : dmAncestor.authorId;
-          if (typeof otherParty === "string" && otherParty) command.data.toMemberId = otherParty;
+          if (typeof otherParty === "string" && otherParty) {
+            command.data.toMemberId = otherParty;
+            // r232: the stamped reply is a DM, so it needs the same consent
+            // check a DM with an explicit toMemberId got above; otherwise a
+            // blocked member keeps reaching the blocker through an old thread.
+            this.dmConsents.requireDmAllowed(roomId, auth.member.id, otherParty);
+          }
         }
       }
       // Bond / peer DM. Room chat (message.posted) is unchanged and still
@@ -4912,10 +5297,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
         // Board is the claim authority the MCP tools share with /work-claims.
-        // Same transaction as the projection event: a handoff or supersede
-        // leaves a successor card, and a failed board write rolls the command back.
-        if (["claim.acquired", "claim.released", "claim.renewed", "work.handoff_recorded", "work.superseded"].includes(incoming.type)) {
-          mirrorProjectionClaim(this, roomId, auth.member.id, incoming);
+        // Same transaction as the projection event: decision #10's write-path
+        // cutover syncs the item's board claim from post-command state via
+        // the migration mapping (server/work-item-board.mjs) — the full
+        // lifecycle, not just the five events the frozen mirror translated
+        // (decision #34) — and a failed board write (caps, occupied
+        // successor) rolls the command back.
+        if (WORK_ITEM_BOARD_SYNC_TYPES.has(incoming.type)) {
+          syncWorkItemClaim(this, roomId, auth.member.id, incoming, state);
         }
         // MSG-1: double-write the messages table in this same transaction.
         // A throw here rolls the event back with the row. No read path uses
@@ -4949,12 +5338,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
-      // RC-2026-09-18-051: wake-on-mention. An @-mention or DM addressed to
-      // an offline wakeable agent enqueues a wake signal (delivered on the
-      // agent's next heartbeat) and journals an agent.wake webhook delivery
-      // for any subscription the agent registered. Runs in the same
-      // transaction as the message event, so a wake is never recorded
-      // without its triggering message.
+      // RC-2026-10-07: reaction-as-ack. The agent.wake payload's one-tap ack
+      // copy (WAKE_ACK_HINT) says "react 👍 to acknowledge", so an active
+      // reaction by a member marks THEIR OWN pending wake signals for that
+      // message delivered. Without this the same signal re-appears on every
+      // heartbeat poll after the member reacted (the phantom re-wake loop).
+      // Runs in the same transaction as the reaction event; never throws —
+      // an ack is best-effort and must not fail the reaction.
+      if (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true
+        && typeof command.data.messageId === "string") {
+        try { this.ackWakesOnReaction(roomId, auth.member.id, command.data.messageId); } catch {}
+      }
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
@@ -4981,10 +5375,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
       // (not the proposer, who is online by definition) get a pointer-only
       // POST when offline with a push subscription.
+      // #3257: the doorbell alone is fire-and-forget — its failures exist
+      // only as a counter, and the proposal expires after 7 days. Enqueue
+      // the durable wake signal first (same contract as mentions/DMs), so
+      // the party's next heartbeat/poll carries the proposal even when the
+      // doorbell misses.
       if (bondEffect?.eventType === "bond.proposed" && bondEffect.data) {
         const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
         for (const partyId of [agentAId, agentBId]) {
           if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
+            this.agentHeartbeats.enqueueWake({ agentId: partyId, kind: "bond",
+              roomId, messageId: typeof bondId === "string" ? bondId : incoming.id });
             this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
               roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
           }
@@ -5002,7 +5403,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Attention: write-time activity fan-out (mention/reply/thread_reply/
       // reaction). Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
-      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); } catch {}
+      // #3261: but it is no longer silent either. The fan-out is atomic
+      // per recipient set (see activity.mjs), the failure is logged and
+      // journaled durably, and the opportunistic replay below backfills
+      // the feed once the fault clears.
+      try { recordActivityEvents(this, roomId, state, auth.member.id, command, incoming); }
+      catch (error) {
+        console.error(`activity fan-out failed for room ${roomId} event ${incoming.id}:`, error?.message ?? error);
+        try {
+          journalActivityFanoutFailure(this, { roomId, senderId: auth.member.id, command, incoming, error });
+        } catch (journalError) {
+          console.error(`activity fan-out failure journal failed for room ${roomId} event ${incoming.id}:`, journalError?.message ?? journalError);
+        }
+      }
+      try { retryActivityFanoutFailures(this, roomId); }
+      catch (error) { console.error(`activity fan-out retry failed for room ${roomId}:`, error?.message ?? error); }
       // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
       // score the legacy event-sourced work.completed receipt, journal the
       // would-be verdict, accept anyway. Runs in the same transaction as
@@ -5051,6 +5466,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
+    } catch (error) {
+      // The test doubles that replace roomFlood expose only consume(), so a
+      // missing refund (or a spend consume() did not report) means no refund.
+      if (floodSpend && typeof this.roomFlood.refund === "function") {
+        try { this.roomFlood.refund(roomId, floodSpend.memberId, floodSpend.type); }
+        catch { /* a refund failure must never mask the command's own error */ }
+      }
+      throw error;
+    }
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
@@ -5132,15 +5556,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
+  // RC-2026-10-07: reaction-as-ack. The agent.wake payload carries the
+  // one-tap ack hint "react 👍 to acknowledge" — honor it: an active
+  // reaction marks the REACTING member's own undelivered wake signals for
+  // that message delivered. Only their own signals are touched (a reaction
+  // is personal acknowledgment, never someone else's), and a member with
+  // no identity link or no pending signals for the message is a no-op.
+  // Defensive against pre-schema databases; never throws.
+  ackWakesOnReaction(roomId, memberId, messageId) {
+    let link = null;
+    try {
+      link = this.db.prepare(
+        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    } catch { return; }
+    if (!link?.identityId) return;
+    try {
+      this.db.prepare(
+        "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=? AND delivered_at IS NULL"
+      ).run(this.now(), link.identityId, roomId, messageId);
+    } catch { /* pre agent_wake_signals schema: nothing to ack */ }
+  }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
     const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    // Decision #25: trial seats receive mention wakes in their room. Guest
+    // members are seated through guest_members, never identity_links, so
+    // the identity_links-only lookup silently dropped every trial-seat
+    // wake. Fall back to the guest seat's identity. Deliberately local to
+    // this fan-out: identityIdForMember (the work-wake resolver) keeps
+    // NOT resolving guests — work wakes stay excluded for trial seats.
+    const guestLinkOf = this.db.prepare("SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=? AND member_id=?");
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId);
+      const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
       if (!link) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
@@ -5182,6 +5633,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         `UPDATE mention_states SET state='responded', decided_at=?
          WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
+      // An in-thread reply notifies the agent who wrote the replied-to
+      // message: without a row here the reply surfaced nowhere for that
+      // agent - no mention inbox entry and no wake. Targeted DMs already
+      // reach their recipient through the dm wake and needs-me dm kind, so
+      // only open-thread replies create a row. INSERT OR IGNORE dedupes
+      // against a direct @mention of the same author in the reply body;
+      // humans keep their existing attention paths.
+      const replyDmTarget = typeof data.toMemberId === "string" ? data.toMemberId : "";
+      if (!replyDmTarget) {
+        const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
+        const authorId = repliedTo?.authorId ?? "";
+        const author = authorId ? (state?.members ?? {})[authorId] : null;
+        if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId) {
+          const replyTimeoutMs = this.mentionTimeoutMsFor(roomId);
+          this.db.prepare(
+            `INSERT OR IGNORE INTO mention_states
+             (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
+             VALUES(?,?,?,?,?,?,NULL)`
+          ).run(roomId, eventId, authorId, "delivered", nowMs, nowMs + replyTimeoutMs);
+        }
+      }
     }
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return [];

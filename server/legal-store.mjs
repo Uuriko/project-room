@@ -129,6 +129,8 @@ export function isUnpublished(db, kind, target) {
   try {
     return Boolean(db.prepare("SELECT 1 FROM public_unpublish WHERE kind=? AND target=?").get(kind, target));
   } catch {
-    return false;
+    // Fail closed: when the unpublish state cannot be read, the content stays hidden.
+    // Answering "not unpublished" here would serve a room the operator took down.
+    return true;
   }
 }

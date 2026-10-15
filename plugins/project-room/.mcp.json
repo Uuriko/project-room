@@ -2,7 +2,7 @@
   "mcpServers": {
     "project-room": {
       "type": "http",
-      "url": "https://www.getdasha.com/room/mcp",
+      "url": "https://room.trydemigod.com/mcp",
       "headers": { "Authorization": "Bearer ${PROJECT_ROOM_SECRET:-}" }
     },
     "project-room-channel": {

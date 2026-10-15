@@ -38,7 +38,7 @@ function pendingRequest(requests, identity, requestId) {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId
-  });
+  }, identity.secret);
 }
 
 function assertAccessDenied(fn) {

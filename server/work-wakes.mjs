@@ -73,9 +73,13 @@ export class WorkWakes {
     const pointer = { kind: "work", roomId, workItemId: id, workRevision: item.revision,
       action: next.action, completionEventId: next.completionEventId, evidenceVersion: next.evidenceVersion,
       eventId: incoming.id, nextRead: { tool: "room_read_work", arguments: { roomId, workItemId: id } } };
-    this.db.prepare(`INSERT OR IGNORE INTO agent_work_wakes
+    const inserted = this.db.prepare(`INSERT OR IGNORE INTO agent_work_wakes
       VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)`)
       .run(`ww_${randomUUID()}`, agentId, roomId, memberId, id, item.revision, incoming.id, incoming.actorId, JSON.stringify(pointer), at);
+    // #3262: a genuinely new work signal releases the room-hosted poll
+    // waiter, mirroring enqueueWake — otherwise a host parked on the poll
+    // door sleeps through the assignment until its wait expires.
+    if (inserted.changes > 0) this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
   pending(agentId, { roomId = null, hostId = null, limit = 50 } = {}) {
     // Existing hostless callers retain their mention/DM contract. New work delivery

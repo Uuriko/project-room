@@ -167,6 +167,24 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const denied = await call('/llms.txt', { method: 'POST' });
     assert.equal(denied.status, 405);
     assert.equal(denied.headers.get('x-test-do-fetches'), '0');
+    // #3274: Worker-layer errors carry the standard envelope, not a bare
+    // { error: { code, message } } — same fields the Node handler emits.
+    const deniedBody = await denied.json();
+    assert.equal(deniedBody.error.code, 'method_not_allowed');
+    assert.equal(typeof deniedBody.hint, 'string');
+    assert.ok(deniedBody.hint.length > 0);
+    assert.ok(Array.isArray(deniedBody.next));
+    assert.equal(typeof deniedBody.operationId, 'string');
+    assert.equal(typeof deniedBody.category, 'string');
+    assert.equal(typeof deniedBody.reason, 'string');
+    // #3274: POST / is 404 (Node's answer for the app root), enveloped.
+    const rootPost = await call('/', { method: 'POST' });
+    assert.equal(rootPost.status, 404);
+    const rootPostBody = await rootPost.json();
+    assert.equal(rootPostBody.error.code, 'not_found');
+    assert.equal(typeof rootPostBody.hint, 'string');
+    assert.ok(Array.isArray(rootPostBody.next));
+    assert.equal(typeof rootPostBody.operationId, 'string');
 
     const missing = await call('/compare/project-room-vs-slack', { headers: { Accept: 'text/html' } });
     assert.equal(missing.status, 404);
@@ -191,7 +209,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(health.headers.get('x-test-do-probes'), '0');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
     const healthBody = await health.json();
-    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging' });
+    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer' });
 
     const ready = await call('/api/ready', { ip: '192.0.2.9' });
     assert.equal(ready.status, 200, await ready.clone().text());

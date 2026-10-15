@@ -130,7 +130,7 @@ test("agent-connect quickstart hosted-MCP commands match the product's own snipp
 });
 
 test("agent-connect quickstart hosted join path matches the live agent packet", async () => {
-  const { llmsFullTxt } = await import("../deploy/agent-discovery.mjs");
+  const { llmsFullTxt } = await import("../server/agent-discovery.mjs");
   const packet = llmsFullTxt();
   assert.ok(packet.includes("room_join"), "llms-full.txt lost the room_join reference");
   assert.ok(

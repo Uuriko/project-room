@@ -110,7 +110,19 @@ export function reconcileRestoredAuthority(restored, current) {
   }
   for (const room of restored.db.prepare("SELECT id FROM rooms").all()) {
     const restoredMembers = restored.room(room.id).state.members;
-    const currentMembers = current.room(room.id).state.members;
+    // A room deleted from the current store after the backup is exactly the
+    // resurrection case this rehearsal exists to report: RoomStore.room()
+    // throws 404 room_not_found for it, and that must not abort the whole
+    // reconciliation. Treat the missing room as having no current members,
+    // so every active restored member is named stale below. Any other error
+    // (storage, corruption) still propagates.
+    let currentMembers;
+    try {
+      currentMembers = current.room(room.id).state.members;
+    } catch (error) {
+      if (error?.code !== "room_not_found") throw error;
+      currentMembers = {};
+    }
     for (const [memberId, member] of Object.entries(restoredMembers)) {
       if (!member.active) continue;
       const now = currentMembers[memberId];

@@ -113,6 +113,10 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           // offline agent with a push subscription. Member id resolves to the
           // agent identity via identity_links; pushNotify itself gates on the
           // agent being offline. Never fails the assignment.
+          // #3257: enqueue the durable wake signal first — the doorbell is
+          // fire-and-forget, so without a signal row an assignee whose push
+          // endpoint is dead (or unconfigured) never learns of the assignment
+          // on any later heartbeat or poll.
           try {
             const assigneeId = record?.assignee?.kind === "agent" && typeof record.assignee.id === "string"
               ? record.assignee.id : null;
@@ -121,11 +125,13 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
                 "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
                 .get(roomId, assigneeId);
               if (link?.identityId) {
+                store.agentHeartbeats.enqueueWake({ agentId: link.identityId, kind: "assignment",
+                  roomId, messageId: assignmentId });
                 store.agentHeartbeats.pushNotify({ identityId: link.identityId,
                   eventType: "assignment.created", roomId, id: assignmentId, ts: store.now() });
               }
             }
-          } catch { /* the push path never fails the assignment */ }
+          } catch { /* the notification path never fails the assignment */ }
           return json(res, 201, { assignmentId, assignment: record });
         }
         if (req.method === "GET") {

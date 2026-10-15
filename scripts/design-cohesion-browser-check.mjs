@@ -12,7 +12,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSettings } from "./room-chrome.mjs";
-import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
+import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../server/room-entry.mjs";
 import { contrastRatio, DARK } from "../src/design-tokens.js";
 
 const hex = rgb => "#" + rgb.match(/\d+/g).slice(0, 3).map(n => Number(n).toString(16).padStart(2, "0")).join("");

@@ -106,9 +106,9 @@ async function fillInvitationEmail(page, fixtureKey) {
   const email = fixtureLogins.get(fixtureKey);
   assert.ok(email, "test account has a synthetic email login");
   await page.locator("#invitation-email").click();
-  await page.locator("#invitation-methods [data-forgot-password]").click();
-  await page.locator('#invitation-methods [data-email-method="magic"]').click();
-  const request = page.locator('#invitation-methods [data-signin-form="magic-request"]');
+  // #3341: one merged form — the email-link path is this form
+  // submitted with a blank password (no recovery detour anymore).
+  const request = page.locator('#invitation-methods [data-signin-form="password"]');
   await request.locator('[name="email"]').fill(email);
   await request.locator('button[type="submit"]').click();
   const form = page.locator('#invitation-methods [data-signin-form="magic-code"]');
@@ -466,9 +466,7 @@ test("delivered email link opens its intended invitation in a fresh browser tab"
   const context = await f.browser.newContext(); const opener = await context.newPage();
   await opener.goto(`${f.origin}/#invite/${f.invitationToken}`);
   await opener.locator('#invitation-email').click();
-  await opener.locator('#invitation-methods [data-forgot-password]').click();
-  await opener.locator('#invitation-methods [data-email-method="magic"]').click();
-  const form = opener.locator('#invitation-methods [data-signin-form="magic-request"]');
+  const form = opener.locator('#invitation-methods [data-signin-form="password"]');
   const email = fixtureLogins.get(f.targetAccountKey);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
@@ -511,7 +509,7 @@ test("a shared invitation retains its pending account signup across Escape and n
   assert.equal(await page.locator("#join-account-auth").isVisible(), true);
   await page.locator("#join-account-google").evaluate(anchor => anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
   assert.equal(new URL(page.url()).pathname, "/", "pending auth cannot start Google navigation");
-  assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-pending-join")), null, "pending auth cannot stash another OAuth handoff");
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-pending-join")), `#join/${token}`, "pending auth keeps this dialog's own link stashed");
   const another = secret();
   await page.evaluate(value => { location.hash = `#join/${value}`; }, another);
   await page.locator("#join-link-status").filter({ hasText: "Finish signing in" }).waitFor();

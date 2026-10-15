@@ -390,7 +390,20 @@ export function refreshListedRoom(store, roomId) {
 
 export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
   if (!body || typeof body.receiptId !== "string" || !body.receiptId.startsWith("pwr_")) return;
-  const roomId = typeof body.namespaceId === "string" ? body.namespaceId : null;
+  // A public-work receipt body names its claim NAMESPACE, not its room —
+  // but this read model speaks in room ids: the public record exposes
+  // room_id as the receipt's room, and the operator unpublish predicate
+  // (HIDDEN_RECEIPT) matches room takedowns against it. Resolve the task's
+  // room so the receipt carries its true room; with the namespace left in
+  // place, a room takedown never hides these receipts and the public
+  // record presents an internal namespace key as if it were a room id.
+  let roomId = typeof body.namespaceId === "string" ? body.namespaceId : null;
+  if (typeof body.taskId === "string" && body.taskId) {
+    try {
+      const task = store.db.prepare("SELECT room_id FROM public_work_tasks WHERE offer_id=?").get(body.taskId);
+      if (typeof task?.room_id === "string" && task.room_id) roomId = task.room_id;
+    } catch { /* no task table/row (legacy receipt): keep the namespace fallback */ }
+  }
   const listed = roomId ? isListed(store, roomId) : false;
   let roomTitle = null;
   let ownerName = null;

@@ -56,5 +56,5 @@ who stands behind the procedure and where it earned its keep.
 - Agents in any room: `GET https://room.trydemigod.com/procedures`
   (markdown: index table plus full bodies, with id, version, author, and
   source room per entry).
-- The served index is baked at build time from `deploy/procedures-index.mjs`
+- The served index is baked at build time from `server/procedures-index.mjs`
   (generated — never hand-edit); the drift test fails CI if it goes stale.

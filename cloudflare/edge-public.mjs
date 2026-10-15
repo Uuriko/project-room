@@ -3,11 +3,13 @@
 // single-threaded, and a cold wake or a synchronous stretch closes its input
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
-import { publicAssetPaths } from '../deploy/public-assets.mjs';
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicPageCsp, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../deploy/public-search.mjs';
-import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../deploy/agent-discovery.mjs';
+import { publicAssetPaths } from '../server/public-assets.mjs';
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicPageCsp, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, reviewedPublicSearchPaths } from '../server/public-search.mjs';
+import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
+import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';
+import { randomBytes } from 'node:crypto';
 
 const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ASSET_CACHE_MAX = 96;
@@ -19,6 +21,7 @@ const assetType = path => path.endsWith('.js') || path.endsWith('.mjs') ? 'text/
   : path.endsWith('.html') ? 'text/html'
   : path.endsWith('.png') ? 'image/png'
   : path.endsWith('.ttf') ? 'font/ttf'
+  : path.endsWith('.woff2') ? 'font/woff2'
   : path.endsWith('.txt') ? 'text/plain'
   : path.endsWith('.svg') ? 'image/svg+xml'
   : path.endsWith('.webmanifest') ? 'application/manifest+json'
@@ -61,11 +64,35 @@ function baseHeaders(url) {
   return headers;
 }
 
+// #3274: every error the Worker layer mints must carry the standard error
+// envelope the handler produces — { error:{code,message}, status, reason,
+// hint, next, operationId, category } (server/http.mjs builds exactly
+// { ...agentErrorBody(...), operationId, category }). Worker-layer errors
+// used to ship bare { error:{code,message} } or plain text, so production
+// agents hitting the front door (llms.txt, openapi.json, the server card),
+// the host/origin guards, or a DO-boundary outage got no hint/next to
+// recover from, while Node callers got the teaching shape.
+export function workerErrorBody({ httpStatus, code, message }) {
+  return {
+    ...agentErrorBody({ httpStatus, code, message }),
+    operationId: `op_${randomBytes(6).toString('base64url')}`,
+    category: errorCategory(httpStatus, code)
+  };
+}
+
+export function workerErrorResponse({ httpStatus, code, message, headers = null, head = false }) {
+  const finalHeaders = new Headers(headers ?? undefined);
+  const body = JSON.stringify(workerErrorBody({ httpStatus, code, message }));
+  finalHeaders.set('Content-Type', 'application/json; charset=utf-8');
+  finalHeaders.set('Content-Length', String(new TextEncoder().encode(body).byteLength));
+  return new Response(head ? null : body, { status: httpStatus, headers: finalHeaders });
+}
+
 function methodNotAllowed(headers, allow) {
   headers.set('Allow', allow);
   headers.set('Content-Type', 'application/json; charset=utf-8');
-  const body = JSON.stringify({ error: { code: 'method_not_allowed', message: 'Method not allowed' } });
-  headers.set('Content-Length', String(body.length));
+  const body = JSON.stringify(workerErrorBody({ httpStatus: 405, code: 'method_not_allowed', message: 'Method not allowed' }));
+  headers.set('Content-Length', String(new TextEncoder().encode(body).byteLength));
   return new Response(body, { status: 405, headers });
 }
 
@@ -268,6 +295,12 @@ export async function edgePublicResponse(request, env, url) {
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
   if (kind === 'discovery') return discoveryResponse(request, url);
+  // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a
+  // method-guarded document) but the edge classified '/' as an asset and
+  // answered 405. Decide it once, Node's way: 404 with the standard envelope,
+  // answered at the edge so the junk never reaches the Durable Object.
+  if (url.pathname === '/' && request.method !== 'GET' && request.method !== 'HEAD')
+    return workerErrorResponse({ httpStatus: 404, code: 'not_found', message: 'Not found', headers: baseHeaders(url) });
   if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed(baseHeaders(url), 'GET, HEAD');
   return assetResponse(request, env, url);
 }
