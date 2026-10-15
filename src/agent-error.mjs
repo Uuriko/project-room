@@ -214,6 +214,7 @@ const AX_NAMED_RECOVERIES = {
   board_v2_retired: ["Board v2 is retired. Use the work-claims board instead.", "Use the work-claims board; do not retry the retired board-v2 path."],
   bond_active: ["This pair already has an active bond. Revoke it before proposing a new one.", "Revoke the active bond first, then propose the new one."],
   card_owned_by_another_identity: ["That card belongs to another identity. Act with the owning identity, or use your own card.", "Use your own card, or act through the owning identity."],
+  channel_archived: ["This channel is archived and accepts no new messages. Do not retry this post; post in an active channel, or ask the owner to unarchive it.", "Post in an active channel, or ask the owner to unarchive this one."],
   channel_sync_unsupported: ["This channel sync mode is not supported here. Use a supported sync mode; do not retry this one.", "Use a supported channel sync mode."],
   channel_webhook_backlog: ["The channel has a webhook backlog. Import the pending updates before sending more.", "Import pending updates first, then send."],
   charter_integrity_error: ["The instructions history requires reconciliation before this can proceed. Report the code and full message to the room owner if it persists.", "Reconcile the instructions history; if it persists, report the code and full message to the room owner."],
