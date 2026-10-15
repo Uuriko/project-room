@@ -490,7 +490,11 @@ const requestOutcomesOf = value => {
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
 const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({ ...(current ?? {}), [key]: { at, digest } });
-const workOf = value => {
+// Exported so writer paths that build claim rows outside the state machine
+// (the work-item-board backfill, #3465) validate a row BEFORE storing it:
+// the durable registry's codec decodes without validation, so a row stored
+// unvalidated is readable but throws on its first state-machine touch.
+export const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
