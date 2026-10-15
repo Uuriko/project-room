@@ -37,7 +37,7 @@ import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
-import { operatorRestoreResponse } from '../server/restore-ndjson.mjs';
+import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
@@ -195,6 +195,13 @@ export class ProjectRoom extends DurableObject {
     // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
       return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
+    }
+    // Same recovery, sourced from the daily backup already sitting in the
+    // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
+    // the current backup is past it (#3409), so the parts are pulled and
+    // replayed one at a time instead of uploaded whole.
+    if (url.pathname === '/api/operator/restore-from-backup') {
+      return respond(await operatorRestoreFromBackupResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store, this.env.ROOM_BACKUPS_KV));
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {

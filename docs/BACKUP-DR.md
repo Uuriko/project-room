@@ -27,6 +27,16 @@ honestly cannot survive yet.
     token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
+  - *KV-native restore (the #3409 fix, once deployed):*
+    `POST /api/operator/restore-from-backup` restores the daily backup
+    already stored in the `ROOM_BACKUPS_KV` namespace — same operator token
+    and fail-closed posture, no size cap: the manifest and parts are pulled
+    and verified (per-part and whole-backup sha256) one at a time and
+    replayed in bounded batches, and the same trailer, foreign-key,
+    watermark, recovery, and invitation audits must pass before the restore
+    reports verified. Body: `{"key": "room-backups/YYYY-MM-DD.ndjson"}`
+    (optional; defaults to today's key). A failed replay deletes everything
+    it touched, leaving the store empty and retryable.
 
 ## Known disaster-recovery defects (all open, all verified)
 
@@ -86,10 +96,11 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 3. Re-issue every credential, and re-apply post-backup revocations (see
    above). Treat the restored room as authoritative **as of `backedUpAt`**.
 
-(The DO-native endpoint runbook applies only to exports under the 64 MiB cap
-until #3409 is fixed: confirm the DO store is empty — the endpoint refuses a
-non-empty store with 409 — then POST the NDJSON with
-`Authorization: Bearer <ROOM_BACKUP_TOKEN>`.)
+(The request-body endpoint runbook applies only to exports under the 64 MiB
+cap: confirm the DO store is empty — the endpoints refuse a non-empty store
+with 409 — then POST the NDJSON with
+`Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
+backup, use the KV-native endpoint above with the backup's key instead.)
 
 ## What was deliberately not done
 

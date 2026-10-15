@@ -403,7 +403,7 @@ export function loadRouteSources(root) {
 
 // Worker literals that answer POST only (every other method is 405), so the
 // inventory does not record a GET/HEAD the Durable Object never serves.
-const WORKER_POST_ONLY_PATHS = new Set(["/api/operator/restore"]);
+const WORKER_POST_ONLY_PATHS = new Set(["/api/operator/restore", "/api/operator/restore-from-backup"]);
 
 export function extractLegacyRoutes(sources) {
   const prepared = substitute(sources.http, sources.constants);
