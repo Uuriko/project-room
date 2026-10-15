@@ -6,21 +6,34 @@
 //   checkInvariants(ctx, opIndex, label)          throws on invariant violation
 //   teardown(ctx)                                 optional, runs once per seed attempt
 //
-// perform() may throw an error with a string `.code` (ServiceError /
-// EscrowError): that is an EXPECTED domain rejection (an illegal transition
-// in a random sequence), counted and continued — not a failure. Any other
-// throw, from perform() or checkInvariants(), fails the property.
+// perform() may throw a genuine domain error (ServiceError with a 4xx
+// status, EscrowError, DisputeError): that is an EXPECTED domain rejection
+// (an illegal transition in a random sequence), counted and continued —
+// not a failure. Any other throw, from perform() or checkInvariants(),
+// fails the property.
 //
 // On failure the runner shrinks to the minimal failing op-prefix and prints
 // an exact reproduction command. See docs/CHAOS.md.
 
 import { Rng } from "./seeded-random.mjs";
+import { ServiceError } from "../../server/service-error.mjs";
+import { EscrowError, DisputeError } from "../../server/bounty-escrow.mjs";
 
 // An error the system under test raises for an illegal-but-well-formed
-// operation (ServiceError, EscrowError, ...): identified by a string code,
-// never by message text.
-export const isExpectedRejection = error =>
-  error !== null && typeof error === "object" && typeof error.code === "string";
+// operation: identified by its TYPE, never by a bare string `.code` or
+// message text. A string code alone proves nothing — Node/SQLite/fs
+// infrastructure errors carry one too (ERR_SQLITE_ERROR, ERR_SQLITE_BUSY,
+// ENOENT, ...), and counting those as domain rejections would mask real
+// storage bugs behind a passing property (#2895). A ServiceError only
+// counts when it is a client-facing refusal (status < 500): the 5xx
+// StorageUnavailableError subclass is an infrastructure failure, not a
+// domain rejection.
+export const isExpectedRejection = error => {
+  if (error === null || typeof error !== "object" || typeof error.code !== "string") return false;
+  if (error instanceof EscrowError || error instanceof DisputeError) return true;
+  if (error instanceof ServiceError) return typeof error.status !== "number" || error.status < 500;
+  return false;
+};
 
 const envInt = (name, fallback) => {
   const raw = process.env[name];

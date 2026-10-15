@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { roomEntry } from '../deploy/room-entry.mjs';
+import { roomEntry } from '../server/room-entry.mjs';
 
 // The deployed Worker owns host rewriting; Chromium owns fragment inheritance.
 // The destination is the actual app/asset HTTP server, never fabricated auth UI.
@@ -63,7 +63,7 @@ test('bundled default doors reach minimal auth and inherit invitation, legacy, a
       assert.equal(new URL(page.url()).origin,origin);
       assert.equal(new URL(page.url()).search,'?entry=release&next=%2Fabout');
       assert.equal(await page.locator('#auth-title').innerText(),'PROJECT ROOM');
-      assert.equal(await page.getByRole('button',{name:'Agent sign in',exact:true}).count(),1);
+      assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),1);
       assert.equal(await page.getByRole('button',{name:'Create account',exact:true}).isVisible(),true);
       assert.equal(await page.getByRole('button',{name:'Log in',exact:true}).isVisible(),true);
       assert.doesNotMatch(await page.locator('body').innerText(),/A shared place|Conversations, shared work|New here\?|Have an invite\?|Connect an agent|Paste a prompt/);

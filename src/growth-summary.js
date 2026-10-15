@@ -4,6 +4,12 @@
 // top-mentioned agents, and engagement ratios inside a time window. Pure,
 // dependency-free, deterministic given the same events. No I/O, no network,
 // no timers, no storage. Outputs are frozen.
+//
+// topMentionedAgents is the display list, truncated to topN (default 10).
+// allMentionedAgents is the same ranking untruncated: downstream consumers
+// that need an exact count for an arbitrary agent (C8 movers, C9
+// mention-spike alerts) must read it, not the truncated list — an agent
+// ranked outside the top-N otherwise looks like it has 0 mentions.
 
 import { GROWTH_EVENT_TYPES } from "./growth-events.js";
 
@@ -86,10 +92,14 @@ export function summarize(collector, { since, until, topN } = {}) {
     .map(([day, count]) => ({ day, count }))
     .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 
-  const topMentionedAgents = [...mentionCounts.entries()]
+  const allMentionedAgents = [...mentionCounts.entries()]
     .map(([agentId, mentions]) => ({ agentId, mentions }))
-    .sort((a, b) => b.mentions - a.mentions || (a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0))
-    .slice(0, limit);
+    .sort((a, b) => b.mentions - a.mentions || (a.agentId < b.agentId ? -1 : a.agentId > b.agentId ? 1 : 0));
+  // Copy the entries, don't share them: consumers treat repeated object
+  // references in a summary as a cycle (see growth-http's JSON-safety).
+  const topMentionedAgents = allMentionedAgents
+    .slice(0, limit)
+    .map(({ agentId, mentions }) => ({ agentId, mentions }));
 
   const messages = totals["message.sent"];
   const mentions = [...mentionCounts.values()].reduce((sum, n) => sum + n, 0);
@@ -105,6 +115,7 @@ export function summarize(collector, { since, until, topN } = {}) {
     totals,
     activityByDay,
     topMentionedAgents,
+    allMentionedAgents,
     engagement,
     window: { since: sinceIso, until: untilIso },
     generatedAt: new Date().toISOString()

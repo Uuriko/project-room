@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prepareWork } from '../client/work-preparation.mjs';
+import { prepareWork, readWorkSelection } from '../client/work-preparation.mjs';
 import { attentionPreview } from '../src/work-selectors.js';
 
 test('preparation follows frozen pages, refreshes work and reports changes without writing', async () => {
@@ -56,4 +56,41 @@ test('attention shows every urgent item and retains all routine items behind exp
   assert.equal(preview.hiddenCount, 7);
   assert.deepEqual(preview.all, [...urgent, ...routine]);
   assert.equal(attentionPreview([...routine, urgent[0]]).visible.length, 5);
+});
+
+
+test('selected task batches bound concurrency, preserve order and abort without partial output', async () => {
+  const pending = new Map(), calls = [];
+  const client = { workContext(id, { signal }) {
+    calls.push(id);
+    return new Promise((resolve, reject) => {
+      pending.set(id, () => resolve({ roomId: 'commons', work: { id } }));
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  } };
+  const result = readWorkSelection(client, { workItemIds: ['a', 'b', 'c', 'd'], brief: false });
+  assert.deepEqual(calls, ['a', 'b']);
+  pending.get('b')(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ['a', 'b', 'c']);
+  pending.get('c')(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ['a', 'b', 'c', 'd']);
+  pending.get('d')(); pending.get('a')();
+  assert.deepEqual((await result).items.map(item => item.work.id), ['a', 'b', 'c', 'd']);
+  const stop = new AbortController();
+  const cancelled = readWorkSelection(client, { workItemIds: ['a', 'b', 'c'], brief: false }, { signal: stop.signal });
+  stop.abort(new Error('access ended'));
+  await assert.rejects(cancelled, /access ended/);
+  assert.deepEqual(calls.slice(4), ['a', 'b']);
+});
+
+test('batch refusal cancels peers and never begins later tasks', async () => {
+  let peerAborted = false; const calls = [];
+  const client = { async workContext(id, { signal }) {
+    calls.push(id);
+    if (id === 'denied') throw new Error('permission denied');
+    return new Promise((resolve, reject) => signal.addEventListener('abort', () => { peerAborted = true; reject(signal.reason); }, { once: true }));
+  } };
+  await assert.rejects(readWorkSelection(client, { workItemIds: ['denied', 'waiting', 'later'], brief: false }), /permission denied/);
+  assert.equal(peerAborted, true);
+  assert.deepEqual(calls, ['denied', 'waiting']);
 });

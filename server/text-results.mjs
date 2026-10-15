@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { nativeTextEvidence, validResultBody, proposalContext, reportedProducer, validateResultSegments } from "../src/work-packet.js";
 import { nextWorkStep } from "../src/workflow.js";
+import { messageInHistory } from "./history-visibility.mjs";
 import { WORK_REVISION_TYPES } from "../src/events.js";
 
 const check = condition => { if (!condition) throw new Error("Native result evidence requires reconciliation"); };
@@ -66,16 +67,36 @@ export function verifyTextCompletion(db, state, work, data, { allowWithdrawn = f
   return { nativeText, text };
 }
 
-export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId }) {
+// The result text follows the room's own visibility rules when a named viewer
+// reads it. A targeted message (a DM) is visible only to its author and
+// addressee; the owner is not exempt (RC-2026-09-19-070). The PRIV-2 history
+// floor applies. A withdrawn message keeps its absence shape for its parties,
+// so only the party rule and the floor are checked here; body checks stay in
+// storedText. No viewer named means an internal call (audit, replay): no gate.
+function textVisibleToViewer(state, messageId, viewerId, floor) {
+  if (viewerId === null) return true;
+  const message = state.messages.find(message => message.id === messageId);
+  if (!message) return false;
+  if (message.toMemberId && message.authorId !== viewerId && message.toMemberId !== viewerId) return false;
+  return messageInHistory(message, floor);
+}
+
+export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, floor = null }) {
   const work = state.workItems[workItemId];
   let result;
-  if (draftMessageId !== null) result = { kind: "draft", text: storedText(db, state, workItemId, draftMessageId) };
-  else {
+  const deny = () => { throw new Error("Result text is hidden from this viewer"); };
+  if (draftMessageId !== null) {
+    if (!textVisibleToViewer(state, draftMessageId, viewerId, floor)) deny();
+    result = { kind: "draft", text: storedText(db, state, workItemId, draftMessageId) };
+  } else {
     const receipt = completionEventId === null ? work.receipt : [...work.receiptHistory, work.receipt].find(receipt => receipt?.eventId === completionEventId);
     if (completionEventId !== null && !receipt) return null;
     result = !receipt ? { kind: "none" } : { kind: receipt.nativeText ? "room_text" : "external", receipt: structuredClone(receipt),
       ...(receipt.nativeText ? { text: storedText(db, state, workItemId, receipt.nativeText.messageId, receipt.nativeText.messageEventId) } : {}) };
-    if (receipt?.nativeText) check(result.text.evidenceVersion === receipt.evidenceVersion);
+    if (receipt?.nativeText) {
+      if (!textVisibleToViewer(state, receipt.nativeText.messageId, viewerId, floor)) deny();
+      check(result.text.evidenceVersion === receipt.evidenceVersion);
+    }
   }
   return { contractVersion: 1, roomId: state.room.id, workItemId,
     selection: { completionEventId, draftMessageId }, result,

@@ -79,7 +79,9 @@ export class TrialTasks {
      task=this.read(roomId,actorId,input.taskId);
      if(input.expectedRevision!==task.revision)railFail(409,'stale_revision','Trial changed');
      const candidate=actorId===task.candidateId,buyer=actorId===task.buyerId;
-     const fields={claim:[],submit:['deliverableRef'],fund:['budgetRecord'],verdict:['rubricScores','verdict','receipt'],block:['reason'],resume:[],release:['reason']}[input.action];
+     const transitions={claim:[],submit:['deliverableRef'],fund:['budgetRecord'],verdict:['rubricScores','verdict','receipt'],block:['reason'],resume:[],release:['reason']};
+     // Own-property lookup: prototype names ('constructor', '__proto__', 'toString', …) must not resolve to inherited Object.prototype members.
+     const fields=Object.hasOwn(transitions,input.action)?transitions[input.action]:undefined;
      if(!fields)railFail(422,'invalid_trial_action','Unknown action');
      shape(input,['action','requestId','taskId','expectedRevision',...fields]);
      if(['claim','submit'].includes(input.action)?!candidate:!owner&&!buyer)railFail(403,'trial_not_party','Action requires the bound candidate, buyer or owner');

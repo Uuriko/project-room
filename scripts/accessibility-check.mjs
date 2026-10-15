@@ -2,7 +2,6 @@ import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { emailContractFixture } from "./email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
-import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
@@ -76,13 +75,17 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.keyboard.press("Enter");
   assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
-  // Email delivery failure has one local announcement owner through the
-  // actual email sign-in screen; this local fixture has no mail provider.
-  await openMagicSignin(page);
-  await page.locator('#auth-signin-ui [name=email]').fill("a11y@example.test");
-  await page.locator('#auth-signin-ui button[type=submit]').click();
+  // A sign-in failure has one local announcement owner. This used the
+  // email sign-in screen's delivery failure, but since #3430 a deployment
+  // with no mail provider (this fixture) no longer offers email sign-in at
+  // all — the password screen, present in every deployment, carries the
+  // same single-owner property.
+  const passwordForm = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  await passwordForm.locator('[name="email"]').fill("a11y@example.test");
+  await passwordForm.locator('[name="password"]').fill("not-the-password");
+  await passwordForm.locator('button[type="submit"]').click();
   const emailError = page.locator('#auth-signin-ui [data-signin-status]');
-  await emailError.filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  await emailError.filter({ hasText: /Invalid email or password/i }).waitFor();
   assert.equal(await emailError.getAttribute("role"), "alert");
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
   assert.equal(await page.locator("#auth-panel").isVisible(), true);
@@ -383,4 +386,38 @@ test("light-theme chat divider keeps 4.5:1 and coarse pointers get 16px/44px con
   assert.ok(control.fontPx >= 16, `coarse-pointer input font-size ${control.fontPx}px does not trigger iOS zoom`);
   assert.ok(control.minHeightPx >= 44, `coarse-pointer input min-height ${control.minHeightPx}px meets the 44px target`);
   await coarse.close();
+});
+
+// R33-1: on a phone the Menu drawer covers the Menu button. Opening it must
+// move focus into the drawer; leaving focus on the covered button sends Tab
+// through the hidden chat behind the drawer first.
+test("phone Menu moves focus into the drawer and Escape brings it back", { timeout: 90000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" })).newPage();
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#sidebar-toggle").focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#room-sidebar").waitFor({ state: "visible" });
+  const focusInDrawer = () => page.evaluate(() => {
+    const active = document.activeElement, rect = active.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return document.getElementById("room-sidebar").contains(active) && rect.width > 0 && Boolean(hit && (active === hit || active.contains(hit)));
+  });
+  assert.equal(await focusInDrawer(), true, "focus lands on a visible control inside the open drawer");
+  await page.keyboard.press("Tab");
+  assert.equal(await focusInDrawer(), true, "the next Tab stays in the drawer, not the chat behind it");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.getElementById("main").classList.contains("sidebar-open"));
+  assert.equal(await page.evaluate(() => document.activeElement.id), "sidebar-toggle", "Escape returns focus to Menu");
 });

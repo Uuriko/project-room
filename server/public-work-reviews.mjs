@@ -150,14 +150,25 @@ export class PublicWorkReviews {
     check(typeof input.reason === 'string' && input.reason.trim().length > 0 && input.reason.length <= 2000 && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(input.reason), 'A concise review reason is required');
     check(action === 'decide' ? ['accepted', 'rejected', 'revision_requested'].includes(input.decision) : ['PASS', 'FAIL'].includes(input.verdict), 'Invalid review action');
     return this.store.transaction(() => {
+      // Journal replay precedes the current scope/permission checks below:
+      // a retry of a completed decide/verify must return its recorded
+      // outcome even if the room was archived, the linked work's review
+      // policy became unavailable, or the actor has since lost designated-
+      // reviewer standing. The actor must still be a current non-guest
+      // member (the same gate scope() opens with), so a revoked member
+      // cannot replay. Fresh requests fall through to the full checks.
+      check(validId(roomId) && validId(actorId) && validId(receiptId), 'Invalid review identifier');
+      knownMember(this.store.room(roomId).state, actorId);
+      const encoded = canonicalJson({ action, receiptId, ...input });
+      if (this.hasTable('public_work_review_requests')) {
+        const previous = this.db.prepare('SELECT * FROM public_work_review_requests WHERE room_id=? AND actor_id=? AND request_id=?').get(roomId, actorId, input.requestId);
+        if (previous) {
+          if (previous.input_json !== encoded) fail(409, 'request_id_reused', 'Review request ID was used for different input');
+          return JSON.parse(previous.outcome_json);
+        }
+      }
       const scope = this.scope(roomId, actorId, receiptId), permission = this.permissions(scope, actorId);
       if (!permission[action]) fail(403, 'review_forbidden', 'Only the current designated reviewer may perform this action');
-      const encoded = canonicalJson({ action, receiptId, ...input });
-      const previous = this.db.prepare('SELECT * FROM public_work_review_requests WHERE room_id=? AND actor_id=? AND request_id=?').get(roomId, actorId, input.requestId);
-      if (previous) {
-        if (previous.input_json !== encoded) fail(409, 'request_id_reused', 'Review request ID was used for different input');
-        return JSON.parse(previous.outcome_json);
-      }
       const receipt = scope.receipt, current = this.current(scope);
       if (input.taskId !== receipt.taskId || input.expectedTermsVersion !== receipt.termsVersion || input.generation !== receipt.generation || input.artifactSha256 !== receipt.artifact.sha256)
         fail(409, 'stale_review_receipt', 'Review must identify this exact submission');

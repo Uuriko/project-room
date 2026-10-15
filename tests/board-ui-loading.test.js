@@ -242,7 +242,7 @@ for (const phase of ["write", "readback"]) test(`Board reset retires completion 
 // This models node removal/restoration, not browser Tab order or modal layout.
 function focusDom(t) {
   let nodes = [], active;
-  const gates = [];
+  const gates = [], listeners = new Map();
   const body = { closest: () => null };
   active = body;
   const previous = { document: globalThis.document, CSS: globalThis.CSS };
@@ -260,7 +260,7 @@ function focusDom(t) {
       && (parts.length === 1 || node.parent?.closest(parts[0]))) ?? null;
   };
   const root = {
-    addEventListener(type) { assert.ok(["input", "click", "submit"].includes(type)); },
+    addEventListener(type, listener) { assert.ok(["input", "click", "submit"].includes(type)); listeners.set(type, listener); },
     contains: node => nodes.includes(node),
     querySelector: query,
     set innerHTML(html) {
@@ -298,7 +298,7 @@ function focusDom(t) {
       if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
     }
   });
-  return { root, query, active: () => active, drain: gate => gates.push(gate) };
+  return { root, query, active: () => active, drain: gate => gates.push(gate), click: target => listeners.get("click")({ target }) };
 }
 
 const STATIC_FOCUS_CONTROLS = [
@@ -374,4 +374,55 @@ test("Board refresh follows the current static control after focus moves from a 
   assert.equal(dom.active(), dom.query(title), "loading does not jump back to Save cap");
   refresh.resolve({ claims: [] }); await board.whenReady();
   assert.equal(dom.active(), dom.query(title), "completion retains the user's newer focus choice");
+});
+
+test("a completed Board action moves focus to the finished card when its button is gone", async t => {
+  const dom = focusDom(t), mutation = held(), readback = held();
+  const item = claim("notes", { title: "Write the notes", state: "in_progress", owner: "owner",
+    updatedAt: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 3600000).toISOString() });
+  let posts = 0;
+  const client = { generation: 1, path: path => path, request(path, options) {
+    if (options?.method === "POST") { posts++; return mutation.promise; }
+    if (path === "/work-claims?limit=200") return posts ? readback.promise : Promise.resolve({ claims: [item] });
+    if (path === "/work-claims/status") return Promise.resolve({ behind: 0 });
+    if (path === "/work-claims/config") return Promise.resolve({ maxMemberOpenClaims: 20 });
+    throw new Error(`Unexpected request: ${path}`);
+  } };
+  const board = installWorkBoard({ client,
+    getState: () => ({ room: { ownerId: "owner" }, members: { owner: { id: "owner", active: true } }, eventLog: [] }),
+    getSession: () => ({ roomId: "commons", member: { id: "owner" } }) });
+  t.after(() => { mutation.resolve({}); readback.resolve({ claims: [] }); });
+  board.sync(); await board.whenReady();
+  const done = dom.query('[data-claim-action="done"]');
+  assert.ok(done, "the in-progress card offers Done");
+  done.focus();
+  dom.click(done);
+  mutation.resolve({}); readback.resolve({ claims: [{ ...item, state: "done" }] });
+  await board.whenReady(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(dom.query('[data-claim-action="done"]'), null, "the Done button is gone after completion");
+  const heading = dom.query('article[data-claim-id="notes"] h4');
+  assert.ok(heading, "the finished card is still on the board");
+  assert.equal(dom.active(), heading, "focus lands on the finished card heading, not the page body");
+});
+
+// --- deploy chip: a known mismatch is not "unknown" ---
+// The server sends behind = 0 when live and main match and null otherwise
+// (server/claim-pr-sync.mjs readRoomDeployStatus), never a positive count, so
+// the chip must read the two shas to tell "differs" from "can't tell".
+const SHA_A = "a".repeat(40), SHA_B = "b".repeat(40);
+const liveChip = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, viewer, {}, NOW, { canWrite: true }))?.[1];
+
+test("deploy chip: matching shas read as matching", () => {
+  assert.equal(liveChip({ live: SHA_A, main: SHA_A, behind: 0, checkedAt: "2026-10-11T00:00:00Z" }), "Live matches main");
+});
+
+test("deploy chip: both shas known and different is its own state, not unknown", () => {
+  assert.equal(liveChip({ live: SHA_A, main: SHA_B, behind: null, checkedAt: "2026-10-11T00:00:00Z" }), "Live differs from main");
+});
+
+test("deploy chip: a missing sha, no status, or a held (stale) read stays unknown", () => {
+  for (const status of [null, {}, { live: SHA_A, main: null, behind: null }, { live: null, main: SHA_B, behind: null },
+    { live: "unstamped", main: SHA_B, behind: null }, { live: SHA_A, main: SHA_B, behind: null, stale: true, heldUntil: "2026-10-11T01:00:00Z" }]) {
+    assert.equal(liveChip(status), "Deploy status unknown", JSON.stringify(status));
+  }
 });

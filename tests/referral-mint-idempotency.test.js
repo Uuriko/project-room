@@ -1,5 +1,9 @@
 // Referral-invite mint: opt-in requestId makes a lost-response retry replay the
 // same signed token instead of minting a second live one.
+// Since #3218 the HTTP mint door is parked (410 referral_invites_parked, no
+// rows written — pinned by tests/referral-mint-freeze.test.js), so the
+// idempotency contract is exercised here at the store level it lives in:
+// store.referralInvites.mint is the same call the door used to make.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -41,32 +45,29 @@ async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
 }
 
 const count = store => store.db.prepare("SELECT COUNT(*) AS n FROM referral_invites").get().n;
-const MINT = "/api/referral-invites/mint";
+const mintKeyed = (store, secret, requestId, maxDepth) =>
+  store.referralInvites.mint(secret, "commons", { requestId, ...(maxDepth !== undefined ? { maxDepth } : {}) });
 
 test("mint with a requestId: a lost-response retry replays the same token and journals one row", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const first = await post(origin, MINT, { roomId: "commons", requestId: "retry-key-0001" }, inviter.secret);
-  assert.equal(first.status, 201);
-  assert.notEqual(first.json.duplicate, true);
-  const replay = await post(origin, MINT, { roomId: "commons", requestId: "retry-key-0001" }, inviter.secret);
-  assert.equal(replay.status, 201);
-  assert.equal(replay.json.duplicate, true);
-  assert.equal(replay.json.token, first.json.token, "the replay re-signs the identical token");
-  assert.equal(replay.json.jti, first.json.jti);
+  const first = mintKeyed(store, inviter.secret, "retry-key-0001");
+  assert.notEqual(first.duplicate, true);
+  const replay = mintKeyed(store, inviter.secret, "retry-key-0001");
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.token, first.token, "the replay re-signs the identical token");
+  assert.equal(replay.jti, first.jti);
   assert.equal(count(store), 1, "no second ledger row");
-  const redeemed = await post(origin, "/api/referral-invites/redeem", { token: replay.json.token, displayName: "Stranger" });
+  const redeemed = await post(origin, "/api/referral-invites/redeem", { token: replay.token, displayName: "Stranger" });
   assert.equal(redeemed.status, 201, "the replayed token is the live one");
 });
 
 test("mint requestId: same key with a different maxDepth is a 409 and changes nothing", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const first = await post(origin, MINT, { roomId: "commons", requestId: "retry-key-0002", maxDepth: 3 }, inviter.secret);
-  assert.equal(first.status, 201);
-  const clash = await post(origin, MINT, { roomId: "commons", requestId: "retry-key-0002", maxDepth: 5 }, inviter.secret);
-  assert.equal(clash.status, 409);
-  assert.equal(clash.json.error.code, "referral_mint_idempotency_conflict");
+  mintKeyed(store, inviter.secret, "retry-key-0002", 3);
+  assert.throws(() => mintKeyed(store, inviter.secret, "retry-key-0002", 5),
+    error => error.status === 409 && error.code === "referral_mint_idempotency_conflict");
   assert.equal(count(store), 1);
 });
 
@@ -74,14 +75,14 @@ test("mint requestId: keys are scoped to the inviter, a fresh key is a fresh tok
   const { store, origin, ownerKey } = await serve(t);
   const a = await enrollInviter(store, origin, ownerKey, "InviterA");
   const b = await enrollInviter(store, origin, ownerKey, "InviterB");
-  const ra = await post(origin, MINT, { roomId: "commons", requestId: "shared-key-0003" }, a.secret);
-  const rb = await post(origin, MINT, { roomId: "commons", requestId: "shared-key-0003" }, b.secret);
-  assert.notEqual(ra.json.jti, rb.json.jti, "another inviter reusing the key never gets this inviter's token");
-  const fresh = await post(origin, MINT, { roomId: "commons", requestId: "fresh-key-0004" }, a.secret);
-  assert.notEqual(fresh.json.jti, ra.json.jti);
-  const k1 = await post(origin, MINT, { roomId: "commons" }, a.secret);
-  const k2 = await post(origin, MINT, { roomId: "commons" }, a.secret);
-  assert.notEqual(k1.json.jti, k2.json.jti, "keyless behavior is unchanged");
+  const ra = mintKeyed(store, a.secret, "shared-key-0003");
+  const rb = mintKeyed(store, b.secret, "shared-key-0003");
+  assert.notEqual(ra.jti, rb.jti, "another inviter reusing the key never gets this inviter's token");
+  const fresh = mintKeyed(store, a.secret, "fresh-key-0004");
+  assert.notEqual(fresh.jti, ra.jti);
+  const k1 = store.referralInvites.mint(a.secret, "commons");
+  const k2 = store.referralInvites.mint(a.secret, "commons");
+  assert.notEqual(k1.jti, k2.jti, "keyless behavior is unchanged");
   assert.equal(count(store), 5);
 });
 
@@ -89,8 +90,8 @@ test("mint requestId: malformed keys are 422", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
   for (const requestId of ["short", "has spaces in it", 12345678, "x".repeat(129)]) {
-    const out = await post(origin, MINT, { roomId: "commons", requestId }, inviter.secret);
-    assert.equal(out.status, 422, JSON.stringify(requestId));
+    assert.throws(() => mintKeyed(store, inviter.secret, requestId),
+      error => error.status === 422, JSON.stringify(requestId));
   }
   assert.equal(count(store), 0);
 });

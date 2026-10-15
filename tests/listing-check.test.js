@@ -11,7 +11,7 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const server = JSON.parse(readFileSync(join(root, "server.json"), "utf8"));
-const catalog = JSON.parse(readFileSync(join(root, "docs/listings.json"), "utf8"));
+const catalog = JSON.parse(readFileSync(join(root, "scripts/listings.json"), "utf8"));
 
 function jsonResponse(status, body) {
   return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });

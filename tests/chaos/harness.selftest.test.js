@@ -9,7 +9,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Rng } from "./seeded-random.mjs";
-import { runProperty, chaosConfig } from "./harness.mjs";
+import { runProperty, chaosConfig, isExpectedRejection } from "./harness.mjs";
+import { ServiceError } from "../../server/service-error.mjs";
+import { EscrowError } from "../../server/bounty-escrow.mjs";
 
 test("Rng: same seed replays the same stream; different seeds diverge", () => {
   const a = new Rng(12345);
@@ -58,12 +60,56 @@ test("runProperty: a correct model passes and reports counts", async () => {
   assert.equal(checks, 30);
 });
 
-test("runProperty: expected domain rejections are counted, not failed", async () => {
-  const domainError = () => {
-    const error = new Error("nope");
-    error.code = "domain_nope";
+test("isExpectedRejection: only genuine domain error types count", () => {
+  // Genuine domain rejections: typed errors from the systems under test.
+  assert.equal(isExpectedRejection(new ServiceError(422, "invite_unavailable", "nope")), true);
+  assert.equal(isExpectedRejection(new ServiceError(409, "invite_already_used", "nope")), true);
+  assert.equal(isExpectedRejection(new EscrowError("illegal_transition", "nope")), true);
+  // Infrastructure failures must NOT be masked as domain rejections, even
+  // though Node/SQLite/fs errors carry a string .code (issue #2895).
+  for (const code of ["ERR_SQLITE_ERROR", "ERR_SQLITE_BUSY", "ERR_SQLITE_CONSTRAINT", "ENOENT", "EACCES", "EIO", "ENOSPC"]) {
+    const error = new Error(`infra ${code}`);
+    error.code = code;
+    assert.equal(isExpectedRejection(error), false, `${code} must fail the property, not be counted as a rejection`);
+  }
+  // A storage outage wrapped as a 5xx ServiceError is infrastructure, not a
+  // domain rejection of an illegal op (StorageUnavailableError is 503).
+  assert.equal(isExpectedRejection(new ServiceError(503, "storage_unavailable", "nope")), false);
+  // A bare coded object / plain Error with a domain-looking code is not a
+  // typed domain error.
+  const plain = new Error("nope");
+  plain.code = "illegal_transition";
+  assert.equal(isExpectedRejection(plain), false);
+  assert.equal(isExpectedRejection({ code: "illegal_transition" }), false);
+  assert.equal(isExpectedRejection(new TypeError("real bug")), false);
+  assert.equal(isExpectedRejection(null), false);
+  assert.equal(isExpectedRejection("illegal_transition"), false);
+});
+
+test("runProperty: an infrastructure error with a string code fails the property", async () => {
+  // Regression for #2895: ERR_SQLITE_ERROR thrown inside perform() used to be
+  // counted as an "expected domain rejection" and the property passed.
+  const sqliteError = () => {
+    const error = new Error("attempt to write a readonly database");
+    error.code = "ERR_SQLITE_ERROR";
     return error;
   };
+  await assert.rejects(
+    () => runProperty({
+      name: "selftest-infra-error",
+      defaultSeeds: { smoke: 2, full: 2 },
+      defaultOps: { smoke: 5, full: 5 },
+      defaultSeedBase: 3500,
+      build: () => ({}),
+      perform: () => { throw sqliteError(); },
+      checkInvariants: () => {},
+    }),
+    /selftest-infra-error.*FAILED on/
+  );
+});
+
+test("runProperty: expected domain rejections are counted, not failed", async () => {
+  const domainError = () => new ServiceError(422, "domain_nope", "nope");
   const summary = await runProperty({
     name: "selftest-rejections",
     defaultSeeds: { smoke: 4, full: 4 },

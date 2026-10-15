@@ -1,13 +1,16 @@
 // Inbox send UI pure contracts: the direct-send honesty copy, the
 // channel-sends receipt validator, the send-capability gate, and the pending
-// reply-review storage validator. The installers themselves are DOM-bound and
-// stay owned by the browser checks; these guard the decisions those
-// installers make, at the boundary where a wrong answer misleads the owner.
+// reply-review storage validator. Most installers are DOM-bound and stay
+// owned by the browser checks; these guard the decisions those installers
+// make, at the boundary where a wrong answer misleads the owner. The
+// direct-send installer is additionally exercised against a fake DOM below,
+// because its finally-block re-render can erase the outcome it just showed.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
   directSendErrorText,
   validDirectSendResponse,
+  installInboxDirectSend,
   isSendableDraft,
   validReplyReviewPending,
 } from "../src/inbox-send-ui.js";
@@ -98,6 +101,58 @@ test("validReplyReviewPending accepts well-formed pending reviews", () => {
     updateId: "upd:1",
     reviewVersion: "0123456789abcdef".repeat(4),
   })));
+});
+
+// --- installInboxDirectSend: the finally re-render must keep the outcome ---
+// Regression for #2976: render(note) stored nothing, so the finally block's
+// render() with no note recomputed a failed status as the generic
+// "Send failed.", erasing the specific sent/failed line shown a moment before.
+
+function installFakeDirectSend(t, api) {
+  const element = (value = "") => ({
+    value, textContent: "", disabled: false, dataset: {}, listeners: {},
+    addEventListener(name, fn) { this.listeners[name] = fn; },
+    reset() { this.resetCalls = (this.resetCalls ?? 0) + 1; },
+  });
+  const els = {
+    "ds-form": element(), "ds-channel": element("telegram"), "ds-to": element("chat-1"),
+    "ds-subject": element(""), "ds-body": element("hello"), "ds-send": element(), "ds-status": element(),
+  };
+  const previous = globalThis.document;
+  globalThis.document = { getElementById: id => els[id] ?? null };
+  t.after(() => { if (previous === undefined) delete globalThis.document; else globalThis.document = previous; });
+  const ui = installInboxDirectSend({
+    api, ownerKey: () => "owner-1",
+    ids: { form: "ds-form", channel: "ds-channel", to: "ds-to", subject: "ds-subject", body: "ds-body", send: "ds-send", status: "ds-status" },
+  });
+  return { els, ui, submit: () => els["ds-form"].listeners.submit({ preventDefault() {} }) };
+}
+
+test("direct send keeps the specific failure from a failed receipt after the finally re-render", async t => {
+  const api = { async request() { return receipt({ send: { id: "s1", status: "failed", channel: "telegram", errorCode: "telegram_send_rejected" } }); } };
+  const { els, ui, submit } = installFakeDirectSend(t, api);
+  await submit();
+  assert.equal(ui.state, "failed");
+  assert.equal(els["ds-status"].textContent, "Telegram refused the message. Nothing was sent.");
+  assert.equal(els["ds-send"].disabled, false, "the finally block still re-enables the send button");
+});
+
+test("direct send keeps the specific failure from a thrown error after the finally re-render", async t => {
+  const api = { async request() { throw Object.assign(new Error("not connected"), { code: "gmail_not_connected", status: 400 }); } };
+  const { els, ui, submit } = installFakeDirectSend(t, api);
+  await submit();
+  assert.equal(ui.state, "failed");
+  assert.equal(els["ds-status"].textContent, "Gmail isn’t connected for sending. Nothing was sent.");
+  assert.equal(els["ds-send"].disabled, false, "the finally block still re-enables the send button");
+});
+
+test("direct send keeps the specific sent line after the finally re-render", async t => {
+  const api = { async request() { return receipt({ send: { id: "s2", status: "sent", channel: "telegram" } }); } };
+  const { els, ui, submit } = installFakeDirectSend(t, api);
+  await submit();
+  assert.equal(ui.state, "sent");
+  assert.equal(els["ds-status"].textContent, "Sent via Telegram.");
+  assert.equal(els["ds-send"].disabled, false, "the finally block still re-enables the send button");
 });
 
 test("validReplyReviewPending rejects malformed or foreign requests", () => {

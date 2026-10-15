@@ -86,7 +86,7 @@ test("access request with a matching 'who referred you?' attributes the join on 
     requestedPermissions: ["accept_work"], note: null,
     referredBy: "pat referrer", // case-insensitive match
     requestId: "ar-match-1",
-  });
+  }, identity.secret);
   assert.equal(requested.referredBy, "pat referrer");
   const decided = accessRequests.decide(ownerKey, roomId, "ar-match-1", { decision: "approve" });
   assert.equal(decided.status, "approved");
@@ -107,7 +107,7 @@ test("unmatched 'who referred you?' still joins with no referrer", t => {
     identityId: identity.identityId, displayName: "Lone Agent",
     requestedPermissions: ["accept_work"], note: null,
     referredBy: "Nobody Here", requestId: "ar-nomatch-1",
-  });
+  }, identity.secret);
   const decided = accessRequests.decide(ownerKey, roomId, "ar-nomatch-1", { decision: "approve" });
   assert.equal(decided.status, "approved");
   const member = store.room(roomId).state.members[decided.memberId];
@@ -138,7 +138,7 @@ test("ambiguous display names do not falsely attribute", t => {
     identityId: identity.identityId, displayName: "Confused Agent",
     requestedPermissions: ["accept_work"], note: null,
     referredBy: "Sam Duplicate", requestId: "ar-ambig-1",
-  });
+  }, identity.secret);
   const decided = accessRequests.decide(ownerKey, roomId, "ar-ambig-1", { decision: "approve" });
   assert.equal(decided.status, "approved");
   const member = store.room(roomId).state.members[decided.memberId];

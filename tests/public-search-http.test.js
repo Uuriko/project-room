@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { publicSearchAssets, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
-import { publicAssetPaths } from "../deploy/public-assets.mjs";
+import { publicSearchAssets, reviewedPublicSearchPaths } from "../server/public-search.mjs";
+import { publicAssetPaths } from "../server/public-assets.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -71,10 +71,23 @@ test("public doors are indexable while credentials and unknown pages keep privat
     for (const block of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
     assert.match(html, /"@type":"FAQPage"/);
   }
-  for (const path of ["/receipts", "/templates", "/agents", "/docs/agents"]) {
+  for (const path of ["/receipts", "/templates", "/agents"]) {
     const response = await fetch(origin + path, { headers: { "x-forwarded-host": "csp-denied.example", forwarded: "host=csp-denied.example;proto=https" } });
     assert.equal(response.status, 200, path);
     assertPublicPolicy(response, origin);
+  }
+  // Decision #36 (#3254, Option A): /docs/agents serves the generated agent
+  // pages. Where the build has generated them into the tree (the canonical
+  // Cloudflare deploy) the door is a public 200; in a plain checkout or an
+  // exact-commit package they are absent by design and the door answers the
+  // private-default 404 like an unknown page — never a 500.
+  const agentsDoor = await fetch(origin + "/docs/agents", { headers: { "x-forwarded-host": "csp-denied.example", forwarded: "host=csp-denied.example;proto=https" } });
+  if (existsSync(new URL("../docs/agents/index.html", import.meta.url))) {
+    assert.equal(agentsDoor.status, 200, "/docs/agents");
+    assertPublicPolicy(agentsDoor, origin);
+  } else {
+    assert.equal(agentsDoor.status, 404, "/docs/agents");
+    assert.match(agentsDoor.headers.get("x-robots-tag"), /noindex/, "/docs/agents");
   }
   const forged = await new Promise((resolve, reject) => {
     const req = httpRequest(origin + "/about", { headers: { host: "csp-denied.example" } }, res => {

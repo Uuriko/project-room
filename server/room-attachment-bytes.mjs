@@ -147,11 +147,19 @@ export class RoomAttachmentBytes {
   // Visibility rule (2026-09-24, #983): a staged file is visible only to
   // its uploader; a file committed onto a DM (toMemberId) is visible only
   // to the message author and recipient. Everything else stays room-wide.
+  // Fail closed (#2950): a committed file whose bound message no longer
+  // resolves in the projection (history replaced via importEvents, or the
+  // projection rebuilt/compacted while the attachment row survived) must
+  // not become room-visible — without the message there is no proof the
+  // file was not a DM. Only the uploader keeps access: commit() proved
+  // the uploader authored the bound message, so they were a party to it
+  // whether it was a DM or a public post.
   visibleTo(row, messages, memberId) {
     if (row.state === "staged") return row.uploader_id === memberId;
     if (row.message_id) {
       const message = messages.get(row.message_id);
-      if (message?.toMemberId) {
+      if (!message) return row.uploader_id === memberId;
+      if (message.toMemberId) {
         return message.authorId === memberId || message.toMemberId === memberId;
       }
     }
@@ -159,7 +167,10 @@ export class RoomAttachmentBytes {
   }
 
   messageIndex(roomId) {
-    return new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    const byId = new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    // A file committed onto an archived DM must keep the DM's visibility rule:
+    // a missing message would read as room-wide.
+    return { get: id => byId.get(id) ?? this.store.archivedMessage(roomId, id) };
   }
 
   list(token, roomId) {

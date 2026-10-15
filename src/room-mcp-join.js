@@ -2,6 +2,8 @@
 // No keys for the four public join tools. Authorization: Bearer pri_…
 // unlocks the enrolled room profile (stdio room tools plus the hosted extras).
 
+import { MCP_TOOL_META } from "./mcp-tool-registry.js";
+
 export const PUBLIC_WORK_MCP_TOOLS = Object.freeze([
   "public_work_recommend", "public_work_read_task", "public_work_claim", "public_work_renew",
   "public_work_release", "public_work_finish", "public_work_my_review"
@@ -14,7 +16,11 @@ export const IDENTITY_MINT_MCP_TOOLS = Object.freeze([
   "room_identity_mint"
 ]);
 
-export const ROOM_MCP_PUBLIC_URL = "https://www.getdasha.com/room/mcp";
+// Canonical hosted-MCP URL (John's decision, 2026-10-13): the service
+// origin. The getdasha door serves the same catalog as an alias, but every
+// constant, snippet, and card advertises this one URL so agents are never
+// handed two origins for the same endpoint.
+export const ROOM_MCP_PUBLIC_URL = "https://room.trydemigod.com/mcp";
 export const ROOM_MCP_SERVER_NAME = "project-room";
 // initialize serverInfo.version. The server card copies this string.
 export const ROOM_MCP_SERVER_VERSION = "0.1.0";
@@ -138,70 +144,22 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
 ]);
 
 // Hidden tools/call aliases. The key is the old name; the value is canonical.
-export const MCP_TOOL_ALIASES = Object.freeze({
-  "bond.propose": "bond_propose",
-  "bond.accept": "bond_accept",
-  "bond.decline": "bond_decline",
-  "bond.revoke": "bond_revoke",
-  "bond.list": "bond_list",
-  "dm.posted": "dm_posted",
-  "wake.register": "wake_register",
-  "wake.clear": "wake_clear",
-  "heartbeat.set": "heartbeat_set",
-  "heartbeat.get": "heartbeat_get",
-  "heartbeat.ack": "heartbeat_ack",
-  "wake.pause": "wake_pause",
-  "wake.resume": "wake_resume",
-  "webhook.subscribe": "webhook_subscribe",
-  "webhook.list": "webhook_list",
-  "webhook.unsubscribe": "webhook_unsubscribe"
-});
+export const MCP_TOOL_ALIASES = Object.freeze(Object.fromEntries(
+  // Enumeration follows HOSTED_ROOM_MCP_TOOLS order, as the hand list did.
+  MCP_TOOL_META.filter(entry => entry.alias)
+    .sort((a, b) => HOSTED_ROOM_MCP_TOOLS.indexOf(a.name) - HOSTED_ROOM_MCP_TOOLS.indexOf(b.name))
+    .map(entry => [entry.alias, entry.name])
+));
 
 // Default Bearer tools/list. About fifteen tools for the first session.
 // tools/list { profile: "full" } (or ?profile=full) returns HOSTED_ROOM_MCP_TOOLS.
-export const CORE_MCP_TOOLS = Object.freeze([
-  "room_needs_me",
-  "room_read_messages",
-  "room_post_message",
-  "room_reply",
-  "room_list_requests",
-  "room_read_request",
-  "room_respond_to_request",
-  "room_react",
-  "dm_posted",
-  "room_check_access",
-  "room_create",
-  "room_join",
-  "room_put_file",
-  "room_commit_file",
-  "add_land_item",
-  "list_land_queue",
-  "wake_pause",
-  "wake_resume",
-  "bond_propose"
-]);
+export const CORE_MCP_TOOLS = Object.freeze(
+  MCP_TOOL_META.filter(entry => entry.core).map(entry => entry.name)
+);
 
-export const CORE_MCP_BLURBS = Object.freeze({
-  room_needs_me: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution.",
-  room_read_messages: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId.",
-  room_post_message: "Post a room message. Optional replyToId.",
-  room_reply: "Reply under a room message. Pass roomId, replyToId, and body. Ordinary replies do not close formal requests.",
-  room_list_requests: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.",
-  room_read_request: "Read a formal request addressed to or sent by you. Pass roomId and requestMessageId. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.",
-  room_respond_to_request: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add requestId and body, preserve all fixed arguments. Retry unchanged after an unknown result; follow next to verify current status.",
-  room_react: "Set or clear your reaction. Pass roomId, messageId, and reaction.",
-  dm_posted: "Send a peer DM. Requires an active bond that includes peer.dm. Pass roomId, to, body, and messageId.",
-  room_check_access: "List rooms this identity is in. Pass roomId to check one room.",
-  room_create: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites.",
-  room_join: "Join a room with a share-link token or an invite code.",
-  room_put_file: "Upload a room file as canonical base64 (at most 1 MiB). Then room_commit_file.",
-  room_commit_file: "Commit a staged file onto a message you posted. Pass roomId, id, and messageId.",
-  add_land_item: "Add a pull request to this room's land queue. Pass roomId, repo (owner/name), and prNumber.",
-  list_land_queue: "List this room's land queue.",
-  wake_pause: "Pause your queued wakes in this room.",
-  wake_resume: "Resume your queued wakes in this room.",
-  bond_propose: "Request a bond. Pass roomId and to. They answer with bond_accept; then peer.dm opens."
-});
+export const CORE_MCP_BLURBS = Object.freeze(Object.fromEntries(
+  MCP_TOOL_META.filter(entry => entry.blurb).map(entry => [entry.name, entry.blurb])
+));
 
 const aliasByCanonical = new Map(Object.entries(MCP_TOOL_ALIASES).map(([alias, canonical]) => [canonical, alias]));
 
@@ -258,8 +216,8 @@ export function isRoomMcpPath(pathname) {
 export function roomMcpUrlForHost(urlLike) {
   try {
     const url = urlLike instanceof URL ? urlLike : new URL(String(urlLike ?? ""));
-    // Edge doors and the Worker origin always advertise the pasteable public URL.
-    // Demigod GET /room/mcp is snippets-only; live POST tools/call is getdasha.
+    // Edge doors and staging Workers always advertise the one canonical
+    // public URL (ROOM_MCP_PUBLIC_URL, the service origin).
     if (EDGE_DOOR_HOSTS.includes(url.hostname) || url.hostname.endsWith(".getdasha.workers.dev")) {
       return ROOM_MCP_PUBLIC_URL;
     }

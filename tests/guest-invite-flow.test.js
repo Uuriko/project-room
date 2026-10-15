@@ -224,6 +224,36 @@ test("happy-path redemption issues the ga1. credential, badges the name, journal
   assert.equal(history.status, 200);
 });
 
+test("mint and redeem disclose the trial-seat scope and the path to full membership (#3214)", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  // The owner minting the seat sees the trial terms they are issuing: the
+  // same access text the contract and preview already serve.
+  const minted = await mintInvite(request, ownerKey);
+  assert.match(minted.access ?? "", /No work lifecycle, invites, polls, or administration/);
+  // The redeeming guest gets the scope AND a next array (the agent-join
+  // style): orient pointer, the claim ceiling, the expiry, and how to
+  // become a full member. Before #3214 the redeem handed over a credential
+  // with no guidance, and the ceiling (403 guest_scope_denied on claim)
+  // was discovered only by hitting it.
+  const identity = store.identities.create("Synapse");
+  const keys = generateKeyPair();
+  const cardBody = { name: "Synapse", description: "visiting agent", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey, signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  const redeemed = await request("/api/guest-invites/redeem", {
+    method: "POST", token: identity.secret, data: { inviteCode: minted.code, card },
+  });
+  assert.equal(redeemed.status, 201);
+  const value = await redeemed.json();
+  assert.match(value.access ?? "", /No work lifecycle, invites, polls, or administration/);
+  assert.ok(Array.isArray(value.next), "redeem carries a next array");
+  const nextText = value.next.join("\n");
+  assert.match(nextText, /activation-pack/);
+  assert.match(nextText, /guest_scope_denied/);
+  assert.match(nextText, /\/api\/agent-invites\/redeem/);
+  assert.ok(value.next.some(step => step.includes(new Date(value.expiresAt).toISOString())),
+    "next names the credential's actual expiry instant");
+});
+
 test("one seat per identity per room; names come from the card and collide safely", async t => {
   const { store, request, ownerKey } = await serve(t);
   const first = await mintInvite(request, ownerKey);
