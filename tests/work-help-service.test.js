@@ -37,6 +37,11 @@ test("help commands preserve exact receipts, work revisions and read markers thr
   assert.equal(work.revision, before.workItems["test-handoff"].revision);
   assert.deepEqual(saved.messages, before.messages); assert.deepEqual(saved.members, before.members);
   assert.throws(() => f.send({ ...open, data: { ...open.data, scope: "Changed retry" } }), { code: "idempotency_conflict" });
+  // Decision #10: the workItems -> board-claims backfill runs at RoomStore
+  // open and writes the accepted item's board card once. Stage that one-time
+  // migration before the baseline so the restart below is a pure no-op,
+  // which is what this test pins.
+  f.store.backfillWorkItemClaims();
   const withdrawal = f.withdraw(), closed = f.send(withdrawal, "owner"), after = auditRecovery(f.store);
   const current = new RoomStore(f.filename, { now: f.now });
   try {

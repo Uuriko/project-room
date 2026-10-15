@@ -25,7 +25,7 @@ import { join } from "node:path";
 import {
   llmsTxt, llmsFullTxt, kitsTxt, agentCard,
   ROOM_ORIGIN, ROOM_PUBLIC_WWW,
-} from "../deploy/agent-discovery.mjs";
+} from "../server/agent-discovery.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 

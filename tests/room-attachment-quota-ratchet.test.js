@@ -76,14 +76,19 @@ test("room records quota ignores expired rows", async t => {
   });
   const roomId = created.roomId;
 
-  // Seed discarded rows to just under the cap via SQL, then force one
-  // staged row to expire via a backdated expires_at.
+  // Seed EXPIRED rows to one under the cap via SQL, then force one
+  // staged row to expire via a backdated expires_at. That brings the
+  // expired-row total to exactly recordsPerRoom (4096) before e-final:
+  // if expired rows were counted (bare COUNT(*), or a mutant counting
+  // expired but not discarded), e-final would hit 409 attachment_quota.
+  // Previously this seeded 'discarded' rows, so the expired count was
+  // only 1 and e-final succeeded whether or not expired rows counted.
   const now = Date.now();
-  const seedCount = attachmentLimits.recordsPerRoom - 10;
+  const seedCount = attachmentLimits.recordsPerRoom - 1;
   const sha64 = "a".repeat(64);
   const insert = store.db.prepare(`INSERT INTO room_attachments(
     room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id
-  ) VALUES(?,?,?,'e.txt','text/plain',1,'${sha64}',NULL,'discarded',?,?,NULL)`);
+  ) VALUES(?,?,?,'e.txt','text/plain',1,'${sha64}',NULL,'expired',?,?,NULL)`);
   store.transaction(() => {
     for (let i = 0; i < seedCount; i += 1) {
       insert.run(roomId, `seed-${i}`, created.ownerMemberId, now, now + 86400000);
@@ -96,6 +101,14 @@ test("room records quota ignores expired rows", async t => {
     .run(roomId, "e-expiry");
   // Touch the room so expire() flips staged→expired.
   store.roomAttachments.list(owner.secret, roomId);
+  // Preconditions: the flip really happened and expired rows are at
+  // the cap, otherwise this test would again pass vacuously.
+  const expiredRow = store.db.prepare("SELECT state FROM room_attachments WHERE room_id=? AND id=?")
+    .get(roomId, "e-expiry");
+  assert.equal(expiredRow.state, "expired");
+  const expiredCount = store.db.prepare("SELECT COUNT(*) AS n FROM room_attachments WHERE room_id=? AND state='expired'")
+    .get(roomId);
+  assert.equal(expiredCount.n, attachmentLimits.recordsPerRoom);
 
   const after = store.roomAttachments.stage(owner.secret, roomId, {
     id: "e-final", filename: "final.txt", mediaType: "text/plain", data: tinyFile()

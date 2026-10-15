@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   agentCard, llmsTxt, llmsFullTxt, kitsTxt, skillMd,
-} from "../deploy/agent-discovery.mjs";
+} from "../server/agent-discovery.mjs";
 import {
   GUEST_INVITE_REDEEM_DEFAULT_MS,
   GUEST_INVITE_REDEEM_MIN_MS,

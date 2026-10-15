@@ -6,7 +6,7 @@ import {
 import {
   LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);

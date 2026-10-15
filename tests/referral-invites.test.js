@@ -49,6 +49,29 @@ async function get(origin, path, token) {
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
+// Minting is parked at the HTTP door (issue #3218), so the flow tests below
+// seed tokens through the store — the same mint() the door used to call.
+// The wrapper keeps the old { status, json } shape so assertions stay as
+// they were. The door refusal itself is pinned by
+// tests/referral-mint-freeze.test.js.
+function mintViaStore(store, body, secret) {
+  const json = store.referralInvites.mint(secret, body.roomId ?? "commons", {
+    ...(body.maxDepth !== undefined ? { maxDepth: body.maxDepth } : {}),
+    ...(body.requestId !== undefined ? { requestId: body.requestId } : {}),
+  });
+  return { status: 201, json };
+}
+
+// A store-level mint refusal, shaped like the HTTP response it replaces.
+function mintRefusalViaStore(store, body, secret) {
+  try {
+    mintViaStore(store, body, secret);
+  } catch (error) {
+    return { status: error.status, json: { error: { code: error.code } } };
+  }
+  assert.fail("store mint should have refused");
+}
+
 // An agent member with work permissions, so the referral flow can prove it
 // lands strangers at the lower tier regardless of the inviter's own power.
 async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
@@ -90,7 +113,7 @@ test("happy path: mint, preview, redeem lands a read+chat stranger; chain contin
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
 
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const minted = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   assert.equal(minted.status, 201);
   assert.match(minted.json.token, /^ref1\./);
   assert.equal(minted.json.depth, 0);
@@ -120,7 +143,7 @@ test("happy path: mint, preview, redeem lands a read+chat stranger; chain contin
 
   // The chain continues once the stranger can invite: they mint at depth 1.
   grantInvite(store, ownerKey, redeemed.json.memberId);
-  const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, redeemed.json.secret);
+  const second = mintViaStore(store, { roomId: "commons" }, redeemed.json.secret);
   assert.equal(second.status, 201);
   assert.equal(second.json.depth, 1);
   assert.equal(second.json.chainId, minted.json.chainId);
@@ -133,7 +156,7 @@ test("happy path: mint, preview, redeem lands a read+chat stranger; chain contin
 test("expired token is rejected and journaled", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const seed = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const seed = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   assert.equal(seed.status, 201);
   const past = store.now();
   const { token } = craftToken(store, { inviter: inviter.identityId,
@@ -157,7 +180,7 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
   const inviter = await enrollInviter(store, origin, ownerKey);
 
   // maxDepth 1: inviter (depth -1) mints depth 0 fine...
-  const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, inviter.secret);
+  const first = mintViaStore(store, { roomId: "commons", maxDepth: 1 }, inviter.secret);
   assert.equal(first.status, 201);
   assert.equal(first.json.depth, 0);
   const redeemed = await post(origin, "/api/referral-invites/redeem", { token: first.json.token, displayName: "DepthZero" });
@@ -165,7 +188,7 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
 
   // ...the depth-0 member, once they can invite, mints depth 1 (the cap is inclusive)...
   grantInvite(store, ownerKey, redeemed.json.memberId);
-  const last = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, redeemed.json.secret);
+  const last = mintViaStore(store, { roomId: "commons", maxDepth: 1 }, redeemed.json.secret);
   assert.equal(last.status, 201);
   assert.equal(last.json.depth, 1);
   const deep = await post(origin, "/api/referral-invites/redeem", { token: last.json.token, displayName: "DepthOne" });
@@ -173,7 +196,7 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
 
   // ...but the depth-1 member is AT the cap: minting fails and is journaled.
   grantInvite(store, ownerKey, deep.json.memberId);
-  const capped = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, deep.json.secret);
+  const capped = mintRefusalViaStore(store, { roomId: "commons", maxDepth: 1 }, deep.json.secret);
   assert.equal(capped.status, 409);
   assert.equal(capped.json.error.code, "referral_depth_exceeded");
 
@@ -191,18 +214,18 @@ test("depth cap binds mint and redeem; cap rejections are journaled", async t =>
 test("descendants cannot raise an inherited chain cap", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 1 }, inviter.secret);
+  const first = mintViaStore(store, { roomId: "commons", maxDepth: 1 }, inviter.secret);
   const zero = await post(origin, "/api/referral-invites/redeem", { token: first.json.token, displayName: "Depth zero" });
   grantInvite(store, ownerKey, zero.json.memberId);
-  const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, zero.json.secret);
+  const second = mintViaStore(store, { roomId: "commons" }, zero.json.secret);
   assert.equal(second.status, 201);
   assert.equal(second.json.maxDepth, 1, "unspecified descendant cap inherits the original");
   const one = await post(origin, "/api/referral-invites/redeem", { token: second.json.token, displayName: "Depth one" });
   grantInvite(store, ownerKey, one.json.memberId);
-  const raised = await post(origin, "/api/referral-invites/mint", { roomId: "commons", maxDepth: 12 }, one.json.secret);
+  const raised = mintRefusalViaStore(store, { roomId: "commons", maxDepth: 12 }, one.json.secret);
   assert.equal(raised.status, 409);
   assert.equal(raised.json.error.code, "referral_depth_exceeded");
-  const defaultAtCap = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, one.json.secret);
+  const defaultAtCap = mintRefusalViaStore(store, { roomId: "commons" }, one.json.secret);
   assert.equal(defaultAtCap.status, 409);
   const rows = store.db.prepare("SELECT max_depth FROM referral_chain_members WHERE room_id = ? ORDER BY depth").all("commons");
   assert.deepEqual(rows.map(r => r.max_depth), [1, 1]);
@@ -211,12 +234,12 @@ test("descendants cannot raise an inherited chain cap", async t => {
 test("preview refuses a consumed token and a removed inviter", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const first = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const first = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   assert.equal((await post(origin, "/api/referral-invites/preview", { token: first.json.token })).status, 200);
   assert.equal((await post(origin, "/api/referral-invites/redeem", { token: first.json.token })).status, 201);
   const consumed = await post(origin, "/api/referral-invites/preview", { token: first.json.token });
   assert.equal(consumed.status, 404);
-  const second = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const second = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   store.db.prepare("UPDATE rooms SET projection = ?, sequence = sequence + 1 WHERE id = 'commons'").run(
     JSON.stringify({ ...store.room("commons").state,
       members: { ...store.room("commons").state.members,
@@ -228,7 +251,7 @@ test("preview refuses a consumed token and a removed inviter", async t => {
 test("tampered and forged tokens are indistinguishable from unknown ones", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const minted = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   const [prefix, body, sig] = minted.json.token.split(".");
 
   // Flip a character to a guaranteed-different one. For the body the signature
@@ -260,7 +283,7 @@ test("tampered and forged tokens are indistinguishable from unknown ones", async
 test("inviter is hidden from every invitee surface; owner audit sees the chain", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const minted = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   const previewed = await post(origin, "/api/referral-invites/preview", { token: minted.json.token });
   const redeemed = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token, displayName: "Shy" });
 
@@ -304,13 +327,19 @@ test("inviter is hidden from every invitee surface; owner audit sees the chain",
 test("mint requires room membership; removed inviter's tokens die", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const outsiderCreated = await post(origin, "/api/agent-identities", { displayName: "Outsider" });
+  // At the store level an identity with no room membership cannot
+  // authenticate into the room at all — the mint is refused before
+  // membership is even evaluated. (At the parked HTTP door the same
+  // caller gets the uniform 410: the freeze answers members and
+  // non-members identically, so the door is not a membership oracle.)
+  assert.throws(() => store.referralInvites.mint(outsiderCreated.json.secret, "commons"),
+    error => error.status === 401);
   const denied = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, outsiderCreated.json.secret);
-  // An identity with no room membership cannot authenticate into the room at
-  // all — the mint is refused before membership is even evaluated.
-  assert.equal(denied.status, 401);
+  assert.equal(denied.status, 410);
+  assert.equal(denied.json.error.code, "referral_invites_parked");
 
   const inviter = await enrollInviter(store, origin, ownerKey);
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+  const minted = mintViaStore(store, { roomId: "commons" }, inviter.secret);
   assert.equal(minted.status, 201);
 
   // The owner removes the inviter; the outstanding token stops working.
@@ -332,7 +361,7 @@ test("the flow makes no outbound network calls", async t => {
     return realFetch(url, init);
   };
   try {
-    const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, inviter.secret);
+    const minted = mintViaStore(store, { roomId: "commons" }, inviter.secret);
     assert.equal(minted.status, 201);
     const previewed = await post(origin, "/api/referral-invites/preview", { token: minted.json.token });
     assert.equal(previewed.status, 200);
@@ -356,11 +385,14 @@ test("existing invite-code redemption still works alongside referral invites", a
   assert.deepEqual(redeemed.json.permissions, []);
 });
 
-// Instinct's #996-family finding: POST /api/referral-invites/mint signs and
-// inserts ledger rows directly (no store.command), so a demoted t1_readonly
-// agent could mint signed invite tokens. Minting is a membership write and
-// must refuse t1 callers. A member without invite rights is refused too.
-// t2 agents who can invite, a human granted invite_member, and the owner pass.
+// Instinct's #996-family finding: minting signs and inserts ledger rows
+// directly (no store.command), so a demoted t1_readonly agent could mint
+// signed invite tokens. Minting is a membership write and must refuse t1
+// callers. A member without invite rights is refused too. t2 agents who
+// can invite, a human granted invite_member, and the owner pass.
+// Since #3218 the HTTP mint door itself is parked (410 for everyone), so
+// the tier gate is exercised here at the store level it lives in; the
+// door refusal is pinned by tests/referral-mint-freeze.test.js.
 test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, and the owner can", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const t2 = await enrollInviter(store, origin, ownerKey, "Inviter");
@@ -370,27 +402,24 @@ test("tier gate: t1_readonly agents cannot mint referral invites; t2, humans, an
     data: { memberId: "human1", displayName: "Human One", kind: "human", permissions: [] } });
   const humanKey = store.issueAccessKey("commons", "human1");
 
-  const refused = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t1.secret);
-  assert.equal(refused.status, 403);
-  assert.equal(refused.json.error.code, "agent_readonly");
-
-  const okT2 = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t2.secret);
-  assert.equal(okT2.status, 201);
-  const refusedHuman = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, humanKey);
-  assert.equal(refusedHuman.status, 403);
-  assert.equal(refusedHuman.json.error.code, "invite_not_permitted");
-  assert.equal(refusedHuman.json.reason, "invite_not_permitted");
-  assert.ok(Array.isArray(refusedHuman.json.next));
+  assert.throws(() => store.referralInvites.mint(t1.secret, "commons"),
+    error => error.status === 403 && error.code === "agent_readonly");
+  assert.match(mintViaStore(store, { roomId: "commons" }, t2.secret).json.token, /^ref1\./);
+  assert.throws(() => store.referralInvites.mint(humanKey, "commons"),
+    error => error.status === 403 && error.code === "invite_not_permitted");
   grantInvite(store, ownerKey, "human1");
-  const okHuman = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, humanKey);
-  assert.equal(okHuman.status, 201);
-  const okOwner = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
-  assert.equal(okOwner.status, 201);
+  assert.match(mintViaStore(store, { roomId: "commons" }, humanKey).json.token, /^ref1\./);
+  assert.match(mintViaStore(store, { roomId: "commons" }, ownerKey).json.token, /^ref1\./);
+
+  // The parked door refuses even a fully eligible minter.
+  const door = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, t2.secret);
+  assert.equal(door.status, 410);
+  assert.equal(door.json.error.code, "referral_invites_parked");
 });
 
 test("redeem rejects missing and inherited ledger inviters without admitting anyone", async t => {
   const { store, origin, ownerKey } = await serve(t);
-  const seed = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const seed = mintViaStore(store, { roomId: "commons" }, ownerKey);
   assert.equal(seed.status, 201);
   const before = store.room("commons");
   const count = table => store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n;
@@ -413,7 +442,7 @@ test("redeem rejects missing and inherited ledger inviters without admitting any
 
 test("an actual enrolled toString inviter retains private referral admission authority", async t => {
   const { store, origin, ownerKey } = await serve(t, "toString");
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const minted = mintViaStore(store, { roomId: "commons" }, ownerKey);
   assert.equal(minted.status, 201);
   const preview = await post(origin, "/api/referral-invites/preview", { token: minted.json.token });
   assert.equal(preview.status, 200);
@@ -449,10 +478,12 @@ test("guest members cannot mint referral invites", async t => {
   assert.equal(store.room("commons").state.members[guest.member.id].active, true);
 
   const attempt = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, guest.token);
-  assert.equal(attempt.status, 403);
-  assert.equal(attempt.json?.error?.code, "invite_not_permitted");
-  assert.equal(attempt.json?.reason, "invite_not_permitted");
-  assert.ok(Array.isArray(attempt.json?.next));
+  assert.equal(attempt.status, 410);
+  assert.equal(attempt.json?.error?.code, "referral_invites_parked");
+  // The underlying gate is unchanged: at the store level the guest is
+  // refused for lacking invite rights, exactly as before the freeze.
+  assert.throws(() => store.referralInvites.mint(guest.token, "commons"),
+    error => error.status === 403 && error.code === "invite_not_permitted");
   // The owner audit ledger must not record a minted token for the guest.
   assert.equal(store.db.prepare(
     "SELECT count(*) n FROM referral_invites WHERE inviter_member_id = ? AND status = 'minted'"
@@ -461,27 +492,31 @@ test("guest members cannot mint referral invites", async t => {
 
 test("a chat member keeps their referral board and cannot mint until they can invite", async t => {
   const { store, origin, ownerKey } = await serve(t);
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const minted = mintViaStore(store, { roomId: "commons" }, ownerKey);
   const redeemed = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token, displayName: "Chat Member" });
   assert.equal(redeemed.status, 201);
   const board = await get(origin, "/api/rooms/commons/referrals", redeemed.json.secret);
   assert.equal(board.status, 200);
   const refused = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, redeemed.json.secret);
-  assert.equal(refused.status, 403);
-  assert.equal(refused.json.error.code, "invite_not_permitted");
+  assert.equal(refused.status, 410);
+  assert.equal(refused.json.error.code, "referral_invites_parked");
+  // The underlying gate is unchanged: at the store level the chat member
+  // is refused for lacking invite rights, exactly as before the freeze.
+  assert.throws(() => store.referralInvites.mint(redeemed.json.secret, "commons"),
+    error => error.status === 403 && error.code === "invite_not_permitted");
   assert.equal(store.db.prepare("SELECT count(*) n FROM referral_invites WHERE inviter_member_id=?").get(redeemed.json.memberId).n, 0);
 });
 
 test("a new referral redeem shares the anonymous identity mint limiter", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   for (let i = 0; i < 8; i++) {
-    const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+    const minted = mintViaStore(store, { roomId: "commons" }, ownerKey);
     assert.equal(minted.status, 201, `mint ${i}`);
     const redeemed = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token, displayName: `Free ${i}` });
     assert.equal(redeemed.status, 201, `redeem ${i}`);
     assert.equal(typeof redeemed.json.secret, "string");
   }
-  const ninth = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const ninth = mintViaStore(store, { roomId: "commons" }, ownerKey);
   const withoutProof = await post(origin, "/api/referral-invites/redeem", { token: ninth.json.token, displayName: "Needs proof" });
   assert.equal(withoutProof.status, 428);
   assert.equal(withoutProof.json.error.code, "proof_required");
@@ -502,7 +537,7 @@ test("a referral redeem attaches an existing identity instead of minting another
   const { store, origin, ownerKey } = await serve(t);
   const existing = store.identities.create("Already Here");
   const before = store.db.prepare("SELECT count(*) n FROM agent_identities").get().n;
-  const minted = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const minted = mintViaStore(store, { roomId: "commons" }, ownerKey);
   const attached = await post(origin, "/api/referral-invites/redeem", { token: minted.json.token }, existing.secret);
   assert.equal(attached.status, 201);
   assert.equal(attached.json.attached, true);
@@ -511,7 +546,7 @@ test("a referral redeem attaches an existing identity instead of minting another
   assert.equal(store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, before);
   assert.equal(store.room("commons").state.members[existing.identityId].displayName, "Already Here");
 
-  const again = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, ownerKey);
+  const again = mintViaStore(store, { roomId: "commons" }, ownerKey);
   const bad = await post(origin, "/api/referral-invites/redeem", { token: again.json.token, displayName: "Nope" }, "pri_" + "x".repeat(43));
   assert.equal(bad.status, 401);
   assert.equal(bad.json.error.code, "auth_required");

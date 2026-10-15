@@ -18,13 +18,21 @@ export function projectBoard(state, now = Date.now()) {
     columns[column].push({
       id: item.id, title: item.title, state: item.state, mode: item.mode,
       accountableMemberId: item.accountableMemberId, revision: item.revision,
+      // The superseded card's next step names the replacement work item, so
+      // the projection must carry the pointer instead of dropping it.
+      ...(typeof item.supersededBy === "string" && item.supersededBy ? { supersededBy: item.supersededBy } : {}),
       next: { action: next.action, label: next.label, memberId: next.memberId, role: next.role },
       ...(item.handoff?.open ? { handoff: {
         eventId: item.handoff.eventId, at: item.handoff.at, actorId: item.handoff.actorId,
         doneSummary: item.handoff.doneSummary,
         evidenceUrl: item.handoff.evidenceUrl ?? null, evidenceVersion: item.handoff.evidenceVersion ?? null,
         nextAction: item.handoff.nextAction, limitReason: item.handoff.limitReason,
-        haltAll: item.handoff.haltAll === true } } : {})
+        haltAll: item.handoff.haltAll === true } } : {}),
+      // A blocked card without the blocker record forces a per-card read to
+      // learn why it is blocked; project it like the handoff record above.
+      ...(item.blocker ? { blocker: {
+        reason: item.blocker.reason, nextAction: item.blocker.nextAction ?? null,
+        eventId: item.blocker.eventId ?? null } } : {})
     });
   }
   for (const list of Object.values(columns)) list.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

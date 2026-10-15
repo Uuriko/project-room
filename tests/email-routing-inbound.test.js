@@ -114,6 +114,21 @@ test("unknown recipients, oversized and malformed messages are rejected with a s
   for (const reason of Object.values(emailRoutingRejections)) assert.match(reason, /^[ -~]{1,64}$/, "reject reasons are short ASCII");
 });
 
+test("a malformed or stale profile from the connection lookup is rejected, not thrown", async () => {
+  // Regression #2930: resolveRoutedConnection calls emailConnection(found) with
+  // no conversion, so EmailContractError escaped routeInboundEmail's outer
+  // catch (which only converts EmailRoutingError) instead of becoming a reject.
+  const malformed = await routeInboundEmail(inbound(), { lookup: () => ({ accountId: "a" }) });
+  assert.deepEqual(malformed, { decision: { accept: false, reason: emailRoutingRejections.malformed }, code: "invalid_email_connection", match: null, tag: null,
+    connection: null, envelope: null, requestId: null, messageId: null, rawDigest: null, preview: null, truncated: false });
+  const stale = await routeInboundEmail(inbound(), { lookup: () => ({ ...connection(), provider: "unknown-provider", revision: 0 }) });
+  assert.deepEqual(stale.decision, { accept: false, reason: emailRoutingRejections.malformed }); assert.equal(stale.code, "invalid_email_connection");
+  const badAlias = await routeInboundEmail(inbound(), { lookup: () => ({ ...connection(), aliases: [{ name: "Help" }] }) });
+  assert.deepEqual(badAlias.decision, { accept: false, reason: emailRoutingRejections.malformed }); assert.equal(badAlias.code, "invalid_email");
+  // Non-contract lookup failures are infrastructure errors and still propagate.
+  await assert.rejects(routeInboundEmail(inbound(), { lookup: () => { throw new Error("database down"); } }), /database down/);
+});
+
 test("completeRoutedImport builds the importer's page.apply request and reports duplicates", async () => {
   const routed = await routeInboundEmail(inbound(), { lookup });
   const first = completeRoutedImport(routed);
@@ -127,6 +142,17 @@ test("completeRoutedImport builds the importer's page.apply request and reports 
   assert.deepEqual(dup, { duplicate: true, receipt: { requestId: routed.requestId }, request: null });
   const rejected = await routeInboundEmail(inbound({ to: "nobody@example.test" }), { lookup });
   assert.throws(() => completeRoutedImport(rejected), { code: "email_routing_not_accepted", reason: emailRoutingRejections.unknownRecipient });
+});
+
+test("completeRoutedImport never claims completeness for a folder that is not complete (#2929)", async () => {
+  const routed = await routeInboundEmail(inbound(), { lookup });
+  const scanning = completeRoutedImport(routed, { folder: { revision: 4, complete: false, scanMembers: ["hello-1@example.test"] }, expectedCursor: "scan-page-1" });
+  assert.equal(scanning.request.complete, false, "an in-progress scan stays in progress: plan() would promote its partial scan set to members");
+  const incomplete = completeRoutedImport(routed, { folder: { revision: 4, complete: false, scanMembers: null }, expectedCursor: "page-2" });
+  assert.equal(incomplete.request.complete, false, "a single routed message is not evidence a folder enumeration finished");
+  const settled = completeRoutedImport(routed, { folder: { revision: 4, complete: true, scanMembers: null }, expectedCursor: "prev" });
+  assert.equal(settled.request.complete, true, "an already-complete folder stays complete");
+  assert.equal(completeRoutedImport(routed).request.complete, true, "a folder created by routed messages alone starts complete");
 });
 
 function storeFixture(t) {
@@ -166,6 +192,36 @@ test("the existing importer accepts routed messages: import, duplicate Message-I
   const projected = f.store.inbox.read(f.auth.token, routed.envelope.sourceId, f.auth.sessionBinding, { emailView: true });
   assert.equal(projected.source.email.view.startsWith("email-"), true); assert.equal(JSON.stringify(projected).includes(routed.rawDigest), false, "raw digests stay off the browser projection");
   assert.equal(JSON.stringify(f.store.inbox.list(f.auth.token, f.auth.sessionBinding, { includeEmail: true })).includes(view.source.envelope.sourceId), true);
+});
+
+test("a routed message arriving mid-scan joins the scan without truncating folder members (#2929)", async t => {
+  const f = storeFixture(t);
+  const page = (overrides) => ({ action: "page.apply", requestId: randomUUID(), connectionId: f.connection.id, connectionRevision: 1,
+    folderId: emailRoutingFolderId, reset: false, observations: [], ...overrides });
+  const folderState = () => f.store.email.state(f.auth.token, f.connection.id, emailRoutingFolderId, f.auth.sessionBinding).folder;
+  const first = await routeInboundEmail(inbound(), { lookup: f.lookup });
+  const second = await routeInboundEmail(inbound({ rawOverrides: { messageId: "<hello-2@example.test>", body: "Second" } }), { lookup: f.lookup });
+  f.apply(first); f.apply(second);
+  assert.deepEqual(folderState().members, ["hello-1@example.test", "hello-2@example.test"]); assert.equal(folderState().complete, true);
+  // A folder scan restarts and has so far re-observed only the first message.
+  f.store.email.apply(f.auth.token, page({ expectedRevision: 2, expectedCursor: second.requestId, cursor: "scan-page-1", complete: false, reset: true,
+    observations: [{ kind: "message", envelope: first.envelope, expectedSourceRevision: 1 }] }), f.auth.sessionBinding);
+  const scanning = folderState();
+  assert.deepEqual(scanning.members, ["hello-1@example.test", "hello-2@example.test"], "members stay put while a scan is in progress");
+  assert.deepEqual(scanning.scanMembers, ["hello-1@example.test"]); assert.equal(scanning.complete, false);
+  // A routed message lands mid-scan: it must join the scan set, not finalize it.
+  const third = await routeInboundEmail(inbound({ rawOverrides: { messageId: "<hello-3@example.test>", body: "Third" } }), { lookup: f.lookup });
+  assert.equal(f.apply(third).applied, true);
+  const midScan = folderState();
+  assert.deepEqual(midScan.members, ["hello-1@example.test", "hello-2@example.test"], "previously imported members are not dropped by a routed import");
+  assert.deepEqual(midScan.scanMembers, ["hello-1@example.test", "hello-3@example.test"], "the routed message joins the in-progress scan");
+  assert.equal(midScan.complete, false, "the scan is still in progress");
+  // When the scan's own final page arrives, members swap to the full scan set.
+  f.store.email.apply(f.auth.token, page({ expectedRevision: midScan.revision, expectedCursor: third.requestId, cursor: "scan-page-2", complete: true,
+    observations: [{ kind: "message", envelope: second.envelope, expectedSourceRevision: 1 }] }), f.auth.sessionBinding);
+  const done = folderState();
+  assert.deepEqual(done.members, ["hello-1@example.test", "hello-2@example.test", "hello-3@example.test"]);
+  assert.equal(done.complete, true); assert.equal(done.scanMembers, null);
 });
 
 test("bindRouting presents the uniform adapter driver and drives the shared page preparer", async t => {

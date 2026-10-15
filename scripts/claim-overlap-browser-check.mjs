@@ -22,7 +22,7 @@ test("a claim on already-claimed paths shows who else holds them", { timeout: 60
   const send = (type, data) => f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type, data });
   const revision = id => f.store.snapshot(f.keys.owner, "commons").state.workItems[id].revision;
   const expiresAt = new Date(Date.now() + 3600000).toISOString();
-  for (const [id, title, paths] of [["w-first", "Fix login redirect", ["src/app.js", "server/**"]], ["w-second", "Start a room", ["./src/app.js", "deploy/room-entry.mjs"]]]) {
+  for (const [id, title, paths] of [["w-first", "Fix login redirect", ["src/app.js", "server/**"]], ["w-second", "Start a room", ["./src/app.js", "server/room-entry.mjs"]]]) {
     send(T.WORK_PROPOSED, { workItemId: id, title, definitionOfDone: "Evidence returned", accountableMemberId: "owner", mode: "write", independentVerificationRequired: false, ownerDecisionRequired: false });
     send(T.WORK_ACCEPTED, { workItemId: id, expectedRevision: revision(id) });
     send(T.CLAIM_ACQUIRED, { workItemId: id, expectedRevision: revision(id), repository: "Uuriko/project-room", ref: id, paths, expiresAt });
