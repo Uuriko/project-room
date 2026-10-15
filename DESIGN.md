@@ -95,6 +95,9 @@ Oct 14): conversation first, work and results inline, details on demand.
 Inspect the open-source Codex implementation when evaluating its behavior;
 do not assume every desktop surface is present in that repository. Adapt the
 pattern for shared audiences, permissions, attribution, and concurrent work.
+This is inspiration, not a fixed template. Prefer whichever interaction makes
+the complete task clearer and easier; fewer elements must not increase effort
+to discover an action, understand its consequences, or recover from failure.
 
 - Show the message, result, or decision before explaining the system.
 - Remove text that repeats a label, selected state, author, or visible action.

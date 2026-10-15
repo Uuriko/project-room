@@ -76,7 +76,7 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#catchup-dialog").evaluate(node => node.open), false);
     assert.equal(await page.locator("#return-brief-panel").count(), 1);
     assert.equal(await page.locator("#caught-up-button").count(), 0);
-    assert.match(await page.locator("#catchup-count").textContent(), /^7 need you/);
+    assert.equal(await page.locator("#catchup-count").textContent(), "7");
     await page.evaluate(() => scrollTo(0, 0)); await capture("closed");
     assert.equal(await summary.evaluate(node => node.getBoundingClientRect().bottom < innerHeight), true);
     const openedBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
@@ -121,7 +121,7 @@ for (const mobile of [false, true]) {
     await openCatchUp(page); await ready();
     await attention("return-1").focus();
     now += 600100; await page.clock.fastForward(600100);
-    await page.waitForFunction(() => document.querySelector("#catchup-count").textContent.startsWith("8 need you"));
+    await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "8");
     assert.match(await attention("return-1").locator("..").textContent(), /Confirm permission and reserve write scope/);
     assert.equal(await attention("return-1").evaluate(node => node === document.activeElement), true);
     assert.equal(await card("return-1").locator('[data-action="start"]').count(), 0);

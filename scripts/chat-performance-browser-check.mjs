@@ -314,6 +314,24 @@ test('a long room opens at its newest message on a phone, and older history fill
       return { gap: Math.round(list.scrollHeight - list.scrollTop - list.clientHeight), lastOnScreen: last.bottom <= Math.min(box.bottom, innerHeight) + 1 && last.top < innerHeight, pill: pill.hidden ? null : pill.textContent };
     });
     assert.deepEqual(seen, { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px open lands on the newest message with no new-messages pill`);
+    // Once a reader leaves the bottom, later chrome changes must not reclaim
+    // the pin or disturb the draft they are keeping while reading history.
+    await page.locator('#message-input').fill('Keep this unsent while I read');
+    const listBox = await page.locator('#message-list').boundingBox();
+    await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + listBox.height / 2);
+    await page.mouse.wheel(0, -500);
+    await page.waitForFunction(() => {
+      const list = document.querySelector('#message-list');
+      return list.scrollHeight - list.scrollTop - list.clientHeight > 300;
+    });
+    await page.waitForTimeout(150);
+    const readingTop = await page.locator('#message-list').evaluate(list => list.scrollTop);
+    await page.locator('[data-late-chrome]').evaluate(chrome => { chrome.style.height = '260px'; });
+    await page.waitForTimeout(150);
+    const afterResize = await page.locator('#message-list').evaluate(list => ({ top: list.scrollTop, gap: list.scrollHeight - list.scrollTop - list.clientHeight }));
+    assert.ok(Math.abs(afterResize.top - readingTop) <= 1, `${viewport.width}px: late chrome preserves the reader's position`);
+    assert.ok(afterResize.gap > 300, `${viewport.width}px: reader is not snapped to newest`);
+    assert.equal(await page.locator('#message-input').inputValue(), 'Keep this unsent while I read');
     assert.deepEqual(errors, []);
     await context.close();
   }

@@ -140,7 +140,7 @@ async function exerciseHeader(page) {
     const menu = await page.locator(".room-more-actions").boundingBox();
     assert.ok(menu.x >= 0 && menu.x + menu.width <= page.viewportSize().width + 1, "More popover stays inside the narrow viewport");
     if (mode === "keyboard") {
-      for (const selector of ["#topbar-activity", "#topbar-later", "#room-actions-open", "#topbar-settings"]) {
+      for (const selector of ["#assistant-setup", "#human-project-open", "#topbar-activity", "#topbar-later", "#room-actions-open", "#topbar-settings"]) {
         await page.keyboard.press("Tab");
         assert.equal(await page.locator(selector).evaluate(node => node === document.activeElement), true, `More menu Tab reaches ${selector}`);
       }
@@ -176,7 +176,7 @@ async function exerciseHeader(page) {
 test("mobile header: session actions fold into an accessible menu, conversation stays close", { timeout: 90000 }, async t => {
   const { fixture, page, errors, server, context, origin } = await setup(t, { width: 390, height: 844 });
   await signIn(fixture, page, origin);
-  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "4 updates"); // R28-1: the owner's own setup events are not news to the owner
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "4"); // R28-1: the owner's own setup events are not news to the owner
   await assertMoreLabel(page);
   const layouts = async (name, count, { interact = false, recovery = false } = {}) => {
     for (const width of [390, 320]) for (const font of [100, 200]) {
@@ -217,13 +217,13 @@ test("mobile header: session actions fold into an accessible menu, conversation 
       await page.screenshot({ path: `test-results/mobile-header-${width}-${font}-${name}.png` });
     }
   };
-  await layouts("4-updates", "4 updates");
+  await layouts("4-updates", "4");
   await openCatchUp(page);
   await page.waitForFunction(() => !document.querySelector("#rb-ack-button").disabled && Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
   await page.locator("#rb-ack-button").click();
-  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "No new updates");
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "");
   await closeCatchUp(page);
-  await layouts("0-updates", "No new updates");
+  await layouts("0-updates", "");
   let now = Date.now(); fixture.store.now = () => now;
   const send = (type, data, key = fixture.keys.owner) => { now += 2100; return fixture.store.command(key, "commons", { id: crypto.randomUUID(), type, data }); };
   // The guest's mention comes first: an unbroken run of the owner's own events right
@@ -231,17 +231,17 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   send(T.MESSAGE_POSTED, { messageId: "header-mention", body: "@owner Please check this synthetic header update." }, fixture.keys.guest);
   for (let n = 0; n < 7; n++) send(T.WORK_PROPOSED, { workItemId: `header-work-${n}`, title: `Synthetic header task ${n + 1}`, definitionOfDone: "Exercise the visible current-needs count.", accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
   for (let n = 0; n < 69; n++) send(T.MESSAGE_POSTED, { messageId: `header-message-${n}`, body: `Synthetic header update ${n + 1}.` });
-  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "7 need you · 77 updates");
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "7");
   // Catch-up proposals are not actionable Updates. Load a real mention so
   // the compact-row contract also exercises the Updates badge, not an empty span.
   await page.locator("#topbar-updates").click();
   await page.waitForFunction(() => !document.querySelector("#updates-count").hidden && document.querySelector("#updates-count").textContent === "1");
   await page.keyboard.press("Escape");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
-  await layouts("77-updates", "7 need you · 77 updates", { interact: true });
+  await layouts("77-updates", "7", { interact: true });
   await context.setOffline(true); server.closeStreams();
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connection interrupted"));
-  await layouts("disconnected", "7 need you · 77 updates", { recovery: true });
+  await layouts("disconnected", "7", { recovery: true });
   // CLOSED EventSource recovery backs off to30s plus up to25% jitter.
   // Require a new successful stream response after the observed interrupted
   // state, not just a status string or an arbitrary extra sleep.

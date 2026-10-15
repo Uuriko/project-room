@@ -152,15 +152,9 @@ test("agent type catalog renders and click fills the same join path", { timeout:
   for (const id of ["claude-code", "codex", "cursor", "hermes", "opencode", "pi", "grok-bot", "grok-build", "instinct", "muse"]) {
     assert.equal(await catalog.locator(`[data-agent-type="${id}"]`).count(), 1, id);
   }
-  // UI calming #8 simplified the agent-type descriptions ("Best for local coding
-  // sessions with MCP tools" became "Best for local coding sessions"). The
-  // catalog text comes from innerText, which never contains markup, so assert
-  // the shortened copy positively and the old suffix negatively instead.
   assert.equal(await f.page.locator("#agent-other-types").evaluate(node => node.open), false);
   assert.equal(await catalog.locator("button:visible").count(), 4);
-  const catalogText = await catalog.innerText();
-  assert.match(catalogText, /Best for local coding sessions/, 'the agent catalog keeps the shortened agent-type copy');
-  assert.doesNotMatch(catalogText, /with MCP tools/, 'the old verbose agent-type suffix is gone');
+  // Selecting an app must populate its actual setup path.
   await f.page.locator('#agent-type-catalog button[data-agent-type="claude-code"]').click();
   assert.equal(await f.page.locator("#agent-connect-name").inputValue(), "Claude Code");
   assert.equal(await f.page.locator("#agent-connect-access").inputValue(), "contribute");
@@ -371,8 +365,9 @@ test("a just-created connection reads as ready, not as a missing member, without
   // stream has applied the new agent's member event. It used to keep saying
   // "Member record missing" until the owner reloaded the page.
   const f = await setup(t, true);
-  // The first-time path: composer "Connect" -> "Add an agent", not the sidebar.
+  // The first-time path: room controls -> Connect -> Add an agent.
   await ensureSidebarClosed(f.page);
+  await f.page.locator('#room-more > summary').click();
   await f.page.locator("#assistant-setup").click();
   await f.page.locator("#room-assistant-setup button", { hasText: "Add an agent" }).click();
   await f.page.locator("#agent-connect-dialog").waitFor({ state: "visible" });

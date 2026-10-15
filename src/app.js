@@ -337,6 +337,16 @@ const timelineWindow = new Map();
 let timelineRevealing = false;
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 const timelinePin = createTimelinePin();
+function setTimelinePin(view, list) {
+  // Room owns bottom positioning until reader input. Native anchoring can
+  // otherwise undo that position before the resize observer runs.
+  list.style.overflowAnchor = "none";
+  timelinePin.set(view, list);
+}
+function clearTimelinePin() {
+  timelinePin.clear();
+  $("#message-list").style.removeProperty("overflow-anchor");
+}
 let pinScrollTop = null; // where the pin last moved the list; that scroll event is not the reader's
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
@@ -2400,10 +2410,10 @@ function renderMessages() {
   list.dataset.view = view;
   if (!sameView) {
     list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0;
-    if (viewPositions.has(view)) timelinePin.clear(); else timelinePin.set(view, list);
+    if (viewPositions.has(view)) clearTimelinePin(); else setTimelinePin(view, list);
   } else if ((nearBottom || ownArrival) && !focused) {
     if (pinOnly && !ownArrival) { stickPinnedTimeline(list); if (newCount > 0) scheduleHorizonAdvance(); }
-    else { list.scrollTop = list.scrollHeight; timelinePin.set(view, list); }
+    else { list.scrollTop = list.scrollHeight; setTimelinePin(view, list); }
     newVisibleMessages = 0;
   }
   else {
@@ -4951,11 +4961,14 @@ const READER_SCROLL_MS = 1000;
 let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
-const noteReaderScroll = () => { readerScrollAt = performance.now(); };
+const noteReaderScroll = event => {
+  if (event) clearTimelinePin();
+  readerScrollAt = performance.now();
+};
 addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
-addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
-$("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
+addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(event); }, { capture: true });
+$("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(event); }, { passive: true });
 for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
     if (!readerScrolling()) return;
@@ -5214,7 +5227,7 @@ if (globalThis.ResizeObserver) new ResizeObserver(() => {
 // dropped as it would have been without the pin.
 function stickPinnedTimeline(list) {
   const before = list.scrollTop, offBottom = list.scrollHeight - before - list.clientHeight >= 80;
-  list.scrollTop = list.scrollHeight; timelinePin.set(list.dataset.view, list);
+  list.scrollTop = list.scrollHeight; setTimelinePin(list.dataset.view, list);
   if (list.scrollTop === before) return;
   pinScrollTop = list.scrollTop;
   if (offBottom) { clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null; }
