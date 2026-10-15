@@ -27,7 +27,8 @@ honestly cannot survive yet.
     token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
-  - *KV-native restore (the #3409 fix, once deployed):*
+  - *KV-native restore (the #3409 fix; on main, effective in production on
+    the next deploy):*
     `POST /api/operator/restore-from-backup` restores the daily backup
     already stored in the `ROOM_BACKUPS_KV` namespace — same operator token
     and fail-closed posture, no size cap: the manifest and parts are pulled
@@ -36,25 +37,33 @@ honestly cannot survive yet.
     watermark, recovery, and invitation audits must pass before the restore
     reports verified. Body: `{"key": "room-backups/YYYY-MM-DD.ndjson"}`
     (optional; defaults to today's key). A failed replay deletes everything
-    it touched, leaving the store empty and retryable.
+    it touched, leaving the store empty and retryable. Verified end to end
+    on 2026-10-15 against a 90,688,789-byte production-shaped backup (the
+    live backup that day was 89,652,872 bytes): the KV restore and file
+    replay of the same backup both verified, ~30s each (#3409).
 
-## Known disaster-recovery defects (all open, all verified)
+## Disaster-recovery defects — status (2026-10-15)
 
-Disaster recovery for the real production backup is currently broken in
-independent ways. None of these is fixed by rehearsing harder; each needs its
-engineering fix, proven against a production-sized export, not a fixture.
+The four defects that made recovery of the real production backup
+impossible or unprovable have all been addressed on `main`:
 
-- **#3409 (High)** — the current backup exceeds the 64 MiB DO restore cap, so
-  the only DO-native restore path rejects it with 413.
-- **#3407 (High)** — the nightly KV writer certifies an export by trailer
-  event *count* only, never the trailer hash. (The R2 writer checks both.)
-  A torn export can be stored as a healthy backup and fail only at restore
-  time.
-- **#3324** — open-store restore ignores the public-claim writer permit.
-- **#3325** — restore verification pins only the event log.
+- **#3409 (High) — fixed, closed 2026-10-15.** The KV-native restore above
+  replaces the capped body path for the daily backup; verified at
+  production shape (see Current state).
+- **#3407 (High) — fixed, closed 2026-10-15.** The KV backup writer now
+  certifies the trailer hash at write time, not only the event count.
+- **#3324 — fixed, closed 2026-10-15.** Open-store restores no longer
+  import the exported public-claim writer permit; regression tests cover
+  both the buffered and the KV streaming restore paths.
+- **#3325 — fix in PR #3536.** Restore verification pinned only the event
+  log; trailer version 2 adds per-table content digests over the rows as
+  exported, verified by all three restore paths, which now report an
+  explicit content-verification level (full / events-only /
+  watermark-only) instead of one bare `verified` flag.
 
-Until #3409 lands, the recovery route for a DO loss is file replay into a new
-Node sqlite store (above), not the restore endpoint.
+Until the KV-native endpoint is deployed to production, the recovery
+route for a DO loss is file replay into a new Node sqlite store (above),
+not the restore endpoints.
 
 ## Honest RPO / RTO
 
@@ -100,14 +109,15 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
 `Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
-backup, use the KV-native endpoint above with the backup's key instead.)
+backup, use the KV-native endpoint above (once deployed) with the backup's
+key instead.)
 
 ## What was deliberately not done
 
 - Enabling R2 and provisioning tokens need the Cloudflare account; they are
   operator steps, not code.
-- Chunked / KV-native in-DO restore for backups over 64 MiB is the #3409 fix,
-  not a runbook step.
+- KV-native in-DO restore for backups over 64 MiB shipped as the #3409 fix
+  (above); it is an endpoint, not a manual runbook procedure.
 - No automated production restore drill: rehearsing against the live DO
   would risk the live room. The Miniflare drill in
   `cloudflare/store.check.mjs` and the 2026-10-07 file-replay rehearsal are
