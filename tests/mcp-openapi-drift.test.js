@@ -75,7 +75,7 @@ function effectiveRequestParams(found) {
       name: prm.name,
       location: prm.in,
       required: prm.in === "path" ? true : prm.required === true,
-      type: normType(sch.type ?? sch.anyOf?.map(x => x?.type)),
+      type: normType(sch.type ?? (sch.anyOf ?? sch.oneOf)?.map(x => x?.type)),
       enum: sch.enum,
     });
   }
@@ -85,7 +85,7 @@ function effectiveRequestParams(found) {
       name,
       location: "body",
       required: (bodySchema.required || []).includes(name),
-      type: normType(sch?.type ?? sch?.anyOf?.map(x => x?.type)),
+      type: normType(sch?.type ?? (sch?.anyOf ?? sch?.oneOf)?.map(x => x?.type)),
       enum: sch?.enum,
     });
   }
@@ -253,33 +253,7 @@ const KNOWN_DRIFT = [
     issue: "https://github.com/Uuriko/project-room/issues/1566",
     detail: "POST /api/agent-rooms accepts starter (boolean, default true); the room_create tool neither exposes it nor passes it through (handler allowlists title/purpose/roomId/kind/displayName).",
   },
-  // CX5-FIX: the REST listener-lease params are HTTP-adapter surface for
-  // now; the in-process MCP wake tools compose the store directly and do
-  // not expose them yet (parity design tracked in the issue).
-  {
-    tool: "wake_register",
-    param: "listenerLease",
-    issue: "https://github.com/Uuriko/project-room/issues/3481",
-    detail: "POST /api/agent-heartbeats accepts listenerLease (true or { roomId }) to acquire/renew the durable listener lease; the wake_register tool does not expose it.",
-  },
-  {
-    tool: "wake_clear",
-    param: "listenerLease",
-    issue: "https://github.com/Uuriko/project-room/issues/3481",
-    detail: "POST /api/agent-heartbeats accepts listenerLease (true or { roomId }) to acquire/renew the durable listener lease; the wake_clear tool does not expose it.",
-  },
-  {
-    tool: "heartbeat_set",
-    param: "listenerLease",
-    issue: "https://github.com/Uuriko/project-room/issues/3481",
-    detail: "POST /api/agent-heartbeats accepts listenerLease (true or { roomId }) to acquire/renew the durable listener lease; the heartbeat_set tool does not expose it.",
-  },
-  {
-    tool: "heartbeat_ack",
-    param: "fencingToken",
-    issue: "https://github.com/Uuriko/project-room/issues/3481",
-    detail: "POST /api/agent-heartbeats/ack accepts fencingToken (required to ack signals fenced by a live listener lease); the heartbeat_ack tool does not expose it.",
-  },
+
 ];
 
 // ---------------------------------------------------------------------------
@@ -352,7 +326,7 @@ function compareTool(toolName, routes) {
     const api = apiParams.get(name);
     check(api, `tool param ${name} has no OpenAPI counterpart`);
     if (!api) continue;
-    const apiType = api.type, toolType = normType(props[name]?.type ?? props[name]?.anyOf?.map(x => x?.type));
+    const apiType = api.type, toolType = normType(props[name]?.type ?? (props[name]?.anyOf ?? props[name]?.oneOf)?.map(x => x?.type));
     if (allow.wireTyped?.[name]) {
       check(toolType === null, `wireTyped param ${name}: tool is now concretely typed (${toolType}) — re-triage`);
       continue;

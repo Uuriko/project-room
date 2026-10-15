@@ -27,7 +27,7 @@ import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscrip
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
-import { ownMember } from "../src/events.js";
+import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
@@ -811,10 +811,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // { roomId } names the room queue to lease — the form the standard
     // room-pinned wake client sends. A scoped credential may only lease
     // its bound room; an identity credential must belong to the room.
-    if (data.listenerLease !== undefined && data.listenerLease !== true
-        && (!data.listenerLease || typeof data.listenerLease !== "object" || Array.isArray(data.listenerLease)
-          || !exact(data.listenerLease, ["roomId"])
-          || typeof data.listenerLease.roomId !== "string" || data.listenerLease.roomId.length === 0))
+    if (!validListenerLease(data.listenerLease))
       reject(422, "invalid_heartbeat", "listenerLease must be true or { roomId } when present");
     if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);
     else if (auth.scopedKey) assertScopedKeyListener(store, auth.identityId, data);
@@ -829,63 +826,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability, listener } = store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
-      let hostId = data.hostId;
-      if (roomKey) {
-        assertRoomKeyPullOnly(store, auth.identityId, data);
-        hostId = roomKeyHostId(auth, data.hostId);
-        assertRoomKeyPullOnly(store, auth.identityId, { ...data, hostId });
-      } else if (auth.scopedKey) {
-        // The replacement guard keys off the CALLER-FACING hostId (an
-        // identity-owned wakeable host of that name must not be replaced).
-        // It must not be re-run against the resolved namespaced id: that
-        // row is this key's own registration, wakeable by design, and
-        // re-registering it is the normal heartbeat path.
-        assertScopedKeyListener(store, auth.identityId, data);
-        hostId = scopedKeyHostId(auth, data.hostId);
-      }
-      const scopedNow = roomKey || auth.scopedKey === true;
-      const result = store.agentHeartbeats.heartbeat({
-        agentId: auth.identityId, hostId, mode: data.mode,
-        wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
-        pushNotification: data.pushNotification ?? null, workWakes: data.workWakes,
-        workScopeRoomId: scopedNow ? auth.roomId : null, activityRoomId: scopedNow ? auth.roomId : null });
-      // CX5-FIX: lease acquisition rides the same transaction as the
-      // heartbeat, keyed by the queue the listener drains — the store's
-      // leases are per-room scopes ('' for the roomless identity queue),
-      // and ackWakes fences per signal room against exactly that scope.
-      // Presence reporting never fails because another host holds the
-      // lease — the response says so (acquired:false + the active
-      // listener's id).
-      let listener = null;
-      if (data.listenerLease !== undefined) {
-        const requestedRoom = data.listenerLease === true ? null : data.listenerLease.roomId;
-        let leaseRoomId;
-        if (auth.roomId) {
-          if (requestedRoom !== null && requestedRoom !== auth.roomId)
-            reject(403, "room_mismatch", "A room-scoped credential leases only its bound room");
-          leaseRoomId = auth.roomId;
-        } else if (requestedRoom !== null) {
-          const link = store.db.prepare(
-            "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoom, auth.identityId);
-          // Links survive access suspension (see scopedKeyRoomBinding):
-          // recheck the live room member, not just the identity mapping,
-          // before an identity-level credential may hold the room's lease.
-          const member = link ? ownMember(store.room(requestedRoom).state.members, link.memberId) : null;
-          if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
-            reject(403, "room_mismatch", "The identity is not a member of the requested listener room");
-          leaseRoomId = requestedRoom;
-        } else leaseRoomId = null;
-        const lease = store.agentHeartbeats.acquireListenerLease({
-          agentId: auth.identityId, roomId: leaseRoomId, listenerId: hostId });
-        // A scoped caller reads listener ids in its own host namespace
-        // (its registrations are prefix-namespaced server-side).
-        const presentListenerId = id => (auth.hostPrefix && typeof id === "string" && id.startsWith(auth.hostPrefix))
-          ? id.slice(auth.hostPrefix.length) : id;
-        listener = lease.acquired
-          ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
-          : { acquired: false, activeListenerId: presentListenerId(lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
-      }
-      return { ...result, listener };
+      return heartbeatWithListener(store, auth, data, { roomKey });
     });
     // A suspended push subscription tells the agent how to re-arm it: POST
     // a fresh pushNotification on the next heartbeat.
