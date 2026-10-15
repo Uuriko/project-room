@@ -1,5 +1,5 @@
 import { WORK_HELP_UPDATED, helpFromEvent, validateHelp } from "../src/work-help.js";
-import { PERMISSIONS, validId, WORK_REVISION_TYPES } from "../src/events.js";
+import { PERMISSIONS, validId, ownMember, WORK_REVISION_TYPES } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "../src/help-offers.js";
 
 const own = (value, key) => value != null && Object.hasOwn(value, key);
@@ -47,7 +47,7 @@ export function auditWorkHelp(state, history, checkpoint = null) {
       participants.add(projected.workItems[id].accountableMemberId);
     }
     for (const offer of Object.values(projected.helpOffers ?? {})) participants.add(offer.offererId);
-    for (const id of participants) check(canonical(pick(actual.members?.[id], memberFields)) === canonical(pick(projected.members[id], memberFields)));
+    for (const id of participants) check(canonical(pick(ownMember(actual.members, id), memberFields)) === canonical(pick(ownMember(projected.members, id), memberFields)));
   };
   let checkpointChecked = !checkpoint;
   if (checkpoint?.sequence === 0) { compare(JSON.parse(checkpoint.projection)); checkpointChecked = true; }
@@ -65,8 +65,8 @@ export function auditWorkHelp(state, history, checkpoint = null) {
       // and strips manage_members and decide from an outgoing AGENT owner,
       // bumping theirs. compare() holds permissions and revision for every
       // participant, so all of it has to be replayed or none of it matches.
-      const incomingOwner = projected.members[d.toMemberId];
-      const outgoingOwner = projected.members[projected.room.ownerId];
+      const incomingOwner = ownMember(projected.members, d.toMemberId);
+      const outgoingOwner = ownMember(projected.members, projected.room.ownerId);
       incomingOwner.permissions = [...PERMISSIONS];
       incomingOwner.revision += 1;
       if (outgoingOwner && outgoingOwner.kind === "agent") {
@@ -77,11 +77,16 @@ export function auditWorkHelp(state, history, checkpoint = null) {
     }
     if (["member.added", "member.joined_via_invitation"].includes(e.type)) {
       check(validId(d.memberId) && !own(projected.members, d.memberId) && Array.isArray(d.permissions));
-      projected.members[d.memberId] = { id: d.memberId, kind: e.type === "member.added" ? d.kind : "human",
-        active: true, revision: 0, permissions: d.permissions };
+      // Own-property write via defineProperty: the lint rule flags the
+      // indexed assignment form, and defineProperty creates the same
+      // enumerable/writable/configurable own property without ever
+      // routing through the Object.prototype "__proto__" setter (the id
+      // is already validId-checked above, which rejects reserved ids).
+      Object.defineProperty(projected.members, d.memberId, { value: { id: d.memberId, kind: e.type === "member.added" ? d.kind : "human",
+        active: true, revision: 0, permissions: d.permissions }, enumerable: true, writable: true, configurable: true });
     }
     if (e.type === "member.access_changed") {
-      check(validId(d.memberId)); const person = projected.members[d.memberId];
+      check(validId(d.memberId)); const person = ownMember(projected.members, d.memberId);
       check(person && typeof d.active === "boolean" && Array.isArray(d.permissions) && d.expectedMemberRevision === person.revision);
       Object.assign(person, { active: d.active, permissions: d.permissions, revision: person.revision + 1 });
     }

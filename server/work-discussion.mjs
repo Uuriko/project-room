@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { validId } from "../src/events.js";
+import { validId, ownMember } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { stampDiscussion } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
@@ -135,7 +135,8 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
       ...(window.consistent ? { consistent: true, resumeToken: hasMore ? null : makeToken("checkpoint", window.horizon, window.horizon) } : {}), limit: window.limit, rowBytes: bytes },
     current: { evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(), workRevision: item.revision,
       workState: item.state, next: nextWorkStep(item, now),
-      participants: [...ids].map(id => state.members[id] ? pick(state.members[id], "id displayName kind active") : { id, unavailable: true }) },
+      participants: [...ids].map(id => { const member = ownMember(state.members, id);
+        return member ? pick(member, "id displayName kind active") : { id, unavailable: true }; }) },
     scope: { membership: "room", targetedMessages: "room-visible", externalExecution: false,
       // Keep the legacy discriminator for installed v1 clients. Explicit
       // visibility describes the actual participant filter applied above.

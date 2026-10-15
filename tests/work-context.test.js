@@ -124,6 +124,21 @@ test("projection uses one explicit clock and exact source IDs without guessing o
   assert.equal(project(2000).next.action, "superseded"); assert.deepEqual(project(2000).suggestedActions, []);
 });
 
+test("selected context does not treat a prototype-named participant id as a member (#3224)", async t => {
+  const f = await fixture(t), snapshot = f.store.snapshot(f.keys.owner, "commons");
+  const state = structuredClone(snapshot.state), item = state.workItems["test-handoff"];
+  // "toString" is not a member of this room; a raw members["toString"] lookup
+  // resolves Object.prototype.toString (truthy), so the participant used to
+  // project as an empty member record instead of unavailable.
+  item.accountableMemberId = "toString";
+  const context = selectedWorkContext({ state, workItemId: item.id, viewerId: "producer", sequence: snapshot.sequence, now: 2000 });
+  assert.deepEqual(context.context.participants.find(member => member.id === "toString"), { id: "toString", unavailable: true });
+  // A real member still resolves through the same path with its fields.
+  const viewer = context.context.participants.find(member => member.id === "producer");
+  assert.equal(viewer.unavailable, undefined); assert.equal(viewer.kind, state.members.producer.kind);
+  assert.deepEqual(context.viewer.id, "producer");
+});
+
 test("selected handoff tracks exact corrections/reviews while preserving human decision and stale revision checks", async t => {
   const f = await fixture(t), producer = f.client("producer"), reviewer = f.client("reviewer");
   const mutate = async (client, type, data = {}) => {

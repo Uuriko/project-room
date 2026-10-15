@@ -1,4 +1,4 @@
-import { validId } from "../src/events.js";
+import { validId, ownMember } from "../src/events.js";
 
 // This reservation never expires or transfers. A lost host may still be writing.
 // Status is operational metadata, not a message or an answer-basis revision.
@@ -57,7 +57,7 @@ export class RequestRuns {
       if (row && row.attempt_id !== input.attemptId) fail("request_run_owned", "Another host owns this request; reconcile that host");
       if (input.action === "claim" || input.action === "working") {
         this.store.dmConsents.requireDmAllowed(roomId, auth.member.id, request.requesterId);
-        if (request.status !== "open" || state.room.archivedAt || state.members[request.requesterId]?.active !== true
+        if (request.status !== "open" || state.room.archivedAt || ownMember(state.members, request.requesterId)?.active !== true
           || this.store.wakeQueue.pauseStatus(roomId, auth.member.id)
           || request.revision !== input.expectedRequestRevision || request.contextEventId !== input.contextEventId)
           fail("request_run_changed", "Request changed, paused or closed; inspect the original attempt");

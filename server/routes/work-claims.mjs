@@ -13,6 +13,7 @@
 import { retentionReport } from "../retention-response.mjs";
 import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
+import { ownMember } from "../../src/events.js";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -40,7 +41,7 @@ function authenticateRead(ctx, writing = false) {
     ctx.rate(`write:${auth.credentialHash}`, 60);
   }
   const members = ctx.store.roomAuthority(roomId).members ?? {};
-  const member = members[auth.member.id];
+  const member = ownMember(members, auth.member.id);
   if (!member || member.active === false) {
     ctx.reject(403, "not_member", `Member "${auth.member.id}" is not a member of room "${roomId}"`);
   }

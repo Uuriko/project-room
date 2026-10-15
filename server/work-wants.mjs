@@ -14,6 +14,7 @@
 // agent_wants_work is additive and unfenced (server/writer-fence.mjs): older
 // writers have no code path to it, and a missing row means "off".
 import { enqueueClaimWake } from "./work-claim-events.mjs";
+import { ownMember } from "../src/events.js";
 
 export const WANTS_WORK_SCHEMA = `
   CREATE TABLE IF NOT EXISTS agent_wants_work (
@@ -117,7 +118,7 @@ export function noteReadyWork(store, roomId, item, { actorId = null, now } = {})
   const at = Number.isFinite(now) ? now : Date.now();
   const woken = [];
   for (const row of rows) {
-    const member = members[row.member_id];
+    const member = ownMember(members, row.member_id);
     if (!member || member.kind !== "agent" || member.active === false || row.member_id === actorId) continue;
     const pref = { labels: parseList(row.labels), capabilities: parseList(row.capabilities) };
     if (!wantsWorkMatches(pref, item)) continue;
