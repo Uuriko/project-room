@@ -1,6 +1,5 @@
 import { AccountClient } from "./account-client.js";
 import { createAuthSigninUI } from "./auth-signin-ui.js";
-import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { applyStoredTheme } from "./account-settings-ui.js";
 import { rememberAccountHint } from "./browser-session.js";
 import { createSigninNavigation } from "./signin-navigation.js";
@@ -49,19 +48,34 @@ export function mountSigninEntry({ openWorkspace }) {
     onMagicLinkRequest: () => "/",
     onAccountSwitch: () => window.confirm(uiText("entry.switchAccount"))
   });
-  const agent = createAgentSigninUI({
-    onSignedIn: async session => {
-      const target = new URL(location.href);
-      target.searchParams.set("room", session.roomId);
-      history.replaceState(history.state, "", target.href);
-      await enterWorkspace();
-    },
-    firstRunActions: {
-      greet: () => $("#message-input")?.focus(),
-      discover: () => { $("#people-panel").open = true; },
-      baseUrl: location.origin
-    }
+  // The agent sign-in component loads lazily on first need: it is a
+  // secondary path off the wall (on current main the wall links to the
+  // standalone /agent-signin page and the in-page panel is absent), so its
+  // module must not tax every fresh sign-in load. Until it loads, the
+  // agent surface is simply unmounted — canLeave()/leave() are trivially
+  // true, the component's own unmounted contract.
+  let agentUi = null, agentFlight = null;
+  const ensureAgent = () => agentFlight ??= import("./agent-signin-ui.js").then(({ createAgentSigninUI }) => {
+    agentUi = createAgentSigninUI({
+      onSignedIn: async session => {
+        const target = new URL(location.href);
+        target.searchParams.set("room", session.roomId);
+        history.replaceState(history.state, "", target.href);
+        await enterWorkspace();
+      },
+      firstRunActions: {
+        greet: () => $("#message-input")?.focus(),
+        discover: () => { $("#people-panel").open = true; },
+        baseUrl: location.origin
+      }
+    });
+    return agentUi;
   });
+  const agent = {
+    canLeave: () => agentUi?.canLeave() ?? true,
+    leave: () => agentUi?.leave() ?? true,
+    unmount: () => agentUi?.unmount()
+  };
   applyStoredTheme();
   $("#static-hero")?.remove();
   $("#auth-panel").hidden = false;
@@ -82,7 +96,7 @@ export function mountSigninEntry({ openWorkspace }) {
   // elsewhere the button keeps its link behavior and the agent component
   // stays unmounted (its canLeave() is safe unmounted).
   if ($("#agent-auth-step")) {
-    agent.mount($("#agent-signin-ui"));
+    void ensureAgent().then(ui => ui.mount($("#agent-signin-ui"))).catch(() => {});
     on($("#agent-signin-button"), "click", () => {
       if (!signin.canLeave()) return;
       signin.showPassword();
