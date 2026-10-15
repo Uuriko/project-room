@@ -129,12 +129,14 @@ test("M-14: avgScore excludes scoreless rows", () => {
 import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
+import { publicUnpublishSchema } from "../server/legal-store.mjs";
 
 test("M-15: feedByCode rejects an unknown cursor instead of restarting pagination", t => {
   const db = new DatabaseSync(":memory:");
   db.exec(roomPublicFaceSchema);
   db.exec(roomDirectorySchema);
   db.exec(PUBLIC_READ_MODEL_SCHEMA);
+  db.exec(publicUnpublishSchema);
   t.after(() => db.close());
   const store = {
     db,

@@ -155,12 +155,18 @@ for (const mobile of [false, true]) {
 
     // Result-first catch-up (C6): the refreshed history groups by outcome,
     // blocker and remaining volume, and each grouped line still opens its exact
-    // supporting record. The completed/blocked events are on the second page,
-    // so page the frozen window first - grouping covers every loaded page.
+    // supporting record. The completed/blocked events sit past the first page,
+    // so page the frozen window to its end first - grouping covers every
+    // loaded page. (How many pages the window spans depends on event volume:
+    // decision #10's cutover added board events to this stream, moving the
+    // outcome/blocker events from page 2 to page 3 of this fixture.)
     await page.locator("#rb-history-section > summary").click();
-    const moreBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
-    await page.locator("#rb-more-button").click(); await moreBrief;
-    await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    for (let pages = 0; pages < 10; pages++) {
+      if (await page.locator("#rb-more-button").isHidden()) break;
+      const moreBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
+      await page.locator("#rb-more-button").click(); await moreBrief;
+      await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    }
     const groupLabels = await page.locator("#rb-history-list .rb-group-label").allTextContents();
     assert.deepEqual(groupLabels.map(text => text.replace(/\s*\(\d+\)$/, "")), ["Results", "Blockers", "Other updates"]);
     const resultsGroup = page.locator("#rb-history-list .rb-group", { has: page.locator(".rb-group-label", { hasText: "Results" }) });

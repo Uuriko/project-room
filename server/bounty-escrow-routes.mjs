@@ -30,6 +30,7 @@
 // returns the original status and body without re-executing.
 import { BountyEscrow, EscrowError, canonicalLane, BOUNTY_GROUPS, normalizeActor } from "./bounty-escrow.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { chargeSpendBeforeCall } from "./spend-grants.mjs";
 
 const IDEM_HEADER = "idempotency-key";
 
@@ -59,6 +60,23 @@ export const isRoomOwner = (store, roomId, auth) => {
   const { ownerId } = store.roomAuthority(roomId);
   if (typeof ownerId !== "string" || !ownerId) return false;
   return canonicalLane(ownerId) === canonicalLane(memberId);
+};
+
+// Credit-ledger reads (balances / history) are scoped to the lane itself or
+// the room owner — the same rule the MCP door enforces by only ever passing
+// the caller's own lane to escrow.balances/history (server/mcp-full-profile.mjs;
+// docs/BOUNTY-MCP-TOOLS.md: "read your own"). History is the stronger reason:
+// escrow.history expands to both legs of every movement the lane touched, so
+// any other member (guests included) reading it would get the lane's full
+// bilateral ledger — counterparties, amounts, before/after balances (#3281).
+// Fails closed: anything that is neither a canonical-lane self match nor the
+// room owner is refused.
+export const canReadLaneLedger = (store, roomId, auth, laneIdentity) => {
+  if (typeof laneIdentity !== "string" || !laneIdentity) return false;
+  const memberId = auth?.member?.id;
+  if (typeof memberId === "string" && memberId
+    && canonicalLane(laneIdentity) === canonicalLane(memberId)) return true;
+  return isRoomOwner(store, roomId, auth);
 };
 
 const runPure = (reject, fn) => {
@@ -116,7 +134,7 @@ export function publishBountyEvent(store, roomId, event) {
   } catch (error) { console.error("bounty webhook fan-out failed:", error?.message ?? error); }
 }
 
-export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers }) {
+export async function handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute, bountyId, identity, sybilFlagId, reauthorize, helpers, credential = null }) {
   const { json, reject, body } = helpers;
   if (req.method !== "GET" && req.method !== "HEAD") enforceAutonomyTierForAction({
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
@@ -208,10 +226,23 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     if (!shape(payload, { required: ["title", "criteria", "amount", "deadline"], optional: ["verifierId", "approvalMode", "rubric", "idempotencyKey"] }))
       invalidInput(reject, "{title, criteria, amount, deadline, verifierId?, approvalMode?, rubric?, idempotencyKey?}");
     return idem(payload, "bounty.post", 201, () => {
+      // #3269: bounty_post is a priced operation — charge it through the
+      // shared spend path (chargeSpendBeforeCall, the same helper the MCP
+      // profiles use), inside this idempotent transaction: reauthorize()
+      // and the journal replay check have already run (see idem above), so
+      // established denials keep their precedence, a replay never reaches
+      // here and is never charged, and the reservation settles atomically
+      // with the write — a refusal rolls both back. A null credential
+      // (account-session callers; http.mjs passes null in that mode) runs
+      // uncharged, mirroring withSpendCharge's guard at every other door.
+      const spend = typeof credential === "string" && credential.length > 0
+        ? chargeSpendBeforeCall(store, credential, "bounty_post", { roomId })
+        : null;
       const { bounty, receipt } = escrow.postBounty(roomId,
         { poster: caller, title: payload.title, criteria: payload.criteria, amount: payload.amount,
           deadline: payload.deadline, verifierId: payload.verifierId ?? null,
           approvalMode: payload.approvalMode ?? "human", rubric: payload.rubric ?? null, actor });
+      spend?.settle();
       return { roomId, bounty, receipt };
     });
   }
@@ -349,13 +380,19 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     });
   }
   if (escrowRoute === "balances" && req.method === "GET") {
-    const balances = runPure(reject, () => escrow.balances(roomId, identityOf(reject, identity)));
+    const laneIdentity = identityOf(reject, identity);
+    if (!canReadLaneLedger(store, roomId, auth, laneIdentity))
+      reject(403, "not_authorized", "Only the lane itself or the room owner can read this lane's credit balances.");
+    const balances = runPure(reject, () => escrow.balances(roomId, laneIdentity));
     return json(res, 200, { roomId, balances });
   }
   if (escrowRoute === "history" && req.method === "GET") {
+    const laneIdentity = identityOf(reject, identity);
+    if (!canReadLaneLedger(store, roomId, auth, laneIdentity))
+      reject(403, "not_authorized", "Only the lane itself or the room owner can read this lane's credit history.");
     const params = url.searchParams;
     const state = params.get("state"), since = params.get("since");
-    const receipts = runPure(reject, () => escrow.history(roomId, identityOf(reject, identity),
+    const receipts = runPure(reject, () => escrow.history(roomId, laneIdentity,
       { state: state ?? null, since: since ?? null }));
     return json(res, 200, { roomId, receipts });
   }

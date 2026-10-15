@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
 import { CORE_MCP_TOOLS } from "../src/room-mcp-join.js";
-import { llmsTxt } from "../deploy/agent-discovery.mjs";
+import { llmsTxt } from "../server/agent-discovery.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = rel => readFileSync(join(root, rel), "utf8");

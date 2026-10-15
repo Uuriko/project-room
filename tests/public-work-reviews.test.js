@@ -126,6 +126,28 @@ test('linked identity alias cannot review own submission and revoked owner canno
   assert.throws(() => human.service().decide('commons', 'owner', human.receipt.receiptId, args), code('review_forbidden'));
 });
 
+test('completed review replay returns the recorded outcome after standing, archive and policy changes, while fresh requests still face current checks', t => {
+  // #2945: replay lookup must precede scope()'s archive/policy throws and
+  // the current-permission check, or a retry of a completed action fails
+  // instead of returning the outcome the caller may have lost.
+  const f = fixture(t), id = f.receipt.receiptId, args = f.input('replayable-accept', 0, { decision: 'accepted' });
+  const accepted = f.service().decide('commons', 'owner', id, args);
+  f.alter(state => { state.members.owner.permissions = ['read']; });
+  assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
+  assert.throws(() => f.service().decide('commons', 'owner', id, { ...args, reason: 'Changed' }), code('request_id_reused'));
+  assert.throws(() => f.service().decide('commons', 'owner', id, f.input('fresh-after-standing-loss', 1, { decision: 'rejected' })), code('review_forbidden'));
+  f.alter(state => { state.room.archivedAt = '2026-10-13T00:00:00.000Z'; });
+  assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
+  assert.throws(() => f.service().decide('commons', 'owner', id, f.input('fresh-after-archive', 1, { decision: 'rejected' })), code('room_archived'));
+
+  const linked = fixture(t, 'human_with_agent_review', true), linkedId = linked.receipt.receiptId;
+  const passArgs = linked.input('replayable-pass', 0, { verdict: 'PASS' });
+  const passed = linked.service().verify('commons', 'reviewer', linkedId, passArgs);
+  linked.alter(state => { state.workItems['linked-work'].state = 'superseded'; });
+  assert.deepEqual(linked.service().verify('commons', 'reviewer', linkedId, passArgs), passed);
+  assert.throws(() => linked.service().verify('commons', 'reviewer', linkedId, linked.input('fresh-after-policy-change', 1, { verdict: 'PASS' })), code('review_policy_changed'));
+});
+
 test('outside producer sees only own sanitized feedback without membership or private reviewer facts', t => {
   const f = fixture(t, 'human_with_agent_review'), id = f.receipt.receiptId;
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links').get().n, 0);

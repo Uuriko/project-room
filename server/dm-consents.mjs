@@ -30,6 +30,8 @@
 // for store.mjs to apply. Local ServiceError avoids the store.mjs import
 // cycle (Workers-bundle-safe).
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { randomUUID } from "node:crypto";
+import { EVENT_TYPES as T, ownMember } from "../src/events.js";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -83,7 +85,11 @@ export class DmConsents {
   }
 
   _activeMember(state, memberId) {
-    const member = state?.members?.[memberId];
+    // Member projections are plain objects from JSON.parse, so a raw index
+    // resolves inherited Object.prototype names ("toString", "valueOf", ...)
+    // that are not room members. Resolve through ownMember like every other
+    // "must be an active room member" check.
+    const member = ownMember(state?.members, memberId);
     return member && member.active !== false ? member : null;
   }
 
@@ -100,7 +106,9 @@ export class DmConsents {
   }
 
   _handleOf(state, memberId) {
-    const member = state?.members?.[memberId];
+    // Same own-property guard as _activeMember: a raw index would resolve
+    // inherited Object.prototype names and render them as member handles.
+    const member = ownMember(state?.members, memberId);
     if (!member) return null;
     const name = typeof member.displayName === "string" && member.displayName.trim()
       ? member.displayName.trim() : memberId;
@@ -109,6 +117,27 @@ export class DmConsents {
 
   _isOwner(state, memberId) {
     return memberId === state?.room?.ownerId;
+  }
+
+  // ---- pair receipt ------------------------------------------------------
+  // Consent rows bypass store.command(), so this module appends its own
+  // thin receipt event (dm.consent_changed) through the store's side-table
+  // append rail, in the caller's transaction. A throw rolls the consent row
+  // change back with the event. New/restarted pending states, decisions,
+  // revokes, blocks and unblocks append: a pending re-ask with an updated
+  // reason is a refresh of the same outreach, not new state, so it does not
+  // log again. Revoke/block/unblock append because live refresh on the other
+  // participant's screen is driven by these receipts.
+  _appendPairEvent(roomId, actorId, requesterId, targetId, status, reason = "") {
+    this.store.appendSideTableEvent(roomId, {
+      id: randomUUID(),
+      idempotencyKey: randomUUID(),
+      roomId,
+      type: T.DM_CONSENT_CHANGED,
+      actorId,
+      at: new Date(nowMs()).toISOString(),
+      data: { requesterId, targetId, status }
+    });
   }
 
   // ---- request ----------------------------------------------------------
@@ -151,12 +180,14 @@ export class DmConsents {
         this.db.prepare(
           "UPDATE dm_consents SET status='pending', reason=?, created_at=?, decided_at=NULL WHERE room_id=? AND requester_id=? AND target_id=?"
         ).run(cleanReason, nowMs(), roomId, requesterId, targetId);
+        this._appendPairEvent(roomId, requesterId, requesterId, targetId, "pending", cleanReason);
         return rowToPair(this._get(roomId, requesterId, targetId));
       }
       const at = nowMs();
       this.db.prepare(
         "INSERT INTO dm_consents (room_id, requester_id, target_id, status, reason, created_at, decided_at) VALUES (?,?,?,?,?,?,NULL)"
       ).run(roomId, requesterId, targetId, "pending", cleanReason, at);
+      this._appendPairEvent(roomId, requesterId, requesterId, targetId, "pending", cleanReason);
       return rowToPair(this._get(roomId, requesterId, targetId));
     });
   }
@@ -175,6 +206,7 @@ export class DmConsents {
       this.db.prepare(
         "UPDATE dm_consents SET status=?, decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
       ).run(status, nowMs(), roomId, requesterId, targetId);
+      this._appendPairEvent(roomId, targetId, requesterId, targetId, status);
       return rowToPair(this._get(roomId, requesterId, targetId));
     });
   }
@@ -197,6 +229,9 @@ export class DmConsents {
       this.db.prepare(
         "UPDATE dm_consents SET status='revoked', decided_at=? WHERE room_id=? AND status='approved' AND ((requester_id=? AND target_id=?) OR (requester_id=? AND target_id=?))"
       ).run(nowMs(), roomId, memberId, otherId, otherId, memberId);
+      for (const row of live) {
+        this._appendPairEvent(roomId, memberId, row.requester_id, row.target_id, "revoked");
+      }
       return rowToPair(this._get(roomId, live[0].requester_id, live[0].target_id));
     });
   }
@@ -213,6 +248,7 @@ export class DmConsents {
       this.db.prepare(
         "UPDATE dm_consents SET status='rejected', decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
       ).run(nowMs(), roomId, requesterId, targetId);
+      this._appendPairEvent(roomId, targetId, requesterId, targetId, "rejected");
       return rowToPair(this._get(roomId, requesterId, targetId));
     });
   }
@@ -237,10 +273,12 @@ export class DmConsents {
         this.db.prepare(
           "UPDATE dm_consents SET status='blocked', decided_at=? WHERE room_id=? AND requester_id=? AND target_id=?"
         ).run(at, roomId, blockedId, blockerId);
+        this._appendPairEvent(roomId, blockerId, blockedId, blockerId, "blocked");
       } else {
         this.db.prepare(
           "INSERT INTO dm_consents (room_id, requester_id, target_id, status, reason, created_at, decided_at) VALUES (?,?,?,'blocked','',?,?)"
         ).run(roomId, blockedId, blockerId, at, at);
+        this._appendPairEvent(roomId, blockerId, blockedId, blockerId, "blocked");
       }
       return rowToPair(this._get(roomId, blockedId, blockerId));
     });
@@ -268,7 +306,8 @@ export class DmConsents {
       requesterId: row.requester_id,
       targetId: row.target_id,
       status: row.status,
-      reason: row.reason,
+      // The owner's moderation view is metadata only: the requester's note is for the target.
+      reason: row.requester_id === viewerId || row.target_id === viewerId ? row.reason : null,
       createdAt: row.created_at,
       decidedAt: row.decided_at,
       outgoing: row.requester_id === viewerId

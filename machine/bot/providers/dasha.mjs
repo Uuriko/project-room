@@ -2,10 +2,21 @@ import { DASHA_URL, dashaBody, dashaHeaders } from "./schemas.mjs";
 
 export function createDashaProvider({ key, model, fetchImpl }) {
   const messages = [];
+  let currentTask = null;
   return {
     name: "dasha",
     computerUse: false,
+    reset() {
+      messages.length = 0;
+      currentTask = null;
+    },
     async next({ task, observations }) {
+      // A different task starts a fresh conversation: the cached provider
+      // must not resend the previous task's history or drop the new task.
+      if (task !== currentTask) {
+        messages.length = 0;
+        currentTask = task;
+      }
       if (messages.length === 0) messages.push({ role: "user", content: task });
       else if (observations.length > 0) {
         messages.push({
