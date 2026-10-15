@@ -67,6 +67,15 @@ const publicTaskItem = packet => ({
   owner: null,
   leaseExpiresAt: packet.claim?.leaseExpiresAt ?? null,
   terms: { termsVersion: packet.termsVersion, generation: packet.claim?.generation },
+  // Ranking-layer fields (redesign charter B-2): the packet facts a
+  // consumer ranking over this projection needs — repository and paths
+  // for overlap checks, acceptance criteria for preference scoring — so
+  // no ranking consumer re-reads the facade to score what the
+  // projection already classified.
+  repositoryUrl: packet.repositoryUrl ?? null,
+  repositoryRef: packet.repositoryRef ?? null,
+  files: packet.files ?? [],
+  acceptanceCriteria: packet.acceptanceCriteria ?? [],
   untrusted: true,
   claimAction: {
     method: "POST",
@@ -127,21 +136,44 @@ export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 
 
 // Cross-room public pool: published public-work tasks whose packet claim
 // state is "unclaimed". Scans the facade's own paginated list so the
-// availability classification stays the facade's (packet()).
-export function availablePublicTasks(store, { limit = 50 } = {}) {
+// availability classification stays the facade's (packet()). This arm is
+// LIVE (redesign charter B-2): it is the availability authority for the
+// public board's claimable read (PublicWorkClaims.listClaimable) and for
+// the public-work matcher's candidate window (PublicWorkClaims.match).
+//
+// Two read modes over the one classification:
+//  - full (default): enumerate every facade page; `total` is the exact
+//    unclaimed count and `items` its first `limit` entries, in the
+//    facade's own claimable-first order.
+//  - window ({ window: true, after }): exactly one facade page in
+//    offer_id order (claimableFirst: false) — the bounded window the
+//    matcher ranks over. Returns that page's unclaimed items plus the
+//    window facts the ranking layer needs (inspected, hasMore,
+//    nextCursor); scoring and ordering stay with the caller.
+export function availablePublicTasks(store, { limit = 50, after = "", window = false } = {}) {
   const facade = store.publicWorkClaims;
-  if (!facade?.list) return { items: [], total: 0 };
-  const items = [];
-  let after = "";
-  while (items.length < limit) {
-    const page = facade.list({ limit: 100, after });
+  if (!facade?.list) {
+    return window ? { items: [], total: 0, inspected: 0, hasMore: false, nextCursor: null } : { items: [], total: 0 };
+  }
+  if (window) {
+    const page = facade.list({ limit: 100, after, claimableFirst: false });
+    const tasks = page?.tasks ?? [];
+    const items = tasks.filter(packet => packet?.claim?.state === "unclaimed").map(publicTaskItem);
+    return { items, total: items.length, inspected: tasks.length,
+      hasMore: page?.nextCursor != null, nextCursor: page?.nextCursor ?? null };
+  }
+  const all = [];
+  let cursor = after;
+  for (;;) {
+    const page = facade.list({ limit: 100, after: cursor });
     const tasks = page?.tasks ?? [];
     for (const packet of tasks) {
-      if (packet?.claim?.state === "unclaimed") items.push(publicTaskItem(packet));
-      if (items.length >= limit) break;
+      if (packet?.claim?.state === "unclaimed") all.push(publicTaskItem(packet));
     }
+    // The facade cursor is the last taskId of each page and strictly
+    // advances over a finite set, so the scan terminates.
     if (!page?.nextCursor || tasks.length === 0) break;
-    after = page.nextCursor;
+    cursor = page.nextCursor;
   }
-  return { items, total: items.length };
+  return { items: all.slice(0, limit), total: all.length };
 }
