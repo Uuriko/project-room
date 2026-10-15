@@ -12,6 +12,7 @@ import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { vapidFromEnv } from '../server/push-subscriptions.mjs';
 import { googleConfig } from '../server/google-oauth.mjs';
+import { githubConfig } from '../server/github-oauth.mjs';
 import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
@@ -122,6 +123,12 @@ export class ProjectRoom extends DurableObject {
     let gmailAuth = null;
     try { gmailAuth = gmailConfig(env, env.ROOM_ORIGIN, googleAuth); }
     catch (error) { console.warn(`room Gmail disabled: ${error.message}`); }
+    // GitHub sign-in is optional exactly like Google above: without the
+    // GITHUB_OAUTH_* secrets the /api/auth/github routes keep their
+    // designed 503 instead of breaking the room.
+    let githubAuth = null;
+    try { githubAuth = githubConfig(env, env.ROOM_ORIGIN); }
+    catch (error) { console.warn(`room github auth disabled: ${error.message}`); }
     this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
@@ -130,6 +137,7 @@ export class ProjectRoom extends DurableObject {
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
+      githubAuth,
       // Magic-link email is optional like Google auth: without RESEND_API_KEY
       // the mailer seam reports mail_not_configured instead of breaking boot.
       magicLinkMailer: (() => {

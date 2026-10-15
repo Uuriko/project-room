@@ -61,6 +61,22 @@ test("resendMagicLinkSend throws a clear error on API failure", async () => {
   await assert.rejects(() => send({ to: "user@example.com", code: "123456" }), /HTTP 401/);
 });
 
+test("resendMagicLinkSend attaches the provider status to API failures (#3529)", async () => {
+  const fetchFn = async () => ({ ok: false, status: 422, text: async () => "{\"message\":\"domain refused\"}" });
+  const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>", fetchFn });
+  await assert.rejects(() => send({ to: "user@example.com", code: "123456" }), error => {
+    assert.equal(error.providerStatus, 422, "the seam classifies refusals by this status");
+    assert.match(error.message, /HTTP 422/);
+    return true;
+  });
+  const down = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>",
+    fetchFn: async () => { throw new Error("socket hangup"); } });
+  await assert.rejects(() => down({ to: "user@example.com", code: "123456" }), error => {
+    assert.equal(error.providerStatus, undefined, "network failures carry no provider status");
+    return true;
+  });
+});
+
 test("resendMagicLinkSend throws a clear error on network failure", async () => {
   const fetchFn = async () => { throw new Error("socket hangup"); };
   const send = resendMagicLinkSend({ apiKey: "re_test", from: "Room <noreply@example.com>", fetchFn });
