@@ -736,11 +736,13 @@ async function callWakeTool(store, secret, identity, name, args) {
     return auth.scopedKey ? scopedKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(agentId);
   }
   if (name === "heartbeat_ack") {
-    if (args.fencingToken === undefined) return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds });
+    // R273-1: with or without a fencingToken, ack inside the credential's own
+    // scope like POST /api/agent-heartbeats/ack, so a room-scoped key cannot
+    // ack another room's wakes.
     return store.transaction(() => {
       const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
       if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken });
+      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null });
     });
   }
   if (name === "wake_pause") {
