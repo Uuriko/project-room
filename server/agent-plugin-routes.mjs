@@ -669,41 +669,63 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // anything; it returns the required shape instead. requestId is optional
   // and echoed back, matching the access-request convention, so a client that
   // retries an uncertain rotation can correlate the receipt.
-  const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
+    const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-rotate:${remoteAddress}`, 20);
-    const data = await body(req);
-    const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
-    const confirmed = Boolean(shape) && data.confirm === true;
-    const requestIdOk = data.requestId === undefined || (typeof data.requestId === "string" && data.requestId.length > 0);
-    // R306: a rotation whose response was lost leaves the client holding
-    // the retired pre-rotation secret, which ownerAuth would reject
-    // outright. The receipt keyed to requestId authorizes one re-rotation
-    // from that secret inside the TTL, so consult it BEFORE the owner
-    // check. It can only succeed for the identity whose pre-rotation
-    // secret matches, so the cross-identity rule still holds. The consult
-    // only runs for a request that already satisfies the confirm and
-    // exact-shape contract (landing lane, 13518): a retired secret plus a
-    // requestId must never rotate without confirm:true or with fields
-    // outside the shape. Malformed requests skip the consult and reach
-    // the owner check first, so an unauthenticated caller still sees 401,
-    // never the shape guidance.
-    if (confirmed && requestIdOk && data.requestId !== undefined) {
-      const retried = store.identities.rotateFromReceiptIfMatched(identityId, bearer(req), data.requestId);
-      if (retried) return json(res, 200, { ...retried, requestId: data.requestId });
+    // ownerAuth first (R316-1, restores the base ordering): a caller the
+    // owner check rejects sees that error before any body parsing or shape
+    // guidance, exactly like the neighbouring routes. The receipt consult
+    // below runs only after that check has failed.
+    let auth = null;
+    let authError = null;
+    try {
+      auth = ownerAuth(req);
+    } catch (error) {
+      authError = error;
     }
-    const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
-    if (!shape || data.confirm !== true) {
-      reject(422, "confirm_required",
-        "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
+    if (authError === null) {
+      if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
+      const data = await body(req);
+      const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+      if (!shape || data.confirm !== true) {
+        reject(422, "confirm_required",
+          "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
+      }
+      if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
+        reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+      }
+      // R306: requestId feeds the rotation receipt, so a retry after a lost
+      // response can re-rotate from the pre-rotation secret inside the TTL.
+      const result = store.identities.rotate(identityId, bearer(req), data.requestId ?? null);
+      return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
     }
-    if (!requestIdOk) {
-      reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
+    // R306: ownerAuth rejected the caller, which for the lost-response retry
+    // is expected: the presented secret is the one the earlier rotation
+    // retired, so ownerAuth cannot accept it. The receipt keyed to requestId
+    // authorizes one re-rotation from that secret inside the TTL. The consult
+    // stays inside the confirm + exact-shape contract (landing lane, 13518):
+    // a request without confirm:true, with fields outside the shape, with a
+    // malformed requestId, or with a body the parser rejects rethrows the
+    // original auth error instead, so nothing the contract rejects can ever
+    // rotate and no body guidance leaks past the auth error. The consult can
+    // only succeed for the identity whose pre-rotation secret matches, so
+    // the cross-identity rule still holds.
+    let consultData = null;
+    try {
+      const data = await body(req);
+      const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+      const requestIdOk = data && (data.requestId === undefined || (typeof data.requestId === "string" && data.requestId.length > 0));
+      const secret = bearer(req) ?? "";
+      if (shape && data.confirm === true && requestIdOk && data.requestId !== undefined && secret.startsWith("pri_")) {
+        consultData = data;
+      }
+    } catch {
+      // A body the parser rejects can never satisfy the contract.
     }
-    // R306: requestId feeds the rotation receipt, so a retry after a lost
-    // response can re-rotate from the pre-rotation secret inside the TTL.
-    const result = store.identities.rotate(identityId, bearer(req), data.requestId ?? null);
-    return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
+    if (consultData) {
+      const retried = store.identities.rotateFromReceiptIfMatched(identityId, bearer(req), consultData.requestId);
+      if (retried) return json(res, 200, { ...retried, requestId: consultData.requestId });
+    }
+    throw authError;
   });
 
   // Revocation is the end of the line for this credential: unlike rotation it
