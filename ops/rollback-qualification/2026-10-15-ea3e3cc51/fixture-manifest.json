@@ -1,0 +1,512 @@
+{
+  "kind": "rollback-qualification-fixture",
+  "candidateSourceRevision": "ea3e3cc51c463afb63e870cdb85e990fb0b8786b",
+  "moduleStampInCheckout": "unstamped",
+  "builtAt": "2026-10-15T21:31:49.397Z",
+  "candidateBoot": {
+    "event": "room.cold_start",
+    "durationMs": 1820,
+    "integrity": "eager",
+    "phases": {
+      "schema": {
+        "ms": 566,
+        "rowsRead": 0
+      },
+      "plugin": {
+        "ms": 842,
+        "rowsRead": 0
+      },
+      "fence": {
+        "ms": 117,
+        "rowsRead": 0
+      },
+      "verifies": {
+        "ms": 18,
+        "rowsRead": 0
+      },
+      "checksum": {
+        "ms": 0,
+        "rowsRead": 0
+      }
+    },
+    "cpuMs": 198,
+    "heapBytes": 24115328,
+    "rooms": 0,
+    "sequences": 0,
+    "projectionBytes": 0,
+    "events": 0
+  },
+  "writes": [
+    {
+      "id": "W0",
+      "detail": "candidate RoomStore cold start on empty store (candidate git ea3e3cc51c463afb63e870cdb85e990fb0b8786b)"
+    },
+    {
+      "id": "W1",
+      "detail": "initialize(initialRoom()) — room 'commons' bootstrap events"
+    },
+    {
+      "id": "W2",
+      "detail": "issueAccessKey('commons','owner') — credentials row"
+    },
+    {
+      "id": "W3",
+      "detail": "MEMBER_ADDED qual-agent via store.command"
+    },
+    {
+      "id": "W4",
+      "detail": "MESSAGE_POSTED x2 (owner + agent) — event/message writes"
+    },
+    {
+      "id": "W5",
+      "detail": "createAccount('acct-rollback-qual') — accounts + terms rows"
+    },
+    {
+      "id": "W6",
+      "detail": "accountLogins.issueEmailVerifyCode — account_magic_codes row (auth-mail persisted state; code value not recorded)"
+    },
+    {
+      "id": "W7",
+      "detail": "createAccountSessionSlot + loginAccountSessionWithMethod — live account session on candidate data"
+    },
+    {
+      "id": "W8",
+      "detail": "oauthPendingStateCreate(provider='github') — #3533 OAuth pending-state row"
+    },
+    {
+      "id": "W9",
+      "detail": "starter seeds x4 anchored (projectOffers create/publish + public-work enable)"
+    },
+    {
+      "id": "W10",
+      "detail": "public-work claim lifecycle x4 (claim -> finish) by a fresh identity — board drained to claimable 0"
+    },
+    {
+      "id": "W11",
+      "detail": "reseedStarterPool() -> seeded=4 (candidate #3540 replenishment write path)"
+    },
+    {
+      "id": "W12",
+      "detail": "workClaims.set room claim with PR link (claim-prs source data)"
+    },
+    {
+      "id": "W13",
+      "detail": "malformed work_claims row inserted via SQL clone (production-residue shape for claim-prs skip behavior)"
+    },
+    {
+      "id": "W14",
+      "detail": "BountyEscrow postBounty + fundBounty (COMMONS-1) — bounty_records + bounty_journal money state"
+    }
+  ],
+  "reseedOutcome": {
+    "seeded": 4,
+    "rounds": [
+      "pw-garden-firsttask-probe-20261005-r2",
+      "pw-garden-glossary-20261005-r2",
+      "pw-garden-linkcheck-20261005-r2",
+      "pw-garden-mcp-paths-20261005-r2"
+    ],
+    "errors": []
+  },
+  "bountyId": "COMMONS-1",
+  "submittedClaims": [
+    {
+      "taskId": "pw-garden-firsttask-probe-20261005",
+      "claim": {
+        "state": "submitted",
+        "generation": 1,
+        "identityId": "ai_ZRf6MtQFKDDKTG-n",
+        "leaseExpiresAt": null,
+        "submittedReceiptId": "pwr_ed535763c202104836a4d252c490421b4b91f58b310e67ea5ef4a280cb69e56f"
+      }
+    },
+    {
+      "taskId": "pw-garden-glossary-20261005",
+      "claim": {
+        "state": "submitted",
+        "generation": 1,
+        "identityId": "ai_ZRf6MtQFKDDKTG-n",
+        "leaseExpiresAt": null,
+        "submittedReceiptId": "pwr_0e6f79c82b9e965f5fdadc287e6639b0688908dec5d741bf72f385626901ffa2"
+      }
+    },
+    {
+      "taskId": "pw-garden-linkcheck-20261005",
+      "claim": {
+        "state": "submitted",
+        "generation": 1,
+        "identityId": "ai_ZRf6MtQFKDDKTG-n",
+        "leaseExpiresAt": null,
+        "submittedReceiptId": "pwr_6dd1408f26f1bc6974adbc86b726a5a996300ab6643df856222146c591439bef"
+      }
+    },
+    {
+      "taskId": "pw-garden-mcp-paths-20261005",
+      "claim": {
+        "state": "submitted",
+        "generation": 1,
+        "identityId": "ai_ZRf6MtQFKDDKTG-n",
+        "leaseExpiresAt": null,
+        "submittedReceiptId": "pwr_e93dfb756a97545702680376c8ac574dac6b3b28caaea676f07ea1173e5f1798"
+      }
+    }
+  ],
+  "fixture": {
+    "file": "fixture.ndjson",
+    "bytes": 91779,
+    "sha256": "cd6744f71a8c74e0c411f0383d33fd03eedd62abeff83fb5dbb5687a7813cd52",
+    "header": null,
+    "trailer": {
+      "kind": "trailer",
+      "version": 2,
+      "events": 5,
+      "eventsHash": "412d10bad5452e3d218aaf6e4e041dfc077910054a97c91a22e3583eb8e842cb",
+      "tables": {
+        "accounts": {
+          "rows": 2,
+          "sha256": "650ff8dfade89b0e6cac277249d435c8a378cdcb26c58832bddb9922eb774a09"
+        },
+        "rooms": {
+          "rows": 1,
+          "sha256": "c4c64ca85b12cc6bab8e51f06782bd7a198bb123e593dd60f351d4276139aa7f"
+        },
+        "events": {
+          "rows": 5,
+          "sha256": "59ffced088d09d4a2b0f9fe3590d36409daa883d776b1870f7c6aeb35433fece"
+        },
+        "commands": {
+          "rows": 3,
+          "sha256": "895289f976901e4550b109168d197c0c0dee19de28f3e6eacaf3473f6eea39d8"
+        },
+        "member_accounts": {
+          "rows": 1,
+          "sha256": "dd30ae93b6a270084dcb632ea2acb9ed335f4738f35dcb1604d9e52aa69c7b0e"
+        },
+        "credentials": {
+          "rows": 2,
+          "sha256": "8adc5cb788221fcdbad059016331736cfd6f144aed2e640968881ae113019684"
+        },
+        "account_credentials": {
+          "rows": 1,
+          "sha256": "ddb53092d28a2ea5353dead58fbd882df0659ca418da4526d97156b1a01b34db"
+        },
+        "account_session_slots": {
+          "rows": 1,
+          "sha256": "1fb2ed2c8b652e9d35054b5bc4519b67ddb35d0f4c0957bb9fa4c6607ae608a4"
+        },
+        "account_magic_codes": {
+          "rows": 1,
+          "sha256": "24fd3bea67ca6cf1c447d0a6de00121910cc597e635e65b8f97fdd390840c384"
+        },
+        "agent_autonomy_tiers": {
+          "rows": 1,
+          "sha256": "c9e8c581cebdf615fef980a537589df47dea13b19983479daf402756f7ab8f9f"
+        },
+        "agent_identities": {
+          "rows": 1,
+          "sha256": "86341170304ef837051f2f616daf66dc7b59a95e102423c2738699f058d8dc23"
+        },
+        "agent_key_registry": {
+          "rows": 1,
+          "sha256": "70e84f70229956d01c9584700c90dc43fb5dc1c3fce5ac4f447bd5d84377fe24"
+        },
+        "bounty_events": {
+          "rows": 3,
+          "sha256": "bf5386cafc07b42af437ed602e80c09ed7f73f263e1c89baefa4930b2fd2a15c"
+        },
+        "bounty_journal": {
+          "rows": 4,
+          "sha256": "b6fcdf63609b33f37d38633ac7f92f76f911bef4cbabf354a9708eb42cb4c3bd"
+        },
+        "bounty_records": {
+          "rows": 1,
+          "sha256": "5f5044f5de159d38f925ddcad82b18a52abbb182827976435e8f347dbf1ad8fb"
+        },
+        "bounty_rubric_versions": {
+          "rows": 1,
+          "sha256": "c04df8c4505c744e8c32442ca4421f39e5e8b481955d9f41d4f9798a4abc0388"
+        },
+        "bounty_sequences": {
+          "rows": 1,
+          "sha256": "2ab654d6464d928ede43dd05f19d23728fb5e13d81c4711ce7bb2a278433b214"
+        },
+        "bounty_watchers": {
+          "rows": 1,
+          "sha256": "3182e38a3568d8afb8cdfabc4a42f8aa97b5824bc2eecda1aefb6513e9c67e29"
+        },
+        "messages": {
+          "rows": 2,
+          "sha256": "842c9b163c6f9adc0475a41908dbc4c5c6effa0e7bb55c5fe997875783923eda"
+        },
+        "oauth_pending_states": {
+          "rows": 1,
+          "sha256": "30a6516c3b4ca153191631fa1a1dea1443728988eace07d8116b4d2c73e6eafe"
+        },
+        "project_offer_requests": {
+          "rows": 16,
+          "sha256": "5eb7a5450dd27c086da1e156c954c2c70178d9463d3208e73937ccfbf8a8a228"
+        },
+        "project_offers": {
+          "rows": 8,
+          "sha256": "d1b6c30724c5a226d594e1825e61a29bb501bd20ecac0759e917bfb6bdf53c10"
+        },
+        "public_receipts": {
+          "rows": 4,
+          "sha256": "7e554ebb4a675f8a6f2b6de366495f48bc1bf4dea34a76cc285f584d5625c976"
+        },
+        "public_work_receipts": {
+          "rows": 4,
+          "sha256": "d2c1c159474bf3541b8a3acff9eff65f7e9e7330eb0a6a63598601f15588751d"
+        },
+        "public_work_requests": {
+          "rows": 16,
+          "sha256": "3d0cc104ea090fb6c3fe5c1a0b75e4c5b428c5126453d5d03e0ac2c7cd4c64a2"
+        },
+        "public_work_tasks": {
+          "rows": 8,
+          "sha256": "fbd720aecdd02d5552c506c513efdc94cb70c668c75de4e3ff831e9703e4e5a9"
+        },
+        "room_schema_stamp": {
+          "rows": 1,
+          "sha256": "43d96cee25c7336ad8a77f355c20c511db59408086ad689d61b3708b70ad12a3"
+        },
+        "work_claims": {
+          "rows": 10,
+          "sha256": "785b272fd0a66eb785a6ddb54c8848b9284cc2c2b899430d13917fafd3eaa8c3"
+        }
+      }
+    },
+    "eventCount": 5,
+    "perTableCounts": {
+      "accounts": 2,
+      "rooms": 1,
+      "events": 5,
+      "commands": 3,
+      "member_accounts": 1,
+      "credentials": 2,
+      "account_credentials": 1,
+      "account_session_slots": 1,
+      "account_magic_codes": 1,
+      "agent_autonomy_tiers": 1,
+      "agent_identities": 1,
+      "agent_key_registry": 1,
+      "bounty_events": 3,
+      "bounty_journal": 4,
+      "bounty_records": 1,
+      "bounty_rubric_versions": 1,
+      "bounty_sequences": 1,
+      "bounty_watchers": 1,
+      "messages": 2,
+      "oauth_pending_states": 1,
+      "project_offer_requests": 16,
+      "project_offers": 8,
+      "public_receipts": 4,
+      "public_work_claim_writer_permit": 1,
+      "public_work_receipts": 4,
+      "public_work_requests": 16,
+      "public_work_tasks": 8,
+      "room_schema_stamp": 1,
+      "work_claims": 10
+    },
+    "dbTableCounts": {
+      "access_requests": 0,
+      "account_access_events": 0,
+      "account_credentials": 1,
+      "account_login_methods": 0,
+      "account_magic_codes": 1,
+      "account_passkey_credentials": 0,
+      "account_recovery_codes": 0,
+      "account_security_events": 0,
+      "account_session_slots": 1,
+      "account_setup": 0,
+      "account_terms": 0,
+      "accounts": 2,
+      "activity_events": 0,
+      "activity_fanout_failures": 0,
+      "agent_api_keys": 0,
+      "agent_autonomy_tiers": 1,
+      "agent_bonds": 0,
+      "agent_capability_grants": 0,
+      "agent_connection_operations": 0,
+      "agent_connections": 0,
+      "agent_directory_cards": 0,
+      "agent_hosts": 0,
+      "agent_identities": 1,
+      "agent_identity_verification": 0,
+      "agent_invite_codes": 0,
+      "agent_invite_redeem_receipts": 0,
+      "agent_key_registry": 1,
+      "agent_push_configs": 0,
+      "agent_room_ownership": 0,
+      "agent_skill_cards": 0,
+      "agent_wake_polls": 0,
+      "agent_wake_signals": 0,
+      "agent_wants_work": 0,
+      "agent_webhook_deliveries": 0,
+      "agent_webhook_subs": 0,
+      "agent_work_wake_hosts": 0,
+      "agent_work_wakes": 0,
+      "board_vtwo_claims": 0,
+      "board_vtwo_events": 0,
+      "board_vtwo_idempotency": 0,
+      "board_vtwo_mirror": 0,
+      "bounty_disputes": 0,
+      "bounty_events": 3,
+      "bounty_flakes": 0,
+      "bounty_idempotency": 0,
+      "bounty_journal": 4,
+      "bounty_records": 1,
+      "bounty_reputation_packets": 0,
+      "bounty_review_packets": 0,
+      "bounty_rubric_versions": 1,
+      "bounty_sequences": 1,
+      "bounty_sybil_flags": 0,
+      "bounty_watchers": 1,
+      "buyer_signoff_loops": 0,
+      "buyer_signoff_requests": 0,
+      "collab_approvals": 0,
+      "collab_assignments": 0,
+      "collab_draft_locks": 0,
+      "collab_notes": 0,
+      "collab_routing_events": 0,
+      "commands": 3,
+      "credentials": 2,
+      "cursors": 0,
+      "demigod_contract_requests": 0,
+      "demigod_contracts": 0,
+      "demigod_offer_profiles": 0,
+      "demigod_offer_requests": 0,
+      "direct_channel_sends": 0,
+      "dm_consents": 0,
+      "events": 5,
+      "gmail_linked_mailboxes": 0,
+      "gmail_mailboxes": 0,
+      "gmail_operations": 0,
+      "gmail_pending": 0,
+      "guest_invites": 0,
+      "guest_link_exchanges": 0,
+      "guest_members": 0,
+      "guest_selfserve": 0,
+      "guest_selfserve_idem": 0,
+      "handoff_envelopes": 0,
+      "human_push_preferences": 0,
+      "human_push_subscriptions": 0,
+      "identity_link_codes": 0,
+      "identity_links": 0,
+      "inbox_attachment_bytes": 0,
+      "inbox_handoff_rooms": 0,
+      "inbox_handoffs": 0,
+      "integrity_job_cursor": 0,
+      "integrity_room_state": 0,
+      "integrity_snapshot": 0,
+      "jev_shadow_decisions": 0,
+      "land_queue": 0,
+      "land_queue_idempotency": 0,
+      "member_accounts": 1,
+      "membership_delegation_grants": 0,
+      "membership_delegation_journal": 0,
+      "membership_delegation_pending": 0,
+      "membership_invitation_events": 0,
+      "membership_invitation_journal": 0,
+      "membership_invitations": 0,
+      "mention_states": 0,
+      "message_reports": 0,
+      "messages": 2,
+      "messages_backfill_cursor": 0,
+      "oauth_pending_states": 1,
+      "operator_actions": 0,
+      "owner_delegate_grants": 0,
+      "owner_delegate_journal": 0,
+      "peer_dm_messages": 0,
+      "peer_dm_threads": 0,
+      "pending_channel_updates": 0,
+      "private_attention_commands": 0,
+      "private_attention_prefs": 0,
+      "private_email_commands": 0,
+      "private_email_connections": 0,
+      "private_email_folders": 0,
+      "private_inbox_commands": 0,
+      "private_inbox_drafts": 0,
+      "private_inbox_reads": 0,
+      "private_inbox_sources": 0,
+      "private_inbox_versions": 0,
+      "private_next_action_dismissals": 0,
+      "private_next_action_suppressions": 0,
+      "private_reminder_commands": 0,
+      "private_reminders": 0,
+      "private_update_commands": 0,
+      "private_update_marks": 0,
+      "project_offer_requests": 16,
+      "project_offers": 8,
+      "projection_bodies": 0,
+      "projection_checkpoints": 0,
+      "public_abuse_reports": 0,
+      "public_directory_entries": 0,
+      "public_read_model_backfill": 0,
+      "public_receipts": 4,
+      "public_rooms": 0,
+      "public_unpublish": 0,
+      "public_work_claim_writer_permit": 1,
+      "public_work_receipts": 4,
+      "public_work_requests": 16,
+      "public_work_review_requests": 0,
+      "public_work_reviews": 0,
+      "public_work_successor_requests": 0,
+      "public_work_successors": 0,
+      "public_work_tasks": 8,
+      "quarantine_thread_splits": 0,
+      "read_horizons": 0,
+      "referral_chain_members": 0,
+      "referral_invite_keys": 0,
+      "referral_invites": 0,
+      "referrals": 0,
+      "request_runs": 0,
+      "room_access_auto_approve": 0,
+      "room_assistant_config": 0,
+      "room_assistant_ops": 0,
+      "room_assistant_runs": 0,
+      "room_attachments": 0,
+      "room_code_checks": 0,
+      "room_code_drops": 0,
+      "room_directory_settings": 0,
+      "room_mention_settings": 0,
+      "room_public_settings": 0,
+      "room_schema_stamp": 1,
+      "room_trial_requests": 0,
+      "room_trial_tasks": 0,
+      "room_verification_policy": 0,
+      "room_vetting_keys": 0,
+      "room_vetting_receipts": 0,
+      "rooms": 1,
+      "saved_messages": 0,
+      "share_link_access": 0,
+      "share_link_codes": 0,
+      "share_link_join_redemptions": 0,
+      "share_link_joins": 0,
+      "share_links": 0,
+      "sla_breach_alerts": 0,
+      "spam_quarantine": 0,
+      "spend_authorizations": 0,
+      "spend_grant_terms": 0,
+      "spend_room_reservations": 0,
+      "squads": 0,
+      "stitch_identities": 0,
+      "stitch_links": 0,
+      "stitch_receipts": 0,
+      "stitch_revocations": 0,
+      "stitch_suggestions": 0,
+      "telegram_live_status": 0,
+      "thread_mutes": 0,
+      "wake_queue": 0,
+      "wake_queue_commands": 0,
+      "wake_queue_pause": 0,
+      "web_fetch_cache": 0,
+      "web_fetch_cache_rooms": 0,
+      "web_fetch_log": 0,
+      "web_research_log": 0,
+      "work_claim_config": 0,
+      "work_claims": 10,
+      "work_item_board_backfill": 0
+    }
+  }
+}
