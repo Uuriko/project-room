@@ -117,3 +117,66 @@ test("the created default room opens for its owner", async t => {
   const rooms = await (await get(origin, "/api/account-rooms", creds)).json();
   assert.ok(rooms.rooms.some(r => r.id === body.room.id));
 });
+
+// R266-n1: a former member signs in again. Their binding row to another
+// account's personal room is stale (no active human member for them in the
+// room state), so the default-room read must skip it and return their own
+// room, never the room they were removed from.
+test("ensure-default-room skips an inactive membership and returns the account's own room", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const mkAccount = async n => {
+    const email = `defaultroom-${n}@example.invalid`;
+    const slot = f.store.createAccountSessionSlot();
+    const res = await post(origin, "/api/auth/password/signup",
+      { email, password: password(n), sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
+    assert.equal(res.status, 202);
+    const freshToken = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
+    const session = f.store.authenticateAccountSession(freshToken);
+    return { accountId: session.account.id,
+      creds: { cookie: `account_session=${freshToken}`, csrf: session.csrf, binding: session.sessionBinding } };
+  };
+  const a = await mkAccount(6);
+  const create = await authedPost(origin, "/api/account-rooms", a.creds,
+    { roomId: "room-alpha-1", title: "Alpha", purpose: "p", kind: "personal", displayName: "Owner" });
+  assert.equal(create.status, 201);
+  const b = await mkAccount(7);
+  const own = await authedPost(origin, "/api/account-rooms", b.creds,
+    { roomId: "personal-beta", title: "Beta", purpose: "p", kind: "personal", displayName: "Owner" });
+  assert.equal(own.status, 201);
+  // Stale ex-member binding: a member_accounts row whose member id does not
+  // exist as an active human member in room-alpha-1's state.
+  f.store.db.prepare(
+    "INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
+    .run("room-alpha-1", "exmemberb", b.accountId, "test-stale-row");
+  const res = await authedPost(origin, "/api/account/ensure-default-room", b.creds);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.created, false);
+  assert.equal(body.room.id, "personal-beta");
+});
+
+// Same stale-only shape as the production repro: the account's only
+// membership rows are inactive, so the no-resurrect rule answers room:null.
+test("ensure-default-room answers room:null when every membership row is inactive", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const slot = f.store.createAccountSessionSlot();
+  const res = await post(origin, "/api/auth/password/signup",
+    { email: "defaultroom-8@example.invalid", password: password(8),
+      sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
+  assert.equal(res.status, 202);
+  const freshToken = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
+  const session = f.store.authenticateAccountSession(freshToken);
+  const creds = { cookie: `account_session=${freshToken}`, csrf: session.csrf, binding: session.sessionBinding };
+  const create = await authedPost(origin, "/api/account-rooms", creds,
+    { roomId: "room-left-2", title: "Left", purpose: "p", kind: "personal", displayName: "Owner" });
+  assert.equal(create.status, 201);
+  f.store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(session.account.id);
+  f.store.db.prepare("UPDATE accounts SET ever_had_room=1 WHERE id=?").run(session.account.id);
+  const stale = await authedPost(origin, "/api/account/ensure-default-room", creds);
+  assert.equal(stale.status, 200);
+  const body = await stale.json();
+  assert.equal(body.created, false);
+  assert.equal(body.room, null);
+});
