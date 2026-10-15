@@ -37,7 +37,8 @@ import {
 // Independently re-derived enforcing constants: the governance document must
 // agree with these, or it has drifted from what the code enforces.
 import { BUDGET_CAPS } from "../src/work-item-session.js";
-import { GUEST_AGENT_PERMISSIONS, GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
+import { GUEST_AGENT_PERMISSIONS } from "../server/guest-agent-links.mjs";
+import { GUEST_CREDENTIAL_TTL_DEFAULT_MS } from "../server/guest-invites.mjs";
 import { wakeQueueLimits } from "../server/wake-queue-limits.mjs";
 import { SEVERITY_KEEP_DAYS, ARCHIVE_AFTER_DAYS } from "../server/audit-retention.mjs";
 import { DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS } from "../server/work-claims.mjs";
@@ -402,7 +403,7 @@ test("governance: served on origin and /room, linked, derived from enforcing con
   // Numeric claims re-derived from the enforcing modules (fail on drift).
   assert.equal(doc.agentWorkControls.roundLimits.cap, BUDGET_CAPS.maxRounds);
   assert.equal(doc.agentWorkControls.toolBudgets.cap, BUDGET_CAPS.maxToolCalls);
-  assert.equal(doc.identityModel.guestTier.ttlMs, GUEST_AGENT_TTL_MS);
+  assert.equal(doc.identityModel.guestTier.ttlMs, GUEST_CREDENTIAL_TTL_DEFAULT_MS);
   assert.deepEqual(doc.identityModel.guestTier.permissions, [...GUEST_AGENT_PERMISSIONS]);
   assert.equal(doc.workLedger.leases.defaultHours, DEFAULT_LEASE_HOURS);
   assert.equal(doc.workLedger.leases.maxHours, MAX_LEASE_HOURS);
@@ -542,7 +543,7 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   const accessRes = await post(origin, "/api/access-requests", {
     roomId: room.roomId, identityId: applicant.identityId, displayName: "Access Applicant",
     requestedPermissions: [], note: null, requestId: `ar_${randomUUID().replaceAll("-", "").slice(0, 12)}`,
-  });
+  }, applicant.secret);
   assert.equal(accessRes.status, 201);
   const access = await accessRes.json();
   assert.equal(access.next[0]?.action, "poll-status");

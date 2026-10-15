@@ -7,9 +7,15 @@
 // a verified link.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { OutsideAgents } from "../server/outside-agents.mjs";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { membershipDelegationSchema } from "../server/membership-delegation.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import {
   outsideAgentBody,
   parseOutsideAgentBody,
@@ -86,6 +92,56 @@ test("assembleOutsideAgents marks the link verified on an owner approval", () =>
   assert.equal(cursor.verifiedBy, "owner");
 });
 
+test("assembleOutsideAgents ignores an approval when no link is in effect, so it cannot pre-verify a later link", () => {
+  // A verify record replayed over a windowed/out-of-order message set:
+  // the approval is seen before any link exists (#2978).
+  const noLink = [msg(introduce("bus:cursor"), "producer", "m1"),
+    msg(verifyRec("bus:cursor", "approved"), "owner", "m2")];
+  const unlinked = assembleOutsideAgents(noLink, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(unlinked.linkedMemberId, null);
+  assert.equal(unlinked.verified, false);
+  assert.equal(unlinked.latestDecision, null);
+  assert.equal(unlinked.decidedLinkMessageId, null);
+  assert.equal(unlinked.verificationPending, false);
+
+  // The same approval must not pre-verify a link that arrives after it:
+  // the later link goes back to pending and waits for a fresh decision.
+  const laterLink = [...noLink, msg(link("bus:cursor"), "producer", "m3")];
+  const cursor = assembleOutsideAgents(laterLink, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(cursor.linkedMemberId, "producer");
+  assert.equal(cursor.verified, false);
+  assert.equal(cursor.verificationPending, true);
+  // And a fresh decision on that link is planned, not treated as a replay.
+  const plan = planOutsideAgentVerify(laterLink, members, "room1", "owner",
+    { externalRef: "bus:cursor", decision: "approved" }, { verifiers });
+  assert.equal(plan.recorded, "verify");
+});
+
+test("assembleOutsideAgents ignores a decision replayed after its link was denied, until a re-link is decided", () => {
+  const messages = [...linkedMessages(),
+    msg(verifyRec("bus:cursor", "denied"), "owner", "m3"),
+    msg(verifyRec("bus:cursor", "approved"), "owner", "m4"),
+    msg(link("bus:cursor"), "producer", "m5")];
+  const cursor = assembleOutsideAgents(messages, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(cursor.linkedMemberId, "producer");
+  assert.equal(cursor.verified, false);
+  assert.equal(cursor.verificationPending, true);
+});
+
+test("assembleOutsideAgents still honors an approval for a link buffered before its introduction", () => {
+  const messages = [msg(link("bus:cursor"), "producer", "m1"),
+    msg(introduce("bus:cursor"), "producer", "m2"),
+    msg(verifyRec("bus:cursor", "approved"), "owner", "m3")];
+  const cursor = assembleOutsideAgents(messages, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(cursor.linkedMemberId, "producer");
+  assert.equal(cursor.verified, true);
+  assert.equal(cursor.decidedLinkMessageId, "m1");
+});
+
 test("assembleOutsideAgents ignores verify records from non-verifiers", () => {
   const messages = [...linkedMessages(), msg(verifyRec("bus:cursor", "approved", "mallory"), "mallory", "m3")];
   const agents = assembleOutsideAgents(messages, members, { verifiers });
@@ -154,6 +210,50 @@ test("server: non-owners cannot verify; denial clears the link", t => {
   const agent = denied.agents.find(a => a.externalRef === "bus:cursor");
   assert.equal(agent.linkedMemberId, null);
   assert.equal(agent.verified, false);
+});
+
+test("server: a membership-delegation grant holder can verify a link", t => {
+  // #2851: #verifiers looked the grant up with room.id, but store.room()
+  // returns { sequence, state } with no .id, so hasGrant always answered
+  // false and a membership-administration delegate could never verify.
+  const directory = mkdtempSync(join(tmpdir(), "project-room-outside-agents-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom("commons"));
+  store.db.exec(membershipDelegationSchema);
+  const net = new OutsideAgents(store);
+  const ownerToken = store.issueAccessKey("commons", "owner");
+  const producer = store.identities.create("Producer Agent");
+  const producerLinked = store.identities.link(ownerToken, "commons", {
+    identityId: producer.identityId, displayName: "Producer Agent",
+    permissions: ["accept_work", "complete_work"],
+  });
+  setTier(store.db, "commons", producerLinked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  // The delegate holds work permissions only (no manage_members), so its
+  // only path into the verifier set is the delegation grant.
+  const delegate = store.identities.create("Delegate Agent");
+  const delegateLinked = store.identities.link(ownerToken, "commons", {
+    identityId: delegate.identityId, displayName: "Delegate Agent",
+    permissions: ["accept_work", "complete_work"],
+  });
+  setTier(store.db, "commons", delegateLinked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+
+  net.record(producer.secret, "commons", {
+    externalRef: "bus:cursor", displayName: "Cursor", origin: "bus", reach: "bus:cursor",
+  });
+  net.link(producer.secret, "commons", { externalRef: "bus:cursor", memberId: producerLinked.memberId });
+
+  // No grant yet: the delegate is not a verifier.
+  assert.throws(() => net.verify(delegate.secret, "commons", { externalRef: "bus:cursor", decision: "approved" }),
+    { code: "outside_agent_forbidden", status: 403 });
+
+  store.delegation.grant(ownerToken, "commons", { identityId: delegate.identityId });
+
+  const decided = net.verify(delegate.secret, "commons", { externalRef: "bus:cursor", decision: "approved" });
+  assert.equal(decided.recorded, "verify");
+  const agent = decided.agents.find(a => a.externalRef === "bus:cursor");
+  assert.equal(agent.verified, true);
+  assert.equal(agent.verifiedBy, delegateLinked.memberId);
 });
 
 test("server: list names the verify step for pending links", t => {

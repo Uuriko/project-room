@@ -268,6 +268,30 @@ test("deriveNotifications is pure: same input, same output, and unknown preferen
 });
 
 
+test("session-enforcement alerts reach the room owner even when work_updates is none (#2943)", () => {
+  const state = { messages: [], workItems: {}, members: {}, room: { ownerId: "owner" } };
+  const at = "2026-09-14T00:00:00.000Z";
+  const row = (sequence, type, data) => ({ sequence, event: { id: `e${sequence}`, type, actorId: "agent", at, data } });
+  const events = [
+    row(1, T.SESSION_STATUS_CHANGED, { workItemId: "w-round", suspendReason: "round_limit" }),
+    row(2, T.SESSION_STOPPED, { workItemId: "w-budget", budgetEnforced: true }),
+    // Not an enforcement firing: no round_limit / budgetEnforced marker.
+    row(3, T.SESSION_STATUS_CHANGED, { workItemId: "w-plain" }),
+    // Ordinary work traffic stays muted under work_updates: "none".
+    row(4, T.WORK_PROPOSED, { workItemId: "w-assigned", accountableMemberId: "owner" }),
+  ];
+  const owner = { id: "owner", displayName: "Owner", notificationPreferences: { work_updates: "none" } };
+  const forOwner = deriveNotifications({ events, state, member: owner });
+  assert.deepEqual(
+    forOwner.map(item => `${item.kind}:${item.workItemId}:${item.eventType}`),
+    [`work_update:w-budget:${T.SESSION_STOPPED}`, `work_update:w-round:${T.SESSION_STATUS_CHANGED}`],
+    "round-limit pauses and budget stops notify the owner despite work_updates=none",
+  );
+  // The carve-out is owner-only: a non-owner with the same preference gets nothing.
+  const other = { id: "someone-else", displayName: "Other", notificationPreferences: { work_updates: "none" } };
+  assert.deepEqual(deriveNotifications({ events, state, member: other }), []);
+});
+
 test("older mentions remain reachable after 600 unrelated events, with read and access fencing", async t => {
   const { store, send, feed, ownerKey, agentKey } = await serve(t);
   store.markCaughtUp(agentKey, "commons", store.room("commons").sequence);

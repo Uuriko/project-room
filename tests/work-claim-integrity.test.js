@@ -241,25 +241,34 @@ test("the Board list pages done claims by age and summarizes history", async t =
   assert.equal((await f.call("owner", "list", { query: "?state=finished" })).status, 422);
 });
 
-// QUARANTINED — see tests/quarantine.json and docs/FLAKY-QUARANTINE.md.
-// The p95 timing assertion below flakes on loaded/slow VMs (it fails on
-// pristine main), so it is skipped in the blocking suite and runs only in
-// the non-blocking quarantine lane (`npm run test:quarantined`, which sets
-// QUARANTINE_RUN=1).
-const QUARANTINE_RUN = process.env.QUARANTINE_RUN === "1";
-
-test("the Board list endpoint p95 stays under the 50 ms budget", { skip: !QUARANTINE_RUN }, async t => {
+// Perf guard (repaired and re-admitted from quarantine, #3289; it was
+// quarantined 2026-10-05 — see docs/FLAKY-QUARANTINE.md). The original
+// measurement was the defect, not the endpoint: a wall-clock p95 over 10
+// samples is the max sample, so one scheduler stall on a loaded runner
+// failed it (5/7 failures on pristine main, e.g. 58.3 ms; re-characterized
+// 2026-10-13 on a loaded VM: 0/20 runs passed, reported values 129–351 ms,
+// while the endpoint's own CPU cost stayed at p50 ≈ 15 ms / p95 ≈ 25 ms).
+// The budget is now priced in CPU time (process.cpuUsage), which measures
+// the work the endpoint itself does: co-tenant contention inflates
+// wall-clock time without moving CPU time, while a real per-list
+// regression (more work per call) still fails the same 50 ms budget.
+// 30 samples make the p95 a real percentile (the 29th value), not the max,
+// and three warm-up calls keep JIT/cache cold-start out of the samples.
+test("the Board list endpoint p95 stays under the 50 ms budget", async t => {
   const f = roomFixture(t);
   seedBoardClaims(f);
-  await f.call("owner", "list", { query: "?limit=200" }); // warm-up
+  for (let i = 0; i < 3; i++) await f.call("owner", "list", { query: "?limit=200" }); // warm-up (JIT, caches)
   const samples = [];
-  for (let i = 0; i < 10; i++) {
-    const started = performance.now();
+  for (let i = 0; i < 30; i++) {
+    const before = process.cpuUsage();
     await f.call("owner", "list", { query: "?limit=50" });
-    samples.push(performance.now() - started);
+    const delta = process.cpuUsage(before);
+    samples.push((delta.user + delta.system) / 1000);
   }
   samples.sort((a, b) => a - b);
-  assert.ok(samples[Math.ceil(samples.length * 0.95) - 1] < 50, `list p95 ${samples.at(-1).toFixed(1)} ms`);
+  const p95 = samples[Math.ceil(samples.length * 0.95) - 1];
+  const median = samples[samples.length >> 1];
+  assert.ok(p95 < 50, `list CPU p95 ${p95.toFixed(1)} ms (median ${median.toFixed(1)} ms; samples: ${samples.map(sample => sample.toFixed(1)).join(", ")})`);
 });
 
 test("Board reads mark another member's claim text untrusted and never the reader's own", async t => {
@@ -417,7 +426,15 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: "add-guest", type: "member.added", data: { memberId: "guest", displayName: "Guest", kind: "agent", permissions: [] } });
   const guestKey = store.issueAccessKey("commons", "guest");
-  const server = createRoomServer({ store });
+  // The /work-claims/status read below must be hermetic: without an injected
+  // fetch it performs a live api.github.com commits/main request and reports
+  // stale:true whenever that request fails or is rate-limited (as in the
+  // coverage CI run for PR #3129), which is unrelated to what this test checks.
+  const fetchPullRequest = async () => ({
+    ok: true, status: 200, headers: { get: () => null },
+    text: async () => JSON.stringify({ sha: "c".repeat(40) }), json: async () => ({ sha: "c".repeat(40) }),
+  });
+  const server = createRoomServer({ store, fetchPullRequest, githubToken: "test-token" });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();

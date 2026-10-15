@@ -50,9 +50,9 @@
         <div class="topbar-actions">
           <span id="identity-label">Checking session…</span>
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
-          <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
+          <button id="refresh-button" class="button ghost icon-button" type="button" disabled aria-label="Refresh connection" title="Refresh connection"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
           <div class="session-menu" id="session-menu">
-            <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions" title="Account"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>
+            <button id="session-menu-button" class="button ghost icon-button" type="button" disabled aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions" title="Account"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>
             <div id="session-menu-panel" class="session-menu-panel">
               <p id="session-expiry" class="form-hint" hidden></p>
               <button id="account-profile-button" class="button ghost" type="button" hidden></button>
@@ -76,22 +76,22 @@
         <p id="auth-link-error" class="status form-status" role="alert"></p>
         <p id="auth-room-hint" class="form-hint" hidden></p>
         <div id="signin-methods" class="signin-methods">
-          <p class="form-hint" id="terms-notice">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
           <a id="google-signin" class="button secondary" href="/api/auth/google/start"><svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5Z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.17 7.09-10.32 7.09-17.65Z"/><path fill="#FBBC05" d="M10.53 28.59A14.41 14.41 0 0 1 9.75 24c0-1.59.27-3.13.78-4.59l-7.98-6.19A23.87 23.87 0 0 0 0 24c0 3.87.93 7.53 2.56 10.78l7.97-6.19Z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.18 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48Z"/></svg><span>Continue with Google</span></a>
+          <a id="github-signin" class="button secondary" href="/api/auth/github/start"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span>Continue with GitHub</span></a>
           <div class="signin-divider" aria-hidden="true">or</div>
           <div id="signin-controller"><div id="auth-signin-ui"></div></div>
+          <p class="form-hint" id="terms-notice">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
         </div>
         <div id="email-auth-step" hidden>
           <div id="email-auth-panel" hidden></div>
         </div>
         <div id="signin-entry-routes" class="signin-entry-routes">
-        <button type="button" id="agent-signin-button" class="text-button" aria-expanded="false" aria-controls="agent-auth-step">Agent sign in</button>
+        <a id="join-code-link" class="text-button" href="/join">Join with an invite code</a>
+        <!-- Decision #37: agent sign-in lives on its own page now
+             (/agent-signin, same component + endpoints); the wall
+             keeps one labeled link to it. -->
+        <a id="agent-signin-button" class="text-button" href="/agent-signin">Agent sign in</a>
         </div>
-        <section id="agent-auth-step" aria-label="Agent sign in" hidden>
-          <button type="button" id="agent-auth-back" class="text-button">Back to log in</button>
-          <div id="agent-signin-ui"></div>
-
-        </section>
 
 
       </section>
@@ -108,30 +108,10 @@
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
         <p class="form-hint">Join a room through its invitation.</p>
-        <!-- RC-2026-09-30-3611 (human-door P0-2): a general request-access
-             door for signed-in users with no rooms. The dead-invite dialog
-             owns the same flow for strangers with dead links; this one needs
-             no invitation at all. -->
-        <details id="account-request-access" class="account-request-access">
-          <summary>Request access to a room</summary>
-          <p class="form-hint">No invitation? Ask a room owner to let you in. They see your name, your note, and your optional referrer — nothing else.</p>
-          <form id="account-request-form" class="account-request-form" autocomplete="off">
-            <label for="account-request-room">Room link</label>
-            <input id="account-request-room" name="roomId" type="text" required autocomplete="off" spellcheck="false" value="muse-room">
-            <p class="form-hint"><code>muse-room</code> is the open community room. If someone sent you a link to a different room, paste the link here.</p>
-            <label for="account-request-name">Your display name</label>
-            <input id="account-request-name" name="displayName" type="text" maxlength="80" required autocomplete="off" spellcheck="false">
-            <label for="account-request-note">Note for the owner (optional)</label>
-            <textarea id="account-request-note" name="note" rows="3" maxlength="500" spellcheck="true"></textarea>
-            <label for="account-request-referred">Who referred you? (optional)</label>
-            <input id="account-request-referred" name="referredBy" type="text" maxlength="80" autocomplete="off" spellcheck="false"
-              placeholder="The display name of the member who invited you">
-            <div class="form-actions">
-              <button id="account-request-submit" class="button primary" type="submit">Send request</button>
-            </div>
-          </form>
-          <p id="account-request-status" class="status form-status" role="status"></p>
-        </details>
+        <!-- Request access lives at the room address now: the join page
+             carries the one request-access door (human-map §8.1, #3293
+             step 2). The acquisition-intent consumer in src/app.js sends
+             "request" intents there. -->
         <details id="account-room-create" class="account-room-create">
           <summary>New room</summary>
           <form id="account-room-form" class="account-room-form" autocomplete="off">
@@ -369,7 +349,10 @@
           <section id="activity-preview" class="needs-attention" aria-label="Recent activity for you" hidden>
             <header class="attention-header">
               <h3><span class="attention-icon" aria-hidden="true">✦</span> Needs your attention <span id="activity-preview-count" class="count-chip"></span></h3>
-              <button id="activity-preview-open" class="button ghost" type="button">Open activity</button>
+              <span class="attention-actions">
+                <button id="activity-preview-open" class="button ghost" type="button">Open activity</button>
+                <button id="activity-preview-dismiss" class="button ghost" type="button">Dismiss</button>
+              </span>
             </header>
             <ol id="activity-preview-list" class="attention-list"></ol>
           </section>
@@ -679,7 +662,7 @@
             <label id="work-done-field" class="field"><span>Done when</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
             <label id="assignee-field" class="field"><span>Assignee</span><select id="assignee-select" name="assigneeId" required></select></label>
             <p id="assignee-hint" class="form-hint" hidden></p>
-            <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label"></select><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
+            <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label" aria-describedby="verifier-hint"></select><p id="verifier-hint" class="form-hint" role="status" hidden></p><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
             <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
               <label class="field"><span>Mode</span><select id="work-mode-select" name="mode"><option value="read">Think it through</option><option value="write">Allowed to change things outside the room</option></select></label>
               <label class="check"><input id="require-verification" type="checkbox" name="requireVerification" checked> Require verification</label>
@@ -710,6 +693,23 @@
             <p class="form-hint" id="friend-dm-hint"></p>
             <p id="friend-dm-status" class="status form-status" role="status"></p>
             <div class="dialog-actions"><button id="friend-dm-close" class="button ghost" type="button">Close</button><button class="button primary" type="submit">Send</button></div>
+          </form>
+        </dialog>
+        <dialog id="message-edit-dialog" aria-labelledby="message-edit-title">
+          <form id="message-edit-form" method="dialog">
+            <div class="dialog-head"><h2 id="message-edit-title">Edit message</h2></div>
+            <label class="field"><span>Message</span><textarea id="message-edit-input" name="body" rows="4" required></textarea></label>
+            <p id="message-edit-status" class="status form-status" role="status"></p>
+            <div class="dialog-actions"><button id="close-message-edit" class="button ghost" value="cancel" formnovalidate type="submit">Cancel</button><button class="button primary" value="default" type="submit">Save</button></div>
+          </form>
+        </dialog>
+        <dialog id="message-delete-dialog" aria-labelledby="message-delete-title">
+          <form id="message-delete-form" method="dialog">
+            <div class="dialog-head"><h2 id="message-delete-title">Delete message</h2></div>
+            <p id="message-delete-source" class="form-hint"></p>
+            <p class="form-hint">This removes the message for everyone. It can't be undone.</p>
+            <p id="message-delete-status" class="status form-status" role="status"></p>
+            <div class="dialog-actions"><button id="close-message-delete" class="button ghost" value="cancel" formnovalidate type="submit">Cancel</button><button class="button destructive" value="default" type="submit">Delete</button></div>
           </form>
         </dialog>
         <dialog id="report-dialog" aria-labelledby="report-title">
@@ -772,7 +772,7 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></dialog>
+    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><h2 id="result-title" tabindex="-1">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-discuss" type="button" class="button" hidden></button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></section>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>
@@ -813,26 +813,14 @@
         </div>
         <p id="invitation-status" class="invitation-feedback" role="status" aria-live="polite"></p>
         <p id="invitation-error" class="invitation-feedback error" role="alert"></p>
-        <!-- RC-2026-09-19-071 (QAJ-001): the request-access door. Shown only
-             for dead invitations that still name the room (expired / revoked /
-             stale), so a stranger with a dead link can ask to join instead of
-             bouncing. -->
+        <!-- RC-2026-09-19-071 (QAJ-001) origin; #3293 step 3: the inline
+             request form became a link-out — the join page at the room's
+             own address carries the one request-access door. Shown only
+             for dead invitations that still name the room (expired /
+             revoked / stale), so a stranger with a dead link can ask to
+             join instead of bouncing. src/app.js sets the href. -->
         <div id="invitation-request-door" hidden>
-          <button id="invitation-request-access" class="button secondary" type="button">Request access</button>
-          <form id="invitation-request-form" hidden>
-            <p class="form-hint">Ask the room owner to let you in. They see your name, your note, and your optional referrer — nothing else.</p>
-            <label for="invitation-request-name">Display name</label>
-            <input id="invitation-request-name" type="text" autocomplete="off" spellcheck="false" required maxlength="80">
-            <label for="invitation-request-note">Note for the owner (optional)</label>
-            <textarea id="invitation-request-note" rows="3" maxlength="500" spellcheck="true"></textarea>
-            <label for="invitation-request-referred">Who referred you? (optional)</label>
-            <input id="invitation-request-referred" type="text" autocomplete="off" spellcheck="false" maxlength="80"
-              placeholder="The display name of the member who invited you">
-            <div class="form-actions">
-              <button id="invitation-request-submit" class="button primary" type="submit">Send request</button>
-            </div>
-          </form>
-          <p id="invitation-request-status" class="invitation-feedback" role="status" aria-live="polite"></p>
+          <a id="invitation-request-access" class="button secondary">Request access</a>
         </div>
         <div class="form-actions invitation-actions">
           <button id="invitation-dismiss" class="button ghost" type="button">Not now</button>
@@ -891,8 +879,7 @@
       </form>
       <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
-    <script type="module" src="./src/app.js"></script>
-    <script type="module" src="./src/request-access.js"></script>
+    <script type="module" src="./src/entry.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
@@ -1044,7 +1031,8 @@
       <p id="join-link-scope">Checking your invitation…</p>
       <section id="join-account-choices" hidden aria-label="Join with an account or as a guest">
         <div class="join-account-actions"><button id="join-account-signin" class="button primary" type="button">Log in</button></div>
-        <p class="form-hint">Keep your rooms across visits and devices. Or join below as a guest for a quick conversation.</p>
+        <p id="join-account-guest-hint" class="form-hint">Keep your rooms across visits and devices. Or join below as a guest for a quick conversation.</p>
+        <a id="join-account-rooms-link" class="text-button" hidden></a>
       </section>
       <section id="join-account-auth" hidden aria-label="Account sign-in">
         <a id="join-account-google" class="button primary" href="/api/auth/google/start">Continue with Google</a>

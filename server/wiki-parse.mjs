@@ -67,7 +67,7 @@ export function parseWikiEntries(text) {
   return entries;
 }
 
-// --- Procedures (docs/history/ROOM-PROCEDURES.md) --------------------------
+// --- Procedures (docs/ROOM-PROCEDURES.md) ----------------------------------
 
 const PROCEDURE_HEADER = /^## (.+)$/;
 const PROCEDURE_SOURCE = /^Source:\s*(.+)$/;

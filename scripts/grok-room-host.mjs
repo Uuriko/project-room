@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, fsyncSync, chmodSync, existsSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { readAgentConnection, ConnectionError } from "../client/agent-connection.mjs";
@@ -17,24 +18,36 @@ function fail(code, message) {
   throw new GrokHostError(code, message);
 }
 
+export function connectionDirectoryFromEnv(env = process.env) {
+  const explicit = env.ROOM_AGENT_CONFIG;
+  if (typeof explicit === "string" && explicit.trim()) return resolve(explicit.trim());
+  const homeGiven = typeof env.HOME === "string" && env.HOME.trim();
+  if (!homeGiven && env !== process.env) return null;
+  const home = homeGiven ? env.HOME.trim() : homedir();
+  return join(home, ".project-room", "grok-build");
+}
+
 function connectionFromEnv(env = process.env) {
-  const directory = env.ROOM_AGENT_CONFIG;
-  if (typeof directory === "string" && directory.trim()) return readAgentConnection(directory.trim());
-  fail("config_not_found", "Set ROOM_AGENT_CONFIG to the private connection directory");
+  const directory = connectionDirectoryFromEnv(env);
+  const explicit = typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim();
+  if (!directory || (!explicit && !existsSync(directory))) {
+    fail("config_not_found", "Set ROOM_AGENT_CONFIG to the private connection directory");
+  }
+  return readAgentConnection(directory);
 }
 
 function journalPathFor(env = process.env) {
   if (typeof env.ROOM_GROK_STATE === "string" && env.ROOM_GROK_STATE.trim()) return resolve(env.ROOM_GROK_STATE.trim());
-  if (typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim()) {
-    return join(resolve(env.ROOM_AGENT_CONFIG.trim()), "grok-host-journal.json");
-  }
+  const directory = connectionDirectoryFromEnv(env);
+  const explicit = typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim();
+  if (directory && (explicit || existsSync(directory))) return join(directory, "grok-host-journal.json");
   fail("config_not_found", "Set ROOM_AGENT_CONFIG or ROOM_GROK_STATE for the journal");
 }
 
 function pendingAccessPathFor(env = process.env) {
-  if (typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim()) {
-    return join(resolve(env.ROOM_AGENT_CONFIG.trim()), "pending-access.json");
-  }
+  const directory = connectionDirectoryFromEnv(env);
+  const explicit = typeof env.ROOM_AGENT_CONFIG === "string" && env.ROOM_AGENT_CONFIG.trim();
+  if (directory && (explicit || existsSync(directory))) return join(directory, "pending-access.json");
   fail("config_not_found", "Set ROOM_AGENT_CONFIG");
 }
 
@@ -231,7 +244,7 @@ function nextFor(code) {
     return "Save a connection with: node scripts/agent-inbox.mjs join '<invite>' ~/.project-room/grok-build --name \"Grok Build\"";
   }
   if (code === "unauthenticated") return "The saved secret was rejected. Reuse the existing identity directory; do not mint a replacement until this one is proven dead.";
-  return "See docs/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
+  return "See archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md";
 }
 
 async function planAndJournal({ connection, items, env, execute, runner, now, extra = {} }) {

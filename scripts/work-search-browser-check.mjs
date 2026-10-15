@@ -109,7 +109,11 @@ for (const touch of [false, true]) test(`work search ${touch ? 'touch' : 'deskto
   mutate('work.blocked', { reason: 'Revise the stored finding.', nextAction: 'Prepare corrected text.' });
   mutate('work.blocker_resolved', { resolution: 'Corrected wording prepared.' });
   const replacement = finish('Replacement finding is ready.');
-  await page.waitForFunction(seq => document.querySelector('#event-count').textContent === String(seq), replacement.sequence);
+  // The completion's board event follows its receipt in the same transaction
+  // (decision #10 cutover), so the receipt sequence is not terminal: the
+  // client can render past it without ever displaying it exactly. Wait for
+  // the client to reach at least the receipt, not exactly it.
+  await page.waitForFunction(seq => Number(document.querySelector('#event-count').textContent) >= seq, replacement.sequence);
   assert.equal(await hits.locator('a').count(), 0, 'old completion text is not a current search result');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'message-search', 'removed focused hit returns to search');
   const revisedCard = page.locator('[data-work-record-id="finished"]');

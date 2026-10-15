@@ -8,10 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { guestHistoryAccessLead, guestReadsHistoryFromJoin } from "../server/history-visibility.mjs";
-import { GuestAgentLinks } from "../server/guest-agent-links.mjs";
 import { EVENT_TYPES as T, event, PERMISSIONS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
-
-const TAIL = "post messages, and react.";
 
 test("guest history copy follows the room setting", () => {
   const v1 = { historyDefaultsVersion: HISTORY_DEFAULTS_VERSION };
@@ -27,25 +24,6 @@ test("guest history copy follows the room setting", () => {
   assert.equal(guestHistoryAccessLead(sinceJoin), "Read messages posted after you join");
   assert.match(guestHistoryAccessLead(all), /its history/);
   assert.doesNotMatch(guestHistoryAccessLead(v1), /history/);
-});
-
-test("guest-agent preview uses the room, not a fixed history promise", () => {
-  const roomFor = room => ({
-    db: null,
-    room: () => ({ state: { room } })
-  });
-  const v1 = new GuestAgentLinks(roomFor({ id: "fresh", title: "Fresh", historyDefaultsVersion: HISTORY_DEFAULTS_VERSION }));
-  const hidden = v1.previewPublic({ room_id: "fresh", expires_at: 1 }, null);
-  assert.match(hidden.access, /^Read messages posted after you join, post messages, and react\./);
-  assert.doesNotMatch(hidden.access, /history/);
-  assert.match(hidden.access, /No membership administration/);
-
-  const legacy = new GuestAgentLinks(roomFor({ id: "old", title: "Old" }));
-  assert.match(legacy.previewPublic({ room_id: "old", expires_at: 1 }, null).access, /^Read messages posted after you join, post messages, and react\./);
-  const chosenAll = new GuestAgentLinks(roomFor({ id: "old", title: "Old", historyVisibility: { value: "all", revision: 1 } }));
-  const open = chosenAll.previewPublic({ room_id: "old", expires_at: 1 }, null);
-  assert.match(open.access, /Read the room and its history, post messages, and react\./);
-  assert.match(open.access, new RegExp(TAIL.replace(".", "\\.")));
 });
 
 test("a v1 room's GX preview does not promise earlier messages", t => {

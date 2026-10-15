@@ -1,6 +1,6 @@
 // Doc-accuracy regression guard for the two audited MCP docs:
-//   docs/history/MCP-INSTALL.md
-//   docs/history/mcp-receipt-binding.md
+//   archive/docs/history/MCP-INSTALL.md
+//   archive/docs/history/mcp-receipt-binding.md
 //
 // Authoring-gate answers (see .agents/skills/test-audit/SKILL.md):
 // 1. Contract: the documented installer surface (client names, flags, the
@@ -12,10 +12,10 @@
 //    a doc sentence, and the doc silently drifts (this file was created after
 //    exactly that drift was found: the "Code/Codex CLI" miswording, the
 //    stale server/mcp-install-script.mjs reference post-#1321, and a broken
-//    docs/RECEIPTS-PAGE.md path in docs/history/).
+//    docs/RECEIPTS-PAGE.md path in archive/docs/history/).
 // 3. Existing coverage does not catch it: tests/docs-relative-links.test.js
 //    scans only top-level docs/*.md Markdown links — not inline-code path
-//    references, not docs/history/*.md — and no test asserts the audited
+//    references, not archive/docs/history/*.md — and no test asserts the audited
 //    docs' claims against the installer's actual behavior.
 // 4. No production seam: only the existing parseArgs export plus file reads.
 
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "../scripts/room-mcp-init.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const history = join(root, "docs", "history");
+const history = join(root, "archive", "docs", "history");
 const installDoc = readFileSync(join(history, "MCP-INSTALL.md"), "utf8");
 const bindingDoc = readFileSync(join(history, "mcp-receipt-binding.md"), "utf8");
 const initSrc = readFileSync(join(root, "scripts", "room-mcp-init.mjs"), "utf8");
@@ -106,7 +106,7 @@ test("binding doc: backtick path references resolve to committed files", () => {
   for (const ref of refs) {
     assert.ok(
       existsSync(resolve(history, ref)),
-      `binding doc: broken path reference "${ref}" (resolved against docs/history/)`
+      `binding doc: broken path reference "${ref}" (resolved against archive/docs/history/)`
     );
   }
 });

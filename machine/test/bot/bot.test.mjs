@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../../../server/store.mjs";
 import { createRoomServer } from "../../../server/http.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../../../server/spend-grants.mjs";
 import { initialRoom } from "../../../server/bootstrap.mjs";
 import { spawnContext } from "../../lib/spawn.mjs";
 import { loadConfig, saveConfig } from "../../lib/config.mjs";
@@ -127,14 +128,14 @@ async function get(origin, path, token) {
   return { status: response.status, json: await response.json().catch(() => null) };
 }
 
-async function enrolled(t, { roomId = "commons" } = {}) {
-  const served = await serve(t);
+async function enrolled(t, { roomId = "commons", served = null, displayName = "Room machine" } = {}) {
+  served ??= await serve(t);
   const home = homeDir();
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const relay = await startFakeRelay();
   t.after(() => relay.close());
   const invite = await post(served.origin, `/api/rooms/${roomId}/agent-invites`, {
-    profile: "contribute", displayName: "Room machine",
+    profile: "contribute", displayName,
   }, served.ownerKey);
   assert.equal(invite.status, 201, JSON.stringify(invite.json));
   relay.mint("bot-code", {
@@ -144,7 +145,7 @@ async function enrolled(t, { roomId = "commons" } = {}) {
     roomId,
     ownerMemberId: "owner",
     inviteCode: invite.json.code,
-    displayName: "Room machine",
+    displayName,
     relayUrl: relay.ws,
     roomOrigin: served.origin,
   });
@@ -153,6 +154,16 @@ async function enrolled(t, { roomId = "commons" } = {}) {
     code: "bot-code", home, env, relayHttp: relay.http, insecure: true, // local fake relay
   }));
   assert.equal(result.ok, true, JSON.stringify(result));
+  // #3269: priced operations charge at the REST doors now, exactly as they
+  // always did at MCP — and the bot stages its receipt files over REST.
+  // Provision it the way a room owner provisions any agent: a spend grant.
+  const botLink = served.store.db.prepare(
+    "SELECT member_id FROM identity_links WHERE room_id = ? AND identity_id = ?").get(roomId, result.identityId);
+  assert.ok(botLink?.member_id, "bot member link missing after enroll");
+  ensureSpendGrantsSchema(served.store.db);
+  issueSpendGrant(served.store.db, roomId, botLink.member_id, {
+    grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now(),
+  });
   return { ...served, home, env, relay, identityId: result.identityId };
 }
 
@@ -325,6 +336,67 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(fetched, false);
   });
 
+  test("anthropic provider forwards screenshot images as image blocks in tool_result", async () => {
+    const seen = [];
+    const provider = createAnthropicProvider({
+      key: "sk-anthropic-test",
+      model: "claude-sonnet-4-5",
+      fetchImpl: async (url, init) => {
+        seen.push({ url, body: JSON.parse(init.body) });
+        if (seen.length === 1) {
+          return jsonResponse({ content: [{ type: "tool_use", id: "toolu_1", input: { action: "screenshot" } }] });
+        }
+        if (seen.length === 2) {
+          return jsonResponse({
+            content: [
+              { type: "tool_use", id: "toolu_2", input: { action: "screenshot" } },
+              { type: "tool_use", id: "toolu_3", input: { action: "left_click", coordinate: [1, 2] } },
+            ],
+          });
+        }
+        return jsonResponse({ content: [{ type: "text", text: "done" }] });
+      },
+    });
+    await provider.next({ task: "open Safari", observations: [] });
+    // loop.mjs puts the screenshot in observation.image as a data URL and
+    // reduces observation.result to { image: true, bytes } (see summarize()).
+    await provider.next({
+      task: "open Safari",
+      observations: [{
+        id: "toolu_1",
+        tool: "desktop.screenshot",
+        result: { image: true, bytes: 5 },
+        image: "data:image/png;base64,aGVsbG8=",
+      }],
+    });
+    const toolResult = seen[1].body.messages.at(-1).content[0];
+    assert.equal(toolResult.type, "tool_result");
+    assert.equal(toolResult.tool_use_id, "toolu_1");
+    assert.ok(Array.isArray(toolResult.content), "screenshot tool_result content must be content blocks, not a JSON string");
+    assert.deepEqual(
+      toolResult.content.find(block => block.type === "text"),
+      { type: "text", text: JSON.stringify({ image: true, bytes: 5 }) },
+    );
+    assert.deepEqual(
+      toolResult.content.find(block => block.type === "image"),
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "aGVsbG8=" } },
+    );
+    // Observations without a usable data-URL image stay plain text results:
+    // no empty or malformed image block may reach the API.
+    await provider.next({
+      task: "open Safari",
+      observations: [
+        { id: "toolu_2", tool: "desktop.screenshot", result: { output: "plain" }, image: null },
+        { id: "toolu_3", tool: "desktop.click", result: { ok: true }, image: "not-a-data-url" },
+      ],
+    });
+    const followUps = seen[2].body.messages.at(-1).content;
+    assert.equal(typeof followUps[0].content, "string");
+    assert.equal(followUps[0].content, JSON.stringify({ output: "plain" }));
+    assert.equal(typeof followUps[1].content, "string");
+    assert.equal(followUps[1].content, JSON.stringify({ ok: true }));
+  });
+
   test("bot enable stays off until a room is named, and status does not print a key", () => {
     const home = homeDir();
     try {
@@ -405,8 +477,17 @@ test.describe("room-machine bot", { concurrency: false }, () => {
 
     const stranger = await reply(minted.secret, "go", planMessage.id);
     assert.equal(stranger.status, 201, JSON.stringify(stranger.json));
-    await step(room, bot);
+    const rejected = await step(room, bot);
+    assert.equal(rejected.results?.[0]?.ignored, "reply_notification", JSON.stringify(rejected));
     assert.equal((await claims(room.origin, secret)).length, 0);
+    assert.equal(JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8")).pending.planMessageId, planMessage.id);
+    const topic = await mention(room, "A human discussion topic");
+    await reply(room.ownerKey, "@Room machine inspect another task later", topic.event.data.messageId);
+    const deferred = await step(room, bot);
+    assert.equal(deferred.results.some(result => result.deferred === "pending_approval"), true);
+    const waiting = await get(room.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
+    assert.equal(waiting.json.pendingWakes.length, 1);
+    assert.equal(JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8")).pending.planMessageId, planMessage.id);
 
     const loose = await reply(room.ownerKey, "go");
     assert.equal(loose.status, 201, JSON.stringify(loose.json));
@@ -417,6 +498,13 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(owner.status, 201, JSON.stringify(owner.json));
     const finished = await step(room, bot);
     assert.equal(finished.done, true, JSON.stringify(finished));
+    const next = await step(room, bot);
+    assert.equal(next.results.filter(result => result.planned).length, 1, JSON.stringify(next));
+    const nextPending = JSON.parse(readFileSync(join(room.home, "bot-state.json"), "utf8")).pending;
+    assert.match(nextPending.text, /inspect another task later/);
+    assert.notEqual(nextPending.planMessageId, planMessage.id);
+    const drained = await get(room.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
+    assert.equal(drained.json.pendingWakes.length, 0);
     const board = await claims(room.origin, secret);
     const lease = board.find(item => item.title === "Lease desk");
     const work = board.find(item => item.id.startsWith("botw-"));
@@ -430,6 +518,39 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     const after = await bodies(room.origin, "commons", secret);
     const receipt = after.find(body => body.includes("Safari is open on example.com."));
     assert.match(receipt, /Receipt sha256:[0-9a-f]{64}/);
+  });
+
+  test("reply notifications between two bots settle without refusal loops and a new task still works", async t => {
+    const first = await enrolled(t);
+    const second = await enrolled(t, { served: first, displayName: "Other machine" });
+    saveBot(first.home, { tier: "t2" }); saveBot(second.home, { tier: "t2" });
+    const firstBot = new MachineBot({ home: first.home, env: first.env, waitMs: 0, provider: scripted([]) });
+    const secondBot = new MachineBot({ home: second.home, env: second.env, waitMs: 0, provider: scripted([]) });
+    await step(first, firstBot); await step(second, secondBot);
+    const firstSecret = await secretOf(first), secondSecret = await secretOf(second);
+    await mention(first, "@Other machine inspect this task", firstSecret);
+    const refused = await step(second, secondBot);
+    assert.equal(refused.results[0].ignored, "tier");
+    const notified = await get(first.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", firstSecret);
+    assert.equal(notified.json.pendingWakes.length, 1);
+    const acknowledged = await step(first, firstBot);
+    assert.equal(acknowledged.results[0].ignored, "reply_notification");
+    const count = (await bodies(first.origin, "commons", firstSecret)).length;
+    for (let i = 0; i < 2; i++) { await step(second, secondBot); await step(first, firstBot); }
+    assert.equal((await bodies(first.origin, "commons", firstSecret)).length, count);
+    for (const secret of [firstSecret, secondSecret]) {
+      const page = await get(first.origin, "/api/agent-wakes/poll?hostId=room-machine&waitMs=0", secret);
+      assert.equal(page.json.pendingWakes.length, 0);
+    }
+    saveBot(first.home, { tier: "t1" });
+    const topic = await mention(first, "A human discussion topic");
+    const addressed = await post(first.origin, "/api/rooms/commons/commands", {
+      id: randomUUID(), type: "message.posted", data: { messageId: randomUUID(), body: MENTION, replyToId: topic.event.data.messageId },
+    }, first.ownerKey);
+    assert.equal(addressed.status, 201);
+    const planned = await step(first, firstBot);
+    assert.equal(planned.results[0].planned, true);
+    assert.equal((await claims(first.origin, firstSecret)).length, 0);
   });
 
   test("a mention in a room outside the allowlist is acked and gets no reply", async (t) => {

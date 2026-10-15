@@ -28,11 +28,67 @@ test("message posts and session launches are act-class; reminder scheduling is d
   assert.ok(ACT_ONLY_EFFECTS.includes(T.MESSAGE_POSTED) && ACT_ONLY_EFFECTS.includes(T.SESSION_STARTED));
 });
 
+// Every module specifier a source file can pull in, in every syntax form:
+// static imports (either quote style, multiline bindings, no semicolon),
+// side-effect imports, re-exports, and dynamic import() calls (string or
+// plain template literal). A single-form regex misses the other forms, so a
+// module could gain a capability while its extracted "imports" still equal
+// the allowlist. Anything whose specifier is not a plain literal (a dynamic
+// import of a variable or interpolated template, an unparseable import) is
+// reported as opaque so the allowlist fails closed instead of skipping it.
+function moduleSpecifiers(source) {
+  const specifiers = [];
+  const spans = [];
+  const capture = (pattern, group) => {
+    for (const match of source.matchAll(pattern)) {
+      specifiers.push(match[group]);
+      spans.push([match.index, match.index + match[0].length]);
+    }
+  };
+  capture(/\b(?:import|export)\b[^'";`]*?\bfrom\s*(["'])([^"']+)\1/g, 2);
+  capture(/\bimport\s*(["'])([^"']+)\1/g, 2);
+  capture(/(?<![\w$.])import\s*\(\s*(["'])([^"']+)\1\s*\)/g, 2);
+  capture(/(?<![\w$.])import\s*\(\s*`([^`${]+)`\s*\)/g, 1);
+  const masked = [...source];
+  for (const [start, end] of spans) {
+    for (let i = start; i < end; i++) if (masked[i] !== "\n") masked[i] = " ";
+  }
+  const rest = masked.join("").replace(/\bimport\.meta\b/g, match => " ".repeat(match.length));
+  const opaque = [];
+  if (/\bimport\b/.test(rest)) opaque.push("<import syntax the allowlist cannot see>");
+  if (/\bexport\b[^;]*\bfrom\b/.test(rest)) opaque.push("<re-export syntax the allowlist cannot see>");
+  return { specifiers, opaque };
+}
+
 test("the reminder module never imports a send, post, session or spend capability", () => {
   const source = readFileSync(new URL("../server/reminders.mjs", import.meta.url), "utf8");
-  const imports = [...source.matchAll(/^import .* from "([^"]+)";/gm)].map(m => m[1]);
-  assert.deepEqual(imports.sort(), ["../src/events.js", "../src/workflow.js", "./store.mjs", "node:crypto"].sort(),
+  const { specifiers, opaque } = moduleSpecifiers(source);
+  assert.deepEqual(opaque, [], "every import in the reminder module is a plain literal the allowlist can see");
+  assert.deepEqual(specifiers.sort(), ["../src/events.js", "../src/workflow.js", "./store.mjs", "node:crypto"].sort(),
     "the draft-class reminder path keeps its minimal dependencies");
+});
+
+test("the reminder import allowlist extraction sees every import syntax form", () => {
+  const forms = [
+    'import { x } from "node:os";',
+    "import { x } from 'node:os';",
+    "import {\n  x,\n} from 'node:os';",
+    'import "node:os";',
+    "import 'node:os'",
+    'export { x } from "node:os";',
+    "export * as ns from 'node:os';",
+    'const p = import("node:os");',
+    "const p = import( 'node:os' );",
+    "const p = import(`node:os`);",
+  ];
+  for (const form of forms) {
+    const { specifiers, opaque } = moduleSpecifiers(form);
+    assert.deepEqual(specifiers, ["node:os"], form);
+    assert.deepEqual(opaque, [], form);
+  }
+  for (const form of ["const p = import(name);", "const p = import(`node:${name}`);", "import x from name;"]) {
+    assert.ok(moduleSpecifiers(form).opaque.length > 0, form);
+  }
 });
 
 test("done-when: enabling a reminder posts no message and launches no session or paid work", t => {

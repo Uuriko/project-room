@@ -11,10 +11,8 @@ const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
   // NEW modules here.
   "agent-key-registry.mjs",
-  "channel-adapters/telegram-rotation.mjs",
   "gmail-content.mjs",
   "inbox-collab-routes.mjs",
-  "inbox-collab-store.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",

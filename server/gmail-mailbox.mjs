@@ -169,13 +169,29 @@ export class GmailMailbox {
     }
     if (typeof tokens.access_token !== 'string' || !tokens.access_token) fail('gmail_reconnect_required');
     const headers = { Authorization: 'Bearer ' + tokens.access_token };
-    const list = await this.json(apiUrl + '/messages?labelIds=INBOX&maxResults=25', { headers });
-    if (list.messages !== undefined && (!Array.isArray(list.messages) || list.messages.length > 25)) fail('gmail_invalid_response');
+    // A manual sync replaces folder membership, so the scan must cover the
+    // whole INBOX before any page may be marked complete: walk the list to
+    // exhaustion, following nextPageToken. (Applying the first 25-message
+    // page as a complete reset evicted every older imported message.)
+    const ids = new Set(), seenPageTokens = new Set();
+    let pageToken = null;
+    do {
+      const query = new URLSearchParams({ labelIds: 'INBOX', maxResults: '50' });
+      if (pageToken) query.set('pageToken', pageToken);
+      const list = await this.json(apiUrl + '/messages?' + query, { headers });
+      if (list.messages !== undefined && (!Array.isArray(list.messages) || list.messages.length > 50)) fail('gmail_invalid_response');
+      for (const message of list.messages ?? []) {
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(message.id ?? '')) fail('gmail_invalid_response');
+        ids.add(message.id);
+      }
+      pageToken = typeof list.nextPageToken === 'string' && list.nextPageToken ? list.nextPageToken : null;
+      // A repeated token would page forever without exhausting the list.
+      if (pageToken) { if (seenPageTokens.has(pageToken)) fail('gmail_invalid_response'); seenPageTokens.add(pageToken); }
+    } while (pageToken);
     const observations = [];
-    for (const message of list.messages ?? []) {
-      if (!/^[a-zA-Z0-9_-]{1,128}$/.test(message.id ?? '')) fail('gmail_invalid_response');
-      const hydrated = await this.json(apiUrl + '/messages/' + message.id + '?format=full', { headers });
-      if (hydrated.id !== message.id) fail('gmail_invalid_response');
+    for (const id of ids) {
+      const hydrated = await this.json(apiUrl + '/messages/' + id + '?format=full', { headers });
+      if (hydrated.id !== id) fail('gmail_invalid_response');
       if (!hydrated.labelIds?.includes('INBOX')) continue;
       const envelope = normalizeGmailMessage(c.profile, hydrated);
       observations.push({ kind: 'message', envelope });
@@ -183,11 +199,18 @@ export class GmailMailbox {
     return this.store.transaction(() => {
       const current = this.auth(token, binding), latest = this.record(current, record.connectionId);
       if (!latest?.usable || latest.refreshToken !== record.refreshToken || current.account.authEpoch !== auth.account.authEpoch) fail('gmail_session_changed');
-      for (const item of observations) item.expectedSourceRevision = this.store.db.prepare('SELECT revision FROM private_inbox_sources WHERE account_id=? AND id=?').get(auth.account.id, item.envelope.sourceId)?.revision ?? 0;
-      const state = this.store.connections.state(token, record.connectionId, 'INBOX', binding);
-      this.store.connections.apply(token, { action: 'page.apply', requestId: randomUUID(), connectionId: record.connectionId, connectionRevision: c.profile.revision,
-        folderId: 'INBOX', expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor, cursor: 'gmail-recent:' + randomUUID(), complete: true, reset: true, observations }, binding);
-      this.save(current, { ...latest, usable: undefined, historyId: null, historyPage: null, syncedAt: new Date(this.store.now()).toISOString() });
+      // Apply the scan in pages, as the background sync does: only the
+      // first page resets and only the last page completes, so folder
+      // membership is swapped for the full scan result at completion,
+      // never for a partial page.
+      const batches = observations.length ? Array.from({ length: Math.ceil(observations.length / 50) }, (_, i) => observations.slice(i * 50, (i + 1) * 50)) : [[]];
+      for (let i = 0; i < batches.length; i++) {
+        for (const item of batches[i]) item.expectedSourceRevision = this.store.db.prepare('SELECT revision FROM private_inbox_sources WHERE account_id=? AND id=?').get(auth.account.id, item.envelope.sourceId)?.revision ?? 0;
+        const state = this.store.connections.state(token, record.connectionId, 'INBOX', binding);
+        this.store.connections.apply(token, { action: 'page.apply', requestId: randomUUID(), connectionId: record.connectionId, connectionRevision: c.profile.revision,
+          folderId: 'INBOX', expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor, cursor: 'gmail-recent:' + randomUUID(), complete: i === batches.length - 1, reset: i === 0, observations: batches[i] }, binding);
+      }
+      this.save(current, { ...latest, usable: undefined, historyId: null, historyPage: null, resetHistoryId: null, syncedAt: new Date(this.store.now()).toISOString() });
       return observations.length;
     });
   }
