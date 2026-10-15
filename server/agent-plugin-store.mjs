@@ -401,7 +401,11 @@ export class AgentPluginStore {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
+      // CX5-FIX: heartbeats:report/read let the saved credential run the
+      // room-scoped wake listener (createHeartbeatActor binds it to this
+      // room via the mcp:room: scope below). Without them the standard
+      // setup credential 403'd on its own listener surface.
+      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
@@ -925,6 +929,8 @@ export class AgentPluginStore {
   // delivery in its journal. No subscription, no delivery — the heartbeat
   // queue alone carries the wake.
   deliverWakePing({ identityId, signal }) {
+    // R282-1: a revoked identity's secret is dead, so its wake must be too.
+    if (this.identityRevoked(identityId)) return Object.freeze({ deliveries: Object.freeze([]) });
     const result = this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
@@ -995,6 +1001,33 @@ export class AgentPluginStore {
   // stays outside the transaction.
   subscribeWebhook({ identityId, url, events, secret = null }) {
     return this.mutate(() => {
+      // R277-1: a dropped 201 makes the client retry the same subscribe,
+      // which used to leave a second subscription and double every
+      // delivery. A subscribe for the same (identity, url, event set)
+      // returns the existing subscription instead; a retry that also
+      // re-enables a subscription the agent had disabled. Both HTTP and
+      // MCP call this one path, so they dedupe identically.
+      const wantedEvents = [...new Set(events)].sort().join("\u0000");
+      for (const existing of this.subs.values()) {
+        if (existing.agentId !== identityId || existing.url !== url) continue;
+        if ([...existing.events].sort().join("\u0000") !== wantedEvents) continue;
+        if (!existing.enabled) {
+          this.webhooks.setEnabled(existing.subscriptionId, { agentId: identityId, enabled: true });
+          this.db.prepare("UPDATE agent_webhook_subs SET enabled=1 WHERE subscription_id=?").run(existing.subscriptionId);
+          existing.enabled = true;
+        }
+        this.hydrateDeliveries(existing.subscriptionId);
+        return { subscription: Object.freeze({
+          subscriptionId: existing.subscriptionId,
+          agentId: existing.agentId,
+          secretRef: this.webhooks.sentinelFor(existing.subscriptionId),
+          url: existing.url,
+          events: Object.freeze([...existing.events]),
+          enabled: existing.enabled,
+          createdAt: existing.createdAt,
+          deliveries: existing.deliveries.length,
+        }) };
+      }
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
       const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
       const sub = this.subs.get(view.subscriptionId);
@@ -1008,6 +1041,36 @@ export class AgentPluginStore {
       // Inbound-delivery verification moved server-side (verifyWebhookDelivery).
       return { subscription: view };
     });
+  }
+
+  // R282-1: revoking an identity secret must stop webhook deliveries. The
+  // subscription URL was chosen by the identity, so after the leak response
+  // the room's message bodies must not keep flowing to that holder. Called
+  // from agent-identities revoke() inside its transaction: disables every
+  // enabled subscription of the identity and returns the count.
+  disableWebhooksForIdentity(identityId) {
+    return this.mutate(() => {
+      const rows = this.db.prepare(
+        "SELECT subscription_id AS subscriptionId FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
+      for (const row of rows) {
+        this.webhooks.setEnabled(row.subscriptionId, { agentId: identityId, enabled: false });
+        this.db.prepare("UPDATE agent_webhook_subs SET enabled=0 WHERE subscription_id=?").run(row.subscriptionId);
+        const sub = this.subs.get(row.subscriptionId);
+        if (sub) sub.enabled = false;
+      }
+      return rows.length;
+    });
+  }
+
+  // R282-1: whether the identity's secret is revoked. Fail-open on a store
+  // without the identities table: no identities there means nothing was
+  // revoked. Belt-and-braces beside the revoke-time disable, so a stale
+  // enabled row from an older build still fans out nothing.
+  identityRevoked(agentId) {
+    try {
+      return !!this.db.prepare(
+        "SELECT 1 FROM agent_identities WHERE identity_id=? AND revoked_at IS NOT NULL").get(agentId);
+    } catch { return false; }
   }
 
   listWebhooks(identityId) {
@@ -1187,6 +1250,10 @@ export class AgentPluginStore {
       return members?.[event?.actorId] ?? null;
     };
     for (const row of rows) {
+      // R282-1: a revoked identity's subscription must not keep pushing the
+      // room's message bodies to the URL it chose, even if the row stayed
+      // enabled from an older build.
+      if (this.identityRevoked(row.agentId)) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;

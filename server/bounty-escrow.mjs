@@ -1125,8 +1125,15 @@ export class BountyEscrow {
 
   _requirePayable(roomId, accountId, amountMillis, what) {
     const payable = this._balanceMillis(roomId, accountId, "payable");
-    if (payable < amountMillis)
-      fail("insufficient_funds", `${what}: ${accountId} holds ${toCredits(payable)} payable credits, needs ${toCredits(amountMillis)}`);
+    if (payable < amountMillis) {
+      // Human copy (#3438): name the account holder by display name, never
+      // the raw identity id, and state the remedy — what was needed, what
+      // is available, and what to do next.
+      const member = this._memberOf(roomId, accountId);
+      const holder = member && typeof member.displayName === "string" && member.displayName
+        ? member.displayName : "This account";
+      fail("insufficient_funds", `${what}: ${holder} holds ${toCredits(payable)} payable credits, needs ${toCredits(amountMillis)}. Reduce the amount to at most ${toCredits(payable)} credits, or add credits first.`);
+    }
   }
 
   // --- events ---------------------------------------------------------------

@@ -27,7 +27,7 @@ import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
-  TRUST_OFF_CODE, trustOffMessage, firstBlockedWakeTarget,
+  TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
@@ -546,6 +546,8 @@ const invitationSchema = `
     expires_at INTEGER NOT NULL,
     authenticated_until INTEGER,
     created_at INTEGER NOT NULL,
+    login_method_kind TEXT,
+    login_method_ref TEXT,
     CHECK(
       (account_id IS NULL AND account_auth_epoch IS NULL AND parent_credential_hash IS NULL AND authenticated_until IS NULL)
       OR
@@ -1033,6 +1035,20 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
     targets.set(dmId, "dm");
   }
+  // An in-thread reply to an agent's post wakes that agent the same way an
+  // @mention would: before this, a reply without an @name reached nobody
+  // and the agent never learned its post was answered. Targeted DMs already
+  // wake their recipient through the dm path above, and replies to a
+  // human's post stay on the human attention paths.
+  const replyToId = typeof data?.replyToId === "string" ? data.replyToId : "";
+  if (replyToId && !dmId) {
+    const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
+    const authorId = repliedTo?.authorId ?? "";
+    const author = authorId ? members[authorId] : null;
+    if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId && !targets.has(authorId)) {
+      targets.set(authorId, "mention");
+    }
+  }
   return targets;
 }
 
@@ -1117,6 +1133,16 @@ const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_s
   projection_bytes INTEGER NOT NULL
 )`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+// #3334: tag an integrity failure with the sub-check that threw, so the job
+// layer can report WHICH check failed on the public health surface. Only the
+// sub-check name (a fixed enum in server/jobs.mjs) is attached — never record
+// ids, bodies, or other record content.
+export function tagIntegritySubcheck(error, subcheck) {
+  if (error && typeof error === "object" && !error.integritySubcheck) {
+    try { error.integritySubcheck = subcheck; } catch { /* frozen errors keep the generic classification path */ }
+  }
+  return error;
+}
 const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL,
@@ -1479,6 +1505,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Additive column; existing rows backfill NULL (no secret binding).
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('credentials') WHERE name='identity_secret_hash'").get()) {
         this.db.exec("ALTER TABLE credentials ADD COLUMN identity_secret_hash TEXT");
+      }
+      // CX4 (targeted native-session revocation): account-session slots
+      // record the verified login method that authenticated them, so the
+      // account-session inventory can tell a native (desktop) session from
+      // a browser one. Additive nullable columns, no schema version bump;
+      // sessions minted before this shipped backfill NULL (method unknown).
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('account_session_slots') WHERE name='login_method_kind'").get()) {
+        this.db.exec("ALTER TABLE account_session_slots ADD COLUMN login_method_kind TEXT");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('account_session_slots') WHERE name='login_method_ref'").get()) {
+        this.db.exec("ALTER TABLE account_session_slots ADD COLUMN login_method_ref TEXT");
       }
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('rooms') WHERE name='archived_at'").get()) migrateRoomLifecycleV28(this);
       // v35: share-link and invitation issuer columns go nullable so an agent
@@ -1972,22 +2009,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // hibernated wake does not start at share links forever. Each step is the
   // same check the constructor used to run.
   async runDeferredIntegrityBatch({ deadline = Infinity, yieldBetween = async () => {} } = {}) {
+    // Step names double as the #3334 failure tags: when a step throws, the
+    // error carries the step's name so the health surface can name the
+    // failing sub-check instead of a bare "1 error(s) in tick".
     const steps = [
-      () => this.shareLinks.verify(),
-      () => this.agentConnections.verify(),
-      () => this.inbox.verify(),
-      () => this.email.verify(),
-      () => this.channelUpdates.verify(),
-      () => this.quarantineSplits.verify(),
-      () => verifyRoomLifecycle(this),
-      () => { if (!this.readOnly) this.identities.expireInactive(); },
-      () => this.backfillReferralDepth(500),
+      ["share_links", () => this.shareLinks.verify()],
+      ["agent_connections", () => this.agentConnections.verify()],
+      ["inbox", () => this.inbox.verify()],
+      ["email", () => this.email.verify()],
+      ["channel_updates", () => this.channelUpdates.verify()],
+      ["quarantine_splits", () => this.quarantineSplits.verify()],
+      ["room_lifecycle", () => verifyRoomLifecycle(this)],
+      ["identity_expiry", () => { if (!this.readOnly) this.identities.expireInactive(); }],
+      ["referral_depth", () => this.backfillReferralDepth(500)],
       // MSG-2: replay message events here, one budgeted batch per visit,
       // then check one caught-up room. This batch runs as the "integrity"
       // job in server/jobs.mjs, so the backfill inherits that job's cadence,
       // budget and runtimes without a second registry entry.
-      () => this.backfillMessages({ deadline }),
-      () => this.checkMessagesParity()
+      ["messages_backfill", () => this.backfillMessages({ deadline })],
+      ["messages_parity", () => this.checkMessagesParity()]
     ];
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
     if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
@@ -2002,7 +2042,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (ran > 0) remember(step);
         return { ran, next: step, budgetExceeded: 1 };
       }
-      steps[step]();
+      try {
+        steps[step][1]();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, steps[step][0]);
+      }
       step = (step + 1) % steps.length;
       ran += 1;
       await yieldBetween();
@@ -2119,7 +2163,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
-    const incremental = this.incrementalIntegrityCheck();
+    let incremental;
+    try {
+      incremental = this.incrementalIntegrityCheck();
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "incremental");
+    }
     if (incremental.ok) {
       await yieldBetween();
       if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
@@ -2135,25 +2184,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     await yieldBetween();
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
-    if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
-    const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
-    for (const id of ids) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-      this.verifyInvitationRecord(id);
-      await yieldBetween();
+    try {
+      const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
+      if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+      const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
+      for (const id of ids) {
+        if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+        this.verifyInvitationRecord(id);
+        await yieldBetween();
+      }
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "invitation_audit");
     }
     if (this.helpProjectionPresent()) {
       if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-      this.verifyHelpHistory();
+      try {
+        this.verifyHelpHistory();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, "help_history");
+      }
       await yieldBetween();
     }
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    try {
+      this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "snapshot");
+    }
     await yieldBetween();
-    const after = this.integrityChecksum();
-    this.writeIntegritySnapshot(after.text);
-    this.rememberIntegrityRoomState();
+    let after;
+    try {
+      after = this.integrityChecksum();
+      this.writeIntegritySnapshot(after.text);
+      this.rememberIntegrityRoomState();
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "snapshot");
+    }
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
@@ -2954,7 +3020,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!account.active) fail(403, "access_denied", "Active account required");
       if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Account access keys expire within 30 days");
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?").run(accountId);
       return this.insertAccountCredential(accountId, this.now() + lifetimeMs);
     });
   }
@@ -2971,10 +3037,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const preserve = typeof preserveSlotToken === "string" && tokenPattern.test(preserveSlotToken) ? hash(preserveSlotToken) : null;
       if (preserve) {
         this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
+          parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=? AND hash != ?`).run(accountId, preserve);
       } else {
         this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+          parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?`).run(accountId);
       }
     });
   }
@@ -2987,7 +3053,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         .run(accountId, accountId);
       // Retain slot tombstones referenced by immutable invitation receipts.
       this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+        parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?`).run(accountId);
     });
   }
   insertAccountCredential(accountId, expiresAt) {
@@ -3011,7 +3077,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=? AND hash != ?")
         .run(accountId, hash(keepToken));
       this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-        parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?`).run(accountId);
+        parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?`).run(accountId);
     });
   }
   // Revoke one specific account key (used to retire a minted-but-undelivered key).
@@ -3112,7 +3178,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing in");
       const access = this.authenticateAccountAccessKey(accountAccessKey);
       const revision = expectedRevision + 1;
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='access-key',login_method_ref=NULL
         WHERE hash=? AND revision=?`).run(revision, access.account.id, access.account.authEpoch, access.credentialHash, Math.min(slot.expiresAt, access.expiresAt, this.now() + 8 * 3600000), slot.credentialHash, expectedRevision);
       // Switching browser identity and retiring its former Room credential are one
       // commit. A storage failure must not report a rejected login after switching.
@@ -3145,8 +3211,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const revision = expectedRevision + 1;
       const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
       const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
-        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, slot.credentialHash, expectedRevision);
+      // CX4: persist the verified method on the slot itself (bounded,
+      // public data only — kind + the ref the login already treats as a
+      // public handle) so the session inventory can name how each live
+      // session signed in, native (desktop) sessions included.
+      const methodKind = method.kind.trim().slice(0, 64);
+      const methodRef = typeof method.ref === "string" && method.ref.trim() !== "" ? method.ref.trim().slice(0, 128) : null;
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind=?,login_method_ref=?
+        WHERE hash=? AND revision=?`).run(revision, accountId, account.authEpoch, parentCredentialHash, authenticatedUntil, methodKind, methodRef, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
         if (typeof revokeRoomToken !== "string" || !tokenPattern.test(revokeRoomToken)) fail(422, "invalid_credential", "Invalid prior Room credential");
         this.revoke(revokeRoomToken);
@@ -3172,16 +3244,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!row || row.account_id === null) fail(409, "slot_not_authenticated", "Only an authenticated session slot can rotate its token");
       const token = key();
       this.db.prepare(`INSERT INTO account_session_slots
-        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at)
-        VALUES(?,?,?,?,?,?,?,?)`)
+        (hash,revision,account_id,account_auth_epoch,parent_credential_hash,expires_at,authenticated_until,created_at,login_method_kind,login_method_ref)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`)
         .run(hash(token), row.revision, row.account_id, row.account_auth_epoch, row.parent_credential_hash,
-          row.expires_at, row.authenticated_until, this.now());
+          row.expires_at, row.authenticated_until, this.now(), row.login_method_kind ?? null, row.login_method_ref ?? null);
       if (this.db.prepare("SELECT 1 FROM share_link_joins WHERE slot_hash=? LIMIT 1").get(slot.credentialHash)) {
         // Invitation receipts are immutable and retain this foreign key.
         // Leave an expired, unauthenticated tombstone: the old token cannot
         // resolve or authenticate, while its historical receipt stays valid.
         this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-          parent_credential_hash=NULL,authenticated_until=NULL,expires_at=? WHERE hash=?`).run(this.now(), slot.credentialHash);
+          parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL,expires_at=? WHERE hash=?`).run(this.now(), slot.credentialHash);
       } else {
         this.db.prepare("DELETE FROM account_session_slots WHERE hash=?").run(slot.credentialHash);
       }
@@ -3215,7 +3287,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // exposed; the verified Google subject is the credential).
       const authenticatedUntil = Math.min(slot.expiresAt, this.now() + 8 * 3600000);
       const parentCredentialHash = hash(this.insertAccountCredential(accountId, authenticatedUntil));
-      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?
+      this.db.prepare(`UPDATE account_session_slots SET revision=?,account_id=?,account_auth_epoch=?,parent_credential_hash=?,authenticated_until=?,login_method_kind='google',login_method_ref=NULL
         WHERE hash=? AND revision=?`).run(revision, accountId, accountAuthEpoch, parentCredentialHash,
         authenticatedUntil, slot.credentialHash, expectedRevision);
       if (revokeRoomToken !== null) {
@@ -3230,10 +3302,81 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const slot = this.accountSessionSlot(slotToken);
       if (slot.sessionRevision !== expectedRevision) fail(409, "stale_session_revision", "Account session changed; refresh before signing out");
-      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL
+      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL
         WHERE hash=? AND revision=?`).run(slot.credentialHash, expectedRevision).changes;
       if (changed !== 1) fail(409, "stale_session_revision", "Account session changed; refresh before signing out");
       return this.accountSessionSlot(slotToken);
+    });
+  }
+  // CX4: the public id of one account-session slot — a one-way derivation
+  // from the stored credential hash, so the session inventory can name a
+  // session without exposing anything that authenticates (the slot hash
+  // itself is never returned). Deterministic per slot row.
+  accountSessionPublicId(slotHash) {
+    return `acs_${hash(`account-session-id:${slotHash}`).slice(0, 24)}`;
+  }
+  accountSessionRows(accountId) {
+    return this.db.prepare(`SELECT s.*,c.revoked AS parent_revoked,c.expires_at AS parent_expiry,c.account_id AS parent_account_id,c.account_auth_epoch AS parent_account_auth_epoch,
+      a.active AS account_active,a.auth_epoch AS current_account_auth_epoch
+      FROM account_session_slots s LEFT JOIN account_credentials c ON c.hash=s.parent_credential_hash LEFT JOIN accounts a ON a.id=s.account_id
+      WHERE s.account_id=? ORDER BY s.created_at DESC, s.hash ASC`).all(accountId);
+  }
+  // The same validity window authenticateAccountSession enforces: the slot
+  // and its parent credential are both live, the credential belongs to the
+  // slot's account at the slot's epoch, and the account is active at its
+  // current epoch. A session outside this window does not authenticate, so
+  // it is neither listed nor revocable — it is already dead.
+  accountSessionRowLive(row, now) {
+    return row.expires_at > now && row.authenticated_until > now
+      && row.parent_revoked === 0 && row.parent_expiry > now
+      && row.parent_account_id === row.account_id && row.parent_account_auth_epoch === row.account_auth_epoch
+      && row.account_active === 1 && row.account_auth_epoch === row.current_account_auth_epoch;
+  }
+  // CX4 session inventory: the account's live account sessions — browser
+  // slots and native (desktop) sessions alike, since both are account-
+  // session slots (the desktop exchange retires its OAuth grant and keeps
+  // only the slot). The login method recorded at login time is what tells
+  // a native session from a browser one; sessions minted before methods
+  // were recorded report method null.
+  listAccountSessions(accountId, currentCredentialHash = null) {
+    if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
+    const now = this.now();
+    const sessions = [];
+    for (const row of this.accountSessionRows(accountId)) {
+      if (!this.accountSessionRowLive(row, now)) continue;
+      sessions.push(Object.freeze({
+        id: this.accountSessionPublicId(row.hash),
+        method: row.login_method_kind ?? null,
+        methodRef: row.login_method_ref ?? null,
+        createdAt: row.created_at,
+        authenticatedUntil: row.authenticated_until,
+        expiresAt: row.expires_at,
+        current: currentCredentialHash !== null && row.hash === currentCredentialHash
+      }));
+    }
+    return sessions;
+  }
+  // CX4 targeted revocation: end ONE of the account's live account
+  // sessions, named by its inventory id. The slot returns to anonymous
+  // exactly as a sign-out leaves it (its row survives for share-link
+  // receipt tombstones); no other session — browser, native, or OAuth —
+  // is touched, and the OAuth endpoints keep their own semantics. Returns
+  // 1 when a live session was revoked; 0 when the id is unknown, already
+  // dead, or belongs to another account, so the HTTP layer answers 404
+  // without distinguishing those cases (no probing). A malformed id
+  // (non-string, empty, or over 128 chars) throws 422 invalid_session_id
+  // instead of returning 0.
+  revokeAccountSession(accountId, sessionId) {
+    if (typeof accountId !== "string" || !validId(accountId)) fail(422, "invalid_account_id", "A valid account is required");
+    if (typeof sessionId !== "string" || sessionId.length === 0 || sessionId.length > 128) fail(422, "invalid_session_id", "A session id is required");
+    return this.transaction(() => {
+      const now = this.now();
+      const row = this.accountSessionRows(accountId)
+        .find(candidate => this.accountSessionRowLive(candidate, now) && this.accountSessionPublicId(candidate.hash) === sessionId);
+      if (!row) return 0;
+      const changed = this.db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL
+        WHERE hash=? AND revision=?`).run(row.hash, row.revision).changes;
+      return changed === 1 ? 1 : 0;
     });
   }
   authenticateAccountSession(token, roomId = null, expectedSessionBinding = null) {
@@ -3640,7 +3783,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE account_id=?").run(accountId);
       this.agentConnections.revokeAccount(accountId);
       this.db.prepare("UPDATE account_credentials SET revoked=1 WHERE account_id=?").run(accountId);
-      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL WHERE account_id=?").run(accountId);
+      this.db.prepare("UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL WHERE account_id=?").run(accountId);
       this.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)").run(accountId, revision, active ? 1 : 0, authEpoch, reason.trim(), at);
       if (!active) this.reminders.retireAccount(accountId);
       return this.account(accountId);
@@ -4482,19 +4625,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
-  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, expectedSessionBinding = null } = {}) {
+  workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId)) fail(422, "invalid_discussion", "Choose one work item");
       const room = this.room(roomId);
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit });
+      const window = discussionWindow({ sequence: room.sequence, roomId, workItemId, viewerId: auth.member.id, cursor, since, limit, consistent, resumeToken });
       const anchorId = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.horizon)?.id;
-      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)) fail(409, "discussion_history_changed", "Discussion history changed; restart after recovery");
+      if (!anchorId || (window.anchorId !== null && window.anchorId !== anchorId)
+        || window.basis && this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, window.basis.horizon)?.id !== window.basis.anchorId) fail(409, window.consistent ? "discussion_reset_required" : "discussion_history_changed", "Discussion history changed; restart after recovery");
       const metadata = this.db.prepare("SELECT sequence,id,json_extract(body,'$.data.messageId') AS message_id FROM events WHERE room_id=? AND sequence<=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, window.horizon, T.MESSAGE_POSTED);
+      const floor = this.historyFloor(roomId, auth.member.id, room.sequence);
+      const scope = window.consistent ? [roomId, workItemId, auth.member.id, auth.member.revision ?? 0, auth.credentialHash ?? null,
+        auth.account?.id ?? null, auth.account?.authEpoch ?? null, auth.sessionBinding ?? null, auth.sessionRevision ?? null,
+        this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=1").get(roomId)?.id ?? null,
+        floor ? [floor.sequence, floor.at, [...floor.sameInstant].sort()] : null] : null;
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
         now: this.now(), metadata, window, anchorId, cursor,
-        floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
+        floor, scope }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -5105,6 +5254,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       catch (error) {
         if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
+        if (error?.code === CHANNEL_ARCHIVED_CODE) fail(409, CHANNEL_ARCHIVED_CODE, error.message);
         if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
@@ -5492,6 +5642,27 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         `UPDATE mention_states SET state='responded', decided_at=?
          WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
       ).run(nowMs, roomId, answered.eventId, senderMemberId);
+      // An in-thread reply notifies the agent who wrote the replied-to
+      // message: without a row here the reply surfaced nowhere for that
+      // agent - no mention inbox entry and no wake. Targeted DMs already
+      // reach their recipient through the dm wake and needs-me dm kind, so
+      // only open-thread replies create a row. INSERT OR IGNORE dedupes
+      // against a direct @mention of the same author in the reply body;
+      // humans keep their existing attention paths.
+      const replyDmTarget = typeof data.toMemberId === "string" ? data.toMemberId : "";
+      if (!replyDmTarget) {
+        const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
+        const authorId = repliedTo?.authorId ?? "";
+        const author = authorId ? (state?.members ?? {})[authorId] : null;
+        if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId) {
+          const replyTimeoutMs = this.mentionTimeoutMsFor(roomId);
+          this.db.prepare(
+            `INSERT OR IGNORE INTO mention_states
+             (room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
+             VALUES(?,?,?,?,?,?,NULL)`
+          ).run(roomId, eventId, authorId, "delivered", nowMs, nowMs + replyTimeoutMs);
+        }
+      }
     }
     const body = typeof data.body === "string" ? data.body : "";
     if (!body.includes("@")) return [];

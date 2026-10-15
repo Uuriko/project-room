@@ -74,6 +74,13 @@ export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, inp
           catch { break; }
           continue;
         }
+        // A contended receiver must not wake its native host through the
+        // startup-attention route either. Keep startup pending until this
+        // process actually owns the receiving lease.
+        if (result.status === 'listener_contended') {
+          await delay(1000, undefined, { signal: controller.signal });
+          continue;
+        }
         const partial = ['before', 'after'].some(stage => result.observations[stage].incompleteSources.length > 0);
         if (!attentionChecked) {
           attentionChecked = true;

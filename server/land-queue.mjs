@@ -21,7 +21,7 @@
 
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
-import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
+import { event, EVENT_TYPES, applyEvent, isRoomArchived, ownMember, validId } from "../src/events.js";
 import { claimWork, createWork, reassignWork, isTerminalClaimState, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
 
 // Caller-supplied idempotency key, same shape as access-requests'
@@ -652,7 +652,11 @@ export class LandQueue {
   }
 
   #member(roomId, memberId) {
-    const member = this.store.room(roomId).state.members?.[memberId];
+    // Member projections are plain objects, so a raw members[memberId] index
+    // resolves inherited Object.prototype names ("toString", "constructor",
+    // ...) that pass validId but are not room members. Resolve through
+    // ownMember (Object.hasOwn) like src/events.js / server/grants.mjs.
+    const member = ownMember(this.store.room(roomId).state.members, memberId);
     if (!member || member.active === false) fail(422, "invalid_land_item", "claimant must be an active room member");
     return member;
   }
@@ -1088,7 +1092,7 @@ export class LandQueue {
     if (!this.store?.db || typeof this.store.room !== "function") return null;
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return null;
-    const member = room.state.members?.[actorId];
+    const member = ownMember(room.state.members, actorId);
     const incoming = event({
       id: randomUUID(),
       idempotencyKey: randomUUID(),
@@ -1130,7 +1134,7 @@ export class LandQueue {
   #emit(roomId, item, changed) {
     const payload = landWakePayload(item, changed);
     const room = this.store.room(roomId);
-    const claimant = room.state.members?.[item.claimantMemberId];
+    const claimant = ownMember(room.state.members, item.claimantMemberId);
     const actorId = claimant && claimant.active !== false ? item.claimantMemberId : room.state.room.ownerId;
     const incoming = event({
       id: randomUUID(),
@@ -1160,7 +1164,7 @@ export class LandQueue {
   #emitBoardReceipt(roomId, item, changed) {
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return null;
-    const claimant = room.state.members?.[item.claimantMemberId];
+    const claimant = ownMember(room.state.members, item.claimantMemberId);
     const incoming = event({
       id: randomUUID(),
       idempotencyKey: randomUUID(),

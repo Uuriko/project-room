@@ -730,6 +730,10 @@ button, .button, .message-to-work { min-height: 44px; }
 .message:focus-visible, .message-list:focus-visible, .work-card:focus-visible, .presence-member:focus-visible, .event-list li:focus-visible, #room-title:focus-visible, #conversation-title:focus-visible, #thread-title:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .message-time { margin-left: .2rem; text-decoration: none; }
 .message-time time { color: var(--muted); }
+/* Timestamp permalinks are standalone controls, not inline prose links. */
+@media (pointer: coarse), (max-width: 500px) {
+  .message-time { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding-inline: .2rem; }
+}
 .message-links { flex-wrap: wrap; gap: .3rem 1rem; }
 .message-to-work, .thread-link { font-size: .875rem; }
 .thread-link { padding: .4rem .65rem; border: 1px solid #374b68; border-radius: .45rem; background: #172335; color: #bcd5ff; }
@@ -1815,3 +1819,7 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
 .join-agent .connect-steps li { margin: .35rem 0; }
 .join-agent .connect-steps strong { color: var(--text); }
+
+.inline-result { min-width: 0; margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.inline-result h2 { margin-block: 0 var(--space-2); font-size: var(--text-lg); }
+.inline-result .portable-actions { flex-wrap: wrap; }

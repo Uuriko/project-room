@@ -490,8 +490,10 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "work_offer_terms",
 ]);
 // Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
-// purely additive, created lazily on first lease use.
-const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims"]);
+// purely additive, created lazily on first lease use. CX5-FIX adds
+// agent_wake_room_activity (room-attributed listener activity), created
+// lazily on first room-scoped poll/heartbeat.
+const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
 // runOnce replay journal (server/run-once.mjs): purely additive, created
 // lazily on first table-backed runOnce() use.
 const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);

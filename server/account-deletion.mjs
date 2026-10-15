@@ -37,7 +37,8 @@ export const RETENTION_POLICY = Object.freeze({
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
     + "stitch data, inbox handoff packets, SLA breach alerts, channel update journals, account setup answers, "
-    + "terms-of-service acceptance, and profile data. Guest invites, share links, "
+    + "terms-of-service acceptance, bounty payment journal entries, "
+    + "and profile data. Guest invites, share links, "
     + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
     + "and their messages and files are purged. Security audit rows, inbox/email "
@@ -65,6 +66,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
     Object.freeze({ category: "oauth_tokens", description: "Third-party OAuth grants (authorization codes, access and refresh tokens) are deleted and revoked; connectors lose access immediately." }),
     Object.freeze({ category: "analytics", description: "Analytics events attributed to the account (analytics_events) are permanently deleted." }),
+    Object.freeze({ category: "bounty_journal", description: "Bounty payment journal entries attributed to the account (bounty_journal) are permanently deleted." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
@@ -423,6 +425,15 @@ export function inventoryFromStore(store, accountId, rooms = null) {
     analytics: {
       itemCount: countWhereIfExists(store, "analytics_events", "account_id", accountId),
     },
+    // WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge
+    // deletes for account targets (purge-registry.mjs, action "delete")
+    // survived self-serve deletion. Purge them like every other
+    // account-owned row; nothing here is a legal-hold category.
+    // (direct_channel_sends, quarantine_thread_splits, spam_quarantine are
+    // Fo's #2229 territory — folded into derived_inbox there, not duplicated.)
+    bounty_journal: {
+      itemCount: countWhereIfExists(store, "bounty_journal", "account_id", accountId),
+    },
     // SEC-04: handoff packets, SLA alerts, and channel journals carry private
     // thread content and metadata keyed by account.
     derived_inbox: {
@@ -487,7 +498,7 @@ const EXECUTORS = {
   sessions: (store, accountId) => {
     const db = store.db, now = typeof store.now === "function" ? store.now() : Date.now();
     const kept = db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-      parent_credential_hash=NULL,authenticated_until=NULL,expires_at=?
+      parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL,expires_at=?
       WHERE account_id=? AND EXISTS (SELECT 1 FROM share_link_joins WHERE slot_hash=account_session_slots.hash)`).run(now, accountId).changes;
     return kept + db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes;
   },
@@ -618,6 +629,11 @@ const EXECUTORS = {
   },
   analytics: (store, accountId) =>
     deleteWhereIfExists(store, "analytics_events", "account_id", accountId),
+  // WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge
+  // deletes for account targets (purge-registry.mjs, action "delete").
+  // Tables are created by their own modules, so skip any this store lacks.
+  bounty_journal: (store, accountId) =>
+    deleteWhereIfExists(store, "bounty_journal", "account_id", accountId),
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;

@@ -909,18 +909,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     };
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
+      // Lagging means bytes from an EARLIER tick are still unsent. Bytes
+      // written during this tick sit behind Node's per-tick queue, so
+      // measuring writableLength inside the write loop counts this tick's own
+      // batch and flags healthy readers whenever one page of visible events
+      // exceeds the cap. Judge lag once per tick, before writing.
+      if (lagging()) { lag(); return; }
+      const backlog = res.writableLength;
       try {
         const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
+        let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+          const frame = `id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`;
+          res.write(frame);
           cursor = item.sequence;
-          if (lagging()) break;
+          queued += Buffer.byteLength(frame);
+          // A reader still holding earlier-tick bytes that this tick would
+          // push past the cap is genuinely behind. This tick alone passing
+          // the cap only bounds the batch: the rest resumes on the next tick.
+          if (backlog > 0 && backlog + queued > streamQueueCap) { lagged = true; break; }
+          if (queued > streamQueueCap) { partial = true; break; }
         }
         // Ephemeral typing indicators ride the stream as synthetic `typing`
         // events with no `id:` — they never disturb Last-Event-ID resume.
         // Emitted only when the visible typist set changes for this connection.
-        if (!lagging()) {
+        if (!lagged) {
           const typists = currentTypists(typingBeats, roomId, entry.memberId);
           const key = typingKey(typists);
           if (key !== entry.lastTypingKey) {
@@ -928,10 +942,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
           }
         }
-        if (lagging()) lag();
+        if (lagged) lag();
         // Advance past invisible rows only after the complete visible batch
-        // was queued. A lagging stream must resume from its last sent event.
-        else cursor = batch.next;
+        // was queued. A partial tick resumes from its last sent event, so a
+        // lagging stream resumes from the last event the client can see.
+        else if (!partial) cursor = batch.next;
       } catch (error) {
         if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
           end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
@@ -1696,6 +1711,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (revoked === 0) reject(404, "session_not_found", "No such active session");
         return json(res, 200, { revoked });
       }
+      // GET /api/account/sessions + DELETE /api/account/sessions/{id}
+      // (account-session inventory + targeted revocation, CX4) live in the
+      // route table: server/routes/account-sessions.mjs.
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
           if (store.storageStatus?.().unavailable) return json(res, 503, { status: "unavailable", reason: "storage_unavailable" }, req.method === "HEAD");
@@ -2170,9 +2188,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         protectWrite(req, auth, false); rate(`account-default-room:${auth.account.id}`, 10);
-        const existing = store.db.prepare(
-          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1").get(auth.account.id);
-        if (existing) return json(res, 200, { room: { id: existing.room_id }, created: false });
+        // R266-n1: read the default room the way /api/account-rooms lists
+        // rooms. Iterate the account's membership rows, keep only rooms where
+        // the account still holds an active human membership (same 403
+        // filter), and prefer kind=personal. A former member with only
+        // inactive rows falls through to the no-resurrect rule below instead
+        // of landing on a room the server would 403.
+        let activeRoom = null, activePersonal = null;
+        const membershipRows = store.db.prepare(
+          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(auth.account.id);
+        for (const { room_id: candidateId } of membershipRows) {
+          try { store.authenticateAccountSession(token, candidateId, binding); }
+          catch (error) { if (error.status !== 403) throw error; continue; }
+          if (activeRoom === null) activeRoom = candidateId;
+          const kind = store.db.prepare(
+            "SELECT json_extract(projection,'$.room.kind') AS kind FROM rooms WHERE id=?").get(candidateId)?.kind;
+          if (kind === "personal" && activePersonal === null) activePersonal = candidateId;
+        }
+        if (activeRoom) return json(res, 200, { room: { id: activePersonal ?? activeRoom }, created: false });
         // An account that has ever held a room but holds none now deliberately
         // left (or was removed from) all of them — never resurrect a room.
         const row = store.db.prepare("SELECT ever_had_room, display_name FROM accounts WHERE id=?").get(auth.account.id);
@@ -4453,10 +4486,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "work-discussion" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), optional limit from 1 to 50, and either cursor or since. Supply each parameter once; since must be a non-negative integer.");
+        if ([...params.keys()].some(key => !["workItemId", "cursor", "since", "limit", "consistent", "resumeToken", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("consistent") && params.get("consistent") !== "true"
+          || ["since", "limit"].some(key => params.has(key) && !/^(0|[1-9]\d*)$/.test(params.get(key)))) reject(422, "invalid_discussion", "Use workItemId (not taskId), limit from 1 to 50, and either cursor, resumeToken or legacy since. consistent=true starts a durable read. Supply each parameter once; since must be a non-negative integer.");
         const discussion = store.workDiscussion(selected.token, roomId, params.get("workItemId"), {
-          cursor: params.get("cursor"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
+          cursor: params.get("cursor"), consistent: params.get("consistent") === "true", resumeToken: params.get("resumeToken"), ...(params.has("since") ? { since: Number(params.get("since")) } : {}),
           ...(params.has("limit") ? { limit: Number(params.get("limit")) } : {}), expectedSessionBinding: fence
         });
         // RC-2026-09-19-070: DM visibility is enforced inside

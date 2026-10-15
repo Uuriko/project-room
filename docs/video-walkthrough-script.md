@@ -220,11 +220,11 @@ guessing.
 > ground: join.html :: id="join-submit"
 > ground: join.html :: Join room
 
-- **S17** — Success screen: "Welcome to the room, friend!" — the readonly
+- **S17** — Success screen: "You're in, friend" — the readonly
   identity-secret field (BLURRED in the video), the Copy button, "Open
   room".
 
-> ground: join.html :: Welcome to
+> ground: join.html :: You&rsquo;re in,
 > ground: join.html :: id="join-secret"
 > ground: join.html :: Copy
 > ground: join.html :: Open room

@@ -834,6 +834,43 @@ test("rehydrating projections rolls the archive back: the whole room returns, th
   assert.ok(f.store.archiveMessages("commons", { keepNewest: 3, dryRun: false }).archived > 0, "the room can be archived again after a rollback");
 });
 
+test("rehydrating an archive fails closed when an archived message cannot be replayed", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `lost-${i}`, body: `body ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  const before = f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
+  const seq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='lost-0'").get().seq;
+  f.store.db.prepare("UPDATE events SET body=json_set(body, '$.data.messageId', 'missing-source') WHERE room_id='commons' AND sequence=?").run(seq);
+
+  assert.throws(() => f.store.rehydrateAllProjections(), /Archived message could not be restored from the event log/);
+  assert.equal(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection, before,
+    "the compact projection and archive marker remain intact");
+  assert.ok(f.store.room("commons").state.messagesArchive, "the in-memory view still records the archive");
+  assert.ok(!f.store.room("commons").state.messages.some(message => message.id === "lost-0"),
+    "the unrecoverable message is not synthesized or partially restored");
+});
+
+test("deleting an archived message fails closed when its original post cannot be replayed", t => {
+  const f = fixture(t);
+  for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `lost-delete-${i}`, body: `body ${i}` });
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  const before = f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
+  const seq = f.store.db.prepare("SELECT seq FROM messages WHERE message_id='lost-delete-0'").get().seq;
+  f.store.db.prepare("UPDATE events SET body=json_set(body, '$.data.messageId', 'missing-delete-source') WHERE room_id='commons' AND sequence=?").run(seq);
+
+  assert.throws(() => f.send(f.human, T.MESSAGE_DELETED, {
+    messageId: "lost-delete-0", expectedMessageRevision: 0, reason: "remove"
+  }), /Archived message could not be restored from the event log/);
+  assert.equal(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection, before,
+    "the failed delete does not change the projection or archive marker");
+  assert.ok(!f.store.room("commons").state.messages.some(message => message.id === "lost-delete-0"),
+    "the missing original is not replaced with a tombstone");
+});
+
 test("archived DM party lookups read the archive marker once per request, not once per message", t => {
   const f = fixture(t);
   for (let i = 0; i < 4; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `dm-${i}`, toMemberId: "agent", body: `private ${i}` });

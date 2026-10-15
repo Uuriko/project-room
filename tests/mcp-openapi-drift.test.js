@@ -75,7 +75,7 @@ function effectiveRequestParams(found) {
       name: prm.name,
       location: prm.in,
       required: prm.in === "path" ? true : prm.required === true,
-      type: normType(sch.type ?? sch.anyOf?.map(x => x?.type)),
+      type: normType(sch.type ?? (sch.anyOf ?? sch.oneOf)?.map(x => x?.type)),
       enum: sch.enum,
     });
   }
@@ -85,7 +85,7 @@ function effectiveRequestParams(found) {
       name,
       location: "body",
       required: (bodySchema.required || []).includes(name),
-      type: normType(sch?.type ?? sch?.anyOf?.map(x => x?.type)),
+      type: normType(sch?.type ?? (sch?.anyOf ?? sch?.oneOf)?.map(x => x?.type)),
       enum: sch?.enum,
     });
   }
@@ -253,6 +253,7 @@ const KNOWN_DRIFT = [
     issue: "https://github.com/Uuriko/project-room/issues/1566",
     detail: "POST /api/agent-rooms accepts starter (boolean, default true); the room_create tool neither exposes it nor passes it through (handler allowlists title/purpose/roomId/kind/displayName).",
   },
+
 ];
 
 // ---------------------------------------------------------------------------
@@ -325,7 +326,7 @@ function compareTool(toolName, routes) {
     const api = apiParams.get(name);
     check(api, `tool param ${name} has no OpenAPI counterpart`);
     if (!api) continue;
-    const apiType = api.type, toolType = normType(props[name]?.type ?? props[name]?.anyOf?.map(x => x?.type));
+    const apiType = api.type, toolType = normType(props[name]?.type ?? (props[name]?.anyOf ?? props[name]?.oneOf)?.map(x => x?.type));
     if (allow.wireTyped?.[name]) {
       check(toolType === null, `wireTyped param ${name}: tool is now concretely typed (${toolType}) — re-triage`);
       continue;

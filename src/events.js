@@ -174,6 +174,10 @@ export function roomPolicy(state) {
 // Rooms that never record the event keep no `room.trust` field, so replay of
 // older logs stays byte-identical.
 export const TRUST_OFF_CODE = "trust_off";
+// A post into an archived channel is a conflict with the archive state, not a
+// bad command: docs/openapi.yaml "Room channels (Phase 2)" documents 409
+// channel_archived. The reducer carries the code and the command surface maps it.
+export const CHANNEL_ARCHIVED_CODE = "channel_archived";
 export const trustOffMessage = targetId =>
   `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
 
@@ -514,8 +518,40 @@ export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
 
+// #3408: applyEvent used to open with a whole-state structuredClone. The
+// clone measured 78-98% of applyEvent's cost, and ~75% of the cloned bytes
+// are replay bookkeeping (eventLog + the two seen maps) that the persisted
+// projection discards. The bookkeeping needs container isolation, not deep
+// copies:
+//   - eventLog is append-only here (one push per applied event) and its
+//     entries are the applied envelopes, which no handler or consumer
+//     mutates once logged (the newest entry is the caller's own `incoming`
+//     object even under a full structuredClone);
+//   - seenEvents values are fingerprint strings and seenIdempotencyKeys
+//     values are event-id strings — immutable, replaced wholesale per key.
+// So the bookkeeping containers get fresh shallow copies (each returned
+// state owns its array/maps, so pushes and key sets never leak across
+// states) while every content branch keeps the full structuredClone.
+// The returned state is value-identical to the structuredClone result;
+// the #3408 replay-equivalence digest chains pin that claim.
+function cloneStateForApply(current) {
+  const state = { ...current };
+  if (Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
+  if (current.seenEvents && typeof current.seenEvents === "object") {
+    state.seenEvents = { ...current.seenEvents };
+  }
+  if (current.seenIdempotencyKeys && typeof current.seenIdempotencyKeys === "object") {
+    state.seenIdempotencyKeys = { ...current.seenIdempotencyKeys };
+  }
+  for (const key of Object.keys(state)) {
+    if (key === "eventLog" || key === "seenEvents" || key === "seenIdempotencyKeys") continue;
+    state[key] = structuredClone(current[key]);
+  }
+  return state;
+}
+
 export function applyEvent(current, incoming) {
-  const state = structuredClone(current);
+  const state = cloneStateForApply(current);
   validateEnvelope(incoming);
   // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
   // so the stored fingerprint agrees with the logged (post-handler) event.
@@ -1209,7 +1245,11 @@ function postMessage(state, incoming) {
   }
   const channel = state.channels[channelId];
   if (!channel) throw new Error("Unknown channel");
-  if (channel.archivedAt) throw new Error("Channel is archived");
+  if (channel.archivedAt) {
+    const error = new Error("Channel is archived");
+    error.code = CHANNEL_ARCHIVED_CODE;
+    throw error;
+  }
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({

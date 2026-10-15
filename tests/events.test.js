@@ -128,6 +128,22 @@ test("a stale revision fails without mutating the projection or event log", () =
   assert.deepEqual(state, before);
 });
 
+test("applyEvent leaves the input state untouched, including its bookkeeping containers", () => {
+  const state = baseState();
+  const before = structuredClone(state);
+  const next = applyEvent(state, fixedEvent("isolation-post", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "Isolated" }));
+  // The applied event landed in the returned state's bookkeeping only.
+  assert.equal(next.eventLog.length, before.eventLog.length + 1);
+  assert.deepEqual(state, before);
+  // #3408: the returned state's eventLog / seen maps are fresh shallow
+  // copies, not the input's containers. Mutating them must not leak back.
+  next.eventLog.push({ id: "forged" });
+  next.seenEvents.forged = "forged";
+  next.seenIdempotencyKeys.forged = "forged";
+  assert.deepEqual(state, before);
+  assert.equal(state.eventLog.length, before.eventLog.length);
+});
+
 test("read-only work starts without a claim", () => {
   let state = baseState();
   state = applyEvent(state, proposal("read-proposed", "work-read", "codex", "instinct", "read"));

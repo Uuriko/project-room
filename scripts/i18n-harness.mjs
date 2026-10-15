@@ -102,7 +102,8 @@ export function baseTreeCounts(ref) {
 // Growth past the ratchet is allowed only when declared: the PR carries the
 // i18n-growth label or a line "i18n-growth: <reason>" in its body (read from
 // the Actions event payload), or I18N_ALLOW_GROWTH=1 locally. A label or body
-// edit needs a lint re-run (gh run rerun --failed) or a new push.
+// edit needs a fresh pull_request event (for example, a new push). Re-running
+// an existing Actions run retains its original event payload and declaration.
 export function growthAllowance(env = process.env) {
   if (env.I18N_ALLOW_GROWTH === "1") return "I18N_ALLOW_GROWTH=1";
   if (!env.GITHUB_EVENT_PATH) return null;

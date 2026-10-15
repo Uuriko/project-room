@@ -50,9 +50,9 @@
         <div class="topbar-actions">
           <span id="identity-label">Checking session…</span>
           <button id="invite-people-button" class="button primary" type="button" hidden>Invite</button>
-          <button id="refresh-button" class="button ghost icon-button" type="button" aria-label="Refresh connection" title="Refresh connection"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
+          <button id="refresh-button" class="button ghost icon-button" type="button" disabled aria-label="Refresh connection" title="Refresh connection"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 0-2 5M20 12a8 8 0 0 0-2-6"/></svg></button>
           <div class="session-menu" id="session-menu">
-            <button id="session-menu-button" class="button ghost icon-button" type="button" aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions" title="Account"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>
+            <button id="session-menu-button" class="button ghost icon-button" type="button" disabled aria-expanded="false" aria-controls="session-menu-panel" aria-label="Session and account actions" title="Account"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg></button>
             <div id="session-menu-panel" class="session-menu-panel">
               <p id="session-expiry" class="form-hint" hidden></p>
               <button id="account-profile-button" class="button ghost" type="button" hidden></button>
@@ -662,7 +662,7 @@
             <label id="work-done-field" class="field"><span>Done when</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
             <label id="assignee-field" class="field"><span>Assignee</span><select id="assignee-select" name="assigneeId" required></select></label>
             <p id="assignee-hint" class="form-hint" hidden></p>
-            <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label"></select><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
+            <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label" aria-describedby="verifier-hint"></select><p id="verifier-hint" class="form-hint" role="status" hidden></p><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
             <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
               <label class="field"><span>Mode</span><select id="work-mode-select" name="mode"><option value="read">Think it through</option><option value="write">Allowed to change things outside the room</option></select></label>
               <label class="check"><input id="require-verification" type="checkbox" name="requireVerification" checked> Require verification</label>
@@ -772,7 +772,7 @@
         <button id="room-instructions-close" class="button secondary" type="button">Close</button>
       </div>
     </dialog>
-    <dialog id="result-dialog" aria-labelledby="result-title"><h2 id="result-title">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></dialog>
+    <section id="result-dialog" class="inline-result" role="region" aria-labelledby="result-title" hidden><h2 id="result-title" tabindex="-1">Result</h2><p id="result-status" class="form-hint" role="status"></p><pre id="result-body"></pre><div id="result-diff" hidden></div><div class="portable-actions"><button id="close-result" type="button" class="button secondary">Close</button><button id="result-discuss" type="button" class="button" hidden></button><button id="result-retry" type="button" class="button ghost" hidden disabled>Retry result</button><button id="result-original" type="button" class="button ghost" hidden>Original</button></div></section>
     <dialog id="action-dialog" aria-labelledby="action-title" aria-describedby="action-context">
       <form id="action-form">
         <h2 id="action-title"></h2>
@@ -879,7 +879,7 @@
       </form>
       <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
-    <script type="module" src="./src/app.js"></script>
+    <script type="module" src="./src/entry.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">

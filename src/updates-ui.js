@@ -11,7 +11,7 @@ const FILTERS = [
 ];
 const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
-const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions", later: "saved" };
+const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
 export function queryFor(filter) {
   if (filter === "mentions") return "state=actionable&kinds=mention";

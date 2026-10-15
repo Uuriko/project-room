@@ -100,6 +100,7 @@ const messages = Object.freeze({
   invite_already_used: "This invite was already used — ask the room owner for a fresh one.",
   member_required: "Set the expected ROOM_AGENT_MEMBER before checking or saving agent access.",
   access_ended: "Access was not accepted. Keep the saved connection; check the service address and existing access with its owner.",
+  insufficient_scope: "This credential does not grant this operation. Ask its owner for an appropriately scoped replacement.",
   identity_credential_changed: "The saved credential changed or was revoked. Obtain the current credential from its owner; do not create a replacement identity.",
   identity_mismatch: "Access does not match the configured room and agent. No identity was adopted.",
   expiry_unconfirmed: "Expiry could not be confirmed. Check the local clock and key expiry.",
@@ -118,6 +119,8 @@ const messages = Object.freeze({
 // agent with no saved connection cannot run. Each local code names its fix.
 const setupCommand = "node scripts/agent-inbox.mjs";
 const localRecovery = Object.freeze({
+  insufficient_scope: ["Keep the existing identity and saved connection. Ask the credential owner for a replacement granting only the scopes required for the intended operation. Do not escalate automatically.",
+    ["Ask the credential owner to confirm the intended operation and provide an appropriately scoped replacement credential"]],
   usage_error: ["Use a documented command; nothing was sent.", [`${setupCommand} --help`]],
   invalid_config: ["The connection settings are incomplete or malformed; nothing was sent.",
     ["Copy the private setup again from the room's Add agent dialog and import it into a new directory"]],
@@ -140,6 +143,7 @@ export function connectionDiagnostic(error) {
   else if (error instanceof RoomClientError) {
     code = error.status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code) ? "invalid_config"
       : error.code === "identity_credential_changed" && error.status === 409 ? "identity_credential_changed"
+      : error.status === 403 && error.code === "insufficient_scope" ? "insufficient_scope"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
       : error.status === 409 && error.code === "invite_already_used" ? "invite_already_used"
       : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;

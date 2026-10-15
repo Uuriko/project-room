@@ -25,8 +25,9 @@ import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscriptions.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
-import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView } from "./room-key-presence.mjs";
+import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
+import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
@@ -97,9 +98,21 @@ export function createAgentAuth({ store, bearer, reject }) {
 
 export function createHeartbeatActor({ store, bearer, reject }) {
   const agentAuth = createAgentAuth({ store, bearer, reject });
-  return (req, scope) => isRoomAccessToken(bearer(req))
-    ? roomKeyPresenceAuth(store, bearer(req))
-    : agentAuth(req, scope);
+  return (req, scope) => {
+    if (isRoomAccessToken(bearer(req))) return roomKeyPresenceAuth(store, bearer(req));
+    const auth = agentAuth(req, scope);
+    // CX5-FIX: a rak_ key bound to exactly one room (its mcp:room: scope)
+    // is a room-scoped listener credential — the credential standard setup
+    // saves. Derive its binding (roomId + host namespace) on every call;
+    // scopedKeyRoomBinding re-verifies the identity's membership in the
+    // bound room, so unlink/rotation/revocation ends the listener at the
+    // next authorization, including the poll's post-wait re-resolution.
+    if (auth.keyId !== null && auth.keyId !== undefined) {
+      const binding = scopedKeyRoomBinding(store, auth);
+      if (binding) return { ...auth, roomId: binding.roomId, hostPrefix: binding.hostPrefix, scopedKey: true };
+    }
+    return auth;
+  };
 }
 
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
@@ -784,11 +797,24 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // RC-2026-09-24-203: the body stays backward-compatible — hostId is
     // required; mode is optional and defaults to wakeable (RC-2026-09-28-3602).
     // wakeUrl / cadenceSeconds / pushNotification / workWakes are optional.
-    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes"];
+    // CX5-FIX: listenerLease (optional boolean) asks this heartbeat to also
+    // acquire/renew the durable listener lease for the caller's scope, so
+    // the HTTP receiving path can hold exclusive queue ownership with a
+    // fencing token (see ackHeartbeats). Scoped credentials (room key, or
+    // a rak_ key bound to one room) run the room-scoped listener contract.
+    const heartbeatFields = ["hostId", "mode", "wakeUrl", "cadenceSeconds", "pushNotification", "workWakes", "listenerLease"];
     if (!data || !Object.keys(data).every(field => heartbeatFields.includes(field))
         || !Object.hasOwn(data, "hostId"))
-      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional");
+      reject(422, "invalid_heartbeat", "hostId is required; mode defaults to wakeable; wakeUrl, cadenceSeconds, pushNotification, workWakes and listenerLease are optional");
+    // listenerLease: true leases the credential's own scope (the bound
+    // room for scoped credentials, the roomless identity queue otherwise);
+    // { roomId } names the room queue to lease — the form the standard
+    // room-pinned wake client sends. A scoped credential may only lease
+    // its bound room; an identity credential must belong to the room.
+    if (!validListenerLease(data.listenerLease))
+      reject(422, "invalid_heartbeat", "listenerLease must be true or { roomId } when present");
     if (roomKey) assertRoomKeyPullOnly(store, auth.identityId, data);
+    else if (auth.scopedKey) assertScopedKeyListener(store, auth.identityId, data);
     // Subscribe-time SSRF guard: the push url's hostname must resolve to a
     // public address BEFORE the sync heartbeat() upsert stores anything.
     // Shape validation (token, auth) happens inside heartbeat(). A room key
@@ -797,20 +823,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       await store.agentHeartbeats.assertPushDns(data.pushNotification.url);
     }
     // Q3-B: the store page includes `more` when pendingWakes is truncated.
-    const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability } = store.transaction(() => {
+    const { host, pendingWakes, more, pushConfigured, pushSuspended, reachability, listener } = store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
-      let hostId = data.hostId;
-      if (roomKey) {
-        assertRoomKeyPullOnly(store, auth.identityId, data);
-        hostId = roomKeyHostId(auth, data.hostId);
-        assertRoomKeyPullOnly(store, auth.identityId, { ...data, hostId });
-      }
-      const result = store.agentHeartbeats.heartbeat({
-        agentId: auth.identityId, hostId, mode: data.mode,
-        wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
-        pushNotification: data.pushNotification ?? null, workWakes: data.workWakes, workScopeRoomId: roomKey ? auth.roomId : null });
-      return result;
+      return heartbeatWithListener(store, auth, data, { roomKey });
     });
     // A suspended push subscription tells the agent how to re-arm it: POST
     // a fresh pushNotification on the next heartbeat.
@@ -819,7 +835,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       action: "rearm-push", method: "POST", path: "/api/agent-heartbeats",
       description: "Your push subscription was suspended after 3 failed deliveries; POST a fresh pushNotification to re-arm.",
     }));
-    return json(res, 200, { agentId: auth.identityId, host, pendingWakes, more: more === true, next, pushConfigured, reachability });
+    // CX5-FIX: a scoped API key reads back the hostId it chose (its stored
+    // row is namespaced under the key); the legacy room key keeps its
+    // pinned namespaced response. The listener block rides only when the
+    // heartbeat asked for the lease.
+    const presentedHost = auth.scopedKey ? { ...host, hostId: data.hostId } : host;
+    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, more: more === true, next, pushConfigured, reachability,
+      ...(listener ? { listener } : {}) });
   });
 
   const ackHeartbeats = translate(async (req, res, { remoteAddress }) => {
@@ -827,19 +849,31 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     let auth = heartbeatActor(req, requiredScope("heartbeats:report"));
     const initialIdentity = auth.identityId;
     const data = await body(req);
-    if (!data || !exact(data, ["signalIds"]) || !Array.isArray(data.signalIds))
-      reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field");
+    // CX5-FIX: fencingToken (optional) is the durable listener lease's
+    // token from a listenerLease heartbeat. ackWakes already fences acks
+    // whenever a live lease or claim covers the signals (409
+    // listener_fenced / wake_signal_fenced); passing the token through is
+    // what lets the HTTP receiving path actually hold that exclusivity.
+    // Without a token the legacy behavior stands for lease-free queues.
+    if (!data || !Object.hasOwn(data, "signalIds")
+        || !Object.keys(data).every(field => field === "signalIds" || field === "fencingToken")
+        || !Array.isArray(data.signalIds))
+      reject(422, "invalid_heartbeat_ack", "signalIds (a string array) is the accepted field; fencingToken is optional");
+    if (data.fencingToken !== undefined && (typeof data.fencingToken !== "string" || data.fencingToken.length === 0))
+      reject(422, "invalid_heartbeat_ack", "fencingToken must be a non-empty string when present");
     return json(res, 200, store.transaction(() => {
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
-      return store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds, roomId: auth.roomId ?? null });
+      return store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds, roomId: auth.roomId ?? null,
+        fencingToken: data.fencingToken ?? null });
     }));
   });
 
   const readHeartbeats = translate(async (req, res) => {
     const auth = heartbeatActor(req, requiredScope("heartbeats:read"));
     rate(`agent-heartbeats-read:${auth.identityId}`, 120);
-    return json(res, 200, auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
+    return json(res, 200, auth.scopedKey ? scopedKeyPresenceView(store, auth)
+      : auth.roomId ? roomKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(auth.identityId));
   });
 
   // plan-wake-live: GET /api/wake-status lives in the route table
@@ -874,12 +908,17 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // hosts). With no hosts at all the waiter is skipped and notePoll
     // answers 404 agent_not_registered — the sequencing error a cold
     // agent needs first (heartbeat before poll), not the parameter error.
+    // A scoped credential whose identity's hosts all live under another
+    // credential's namespace derives its own credential slot instead (see
+    // the derivation below) — never another host's slot, and never no
+    // waiter at all.
     const rawHostId = url.searchParams.get("hostId");
     let waiterHostId = null;
     if (rawHostId !== null) {
       if (!HOST_ID_PATTERN.test(rawHostId))
         reject(422, "invalid_wake_poll", "hostId must be 1-128 chars, [A-Za-z0-9._-] — one wake waiter per host");
-      waiterHostId = auth.roomId ? roomKeyHostId(auth, rawHostId) : rawHostId;
+      waiterHostId = auth.scopedKey ? scopedKeyHostId(auth, rawHostId)
+        : auth.roomId ? roomKeyHostId(auth, rawHostId) : rawHostId;
     } else {
       const hosts = store.agentHeartbeats.statusOf(auth.identityId).hosts;
       const own = auth.roomId ? hosts.filter(host => host.hostId.startsWith(auth.hostPrefix)) : hosts;
@@ -887,6 +926,22 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       else if (own.length > 1) reject(422, "invalid_wake_poll", auth.roomId
         ? "hostId is required: this credential has several registered hosts — pass the hostId you heartbeat with (one wake waiter per host)"
         : `hostId is required: this identity has several registered hosts (${own.map(host => host.hostId).join(", ")}) — pass the hostId you heartbeat with (one wake waiter per host)`);
+      else if (auth.roomId && hosts.length > 0) {
+        // The identity IS registered, but every host sits under another
+        // credential's namespace — the standard shape since CX5: hosts
+        // heartbeated by the saved rak_ setup (ak_ namespace) while a
+        // legacy room key (rk_ namespace) polls, or the reverse. Deriving
+        // across namespaces would wedge that host's waiter slot (the
+        // two-host livelock the per-host keying exists to prevent), and
+        // notePoll's registration check is namespace-blind, so without a
+        // fallback this poll registered NO waiter and rode out the full
+        // waitMs on the bare timer — signals still arrived (the post-wait
+        // notePoll is host-independent) but never promptly. Park the wait
+        // on the polling credential's own namespaced derived slot
+        // instead: prompt release on this room's signals, no real host's
+        // slot touched, no other host's wait disturbed.
+        waiterHostId = auth.scopedKey ? scopedKeyHostId(auth, "derived") : roomKeyHostId(auth, "derived");
+      }
     }
     const rawWait = url.searchParams.get("waitMs");
     let waitMs = 25000;
@@ -907,8 +962,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // Registering the waiter first is load-bearing: a reconnect with the
     // same hostId replaces only that host's previous wait, and the notePoll
     // right after closes the race where a signal landed between requests.
-    // waiterHostId is null only when no host is registered, where notePoll
-    // rejects 404 before any wait can happen — no waiter is needed.
+    // waiterHostId is null only when the identity has no registered host
+    // at all, where notePoll rejects 404 before any wait can happen — no
+    // waiter is needed. (Scoped credentials with hosts only under another
+    // credential's namespace derive a credential slot above, so a
+    // registered identity's held poll always has a release channel.)
     let woken = false, clientGone = false, done = null;
     const donePromise = new Promise(resolve => { done = resolve; });
     const release = waiterHostId === null ? () => {} : store.agentHeartbeats.addWakeWaiter(auth.identityId, waiterHostId, {
