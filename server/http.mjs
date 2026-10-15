@@ -87,6 +87,7 @@ import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLI
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+import { roomProofView } from "./proof-page.mjs";
 // --- end GR2 ---
 // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
 import { termsStatus } from "./legal-store.mjs";
@@ -227,6 +228,7 @@ const gr2PublicPath = pathname => {
   if (rest === "/templates" || rest === "/agents" || rest === "/templates.json") return rest;
   if (/^\/templates\/[a-z0-9][a-z0-9-]{0,63}(?:\.json)?$/.test(rest)) return rest;
   if (/^\/r\/[a-z0-9][a-z0-9-]{0,63}(?:\.json)?$/.test(rest)) return rest;
+  if (/^\/r\/[a-z0-9][a-z0-9-]{0,63}\/proof(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
 // --- end GR2 ---
@@ -2065,8 +2067,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
+      const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
       const acquisition = url.pathname === "/templates" || url.pathname === "/templates.json"
-        || url.pathname === "/agents" || templateDetail || roomPage;
+        || url.pathname === "/agents" || templateDetail || roomPage || proofPage;
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
@@ -2099,6 +2102,23 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const page = agentDirectoryView(store, { ref, cursor: url.searchParams.get("cursor") });
           if (page.error) reject(page.error.status, page.error.code, page.error.message);
           return sendPage(200, page.html, null, "/agents");
+        }
+        if (proofPage) {
+          const proof = roomProofView(store, proofPage[1], { cursor: url.searchParams.get("cursor") });
+          if (proof?.error) reject(proof.error.status, proof.error.code, proof.error.message);
+          // Same posture as the room page: an unpublished or receipts-off
+          // room gets the styled public 404 for browsers, the JSON envelope
+          // for .json / non-HTML clients.
+          if (!proof && !proofPage[2] && acceptPrefersHtml(req.headers.accept)) {
+            const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+            res.setHeader("X-Robots-Tag", "noindex");
+            res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
+          if (!proof) reject(404, "not_found", "Not found");
+          // Toggle-controlled representation: never sit in a shared cache
+          // (the owner flipping public receipts off must bite immediately).
+          return sendPage(200, proof.html, proofPage[2] ? proof.document : null, `/r/${proofPage[1]}/proof`, "no-store");
         }
         const page = publicRoomView(store, roomPage[1], { ref });
         // A browser opening /r/<slug> for a room that is unknown or not
