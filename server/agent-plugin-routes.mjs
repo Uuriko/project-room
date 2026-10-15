@@ -671,18 +671,38 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   // retries an uncertain rotation can correlate the receipt.
   const rotateIdentitySecret = translate(async (req, res, { remoteAddress, identityId }) => {
     rate(`agent-identity-rotate:${remoteAddress}`, 20);
-    const auth = ownerAuth(req);
-    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
     const data = await body(req);
     const shape = data && (exact(data, ["confirm"]) || exact(data, ["confirm", "requestId"]));
+    const confirmed = Boolean(shape) && data.confirm === true;
+    const requestIdOk = data.requestId === undefined || (typeof data.requestId === "string" && data.requestId.length > 0);
+    // R306: a rotation whose response was lost leaves the client holding
+    // the retired pre-rotation secret, which ownerAuth would reject
+    // outright. The receipt keyed to requestId authorizes one re-rotation
+    // from that secret inside the TTL, so consult it BEFORE the owner
+    // check. It can only succeed for the identity whose pre-rotation
+    // secret matches, so the cross-identity rule still holds. The consult
+    // only runs for a request that already satisfies the confirm and
+    // exact-shape contract (landing lane, 13518): a retired secret plus a
+    // requestId must never rotate without confirm:true or with fields
+    // outside the shape. Malformed requests skip the consult and reach
+    // the owner check first, so an unauthenticated caller still sees 401,
+    // never the shape guidance.
+    if (confirmed && requestIdOk && data.requestId !== undefined) {
+      const retried = store.identities.rotateFromReceiptIfMatched(identityId, bearer(req), data.requestId);
+      if (retried) return json(res, 200, { ...retried, requestId: data.requestId });
+    }
+    const auth = ownerAuth(req);
+    if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only rotate its own secret");
     if (!shape || data.confirm !== true) {
       reject(422, "confirm_required",
         "Rotation retires the current secret immediately and shows the replacement once. Send {\"confirm\":true} to proceed; requestId is optional.");
     }
-    if (data.requestId !== undefined && (typeof data.requestId !== "string" || !data.requestId)) {
+    if (!requestIdOk) {
       reject(422, "invalid_request_id", "requestId must be a non-empty string when present");
     }
-    const result = store.identities.rotate(identityId, bearer(req));
+    // R306: requestId feeds the rotation receipt, so a retry after a lost
+    // response can re-rotate from the pre-rotation secret inside the TTL.
+    const result = store.identities.rotate(identityId, bearer(req), data.requestId ?? null);
     return json(res, 200, data.requestId === undefined ? result : { ...result, requestId: data.requestId });
   });
 
