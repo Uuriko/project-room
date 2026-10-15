@@ -53,6 +53,37 @@ const filesOf = input => {
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
 
+// #3530: the standard public-work starter set — the newcomer tasks an
+// operator first seeded on the public board (the pw-garden round of
+// 2026-10-05). An enabled public task is one-shot: once it carries a
+// submitted receipt it never becomes claimable again, and the only
+// follow-on paths (a fresh owner offer, the review successor flow) are
+// manual. The seed pool was therefore consumed exactly once and the
+// anonymous front door llms.txt routes new agents to dead-ended at
+// claimableCount 0. reseedStarterPool() below is the replenishment: it
+// clones the next round of each seed from that seed's own latest round —
+// same room, owner, terms, repository and files — so what comes back is
+// exactly what the operator originally published; only the offer id
+// advances (<base>-r2, -r3, ...). Anchored by design: a store where the
+// operator never published a seed grows nothing here, and the
+// seed-dc-* tasks are deliberately absent — they belong to another
+// product's repository pinned at a historical commit, so re-issuing
+// them from this codebase would mint stale work, not starter work.
+export const PUBLIC_WORK_STARTER_SEED_IDS = Object.freeze([
+  'pw-garden-firsttask-probe-20261005',
+  'pw-garden-glossary-20261005',
+  'pw-garden-linkcheck-20261005',
+  'pw-garden-mcp-paths-20261005',
+]);
+// Round 1 is the operator's original offer id; later rounds append -rN.
+export const starterRoundOf = (offerId, baseId) => {
+  if (offerId === baseId) return 1;
+  if (!offerId.startsWith(baseId + '-r')) return 0;
+  const suffix = offerId.slice(baseId.length + 2);
+  return /^[1-9][0-9]*$/.test(suffix) ? Number(suffix) : 0;
+};
+export const starterRoundId = (baseId, round) => (round === 1 ? baseId : `${baseId}-r${round}`);
+
 export const PUBLIC_WORK_IDENTITY_RATE_LIMIT = 60;
 export const PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS = 60000;
 // At most this many distinct identity buckets stay live, matching the bound
@@ -185,6 +216,90 @@ export class PublicWorkClaims {
       return { tasks: page, claimableCount,
         nextCursor: start + limit < tasks.length ? page.at(-1).taskId : null };
     });
+  }
+  // #3530 keeper surface: the starter pool's state in the same terms the
+  // public board serves. `due` lists the anchored seeds whose latest
+  // round is fully submitted — the only seeds a reseed may advance.
+  starterPoolStatus() {
+    if (!this.available()) return { available: false, anchored: 0, claimable: 0, due: [] };
+    const claimable = this.list({ limit: 100 }).claimableCount;
+    const due = [];
+    let anchored = 0;
+    for (const baseId of PUBLIC_WORK_STARTER_SEED_IDS) {
+      const family = this._starterFamily(baseId);
+      if (!family.length) continue;
+      anchored++;
+      if (this._starterTaskState(family.at(-1).row) === 'submitted') due.push(baseId);
+    }
+    return { available: true, anchored, claimable, due };
+  }
+  _starterFamily(baseId) {
+    const rows = this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=? OR offer_id LIKE ?').all(baseId, `${baseId}-r%`);
+    return rows.map(row => ({ row, round: starterRoundOf(row.offer_id, baseId) }))
+      .filter(entry => entry.round > 0).sort((left, right) => left.round - right.round);
+  }
+  // packet()'s state derivation without the packet: a receipt at the
+  // current generation is terminal, a live lease is claimed, else open.
+  _starterTaskState(row) {
+    if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation)) return 'submitted';
+    const item = this.store.workClaims.get(row.namespace_key, row.offer_id);
+    const live = item ? releaseExpired([item], this.store.now())[0] : null;
+    return live?.owner ? 'claimed' : 'unclaimed';
+  }
+  // Replenish the starter set, bounded so it cannot spam: it fires only
+  // when the board's public claimableCount is exactly zero, it mints at
+  // most one new round per anchored seed, and only for a seed whose
+  // latest round is submitted (a live claimed round blocks its own seed
+  // alone). The create/publish/enable request ids are derived from the
+  // round, so a repeated or interrupted tick replays the journals and
+  // converges on the same offers instead of duplicating them.
+  reseedStarterPool() {
+    if (!this.available()) return { seeded: 0, claimable: 0, rounds: [], skipped: [], errors: [] };
+    return this.store.transaction(() => {
+      const { claimableCount } = this.list({ limit: 100 });
+      const summary = { seeded: 0, claimable: claimableCount, rounds: [], skipped: [], errors: [] };
+      if (claimableCount > 0) return summary;
+      for (const baseId of PUBLIC_WORK_STARTER_SEED_IDS) {
+        try {
+          const outcome = this._reseedStarter(baseId);
+          if (outcome.seeded) { summary.seeded++; summary.rounds.push(outcome.offerId); }
+          else summary.skipped.push({ seed: baseId, reason: outcome.reason });
+        } catch (error) {
+          summary.errors.push({ seed: baseId, code: error?.code ?? 'error', message: String(error?.message ?? error).slice(0, 200) });
+        }
+      }
+      return summary;
+    });
+  }
+  _reseedStarter(baseId) {
+    const family = this._starterFamily(baseId);
+    if (!family.length) return { seeded: false, reason: 'not_anchored' };
+    const latest = family.at(-1), { row } = latest;
+    const state = this._starterTaskState(row);
+    if (state !== 'submitted') return { seeded: false, reason: `latest_round_${state}` };
+    const offerRow = this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(row.offer_id);
+    // The anchor offer must still be exactly the offer the latest round
+    // was enabled against; an operator who withdrew or revised it has
+    // retired the seed, and the keeper must not resurrect it.
+    if (!offerRow || offerRow.status !== 'published' || offerRow.version !== row.terms_version)
+      return { seeded: false, reason: 'anchor_offer_changed' };
+    if (isUnpublished(this.db, 'room', row.room_id)) return { seeded: false, reason: 'room_unpublished' };
+    const { state: roomState } = this.store.room(row.room_id);
+    if (roomState.room.archivedAt) return { seeded: false, reason: 'room_archived' };
+    const ownerId = roomState.room.ownerId;
+    const source = this.store.projectOffers.record(offerRow, true);
+    const terms = { kind: source.kind, title: source.title, summary: source.summary,
+      acceptanceCriteria: source.acceptanceCriteria, exclusions: source.exclusions ?? [],
+      reward: source.reward, approvalPolicy: source.approvalPolicy };
+    for (const field of ['repositoryUrl', 'submissionUrl', 'deadline']) if (source[field] != null) terms[field] = source[field];
+    const round = latest.round + 1, offerId = starterRoundId(baseId, round), stamp = `reseed-${baseId}-r${round}`;
+    const created = this.store.projectOffers.create(row.room_id, ownerId,
+      { requestId: `${stamp}-create`, offerId, terms, reviewerMemberIds: source.reviewerMemberIds });
+    const published = this.store.projectOffers.transition(row.room_id, ownerId, offerId, 'publish',
+      { requestId: `${stamp}-publish`, expectedRevision: created.revision });
+    this.enable(row.room_id, ownerId, offerId, { requestId: `${stamp}-enable`, expectedRevision: published.revision,
+      expectedTermsVersion: published.version, repositoryRef: row.repository_ref, files: JSON.parse(row.files_json) });
+    return { seeded: true, offerId, round };
   }
   enable(roomId, actorId, offerId, input) {
     shape(input, ['requestId', 'expectedRevision', 'expectedTermsVersion', 'repositoryRef', 'files']);

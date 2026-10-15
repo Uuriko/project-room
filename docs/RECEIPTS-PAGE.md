@@ -15,6 +15,15 @@ No login. The page is indexable when the URL has no query string.
   not.
 - A completed work item appears only when it has a receipt and the same
   owner setting is on.
+- A bounty lot (`/receipts/lot_<id>`) appears once its bounty's settlement
+  verdict is recorded — paid out, failed, unverified, or split. The page
+  shows the one ledger movement the lot names (kind, amount, source and
+  destination accounts) plus the bounty's poster, worker, award, pinned
+  rubric hash, and settlement outcome. Before settlement, and for journal
+  lots that are not bounty movements, the id is a 404. The record is
+  composed from the credit ledger at read time, not stored as a copy. A
+  room that turned public receipts off in the directory settings, and
+  operator unpublish, hide it like the other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has

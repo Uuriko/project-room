@@ -19,7 +19,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, validId } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -62,7 +62,9 @@ const randomSymbols = (length, alphabet) => {
 // as bare unsalted sha256 (~40 bits, offline-invertible by anyone with DB read
 // access); the sha256 fallback is removed, so those rows no longer redeem.
 const codeHash = code => scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
-const NEVER_GRANT = ["manage_members", "decide", "invite_member"];
+// NEVER_GRANT is defined once in src/events.js and shared with the
+// share-link grant (server/share-links.mjs) so every invitation door
+// enforces the same ceiling (#3549).
 
 // Human descriptions for the standing invite profiles, surfaced by
 // vocabulary() so a minting agent never has to guess what a profile grants.

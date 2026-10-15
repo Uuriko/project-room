@@ -20,7 +20,7 @@
 //   (docs/BACKUP-DR.md); there is no "current" store left to reconcile against.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
+import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -62,6 +62,7 @@ export function parseNdjsonExport(ndjson) {
   if (typeof ndjson !== "string" || !ndjson.trim()) throw new Error("Export is empty");
   const byTable = new Map();
   const skippedTables = {};
+  const digests = createTableDigests();
   let watermark = null;
   let trailer = null;
   for (const line of ndjson.split("\n")) {
@@ -77,13 +78,16 @@ export function parseNdjsonExport(ndjson) {
     // End-of-stream integrity trailer (server/room-export.mjs exportTrailer).
     if (record?.kind === "trailer") {
       if (trailer) throw new Error("Export has more than one trailer");
-      if (record.version !== 1 || !Number.isSafeInteger(record.events) || typeof record.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(record.eventsHash))
-        throw new Error("Export trailer is malformed");
+      assertTrailerShape(record);
       trailer = record;
       continue;
     }
     if (typeof record?.table !== "string" || !IDENT.test(record.table) || !record.row || typeof record.row !== "object" || Array.isArray(record.row))
       throw new Error("Export line is not a table row");
+    // #3325: digest every loadable row as parsed, before the skip branch
+    // below decides what lands — the digest set and the skip set are
+    // disjoint by construction (CONTENT_DIGEST_SKIPPED_TABLES).
+    digests.add(record.table, record.row);
     // Cloudflare-internal storage tables are the target DO's own business;
     // they are never room data and must not cross between Durable Objects.
     // Skipped rows are counted and reported, never silently dropped (#3325).
@@ -98,7 +102,7 @@ export function parseNdjsonExport(ndjson) {
   }
   if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events))
     throw new Error("Export is missing its watermark");
-  return { watermark, byTable, trailer, skippedTables };
+  return { watermark, byTable, trailer, skippedTables, tableDigests: digests.finish() };
 }
 
 function insertOrder(names) {
@@ -111,7 +115,7 @@ function insertOrder(names) {
 // empty (no rooms row); a non-empty store is refused, never overwritten.
 export function replayNdjsonInto(ndjson, store) {
   if (!store?.db) throw new Error("Restore needs an open store");
-  const { watermark, byTable, trailer, skippedTables } = parseNdjsonExport(ndjson);
+  const { watermark, byTable, trailer, skippedTables, tableDigests } = parseNdjsonExport(ndjson);
   // Torn export (a write landed mid-stream): refuse before touching the store.
   if (trailer) verifyTrailer(trailer, byTable);
   const db = store.db;
@@ -168,9 +172,14 @@ export function replayNdjsonInto(ndjson, store) {
           if (actual !== expected) throw new Error(`Export watermark does not match the restored table ${table}: expected ${expected} rows, got ${actual}`);
         }
       }
+      // #3325: the digest pin is verified inside the transaction, after
+      // the load — the load's per-cell refusals are the more specific
+      // errors and fire first; a well-formed tamper (the #3325 probe) is
+      // refused here and the whole replay rolls back.
+      const contentVerification = contentVerificationLevel(trailer, tableDigests);
       const recovery = auditRecovery(store);
       const audit = store.verifyInvitationAudit();
-      return { verified: true, trailer: trailer ? "verified" : "absent", events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };
     });
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
@@ -200,6 +209,7 @@ export function createBackupReplaySession(store) {
   const claimPermit = existing.has(CLAIM_PERMIT_TABLE);
   const skippedTables = {};
   const eventTuples = [];
+  const digests = createTableDigests();
   const counts = new Map();
   const knownColumns = new Map();
   const buffers = new Map();
@@ -255,13 +265,15 @@ export function createBackupReplaySession(store) {
     }
     if (record?.kind === "trailer") {
       if (trailer) throw new Error("Export has more than one trailer");
-      if (record.version !== 1 || !Number.isSafeInteger(record.events) || typeof record.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(record.eventsHash))
-        throw new Error("Export trailer is malformed");
+      assertTrailerShape(record);
       trailer = record;
       return;
     }
     if (typeof record?.table !== "string" || !IDENT.test(record.table) || !record.row || typeof record.row !== "object" || Array.isArray(record.row))
       throw new Error("Export line is not a table row");
+    // #3325: digest each loadable row as it streams past, before the skip
+    // branch — finish() pins the whole stream against the trailer.
+    digests.add(record.table, record.row);
     if (record.table.startsWith("_cf_") || RESTORE_SKIP_TABLES.has(record.table)
       || record.table === CLAIM_PERMIT_TABLE || REPLAY_SKIPPED_TABLES.includes(record.table)) {
       skippedTables[record.table] = (skippedTables[record.table] ?? 0) + 1;
@@ -314,6 +326,9 @@ export function createBackupReplaySession(store) {
       // replay does — the tuples collected line by line are exactly the
       // rows verifyTrailer hashes.
       if (trailer) verifyTrailer(trailer, new Map([["events", eventTuples]]));
+      // #3325: the trailer's table digests pin the non-event rows the same
+      // way; a mismatch aborts and wipes the replay like any other failure.
+      const contentVerification = contentVerificationLevel(trailer, digests.finish());
       if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Restored store failed foreign key check");
       const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
       if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
@@ -331,7 +346,7 @@ export function createBackupReplaySession(store) {
       const audit = store.verifyInvitationAudit();
       settled = true;
       db.exec("PRAGMA foreign_keys=ON");
-      return { verified: true, trailer: trailer ? "verified" : "absent", events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };
     } catch (error) {
       abort();
       throw error;
@@ -437,13 +452,14 @@ export async function operatorRestoreResponse(request, token, store) {
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
-    if (/watermark does not match|torn|foreign key check/.test(message))
+    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
   }
   return jsonResponse(200, {
     ok: true,
     verified: result.verified,
+    contentVerification: result.contentVerification,
     events: result.events,
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
@@ -539,6 +555,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     return jsonResponse(200, {
       ok: true,
       verified: result.verified,
+      contentVerification: result.contentVerification,
       events: result.events,
       tables: result.tables,
       backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
@@ -553,7 +570,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     const message = error?.message ?? String(error);
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
-    if (/watermark does not match|torn|foreign key check|Backup (part|does not match)/.test(message))
+    if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
   }

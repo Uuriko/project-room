@@ -208,10 +208,10 @@ const gr1PublicPath = pathname => {
   if (!pathname.startsWith("/room/")) return null;
   const rest = pathname.slice("/room".length);
   if (rest === "/receipts" || rest === "/sitemap.xml") return rest;
-  if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})(?:\.json)?$/.test(rest)) return rest;
+  if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
-const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})\.json$/;
+const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})\.json$/;
 const isPublicReceiptsJson = pathname => pathname === "/api/public/receipts"
   || pathname === "/room/api/public/receipts"
   || PUBLIC_RECEIPT_JSON.test(pathname)
@@ -1970,7 +1970,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const gr2Alias = gr2PublicPath(url.pathname);
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
-      const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}))(\.json)?$/.exec(url.pathname);
+      const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
@@ -4119,7 +4119,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
         const snapshotView = params.has("view") ? "work" : "full";
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1");
+        const auditHeader = req.headers["x-project-room-audit-view"];
+        if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full");
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
