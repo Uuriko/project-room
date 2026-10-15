@@ -88,3 +88,34 @@ test("the stamp does not depend on function source text", () => {
   const stampFn = source.slice(source.indexOf("function roomSchemaStamp()"), source.indexOf("return hash.digest", source.indexOf("function roomSchemaStamp()")));
   assert.equal(/\.toString\(\)/.test(stampFn), false);
 });
+
+// Warm-wake stamp coverage for the account-session slot columns (CX4, #3500).
+// A deferred-integrity warm wake whose stored stamp matches skips the whole
+// schema pass. CX4 added login_method_kind/login_method_ref only through a
+// migration-tail ALTER that no hashed constant covers, so a room stamped by
+// the pre-CX4 deploy skips the pass on the next wake and every password,
+// magic-link and OAuth sign-in dies writing the session slot
+// ("no such column: login_method_kind", prod 0584dc9e, 2026-10-15).
+// roomSchemaStamp() as written by the CX4 deploy 0584dc9e3 (prod, deploy of
+// 2026-10-15T01:38Z), identical to the pre-CX4 9bb81c609 stamp.
+const PRE_CX4_STAMP = "714cefdbdc9fd585d48465360fc40924ea50202c6b3952e440fd4554ea4a6a3c";
+const SLOT_COLUMNS = ["login_method_kind", "login_method_ref"];
+
+test("a room stamped by the pre-CX4 deploy converges account-session slot columns on a warm wake", () => {
+  const dir = mkdtempSync(join(tmpdir(), "slot-stamp-"));
+  try {
+    const filename = join(dir, "room.sqlite");
+    const first = new RoomStore(filename, { now: () => NOW });
+    for (const column of SLOT_COLUMNS) first.db.exec(`ALTER TABLE account_session_slots DROP COLUMN ${column}`);
+    first.db.prepare("UPDATE room_schema_stamp SET stamp=? WHERE singleton=1").run(PRE_CX4_STAMP);
+    first.close();
+
+    const woken = new RoomStore(filename, { now: () => NOW, integrity: "deferred" });
+    try {
+      const present = woken.db.prepare("SELECT name FROM pragma_table_info('account_session_slots')").all().map((row) => row.name);
+      for (const column of SLOT_COLUMNS) assert.ok(present.includes(column), `${column} missing after warm wake`);
+      // The session-slot write that 500s on prod must succeed.
+      woken.db.prepare("UPDATE account_session_slots SET login_method_kind=?, login_method_ref=? WHERE account_id=?").run("password", "m1", "acc-x");
+    } finally { woken.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
