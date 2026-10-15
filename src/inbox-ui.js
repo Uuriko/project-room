@@ -228,7 +228,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
         return section;
       }));
     }
-    if (rows.length && !visible.length) text("#inbox-status", "No messages match these filters."); else if (rows.length && $("#inbox-status").textContent === "No messages match these filters.") text("#inbox-status", "");
+    if (rows.length && !visible.length) text("#inbox-status", "No messages match these filters. Change the filters to see more messages."); else if (rows.length && $("#inbox-status").textContent === "No messages match these filters. Change the filters to see more messages.") text("#inbox-status", "");
     const needing = rows.filter(source => source.needsYou).length;
     text("#inbox-attention-count", needing ? `(${needing} need you)` : "");
     // Paged list: a "Show more" button appears while the server has another
@@ -554,7 +554,7 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       const result = await api.list(); if (!owns() || turn !== epoch || navigation !== navigationEpoch || !active) return;
       rows = result.sources; nextCursor = result.nextCursor ?? null; searchQuery = null;
       const clear = $("#inbox-search-clear"); if (clear) clear.hidden = true;
-      renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters.") : "No messages yet.");
+      renderFilters(); renderList(); text("#inbox-status", rows.length ? (visibleRows().length ? "" : "No messages match these filters. Change the filters to see more messages.") : "No messages yet.");
       $("#inbox-empty").hidden = rows.length > 0;
       if (selected && drafts.has(selected)) { render(); loadResults(selected); return; }
       // Refreshing imported copies must preserve the user's All messages view.
@@ -563,7 +563,9 @@ export function installInbox({ account, room, getRoom, onShared, onOpenWork, onA
       if (saved && rows.some(r => r.id === saved.sourceId && r.revision === saved.sourceRevision))
         positions.set(saved.sourceId, { sourceRevision: saved.sourceRevision, reader: saved.reader, page: saved.page });
       if (rows.length) await open(rows.find(r => r.id === pending?.sourceId)?.id ?? rows.find(r => r.id === saved?.sourceId)?.id ?? rows[0].id);
-    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) text("#inbox-status", errorText(error)); }
+      // A failed load is not an empty inbox: hide the empty note so the error
+      // whisper never sits under a claim that we know there is nothing here.
+    } catch (error) { if (owns() && turn === epoch && navigation === navigationEpoch && active) { text("#inbox-status", errorText(error)); $("#inbox-empty").hidden = true; } }
   }
   async function open(sourceId) {
     if (!owns()) return;

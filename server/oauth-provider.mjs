@@ -297,11 +297,19 @@ export function createOAuthProvider({ clients, codes, accessTokens, refreshToken
     if (isExpired(record, now)) { refreshStore.delete(record.tokenHash); fail("invalid_request", "refresh token expired"); }
     if (isAccountActive && !isAccountActive(record.userId)) fail("invalid_grant", "account is no longer active");
     check(record.clientId === clientId, "client_id mismatch");
-    record.revoked = true; // rotation: old refresh token is single-use
+    // Issue the replacement pair BEFORE revoking the old token (#2944).
+    // issueTokenPair can still throw (validateScopes, or
+    // normalizeSessionMeta for a non-object session); revoking first would
+    // persist immediately on the SQLite store (and by reference on Map
+    // stores), consuming the old token with no replacement issued. Issuing
+    // first is safe: those throws happen before issueTokenPair writes any
+    // new record, and this function is synchronous, so nothing can observe
+    // both refresh tokens live in between.
     const next = issueTokenPair({
       clientId: record.clientId, userId: record.userId,
       scopes: [...record.scopes], familyId: record.familyId, session,
     });
+    record.revoked = true; // rotation: old refresh token is single-use
     record.rotatedBy = sha256(next.refreshToken);
     return next;
   };

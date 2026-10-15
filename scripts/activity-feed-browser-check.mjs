@@ -114,8 +114,12 @@ for (const mobile of [false, true]) {
     await capture("unread");
 
     // Scrolling to the bottom advances the horizon (debounced): the divider
-    // clears because everything in view now counts as read. Synthetic scroll
-    // events cover viewports where the list has no scrollable overflow.
+    // clears because everything in view now counts as read. Only a reader's
+    // scroll counts, so a real wheel comes first; synthetic scroll events then
+    // cover viewports where the list has no scrollable overflow.
+    const listBox = await page.locator("#message-list").boundingBox();
+    await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + Math.min(listBox.height, page.viewportSize().height - listBox.y) / 2);
+    await page.mouse.wheel(0, 100000);
     await page.evaluate(() => {
       const list = document.querySelector("#message-list");
       if (list) { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event("scroll")); }
@@ -173,17 +177,22 @@ for (const mobile of [false, true]) {
     await page.keyboard.press("u");
     await page.locator('.chat-divider.unread', { hasText: "New messages" }).first().waitFor({ state: "visible" });
 
-    // The room-actions palette lists Activity and Later entries (desktop:
-    // the palette button is hidden on small screens).
+    // The room-actions palette lists Activity (desktop: the palette button is
+    // hidden on small screens). Since #1319 the palette's Activity entry opens
+    // Updates on its "All activity" filter (updates-ui.js PALETTE); `g a` and
+    // the topbar button still open the Activity dialog checked above.
     if (!mobile) {
       await clickChrome(page, "#room-actions-open");
       const actionsDialog = page.locator("#room-actions-dialog");
       await actionsDialog.waitFor({ state: "visible" });
       await page.locator("#room-actions-query").fill("activity");
       await page.waitForFunction(() => [...document.querySelectorAll("#room-actions-list [data-room-action]")].some(el => el.textContent.toLowerCase().includes("activity")));
-      await page.locator("#room-actions-list [data-room-action]").first().click();
-      await dialog.waitFor({ state: "visible" });
-      await page.keyboard.press("Escape");
+      await page.locator('#room-actions-list [data-room-action="activity"]').click();
+      const updatesDialog = page.locator("#updates-dialog");
+      await updatesDialog.waitFor({ state: "visible" });
+      await page.locator('[data-update-filter="all"][aria-selected="true"]').waitFor();
+      await page.locator("#updates-close").click();
+      await updatesDialog.waitFor({ state: "hidden" });
     }
 
     assert.deepEqual(errors, [], "no page errors");

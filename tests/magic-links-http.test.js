@@ -225,3 +225,34 @@ test("magic email preserves invitation context and refuses unsafe targets before
   assert.equal(sent[0].returnTo, returnTo);
   assert.equal((await consumeCode(origin, slot, "target@example.com", sent[0].code)).status, 201, "valid continuation keeps real code redemption intact");
 });
+
+test("signin-options publicly advertises mail configuration for the logged-out wall (#3341)", async t => {
+  // Configured memory mailer (startServer default): mail reads true, and
+  // no account session or slot is needed to learn it.
+  const configured = await startServer(t);
+  const res = await fetch(`${configured.origin}/api/auth/signin-options`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.providers.mail.configured, true);
+  for (const provider of ["github", "google", "passkey", "mail"]) {
+    assert.equal(typeof body.providers[provider].configured, "boolean", `${provider} advertises a boolean`);
+  }
+  assert.ok(!("methods" in body) && !("emailVerification" in body), "no account-shaped fields leak into the public feed");
+  // Wrong method is a 405, like /api/auth/methods.
+  const postRes = await fetch(`${configured.origin}/api/auth/signin-options`, { method: "POST" });
+  assert.equal(postRes.status, 405);
+});
+
+test("signin-options reports mail unconfigured on a stock deployment (#3341)", async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+  });
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/auth/signin-options`);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).providers.mail.configured, false);
+});

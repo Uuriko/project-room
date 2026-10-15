@@ -15,7 +15,7 @@ import {
   copilotMcpConfigPathFor,
 } from "../scripts/room-mcp-init.mjs";
 
-const URL = "https://www.getdasha.com/room/mcp";
+const URL = "https://room.trydemigod.com/mcp";
 const failRun = () => ({ status: 1 });
 const noCmd = () => { throw new Error("no such command"); };
 const noExist = () => false;

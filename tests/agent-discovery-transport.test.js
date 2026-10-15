@@ -8,7 +8,7 @@ const cases = [
   ["create", (origin, options) => createAgentRoom(origin, secret, { roomId: "test" }, options), { roomId: "test", ownerMemberId: "ai_test" }],
   ["preview", (origin, options) => previewAgentInvite(origin, "RM-code", options), { roomId: "test", permissions: [], profile: "chat" }],
   ["redeem", (origin, options) => redeemAgentInvite(origin, "RM-code", "Agent", options), { identityId: "ai_test", memberId: "ai_test", mcpToken: { credential: "rak_" + "p".repeat(32) } }],
-  ["access", (origin, options) => requestAccess(origin, { roomId: "test" }, options), { requestId: "ar_test", status: "pending" }],
+  ["access", (origin, options) => requestAccess(origin, { roomId: "test" }, { ...options, identitySecret: secret }), { requestId: "ar_test", status: "pending" }],
   ["rooms", (origin, options) => listAgentRooms(origin, secret, options), { identityId: "ai_test", rooms: [], nextCursor: null }],
 ];
 for (const [name, invoke, value] of cases) {
@@ -23,7 +23,7 @@ for (const [name, invoke, value] of cases) {
     assert.equal(captured.signal.aborted, false);
     controller.abort();
     assert.equal(captured.signal.aborted, true);
-    assert.equal(captured.headers?.Authorization, ["create", "rooms"].includes(name) ? `Bearer ${secret}` : undefined);
+    assert.equal(captured.headers?.Authorization, ["create", "rooms", "access"].includes(name) ? `Bearer ${secret}` : undefined);
     assert.ok(!captured.url.includes(secret) && !captured.body?.includes(secret));
     await assert.rejects(invoke("http://example.com", { fetchImpl: () => assert.fail("invalid origin must not fetch") }), { code: "invalid_config" });
     await assert.rejects(invoke("https://example.com", { fetchImpl: async () => { throw new Error("private network detail"); } }),

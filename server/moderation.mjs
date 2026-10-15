@@ -98,7 +98,7 @@ export class Moderation {
       if (!reason) fail(422, "invalid_report", "Say briefly why you are reporting this message");
       if (reason.length > reportLimits.reasonLength || /[\p{Cc}]/u.test(reason.replace(/[\n\t]/g, ""))) fail(422, "invalid_report", `Keep the reason to ${reportLimits.reasonLength} characters of plain text`);
       const room = this.store.room(roomId);
-      const message = room.state.messages.find(m => m.id === request.messageId);
+      const message = room.state.messages.find(m => m.id === request.messageId) ?? this.store.archivedMessage(roomId, request.messageId);
       if (!message) fail(404, "message_not_found", "That message is not in this room");
       // A reporter can only report what they can read: a DM between two other
       // members (or history before a since_join reporter's join) answers
@@ -132,7 +132,7 @@ export class Moderation {
       // only when the owner is one of its two parties (and in their history).
       const ownerFloor = summaryHistoryFloor(this.store, roomId, auth.member.id);
       const reports = this.db.prepare("SELECT * FROM message_reports WHERE room_id=? ORDER BY created_at DESC, report_id").all(roomId).map(row => {
-        const message = messages.get(row.message_id);
+        const message = messages.get(row.message_id) ?? this.store.archivedMessage(roomId, row.message_id);
         return {
           ...receipt(row), reporterId: row.reporter_id, authorId: row.author_id,
           message: message ? {

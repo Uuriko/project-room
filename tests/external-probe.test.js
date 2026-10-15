@@ -10,7 +10,10 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { wireNodeJobs } from "../server/jobs.mjs";
 import worker from "../cloudflare/external-probe-worker.mjs";
+import { CRON_JOBS, jobHealthView, jobHealthResponse, jobHealthUnavailable } from "../cloudflare/job-heartbeat.mjs";
+import { runExternalProbe } from "../cloudflare/external-probe.mjs";
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -65,6 +68,12 @@ async function opsRoom(t) {
   const directory = mkdtempSync(join(tmpdir(), "external-probe-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom("ops"));
+  // A bare room server has no wired scheduler, so /api/health/jobs serves
+  // no job rows and the probe's jobs check would (correctly) fail
+  // jobs_missing. Wire one and run a real tick so the healthy room reports
+  // healthy jobs.
+  const scheduler = wireNodeJobs(store, { env: {}, tickMs: 0 });
+  await scheduler.runOnce();
   const ownerKey = store.issueAccessKey("ops", "owner");
   const invite = store.invites.create(ownerKey, "ops", { profile: "chat" });
   const server = createRoomServer({ store });
@@ -109,7 +118,7 @@ test("a healthy room passes ready, anonymous tools/list, and llms.txt without a 
   const result = await run({ PROBE_ORIGIN: room.origin, PROBE_STATE: memoryKv() });
   assert.equal(result.ok, true);
   assert.equal(result.error, null);
-  assert.deepEqual(result.checks.map(check => check.id), ["ready", "mcp", "llms"]);
+  assert.deepEqual(result.checks.map(check => check.id), ["ready", "mcp", "llms", "jobs"]);
   assert.ok(result.checks.every(check => check.ok), JSON.stringify(result.checks));
   assert.deepEqual(result.alerts, []);
   const mcp = calls.filter(call => call.url === `${room.origin}/mcp`);
@@ -348,10 +357,168 @@ test("a streak that cannot be saved does not notify", async t => {
   assert.deepEqual(hooks, []);
 });
 
+test("ops-room alert is prefixed with /room on a getdasha door origin, and not on a service origin", async () => {
+  // Regression for #2863: ROOM_AGENT_ORIGIN=https://www.getdasha.com is the
+  // documented door form (no /room path). On that host /api/* is Webflow, so
+  // the room command must go to /room/api/rooms/<id>/commands or it is lost.
+  for (const [doorOrigin, expected] of [
+    ["https://www.getdasha.com", "https://www.getdasha.com/room/api/rooms/ops/commands"],
+    ["https://getdasha.com", "https://getdasha.com/room/api/rooms/ops/commands"],
+    ["https://room.trydemigod.com", "https://room.trydemigod.com/api/rooms/ops/commands"]
+  ]) {
+    const posted = [];
+    const fetchImpl = async input => {
+      const url = String(input instanceof URL ? input.href : input);
+      if (url.includes("/rooms/ops/commands")) {
+        posted.push(url);
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ status: "unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    };
+    const env = {
+      PROBE_ORIGIN: "https://probe.example",
+      PROBE_STATE: memoryKv(),
+      ROOM_AGENT_ORIGIN: doorOrigin,
+      ROOM_AGENT_ROOM: "ops",
+      ROOM_AGENT_TOKEN: "probe-test-token"
+    };
+    const first = await runExternalProbe(env, fetchImpl);
+    assert.equal(first.consecutiveFailures, 1);
+    assert.deepEqual(posted, []);
+    const second = await runExternalProbe(env, fetchImpl);
+    assert.equal(second.consecutiveFailures, 2);
+    assert.deepEqual(posted, [expected], `room alert URL for ${doorOrigin}`);
+    assert.equal(second.alerts.find(alert => alert.destination === "room")?.ok, true);
+  }
+});
+
 test("fetch does not run the probe", async t => {
   const calls = watchFetch(t);
   const response = await worker.fetch(new Request("https://probe.invalid/"));
   assert.equal(response.status, 404);
   assert.match(await response.text(), /schedule/);
   assert.deepEqual(calls, []);
+});
+
+// The jobs check: /api/health/jobs is the only outside view of the cron
+// heartbeats. A failing job, a stale job, and a healthy board are three
+// different signals and must not collapse into one "jobs failed".
+function jobsFetch(jobsPayload) {
+  return async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/api/ready")) return new Response(JSON.stringify({ status: "ready" }), { status: 200, headers: { "content-type": "application/json" } });
+    if (url.endsWith("/mcp")) return new Response(JSON.stringify({ jsonrpc: "2.0", result: { tools: [{ name: "room_status" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+    if (url.endsWith("/llms.txt")) return new Response("# Uuriko Project Room\n", { status: 200, headers: { "content-type": "text/plain" } });
+    if (url.endsWith("/api/health/jobs")) return new Response(JSON.stringify(jobsPayload), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
+  };
+}
+
+const HEALTHY_JOBS = { schema: "room.job-health/1", status: "ok", jobs: [
+  { name: "integrity", status: "ok", stale: false, consecutiveFailures: 0 },
+  { name: "claim-prs", status: "ok", stale: false, consecutiveFailures: 0 },
+  { name: "gmail-sync", status: "disabled", stale: false, consecutiveFailures: 0, enabled: false }
+] };
+
+test("jobs check passes a healthy board and ignores disabled jobs", async () => {
+  const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, jobsFetch(HEALTHY_JOBS));
+  assert.equal(result.ok, true, JSON.stringify(result.checks));
+  assert.equal(result.checks.find(check => check.id === "jobs").ok, true);
+});
+
+test("jobs check distinguishes a failing job, naming it and its public error code", async () => {
+  const payload = { schema: "room.job-health/1", status: "degraded", jobs: [
+    { name: "integrity", status: "failing", stale: false, consecutiveFailures: 57, lastErrorCode: "messages_parity_failed" },
+    { name: "claim-prs", status: "ok", stale: false, consecutiveFailures: 0 }
+  ] };
+  const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, jobsFetch(payload));
+  assert.equal(result.ok, false);
+  const jobs = result.checks.find(check => check.id === "jobs");
+  assert.equal(jobs.ok, false);
+  assert.equal(jobs.reason, "job_failing");
+  assert.match(jobs.detail, /integrity \(messages_parity_failed\)/);
+  // No free-text error or secret material rides along: name + code only.
+  assert.equal(JSON.stringify(result.checks).match(/token|secret|Bearer/i), null);
+});
+
+test("jobs check distinguishes staleness from failure", async () => {
+  const payload = { schema: "room.job-health/1", status: "ok", jobs: [
+    { name: "room-backup", status: "ok", stale: true, consecutiveFailures: 0 },
+    { name: "integrity", status: "ok", stale: false, consecutiveFailures: 0 }
+  ] };
+  const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, jobsFetch(payload));
+  assert.equal(result.ok, false);
+  const jobs = result.checks.find(check => check.id === "jobs");
+  assert.equal(jobs.reason, "job_stale");
+  assert.match(jobs.detail, /room-backup/);
+});
+
+test("jobs check fails closed when the health view carries no job rows", async () => {
+  const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() },
+    jobsFetch({ schema: "room.job-health/1", status: "ok" }));
+  assert.equal(result.ok, false);
+  assert.equal(result.checks.find(check => check.id === "jobs").reason, "jobs_missing");
+});
+
+test("a jobs-only outage alerts after two runs and recovers with the board", async () => {
+  const hooks = [];
+  const failing = { schema: "room.job-health/1", status: "degraded", jobs: [
+    { name: "claim-prs", status: "failing", stale: false, consecutiveFailures: 121, lastErrorCode: "claim_pr_sync_failed" }
+  ] };
+  let payload = failing;
+  const fetchImpl = async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { return new Response(null, { status: 204 }); }
+    return jobsFetch(payload)(input);
+  };
+  const env = {
+    PROBE_ORIGIN: "https://probe.example",
+    PROBE_STATE: memoryKv(),
+    PROBE_ALERT_WEBHOOK_URL: "https://alerts.example/hook"
+  };
+  const first = await runExternalProbe(env, fetchImpl);
+  assert.equal(first.ok, false);
+  assert.deepEqual(first.alerts, []);
+  const second = await runExternalProbe(env, async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { hooks.push("outage"); return new Response(null, { status: 204 }); }
+    return jobsFetch(payload)(input);
+  });
+  assert.equal(second.consecutiveFailures, 2);
+  assert.equal(second.alerts.find(alert => alert.destination === "webhook")?.kind, "outage");
+  payload = HEALTHY_JOBS;
+  const recovered = await runExternalProbe(env, async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { hooks.push("recovery"); return new Response(null, { status: 204 }); }
+    return jobsFetch(payload)(input);
+  });
+  assert.equal(recovered.ok, true);
+  assert.deepEqual(hooks, ["outage", "recovery"]);
+});
+
+
+test("jobs diagnostics consume the real Worker health response, including 503", async () => {
+  const now = Date.now();
+  const healthy = Object.fromEntries(CRON_JOBS.map(job => [job.name, { lastRunAt: now, lastSuccessAt: now, consecutiveFailures: 0 }]));
+  const name = CRON_JOBS[0].name;
+  const probe = async response => {
+    const fallback = jobsFetch(HEALTHY_JOBS);
+    const result = await runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: memoryKv() }, input =>
+      String(input).endsWith("/api/health/jobs") ? response : fallback(input));
+    assert.doesNotMatch(JSON.stringify(result.checks), /private-error-secret/);
+    return result.checks.find(check => check.id === "jobs");
+  };
+  assert.equal((await probe(jobHealthResponse(jobHealthView(healthy, now)))).ok, true);
+  const stale = structuredClone(healthy); stale[name].lastSuccessAt = 0;
+  const staleCheck = await probe(jobHealthResponse(jobHealthView(stale, now)));
+  assert.equal(staleCheck.status, 503); assert.equal(staleCheck.reason, "job_stale"); assert.equal(staleCheck.detail, name);
+  const failing = structuredClone(healthy); failing[name].consecutiveFailures = 1; failing[name].lastError = "private-error-secret";
+  const failingCheck = await probe(jobHealthResponse(jobHealthView(failing, now)));
+  assert.equal(failingCheck.status, 503); assert.equal(failingCheck.reason, "job_failing"); assert.equal(failingCheck.detail, `${name} (unclassified)`);
+  for (const response of [jobHealthUnavailable(), new Response("private-error-secret", { status: 503 }),
+    new Response(JSON.stringify({ ...HEALTHY_JOBS, schema: "unknown" }), { status: 503 }),
+    new Response(JSON.stringify(HEALTHY_JOBS), { status: 503 })]) {
+    const check = await probe(response);
+    assert.equal(check.ok, false); assert.equal(check.status, 503); assert.equal(check.reason, "http_status"); assert.equal(check.detail, null);
+  }
 });

@@ -391,28 +391,35 @@ function countMergedPrs(repo, sinceDate) {
 }
 
 /**
- * Room message events for the window. Walks the after-cursor, limit=100 per
- * page (the API's cap). Pure read: never touches the watermark — the caller
- * commits it via watermarkDecision() only after a successful post.
+ * Walk room event pages via fetchPage(after) → { events, next, hasMore }.
+ * Exported for tests; fetchRoomEvents supplies the real page fetcher.
+ *
+ * The events API scans up to `limit` log rows per page but returns only
+ * the viewer-visible subset (store eventsAfter computes `next` from the
+ * SCANNED rows, then filters). So a page can be empty — or end well past
+ * its last visible event — while more of the log remains. The walk must
+ * therefore follow the response's `next` cursor and continue while
+ * hasMore is true: breaking on an empty visible page, or advancing by
+ * the last visible sequence, silently and permanently drops every
+ * signal past the filtered rows (the watermark then commits past them).
+ * `head` is the scanned cursor, not the last visible sequence, for the
+ * same reason. A page that reports hasMore without advancing the
+ * cursor violates the contract; fail closed instead of re-fetching the
+ * same page until the cap.
  * Returns { events, head, truncated }.
  */
-async function fetchRoomEvents(room, sinceMs, startAfter) {
-  const token = roomToken();
+export async function walkRoomEvents(fetchPage, sinceMs, startAfter) {
   let after = Number(startAfter) || 0;
   const events = [];
   let head = after;
   let truncated = false;
   for (let page = 0; page < EVENT_PAGE_LIMIT; page++) {
-    const qs = `limit=100${after ? `&after=${after}` : ""}`;
-    const data = await httpsJson({
-      path: `/api/rooms/${room}/events?${qs}`,
-      token,
-    });
+    const data = await fetchPage(after);
     const evs = data.events ?? [];
-    if (!evs.length) break;
+    let visibleHead = after;
     for (const e of evs) {
       const seq = Number(e.sequence) || 0;
-      if (seq > head) head = seq;
+      if (seq > visibleHead) visibleHead = seq;
       const ev = e.event ?? {};
       if (ev.type !== "message.posted") continue;
       const at = Date.parse(ev.at ?? "");
@@ -420,11 +427,38 @@ async function fetchRoomEvents(room, sinceMs, startAfter) {
       const body = ev.data?.body;
       if (body) events.push({ sequence: seq, body: String(body) });
     }
-    after = head;
+    // Advance by what was scanned (the API's `next`); fall back to the
+    // last visible sequence only when a page carries no cursor.
+    const scanned = data.next == null ? NaN : Number(data.next);
+    head = Math.max(head, Number.isFinite(scanned) ? scanned : visibleHead);
     if (!data.hasMore) break;
+    if (!(head > after)) {
+      throw new Error(
+        `room events cursor did not advance (after=${after}, next=${data.next})`
+      );
+    }
+    after = head;
     if (page === EVENT_PAGE_LIMIT - 1) truncated = true;
   }
   return { events, head, truncated };
+}
+
+/**
+ * Room message events for the window. Walks the after-cursor, limit=100 per
+ * page (the API's cap). Pure read: never touches the watermark — the caller
+ * commits it via watermarkDecision() only after a successful post.
+ * Returns { events, head, truncated }.
+ */
+async function fetchRoomEvents(room, sinceMs, startAfter) {
+  const token = roomToken();
+  return walkRoomEvents(
+    (after) => {
+      const qs = `limit=100${after ? `&after=${after}` : ""}`;
+      return httpsJson({ path: `/api/rooms/${room}/events?${qs}`, token });
+    },
+    sinceMs,
+    startAfter
+  );
 }
 
 /** Post one message to the room as the owner identity. */

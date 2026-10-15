@@ -306,6 +306,11 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
     VALUES('commons','mention','agent','Recovery agent','recovery-reported','','owner',?,NULL)`)
     .run(f.now());
+  // Seed one pending fan-out failure journal row (#3261) so the capture
+  // comparison and cold-start coverage include activity_fanout_failures.
+  f.store.db.prepare(`INSERT INTO activity_fanout_failures(room_id,event_id,command_type,actor_id,payload,error,created_at,recovered_at)
+    VALUES('commons','recovery-reported','message.posted','agent','{}','synthetic fan-out failure',?,NULL)`)
+    .run(f.now());
   f.store.db.prepare(`INSERT INTO read_horizons(room_id,member_id,thread_id,last_read_message_id,updated_at)
     VALUES('commons','owner','','recovery-reported',?)`)
     .run(f.now());

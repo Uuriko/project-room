@@ -36,10 +36,11 @@
    enlarged text (same overflow class .key-field already guards). */
 .join-secret-row input { flex: 1; min-width: 0; font-family: monospace; }
 .join-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
-/* M-01 (mobile onboarding): the self-serve door on the signed-in Rooms panel
-   must meet the coarse-pointer touch floor. The sibling .account-room-create
-   summary already had it; this one rendered about one line tall. */
-#account-request-access summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+/* M-01 (mobile onboarding): the request-access door's primary control must
+   meet the coarse-pointer touch floor. The door moved from the signed-in
+   Rooms panel disclosure to the join page (issue 3293 consolidation); the
+   floor follows the door — a bare .button renders ~34px tall. */
+#join-request-submit { min-height: 44px; }
 h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-weight: 650; opacity: .85; }
 /* BU-14: claim-card headings carry tabindex="-1" as the programmatic focus
    target after board re-renders (src/board-ui.js focus stick) and for j/k

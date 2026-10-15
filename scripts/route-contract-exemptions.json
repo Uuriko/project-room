@@ -1,0 +1,863 @@
+{
+  "note": "Route contract classification of record (W2). Every served (method, template) is either in docs/openapi.yaml, in the served spec (server/discoverability.mjs), or exempted here with a class and a reason. tests/route-contract-coverage.test.js enforces it: new routes fail until documented or classified, and stale entries fail too. Initially derived mechanically by scripts/route-contract-census.mjs (W2 census, 2026-10-13); maintained by hand afterwards, like scripts/openapi-served-exclusions.json. HEAD inherits the classification of the same template's GET (repo convention for public reads).",
+  "templates": [
+    {
+      "template": "/.well-known/agent-plugin-manifest.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/.well-known/ai-catalog.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/.well-known/ard.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/.well-known/feedback",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/.well-known/jwks.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/.well-known/oauth-authorization-server",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/.well-known/security.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/AGENTS.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/CLAUDE.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/agent-card.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/agent.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/agents",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/agents.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/agents.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/api/auth/github/callback",
+      "class": "human-auth",
+      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
+    },
+    {
+      "template": "/api/auth/github/start",
+      "class": "human-auth",
+      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
+    },
+    {
+      "template": "/api/auth/google/callback",
+      "class": "human-auth",
+      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
+    },
+    {
+      "template": "/api/auth/google/start",
+      "class": "human-auth",
+      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
+    },
+    {
+      "template": "/apps.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/apps.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/favicon.ico",
+      "class": "web-asset",
+      "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
+    },
+    {
+      "template": "/healthz",
+      "class": "ops",
+      "reason": "Health alias twin; the operation is documented as /api/health (+ /api/healthz) in docs/openapi.yaml (deploy/agent-discovery.mjs HEALTH_ALIAS_PATHS)."
+    },
+    {
+      "template": "/join",
+      "class": "edge-door",
+      "reason": "One-URL machine door; the documented operation is POST /api/join (same handler, also declared outside the /api inventory by design in the boundary suite)."
+    },
+    {
+      "template": "/join.html",
+      "class": "web-ui",
+      "reason": "Human web page (app shell, join page, or public face); not an API contract."
+    },
+    {
+      "template": "/kit.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/kit.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/kits",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/kits.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/kits.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/mcp/claude",
+      "class": "protocol",
+      "reason": "MCP door (JSON-RPC over POST, server card on GET); the tool contract is the MCP catalog (tools/list), not REST operations."
+    },
+    {
+      "template": "/mcp/codex",
+      "class": "protocol",
+      "reason": "MCP door (JSON-RPC over POST, server card on GET); the tool contract is the MCP catalog (tools/list), not REST operations."
+    },
+    {
+      "template": "/mcp/cursor",
+      "class": "protocol",
+      "reason": "MCP door (JSON-RPC over POST, server card on GET); the tool contract is the MCP catalog (tools/list), not REST operations."
+    },
+    {
+      "template": "/mcp/server-card",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/oauth/authorize",
+      "class": "protocol",
+      "reason": "OAuth 2.0 server endpoint; the contract is RFC 6749/7009 plus the /.well-known/oauth-authorization-server metadata document."
+    },
+    {
+      "template": "/oauth/revoke",
+      "class": "protocol",
+      "reason": "OAuth 2.0 server endpoint; the contract is RFC 6749/7009 plus the /.well-known/oauth-authorization-server metadata document."
+    },
+    {
+      "template": "/oauth/token",
+      "class": "protocol",
+      "reason": "OAuth 2.0 server endpoint; the contract is RFC 6749/7009 plus the /.well-known/oauth-authorization-server metadata document."
+    },
+    {
+      "template": "/p/{}",
+      "class": "web-ui",
+      "reason": "Human web page (app shell, join page, or public face); not an API contract."
+    },
+    {
+      "template": "/project-room/.well-known/agent-card.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/.well-known/agent.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/.well-known/governance.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/.well-known/jwks.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/.well-known/mcp",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/.well-known/mcp.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/SKILL.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /SKILL.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/project-room/agents.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/join.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /join.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/project-room/kits.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /kits.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/project-room/llms-full.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /llms-full.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/project-room/llms.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /llms.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/project-room/mcp/server-card",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/project-room/procedures",
+      "class": "edge-door",
+      "reason": "Door mirror of /procedures: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/project-room/skills",
+      "class": "edge-door",
+      "reason": "Door mirror of /skills: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/receipts",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/robots.txt",
+      "class": "web-asset",
+      "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
+    },
+    {
+      "template": "/room",
+      "class": "web-ui",
+      "reason": "Human web page (app shell, join page, or public face); not an API contract."
+    },
+    {
+      "template": "/room/.well-known/agent-card.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/.well-known/agent.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/.well-known/governance.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/.well-known/jwks.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/.well-known/mcp",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/.well-known/mcp.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/.well-known/security.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/AGENTS.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/CLAUDE.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/CURSOR.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /CURSOR.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/GEMINI.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /GEMINI.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/README.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /README.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/SKILL.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /SKILL.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/a2a",
+      "class": "protocol",
+      "reason": "A2A door (JSON-RPC); the contract is the agent card and the A2A protocol, not REST operations."
+    },
+    {
+      "template": "/room/agent.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/agents",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/agents.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/agents.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/api/health",
+      "class": "ops",
+      "reason": "Health alias twin; the operation is documented as /api/health (+ /api/healthz) in docs/openapi.yaml (deploy/agent-discovery.mjs HEALTH_ALIAS_PATHS)."
+    },
+    {
+      "template": "/room/api/healthz",
+      "class": "ops",
+      "reason": "Health alias twin; the operation is documented as /api/health (+ /api/healthz) in docs/openapi.yaml (deploy/agent-discovery.mjs HEALTH_ALIAS_PATHS)."
+    },
+    {
+      "template": "/room/apps",
+      "class": "edge-door",
+      "reason": "Door mirror of /apps: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/apps.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/apps.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/cursor.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /cursor.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/favicon.ico",
+      "class": "web-asset",
+      "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
+    },
+    {
+      "template": "/room/gemini.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /gemini.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/health",
+      "class": "ops",
+      "reason": "Health alias twin; the operation is documented as /api/health (+ /api/healthz) in docs/openapi.yaml (deploy/agent-discovery.mjs HEALTH_ALIAS_PATHS)."
+    },
+    {
+      "template": "/room/healthz",
+      "class": "ops",
+      "reason": "Health alias twin; the operation is documented as /api/health (+ /api/healthz) in docs/openapi.yaml (deploy/agent-discovery.mjs HEALTH_ALIAS_PATHS)."
+    },
+    {
+      "template": "/room/join",
+      "class": "edge-door",
+      "reason": "Door mirror of /join: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/join.html",
+      "class": "web-ui",
+      "reason": "Human web page (app shell, join page, or public face); not an API contract."
+    },
+    {
+      "template": "/room/join.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /join.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/kit",
+      "class": "edge-door",
+      "reason": "Door mirror of /kit: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/kit.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/kit.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/kits",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/kits.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/kits.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/kits.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /kits.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/llms",
+      "class": "edge-door",
+      "reason": "Door mirror of /llms: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/llms-full.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /llms-full.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/llms.txt",
+      "class": "edge-door",
+      "reason": "Door mirror of /llms.txt: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/mcp/claude",
+      "class": "protocol",
+      "reason": "MCP door (JSON-RPC over POST, server card on GET); the tool contract is the MCP catalog (tools/list), not REST operations."
+    },
+    {
+      "template": "/room/mcp/codex",
+      "class": "protocol",
+      "reason": "MCP door (JSON-RPC over POST, server card on GET); the tool contract is the MCP catalog (tools/list), not REST operations."
+    },
+    {
+      "template": "/room/mcp/cursor",
+      "class": "protocol",
+      "reason": "MCP door (JSON-RPC over POST, server card on GET); the tool contract is the MCP catalog (tools/list), not REST operations."
+    },
+    {
+      "template": "/room/mcp/server-card",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/openapi.json",
+      "class": "edge-door",
+      "reason": "Door mirror of /openapi.json: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/procedures",
+      "class": "edge-door",
+      "reason": "Door mirror of /procedures: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/readme.md",
+      "class": "edge-door",
+      "reason": "Door mirror of /readme.md: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/skill",
+      "class": "edge-door",
+      "reason": "Door mirror of /skill: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/skill.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/skills",
+      "class": "edge-door",
+      "reason": "Door mirror of /skills: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/tools",
+      "class": "edge-door",
+      "reason": "Door mirror of /tools: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
+    },
+    {
+      "template": "/room/tools.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/room/tools.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/security.txt",
+      "class": "web-asset",
+      "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
+    },
+    {
+      "template": "/sitemap.xml",
+      "class": "web-asset",
+      "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
+    },
+    {
+      "template": "/skill.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/templates",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/templates.json",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/tools.md",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/tools.txt",
+      "class": "discovery-doc",
+      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    }
+  ],
+  "methods": [
+    {
+      "method": "POST",
+      "template": "/api/public-work/receipts/{}",
+      "class": "extractor-artifact",
+      "reason": "Probe-verified 405 method_not_allowed (W2, 2026-10-13): public-work action routes are POST-only and reads GET/HEAD-only; this twin comes from the extractor's literal sweep in scripts/routes-inventory.mjs."
+    },
+    {
+      "method": "POST",
+      "template": "/api/public-work/receipts/{}/artifact",
+      "class": "extractor-artifact",
+      "reason": "Probe-verified 405 method_not_allowed (W2, 2026-10-13): public-work action routes are POST-only and reads GET/HEAD-only; this twin comes from the extractor's literal sweep in scripts/routes-inventory.mjs."
+    },
+    {
+      "method": "POST",
+      "template": "/api/public-work/tasks",
+      "class": "extractor-artifact",
+      "reason": "Probe-verified 405 method_not_allowed (W2, 2026-10-13): public-work action routes are POST-only and reads GET/HEAD-only; this twin comes from the extractor's literal sweep in scripts/routes-inventory.mjs."
+    },
+    {
+      "method": "POST",
+      "template": "/api/public-work/tasks/{}",
+      "class": "extractor-artifact",
+      "reason": "Probe-verified 405 method_not_allowed (W2, 2026-10-13): public-work action routes are POST-only and reads GET/HEAD-only; this twin comes from the extractor's literal sweep in scripts/routes-inventory.mjs."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/board",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/board",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/board/v2/board",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/board",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/claims",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/claims",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/claims",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/claims/{}/heartbeat",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/claims/{}/heartbeat",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/claims/{}/heartbeat",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/claims/{}/receipts",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/claims/{}/receipts",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/claims/{}/receipts",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/claims/{}/release",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/claims/{}/release",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/claims/{}/release",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/decisions",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/decisions",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/decisions",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/events",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/events",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/board/v2/events",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/events",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/findings",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/findings",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/findings",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/health",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/health",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/board/v2/health",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/health",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/mirror-map",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/mirror-map",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/mirror-map",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "DELETE",
+      "template": "/api/rooms/{}/board/v2/notes",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PATCH",
+      "template": "/api/rooms/{}/board/v2/notes",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "PUT",
+      "template": "/api/rooms/{}/board/v2/notes",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact: the board/v2 matches feed the method-agnostic room chain (server/http.mjs) and the extractor attributes the chain's full method union to every matched template. The per-template contract methods are the documented ones; auth precedes method dispatch and undeclared methods reach per-action 405s."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/files/{}",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact of the room action chain: the branch matches the template method-agnostically and the extractor attributes sibling-action methods. The documented operations on this template and its action sub-paths carry the contract; auth precedes method dispatch."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/list_land_queue",
+      "class": "action-family",
+      "reason": "Served by design: the land-queue branch (server/http.mjs landMatch) is method-agnostic and docs/openapi.yaml describes the land action family as POST/GET; the GET operation is documented and this POST reaches the same handler."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/matchmaking/decisions/{}",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact of the room action chain: the branch matches the template method-agnostically and the extractor attributes sibling-action methods. The documented operations on this template and its action sub-paths carry the contract; auth precedes method dispatch."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/public-work/receipts/{}",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact of the room action chain: the branch matches the template method-agnostically and the extractor attributes sibling-action methods. The documented operations on this template and its action sub-paths carry the contract; auth precedes method dispatch."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/public-work/results",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact of the room action chain: the branch matches the template method-agnostically and the extractor attributes sibling-action methods. The documented operations on this template and its action sub-paths carry the contract; auth precedes method dispatch."
+    },
+    {
+      "method": "POST",
+      "template": "/api/rooms/{}/updates",
+      "class": "extractor-artifact",
+      "reason": "Method-spread artifact of the room action chain: the branch matches the template method-agnostically and the extractor attributes sibling-action methods. The documented operations on this template and its action sub-paths carry the contract; auth precedes method dispatch."
+    }
+  ]
+}
