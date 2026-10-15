@@ -1,6 +1,6 @@
 // Read-only offline audit. It neither repairs data nor proves post-capture authority.
 import { createHash } from "node:crypto";
-import { EVENT_TYPES, validId } from "../src/events.js";
+import { EVENT_TYPES, validId, ownMember } from "../src/events.js";
 import { terminalWork } from "../src/workflow.js";
 import { applicationTables, lazyAdditiveTables, STORE_SCHEMA_VERSION } from "./writer-fence.mjs";
 import { auditTextResults } from "./text-results.mjs";
@@ -159,7 +159,7 @@ export function auditRecovery(store) {
       }
     }
     for (const row of reminders) {
-      const state = rooms.get(row.room_id), member = state?.members[row.member_id], work = state?.workItems[row.work_item_id];
+      const state = rooms.get(row.room_id), member = ownMember(state?.members, row.member_id), work = state?.workItems[row.work_item_id];
       const key = canonical([row.room_id, row.member_id, row.work_item_id]);
       const history = byWork.get(key), latest = history?.reduce((a, b) => a.revision > b.revision ? a : b);
       requireState(member && work && integer(row.revision) && row.revision > 0 && integer(row.due_at)

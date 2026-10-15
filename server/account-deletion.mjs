@@ -16,7 +16,7 @@
 //      order inside one transaction.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
+import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind, ownMember } from "../src/events.js";
 import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { ServiceError } from "./store.mjs";
 import {
@@ -470,7 +470,7 @@ export function planAccountDeletion(store, accountId) {
 function deactivateBoundMembers(store, accountId) {
   for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
     const state = store.room(roomId).state;
-    const member = state.members?.[memberId];
+    const member = ownMember(state.members, memberId);
     if (!member || member.active === false || isRoomArchived(state)) continue;
     if (store.roomAuthority(roomId).ownerId === memberId) continue;
     const key = store.issueAccessKey(roomId, memberId, 60000, accountId);
