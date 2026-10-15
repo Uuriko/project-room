@@ -922,6 +922,11 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
         }
+        // R274-1: a webhook subscription fans out every room the identity is
+        // linked in, so hold API keys to webhooks:manage like /api/agent-webhooks.
+        if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
@@ -942,6 +947,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
  // wildcard rule in agent-plugin-routes.mjs.
 const MCP_INBOX_SCOPE = "mcp:inbox";
 const MCP_WAKE_SCOPE = "mcp:wake";
+const MCP_WEBHOOKS_SCOPE = "webhooks:manage";
 function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
