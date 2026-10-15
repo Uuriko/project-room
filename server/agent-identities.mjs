@@ -943,7 +943,13 @@ export class AgentIdentities {
         this.db.prepare("UPDATE agent_identities SET revoked_at=? WHERE identity_id=?").run(revokedAt, identityId);
       }
       const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
-      return { identityId, displayName: identity.displayName, revoked: true, revokedAt, revokedApiKeys };
+      // R282-1: the subscription URL was chosen by the identity, so webhook
+      // subscriptions must die with the secret the same way its scoped API
+      // keys do. Otherwise room message bodies keep flowing to that holder
+      // after the leak response, and the revoked secret cannot unsubscribe.
+      const disabledWebhooks = this.store.agentPlugin?.disableWebhooksForIdentity
+        ? this.store.agentPlugin.disableWebhooksForIdentity(identityId) : 0;
+      return { identityId, displayName: identity.displayName, revoked: true, revokedAt, revokedApiKeys, disabledWebhooks };
     });
   }
 

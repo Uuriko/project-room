@@ -929,6 +929,8 @@ export class AgentPluginStore {
   // delivery in its journal. No subscription, no delivery — the heartbeat
   // queue alone carries the wake.
   deliverWakePing({ identityId, signal }) {
+    // R282-1: a revoked identity's secret is dead, so its wake must be too.
+    if (this.identityRevoked(identityId)) return Object.freeze({ deliveries: Object.freeze([]) });
     const result = this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
@@ -1039,6 +1041,36 @@ export class AgentPluginStore {
       // Inbound-delivery verification moved server-side (verifyWebhookDelivery).
       return { subscription: view };
     });
+  }
+
+  // R282-1: revoking an identity secret must stop webhook deliveries. The
+  // subscription URL was chosen by the identity, so after the leak response
+  // the room's message bodies must not keep flowing to that holder. Called
+  // from agent-identities revoke() inside its transaction: disables every
+  // enabled subscription of the identity and returns the count.
+  disableWebhooksForIdentity(identityId) {
+    return this.mutate(() => {
+      const rows = this.db.prepare(
+        "SELECT subscription_id AS subscriptionId FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
+      for (const row of rows) {
+        this.webhooks.setEnabled(row.subscriptionId, { agentId: identityId, enabled: false });
+        this.db.prepare("UPDATE agent_webhook_subs SET enabled=0 WHERE subscription_id=?").run(row.subscriptionId);
+        const sub = this.subs.get(row.subscriptionId);
+        if (sub) sub.enabled = false;
+      }
+      return rows.length;
+    });
+  }
+
+  // R282-1: whether the identity's secret is revoked. Fail-open on a store
+  // without the identities table: no identities there means nothing was
+  // revoked. Belt-and-braces beside the revoke-time disable, so a stale
+  // enabled row from an older build still fans out nothing.
+  identityRevoked(agentId) {
+    try {
+      return !!this.db.prepare(
+        "SELECT 1 FROM agent_identities WHERE identity_id=? AND revoked_at IS NOT NULL").get(agentId);
+    } catch { return false; }
   }
 
   listWebhooks(identityId) {
@@ -1218,6 +1250,10 @@ export class AgentPluginStore {
       return members?.[event?.actorId] ?? null;
     };
     for (const row of rows) {
+      // R282-1: a revoked identity's subscription must not keep pushing the
+      // room's message bodies to the URL it chose, even if the row stayed
+      // enabled from an older build.
+      if (this.identityRevoked(row.agentId)) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;
