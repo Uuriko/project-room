@@ -907,3 +907,14 @@ test("automatic pickup keeps separate failed-request notifications visible", asy
     emit: value => { observed.push(value); if (observed.length === 2) controller.abort(); } });
   assert.deepEqual(observed, ids.map(requestMessageId => ({ status: "needs_attention", requestMessageId })));
 });
+
+test("a reply refused because its channel is archived names channel_archived instead of not_confirmed", () => {
+  // #3520: posting into an archived channel is the documented 409 channel_archived.
+  const refused = replyRefusal({ status: 409, code: "channel_archived", message: "Channel is archived" }, { name: "room_reply", args: { requestId: "r1" } });
+  assert.equal(refused.type, "reply_refused");
+  assert.equal(refused.code, "channel_archived");
+  assert.equal(refused.reason, "channel_archived");
+  assert.equal(refused.outcome, "this_attempt_refused");
+  assert.doesNotMatch(refused.hint, /unknown error/i);
+  assert.match(refused.hint, /archived/i);
+});

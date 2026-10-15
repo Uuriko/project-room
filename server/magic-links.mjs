@@ -43,6 +43,39 @@ export async function attemptMailDelivery(fn, kind, warn = console.warn) {
   catch (error) { warn(`mail delivery failed (${kind}): ${describeMailFailure(error)}`); return false; }
 }
 
+// A provider refusal is permanent for this exact send: the provider rejected
+// the request itself (a recipient domain it will not serve, a suppressed
+// address) with a client-class status, so retrying the identical send can
+// never succeed. A send implementation may mark a refusal directly with
+// `recipientRefused: true` or code "mail_recipient_refused"; otherwise the
+// provider's HTTP status decides via `providerStatus` (the Resend transport
+// attaches it). NOT refusals: network errors and provider 5xx (an outage),
+// 408/429 (timeout / throttling — the send may succeed later), and 401 (the
+// operator's credential is broken, a platform-wide failure that must stay
+// loud rather than be absorbed one request at a time).
+export function isMailRecipientRefusal(error) {
+  if (!error || typeof error !== "object") return false;
+  if (error.recipientRefused === true || error.code === "mail_recipient_refused") return true;
+  const status = error.providerStatus;
+  return Number.isInteger(status) && status >= 400 && status < 500
+    && status !== 401 && status !== 408 && status !== 429;
+}
+
+// Run one auth-request mail send (magic sign-in, password reset). These
+// endpoints answer indistinguishably whether or not the address turns out
+// deliverable, so a provider refusal is logged (redacted) and absorbed —
+// the caller answers exactly as for a delivered send (#3529). Any other
+// failure rethrows, so a transient provider failure still surfaces as a
+// retryable error instead of being masked as "sent".
+export async function attemptAuthMailDelivery(fn, kind, warn = console.warn) {
+  try { await fn(); return true; }
+  catch (error) {
+    if (!isMailRecipientRefusal(error)) throw error;
+    warn(`mail delivery refused (${kind}): ${describeMailFailure(error)}`);
+    return false;
+  }
+}
+
 // createMagicLinkMailer({ send, baseUrl }) -> mailer.
 //
 // send: async ({ to, code, expiresAt, baseUrl }) => void. When omitted the

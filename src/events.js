@@ -174,6 +174,10 @@ export function roomPolicy(state) {
 // Rooms that never record the event keep no `room.trust` field, so replay of
 // older logs stays byte-identical.
 export const TRUST_OFF_CODE = "trust_off";
+// A post into an archived channel is a conflict with the archive state, not a
+// bad command: docs/openapi.yaml "Room channels (Phase 2)" documents 409
+// channel_archived. The reducer carries the code and the command surface maps it.
+export const CHANNEL_ARCHIVED_CODE = "channel_archived";
 export const trustOffMessage = targetId =>
   `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
 
@@ -1241,7 +1245,11 @@ function postMessage(state, incoming) {
   }
   const channel = state.channels[channelId];
   if (!channel) throw new Error("Unknown channel");
-  if (channel.archivedAt) throw new Error("Channel is archived");
+  if (channel.archivedAt) {
+    const error = new Error("Channel is archived");
+    error.code = CHANNEL_ARCHIVED_CODE;
+    throw error;
+  }
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
