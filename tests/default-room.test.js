@@ -187,3 +187,29 @@ test("ensure-default-room answers room:null when every membership row is inactiv
   assert.equal(body.created, false);
   assert.equal(body.room, null);
 });
+
+// R266-1 (John's Tab r268): an account with an ACTIVE non-personal room that
+// sorts before its own personal room still lands on the personal room.
+test("ensure-default-room prefers the account's personal room over an earlier active organization room", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const slot = f.store.createAccountSessionSlot();
+  const res = await post(origin, "/api/auth/password/signup",
+    { email: "defaultroom-9@example.invalid", password: password(9),
+      sessionToken: slot.token, sessionRevision: slot.session.sessionRevision });
+  assert.equal(res.status, 202);
+  const freshToken = /account_session=([^;]+)/.exec(res.headers.get("set-cookie") || "")?.[1];
+  const session = f.store.authenticateAccountSession(freshToken);
+  const creds = { cookie: `account_session=${freshToken}`, csrf: session.csrf, binding: session.sessionBinding };
+  const org = await authedPost(origin, "/api/account-rooms", creds,
+    { roomId: "a-org-room", title: "Org", purpose: "p", kind: "organization", displayName: "Owner" });
+  assert.equal(org.status, 201);
+  const own = await authedPost(origin, "/api/account-rooms", creds,
+    { roomId: "personal-zeta", title: "Zeta", purpose: "p", kind: "personal", displayName: "Owner" });
+  assert.equal(own.status, 201);
+  const pick = await authedPost(origin, "/api/account/ensure-default-room", creds);
+  assert.equal(pick.status, 200);
+  const body = await pick.json();
+  assert.equal(body.created, false);
+  assert.equal(body.room.id, "personal-zeta");
+});
