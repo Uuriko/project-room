@@ -12,6 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,7 +52,7 @@ for (const messages of [10, 510]) {
     const directory = await mkdtemp(join(tmpdir(), "restore-fk-order-"));
     let mf, seed;
     try {
-      const origin = "https://room.example.test", token = "synthetic-restore-fk-order-token";
+      const origin = "https://room.example.test", token = randomUUID();
       const config = {
         modules: true, script: bundled.outputFiles[0].text, compatibilityDate: "2026-07-30",
         compatibilityFlags: ["nodejs_compat"],
