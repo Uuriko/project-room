@@ -34,7 +34,7 @@ import { installInbox } from "./inbox-ui.js";
 import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
-import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
@@ -122,7 +122,11 @@ function consumeInvitationFragment() {
   // human share-link tokens, so without a redirect this rendered "This
   // invitation link is unavailable." before any API call — even though the
   // code is redeemable on the /join page. Flag it; the call sites navigate.
-  if (AGENT_INVITE_CODE_PATTERN.test(candidate)) return { valid: false, secret: candidate, redirect: true };
+  // normalizeAgentInviteCode tolerates what the server and /join page
+  // tolerate (case, pasted whitespace, trailing slash/query junk) and never
+  // hijacks a 43-char human token.
+  const agentCode = normalizeAgentInviteCode(candidate);
+  if (agentCode) return { valid: false, secret: agentCode, redirect: true };
   return invitationTokenPattern.test(candidate)
     ? { valid: true, secret: candidate }
     : { valid: false, secret: null };
