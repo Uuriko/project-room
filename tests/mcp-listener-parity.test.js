@@ -1,4 +1,5 @@
-// Hosted MCP wake, heartbeat, and webhook tools.
+// Exercises server/agent-listener-contract.mjs through real hosted MCP requests,
+// including transaction rollback, current authority, and lease-fenced ACK.
 // Synthetic fixtures only. Identity secrets are checked by absence in
 // responses and are never printed.
 import test from "node:test";
