@@ -13,7 +13,12 @@ function indexMessages(messages) {
   for (const message of messages ?? []) {
     if (message && typeof message.id === "string") byId.set(message.id, message);
   }
-  return byId;
+  // Archived messages are no longer in the projection. A messages array may
+  // carry an `archivedLookup` so their log events are still redacted to the
+  // current record (a withdrawn archived message must not regain its body).
+  const archived = messages?.archivedLookup;
+  if (typeof archived !== "function") return byId;
+  return { get: id => byId.get(id) ?? archived(id) };
 }
 
 function messageIdOf(event) {
@@ -34,9 +39,11 @@ function redactEvent(event, byId) {
   if (!event || typeof event !== "object" || !MESSAGE_BODY_TYPES.has(event.type)) return event;
   const data = event.data;
   if (!data || typeof data !== "object" || !Object.hasOwn(data, "body")) return event;
-  const message = byId.get(messageIdOf(event));
-  if (!message) return event;
-  const body = currentBody(message);
+  // Fail closed: the message window and the event window are trimmed
+  // independently, so an event can outlive its message entry. With no
+  // projection entry there is no current body to show; currentBody maps a
+  // missing message to the tombstone (null), never the logged text.
+  const body = currentBody(byId.get(messageIdOf(event)));
   if (data.body === body) return event;
   return { ...event, data: { ...data, body } };
 }

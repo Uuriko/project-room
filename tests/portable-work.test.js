@@ -166,7 +166,7 @@ test("independently generated participant answer imports unchanged as an unverif
   const f = fixture(t), before = f.snapshot();
   // Captured from a fresh-context Codex participant given the real exported packet.
   // Replaying this artifact tests import; it does not invoke a model on each test run.
-  const answer = readFileSync(new URL("../docs/evidence/portable-agent-2026-09-07.txt", import.meta.url), "utf8");
+  const answer = readFileSync(new URL("../archive/docs/evidence/portable-agent-2026-09-07.txt", import.meta.url), "utf8");
   const data = parseWorkReturn(answer, { roomId: "commons", workItemId: "test-handoff" });
   f.send(T.MESSAGE_POSTED, data);
   const after = f.snapshot();

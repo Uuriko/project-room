@@ -27,8 +27,20 @@ export function createHealthProbe() {
       const joined = await race(inflight, timeoutMs);
       if (joined.timeout) track(inflight);
       if (joined.timeout || joined.error) return onUnready(joined.timeout ? "timeout" : "error", timing());
-      try { return onSnapshot(await snapshotResponse(await start()), timing()); }
-      catch { return onUnready("error", timing()); }
+      // The joiner's own start() is per-request, but it is not exempt from
+      // the budget: bound it by the time left after waiting for the gate,
+      // not a fresh timeoutMs, so the caller still answers within its
+      // overall timeout. On timeout keep its I/O alive via waitUntil,
+      // exactly as the leader branch does for its task.
+      const remainingMs = Math.max(0, timeoutMs - (performance.now() - started));
+      const own = (async () => snapshotResponse(await start()))();
+      const racedOwn = await race(own, remainingMs);
+      if (racedOwn.timeout) {
+        track(own);
+        return onUnready("timeout", timing());
+      }
+      if (racedOwn.error) return onUnready("error", timing());
+      return onSnapshot(racedOwn, timing());
     }
     let settle;
     const gate = new Promise(resolve => { settle = resolve; });
@@ -74,8 +86,12 @@ async function snapshotResponse(response) {
   };
 }
 
-export function workerLivenessResponse(request, { mode, deployment }) {
-  const body = { status: "ok", mode, ...(deployment ? { deployment } : {}) };
+export function workerLivenessResponse(request, { mode, deployment, emailVerification }) {
+  // emailVerification is part of the documented /api/health contract
+  // (docs/openapi.yaml): the Node handler reports it so a deploy that lost
+  // its mail secret cannot silently relax every email gate. #3272: the Worker
+  // liveness answer must carry the same field, derived from the same env.
+  const body = { status: "ok", mode, ...(deployment ? { deployment } : {}), ...(emailVerification ? { emailVerification } : {}) };
   return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
     status: 200,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }

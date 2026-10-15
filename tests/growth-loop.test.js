@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { ACTIVATION_DWELL_MS, GROWTH_FUNDING, GROWTH_ROOM_ORIGIN, PAYOUT_DAILY_CAP, PAYOUT_WINDOW_MS, noteIdentityMint } from "../server/growth-loop.mjs";
-import { llmsTxt, agentsJson } from "../deploy/agent-discovery.mjs";
+import { llmsTxt, agentsJson } from "../server/agent-discovery.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -186,6 +186,28 @@ test("an inviter's own agents do not earn credits, and other payouts stop at the
   advance(ACTIVATION_DWELL_MS);
   const cappedBoard = store.referrals.board(ownerKey, "commons");
   assert.equal(cappedBoard.myActiveCount, PAYOUT_DAILY_CAP);
+  advance(PAYOUT_WINDOW_MS);
+  assert.equal(store.referrals.board(ownerKey, "commons").myActiveCount, PAYOUT_DAILY_CAP + 1);
+});
+
+test("delayed settlement still counts payouts against the daily cap (#2931)", t => {
+  const { store, ownerKey, advance } = openStore(t);
+  const invite = store.referrals.board(ownerKey, "commons").invite;
+  const friends = [];
+  for (let i = 0; i < PAYOUT_DAILY_CAP + 1; i += 1) friends.push(joinHuman(store, invite.token, `Delayed ${i}`));
+  for (const friend of friends) post(store, friend.slot.token, "present", friend.binding());
+  // No board()/credits call settles for days after every referral qualifies:
+  // settlement has no timer, so the dwell elapsing does not settle anything.
+  advance(ACTIVATION_DWELL_MS + 2 * PAYOUT_WINDOW_MS);
+  const settled = store.referrals.board(ownerKey, "commons");
+  assert.equal(settled.myActiveCount, PAYOUT_DAILY_CAP,
+    "backdated activated_at must not drop delayed payouts out of the cap window");
+  const activated = friends.filter(friend => typeof payoutRow(store, friend.memberId).activatedAt === "number");
+  assert.equal(activated.length, PAYOUT_DAILY_CAP);
+  assert.equal(friends.length - activated.length, 1,
+    "the referral over the cap stays pending, not activated");
+  // Once the payouts actually made fall out of the rolling window, the
+  // remaining qualified referral can still be paid.
   advance(PAYOUT_WINDOW_MS);
   assert.equal(store.referrals.board(ownerKey, "commons").myActiveCount, PAYOUT_DAILY_CAP + 1);
 });

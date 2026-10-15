@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { unpublishPublic } from '../server/legal-store.mjs';
 const input = (id = 'public-work') => ({ requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'], terms: { repositoryUrl: 'https://github.com/Uuriko/project-room', kind: 'project', title: 'Useful work', summary: 'Produce a reviewable result', acceptanceCriteria: ['One concrete accepted result'], reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'project-offer-store-')); const file = join(dir, 'room.sqlite');
@@ -37,6 +38,20 @@ test('publication revalidates current reviewer kind and archived rooms never exp
   store.command(ownerKey, 'commons', { id: 'archive-offer-room', type: 'room.archived', data: {} });
   assert.deepEqual(store.projectOffers.list(), { offers: [], nextCursor: null });
   assert.throws(() => store.projectOffers.read('public-work'), error => error.code === 'offer_not_found');
+});
+test('operator unpublish removes a published offer from list, read and brief', t => {
+  const { store } = fixture(t);
+  store.projectOffers.create('commons', 'owner', input());
+  store.projectOffers.transition('commons', 'owner', 'public-work', 'publish', { requestId: 'publish', expectedRevision: 1 });
+  assert.equal(store.projectOffers.list().offers.length, 1);
+  assert.equal(store.projectOffers.read('public-work').id, 'public-work');
+  assert.ok(store.projectOffers.brief('public-work').includes('Useful work'));
+  unpublishPublic(store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: store.now() });
+  assert.deepEqual(store.projectOffers.list(), { offers: [], nextCursor: null });
+  assert.throws(() => store.projectOffers.read('public-work'), error => error.code === 'offer_not_found');
+  assert.throws(() => store.projectOffers.brief('public-work'), error => error.code === 'offer_not_found');
+  // The owner's private view is not a public read: the offer still exists there.
+  assert.equal(store.projectOffers.ownerList('commons', 'owner').offers.length, 1);
 });
 test('USD, USDC and internal milli-credit amounts do not authorize or imply payment', t => {
   const { store } = fixture(t);

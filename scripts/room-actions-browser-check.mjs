@@ -8,8 +8,10 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, { mobile = false, role = "owner", expectedMessageWrites = 0 } = {}) {
+async function setup(t, { mobile = false, role = "owner", expectedMessageWrites = 0, theme = "dark", savedMessageId = null } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  if (savedMessageId) f.store.db.prepare("INSERT INTO saved_messages (room_id, member_id, message_id, saved_at) VALUES (?, ?, ?, ?)")
+    .run("commons", role, savedMessageId, Date.now());
   let browser;
   t.after(async () => {
     await browser?.close(); server.closeStreams(); server.closeAllConnections();
@@ -21,6 +23,7 @@ async function setup(t, { mobile = false, role = "owner", expectedMessageWrites 
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const page = await context.newPage(), external = [], errors = [], writes = [];
+  await page.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   page.setDefaultTimeout(8000);
   await context.route("**/*", route => {
     if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); }
@@ -44,6 +47,28 @@ async function setup(t, { mobile = false, role = "owner", expectedMessageWrites 
   };
   return { ...f, page, origin, open, action, capture };
 }
+
+for (const mobile of [false, true]) for (const theme of ["dark", "light"]) test(`saved navigation ${mobile ? "mobile" : "desktop"} ${theme}: palette and button open the same bookmarks`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile, theme, savedMessageId: "test-request" }), p = f.page;
+  const draft = "Keep this draft while I find my saved message";
+  await p.locator("#message-input").fill(draft);
+  await clickChrome(p, "#topbar-later");
+  await p.locator('#later-list [data-open-message="test-request"]').waitFor();
+  const bookmarked = await p.locator("#later-list").innerText();
+  await p.locator("#later-close").click();
+  await f.open();
+  await p.locator("#room-actions-query").fill("Saved for later");
+  await p.locator("#room-actions-query").press("Enter");
+  await p.locator("#later-dialog").waitFor({ state: "visible" });
+  await p.locator('#later-list [data-open-message="test-request"]').waitFor();
+  assert.equal(await p.locator("#later-list").innerText(), bookmarked);
+  assert.equal(await p.locator("#updates-dialog").isVisible(), false);
+  assert.equal(await p.locator("#message-input").inputValue(), draft);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(`saved-${mobile ? "mobile" : "desktop"}-${theme}`);
+  await p.keyboard.press("Escape");
+  assert.equal(await p.locator("#later-dialog").isVisible(), false);
+});
 
 for (const mobile of [false, true]) test(`room actions ${mobile ? "mobile" : "desktop"}: quiet entry, draft preservation, no implicit writes`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile }), p = f.page, input = p.locator("#message-input");

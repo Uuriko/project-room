@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { handleIdentityMintMcp } from "../server/mcp-identity-mint.mjs";
 import { solveIdentityMintProof } from "./fixtures/identity-mint-solver.mjs";
 
 async function serve(t) {
@@ -123,6 +124,43 @@ test("proof-of-work challenge carries the recipe after the free quota is spent",
   const bogusResult = unwrapCall(bogus, "bogus proof");
   assert.equal(bogusResult.isError, true);
   assert.equal(bogusResult.structuredContent.code, "proof_required");
+});
+
+test("a post-mint bookkeeping failure does not mask a successful mint or lose its one-time secret", () => {
+  // store.identities.create commits independently; noteIdentityMint then
+  // writes growth bookkeeping through store.db. Make that write throw and
+  // require the handler to still return the committed mint — on the old
+  // code both lived in one try, so the catch returned a 500 and discarded
+  // `created`, permanently losing the one-time secret and privateKey.
+  const created = {
+    identityId: "ai_bookkeeping_fixture",
+    secret: "pri_fixture-secret-never-real-0000000000000000", // secrets-allowlist (fixture value, not a credential)
+    privateKey: "fixture-private-key-never-real", // secrets-allowlist (fixture value, not a credential)
+  };
+  const store = {
+    identities: {
+      create(name, options) {
+        assert.equal(name, "Bookkeeping Agent");
+        assert.equal(options.anonymous.address, "203.0.113.10");
+        return created;
+      },
+    },
+    db: {
+      prepare() { throw new Error("bookkeeping write failed"); },
+    },
+  };
+  const message = {
+    jsonrpc: "2.0",
+    id: "mint-bookkeeping",
+    method: "tools/call",
+    params: { name: "room_identity_mint", arguments: { displayName: "Bookkeeping Agent" } },
+  };
+  const reply = handleIdentityMintMcp(store, message, { remoteAddress: "203.0.113.10" });
+  assert.ok(reply.result, `mint must return a result, got ${JSON.stringify(reply).slice(0, 300)}`);
+  assert.equal(reply.result.isError, undefined,
+    `bookkeeping failure must not turn the mint into a tool error: ${JSON.stringify(reply.result.structuredContent).slice(0, 300)}`);
+  assert.deepEqual(reply.result.structuredContent, created,
+    "the committed mint's one-time secret and privateKey must reach the client");
 });
 
 test("a valid proof-of-work is accepted on first mint", async t => {

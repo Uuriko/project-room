@@ -39,7 +39,7 @@ test("paid-work quote with zero fee stays honest", () => {
 });
 
 test("the 1% room-pool fee is real: code matches the documented rate", () => {
-  // docs/history/FREE-MISS-SETTLEMENT.md + docs/history/bounty-receipts.md say
+  // archive/docs/history/FREE-MISS-SETTLEMENT.md + archive/docs/history/bounty-receipts.md say
   // "1% room-pool fee applies on released payouts only", scoped to the valueless
   // credits ledger. Pin the code to the same rate so the docs never drift.
   assert.equal(FEE_NUMERATOR, 1);
