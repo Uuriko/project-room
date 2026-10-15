@@ -138,7 +138,7 @@ test("ensure-default-room skips an inactive membership and returns the account's
   };
   const a = await mkAccount(6);
   const create = await authedPost(origin, "/api/account-rooms", a.creds,
-    { roomId: "room-alpha-1", title: "Alpha", purpose: "p", kind: "personal", displayName: "Owner" });
+    { roomId: "a-room-alpha", title: "Alpha", purpose: "p", kind: "personal", displayName: "Owner" });
   assert.equal(create.status, 201);
   const b = await mkAccount(7);
   const own = await authedPost(origin, "/api/account-rooms", b.creds,
@@ -148,7 +148,7 @@ test("ensure-default-room skips an inactive membership and returns the account's
   // exist as an active human member in room-alpha-1's state.
   f.store.db.prepare(
     "INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
-    .run("room-alpha-1", "exmemberb", b.accountId, "test-stale-row");
+    .run("a-room-alpha", "exmemberb", b.accountId, "test-stale-row");
   const res = await authedPost(origin, "/api/account/ensure-default-room", b.creds);
   assert.equal(res.status, 200);
   const body = await res.json();
@@ -173,6 +173,13 @@ test("ensure-default-room answers room:null when every membership row is inactiv
     { roomId: "room-left-2", title: "Left", purpose: "p", kind: "personal", displayName: "Owner" });
   assert.equal(create.status, 201);
   f.store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(session.account.id);
+  // r268 tightening: keep an INACTIVE row (stale binding into a room this account is not an active member of).
+  const other = await authedPost(origin, "/api/account-rooms", creds,
+    { roomId: "a-other-room", title: "Other", purpose: "p", kind: "personal", displayName: "Owner" });
+  assert.equal(other.status, 201);
+  f.store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(session.account.id);
+  f.store.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
+    .run("room-left-2", "exmember8", session.account.id, "test-stale-row");
   f.store.db.prepare("UPDATE accounts SET ever_had_room=1 WHERE id=?").run(session.account.id);
   const stale = await authedPost(origin, "/api/account/ensure-default-room", creds);
   assert.equal(stale.status, 200);
