@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "../service-error.mjs";
-import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery } from "../magic-links.mjs";
+import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery, attemptAuthMailDelivery } from "../magic-links.mjs";
 import { normalizeEmail } from "../account-login-methods.mjs";
 import { resolvePasskeyParams, passkeyUserLabel, PASSKEY_RP_NAME } from "../account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../../src/password-auth.mjs";
@@ -82,6 +82,11 @@ export async function handleAuthGroup(ctx) {
   // Delivery does not change the signup response, but a failure is logged
   // (redacted) so operators can see why mail is not arriving.
   const deliverSignupMail = fn => attemptMailDelivery(fn, "signup");
+  // Sign-in and reset requests answer indistinguishably whether or not the
+  // address is deliverable (#3529): a provider refusal for the recipient is
+  // absorbed (and logged), while a transient provider failure still throws
+  // so the request surfaces as retryable instead of a fake "sent".
+  const deliverAuthMail = (fn, kind) => attemptAuthMailDelivery(fn, kind);
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
 
 
@@ -123,7 +128,7 @@ export async function handleAuthGroup(ctx) {
       magicEmailLimit(magicRequestEmailLimiter, normalized);
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issueMagicCode({ email: normalized });
-      await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "magic-request");
       return json(res, 200, { status: "sent" });
     }
     const data = await body(req);
@@ -204,8 +209,8 @@ export async function handleAuthGroup(ctx) {
     if (requesting) {
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issuePasswordResetCode({ email: normalized });
-      await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
-        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
+        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "password-reset-request");
       return json(res, 200, { status: "sent" });
     }
     const verifyResetSlot = () => {

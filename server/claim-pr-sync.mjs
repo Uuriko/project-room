@@ -16,13 +16,32 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
   pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest, usableEtag
 } from "./claim-coordination.mjs";
+
+// #3464: the durable registry decodes stored rows WITHOUT validation while
+// every state-machine touch re-validates, so one stored row with a malformed
+// field (a full URL in `repo`, say) is readable but throws on first touch —
+// and the whole-table phases below touch everything, so one bad row wedged
+// the sweep for every room (prod, 2026-10-13T23:57Z onward). Per-item
+// isolation: skip the row, count it, and name it in the operator log.
+// Repairing or deleting the row itself is operator work (diagnosis §7); the
+// sweep's job is to keep everyone else moving and to say which row is bad.
+function noteSkippedInvalidClaim(skipped, roomId, claimId, error) {
+  const entry = { roomId, claimId: claimId ?? null, error: String(error?.message ?? error).slice(0, 200) };
+  // Several phases touch the same row in one tick; report each row once.
+  if (Array.isArray(skipped)) {
+    if (skipped.some(prior => prior.roomId === roomId && prior.claimId === entry.claimId)) return entry;
+    skipped.push(entry);
+  }
+  console.warn(`[claim-prs] skipped invalid claim row ${roomId}/${entry.claimId}: ${entry.error}`);
+  return entry;
+}
 
 const LOOKUP_LIMIT = 4;
 const LOOKUP_LIMIT_NO_TOKEN = 1;
@@ -648,7 +667,13 @@ export async function settleFromSearch(store, { env = null, fetchImpl = fetch, t
       for (const { roomId, claimId, url } of byNumber.get(number) ?? []) {
         const current = store.workClaims.get(roomId, claimId);
         if (!current || current.kind === "land" || current.kind === "deploy") continue;
-        if (commitPullRequestLookup(store, store.workClaims, roomId, current, { url, kind: "merged", mergedSha: null }, nowMs)) settled += 1;
+        // #3464: settling re-validates; one invalid row must not roll back
+        // the whole search batch's settlements.
+        try {
+          if (commitPullRequestLookup(store, store.workClaims, roomId, current, { url, kind: "merged", mergedSha: null }, nowMs)) settled += 1;
+        } catch (error) {
+          noteSkippedInvalidClaim(null, roomId, claimId, error);
+        }
       }
     }
   });
@@ -659,23 +684,31 @@ export async function settleFromSearch(store, { env = null, fetchImpl = fetch, t
 // before any request. A missing token does not fail the tick.
 export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined, deadline = Infinity, yieldBetween = null } = {}) {
   if (!store?.db || !store.workClaims) return { checked: 0, updated: 0 };
-  closeDeployedClaims(store, nowMs);
+  // #3464: rows skipped by the whole-table phases ride every return path, so
+  // a tick that polls nothing still reports the poison it stepped over. The
+  // count is numeric and survives into the job heartbeat summary; the item
+  // detail stays on this return value and the operator log.
+  const skippedInvalid = [];
+  const skipSummary = () => skippedInvalid.length
+    ? { skippedInvalid: skippedInvalid.length, skippedInvalidItems: skippedInvalid }
+    : {};
+  closeDeployedClaims(store, nowMs, skippedInvalid);
   // #1526 B2: sweep lapsed leases before polling, exactly like the HTTP board
   // path (sweepRoom in server/work-claim-routes.mjs). A claim whose lease
   // lapsed is auto-released (lease_expired event, flake signal) so the tick
   // can never settle a dead round as done — the cron and HTTP paths agree.
-  sweepExpiredClaimLeases(store, nowMs);
-  sweepStaleUnclaimedClaims(store, nowMs);
+  sweepExpiredClaimLeases(store, nowMs, skippedInvalid);
+  sweepStaleUnclaimedClaims(store, nowMs, { skipped: skippedInvalid });
   const access = token === undefined ? githubToken(env ?? process.env) : token;
-  if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
+  if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1, ...skipSummary() };
   // While the shared core budget is spent, the REST poll makes no call; the
   // search batch (separate quota) still settles merged and closed pulls.
   if (readClaimPullBudget(store) > nowMs) {
     const searchSettled = await settleFromSearch(store, { env: env ?? process.env, fetchImpl, token: access, nowMs, deadline });
-    return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}) };
+    return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}), ...skipSummary() };
   }
   const due = loadDueClaims(store, nowMs);
-  if (due.length === 0) return { checked: 0, updated: 0 };
+  if (due.length === 0) return { checked: 0, updated: 0, ...skipSummary() };
   // Claim ids are room-scoped, so lookup results carry their room and the
   // room map is keyed by (roomId, claimId): the same claimId can be due in
   // two rooms in one tick, and a bare-claimId key would settle one room's
@@ -695,7 +728,13 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       const roomId = roomOf.get(roomKey(result.roomId, result.claimId));
       const current = store.workClaims.get(roomId, result.claimId);
       checked += 1;
-      if (commitPullRequestLookup(store, store.workClaims, roomId, current, result, nowMs)) updated += 1;
+      // #3464: settling re-validates through the state machine; one invalid
+      // due row must not roll back the whole batch's settlements.
+      try {
+        if (commitPullRequestLookup(store, store.workClaims, roomId, current, result, nowMs)) updated += 1;
+      } catch (error) {
+        noteSkippedInvalidClaim(skippedInvalid, roomId, result.claimId, error);
+      }
     }
     if (batch.rateLimitedUntil) {
       const byRoom = new Map();
@@ -708,10 +747,10 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
-  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}) };
+  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...skipSummary() };
 }
 
-function closeDeployedClaims(store, nowMs) {
+function closeDeployedClaims(store, nowMs, skipped = null) {
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
@@ -721,12 +760,18 @@ function closeDeployedClaims(store, nowMs) {
   }
   for (const roomId of roomIds) {
     for (const item of store.workClaims.list(roomId)) {
-      const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
-      if (!closed) continue;
-      store.workClaims.set(roomId, closed);
-      emitWorkClaimEvent(store, roomId, {
-        actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
-      });
+      // #3464: closeWhenLive re-validates the stored row; isolate per item
+      // so one invalid row cannot abort the phase for every other room.
+      try {
+        const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
+        if (!closed) continue;
+        store.workClaims.set(roomId, closed);
+        emitWorkClaimEvent(store, roomId, {
+          actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
+        });
+      } catch (error) {
+        noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
+      }
     }
   }
 }
@@ -737,7 +782,7 @@ function closeDeployedClaims(store, nowMs) {
 // the same facts on the HTTP path released it first (claim_flaked). Sweep
 // here with the same semantics — auto-release, lease_expired event, one
 // wake per expiry — so both settlement paths read the same world.
-function sweepExpiredClaimLeases(store, nowMs) {
+function sweepExpiredClaimLeases(store, nowMs, skipped = null) {
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
@@ -755,7 +800,15 @@ function sweepExpiredClaimLeases(store, nowMs) {
     if (expired.length === 0) continue;
     store.workClaims.transaction(() => {
       for (const before of expired) {
-        const [item] = releaseExpired([before], nowMs);
+        // #3464: releaseExpired re-validates through the state machine;
+        // isolate per item so one invalid row cannot roll back the room.
+        let item;
+        try {
+          [item] = releaseExpired([before], nowMs);
+        } catch (error) {
+          noteSkippedInvalidClaim(skipped, roomId, before?.id, error);
+          continue;
+        }
         if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
         store.workClaims.set(roomId, item);
         const receipt = emitWorkClaimEvent(store, roomId, {
@@ -786,7 +839,7 @@ function sweepExpiredClaimLeases(store, nowMs) {
 // history stamp, and no wake (nobody holds the item).
 export const STALE_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const lastStaleSweep = new WeakMap();
-export function sweepStaleUnclaimedClaims(store, nowMs, { force = false } = {}) {
+export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped = null } = {}) {
   if (!store?.db || !store.workClaims) return 0;
   const last = lastStaleSweep.get(store);
   if (!force && typeof last === "number" && nowMs - last >= 0 && nowMs - last < STALE_SWEEP_INTERVAL_MS) return 0;
@@ -803,7 +856,25 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false } = {}) 
   let closed = 0;
   for (const roomId of roomIds) {
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
-    const pairs = closeStaleUnclaimed(store.workClaims.list(roomId), nowMs);
+    const items = store.workClaims.list(roomId);
+    let pairs;
+    try {
+      pairs = closeStaleUnclaimed(items, nowMs);
+    } catch {
+      // #3464: closeStaleUnclaimed re-validates each dormant row through
+      // closeWork; one invalid row aborts the room's batch. Retry per item
+      // so the valid rows still close and the invalid ones are named.
+      pairs = [];
+      for (const item of items) {
+        try {
+          pairs.push(...closeStaleUnclaimed([item], nowMs));
+        } catch (error) {
+          noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
+        }
+        if (pairs.length >= STALE_SWEEP_BATCH) break;
+      }
+      pairs = pairs.slice(0, STALE_SWEEP_BATCH);
+    }
     if (pairs.length === 0) continue;
     store.workClaims.transaction(() => {
       for (const [, item] of pairs) {
@@ -832,9 +903,16 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
     store.workClaims.transaction(() => {
       for (const item of store.workClaims.list(roomId)) {
         if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;
-        const settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
-          claimId: item.id, url: decision.url, kind: decision.outcome
-        }, nowMs);
+        // #3464: same per-item isolation as the poll path — one invalid
+        // linked row must not fail settlement for the rest of the room.
+        let settled = false;
+        try {
+          settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
+            claimId: item.id, url: decision.url, kind: decision.outcome
+          }, nowMs);
+        } catch (error) {
+          noteSkippedInvalidClaim(null, roomId, item.id, error);
+        }
         if (settled) applied.push({ roomId, claimId: item.id, outcome: decision.outcome });
       }
     });

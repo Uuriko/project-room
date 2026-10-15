@@ -208,10 +208,10 @@ const gr1PublicPath = pathname => {
   if (!pathname.startsWith("/room/")) return null;
   const rest = pathname.slice("/room".length);
   if (rest === "/receipts" || rest === "/sitemap.xml") return rest;
-  if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})(?:\.json)?$/.test(rest)) return rest;
+  if (/^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})(?:\.json)?$/.test(rest)) return rest;
   return null;
 };
-const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})\.json$/;
+const PUBLIC_RECEIPT_JSON = /^\/receipts\/(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})\.json$/;
 const isPublicReceiptsJson = pathname => pathname === "/api/public/receipts"
   || pathname === "/room/api/public/receipts"
   || PUBLIC_RECEIPT_JSON.test(pathname)
@@ -909,18 +909,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     };
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
+      // Lagging means bytes from an EARLIER tick are still unsent. Bytes
+      // written during this tick sit behind Node's per-tick queue, so
+      // measuring writableLength inside the write loop counts this tick's own
+      // batch and flags healthy readers whenever one page of visible events
+      // exceeds the cap. Judge lag once per tick, before writing.
+      if (lagging()) { lag(); return; }
+      const backlog = res.writableLength;
       try {
         const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
+        let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+          const frame = `id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`;
+          res.write(frame);
           cursor = item.sequence;
-          if (lagging()) break;
+          queued += Buffer.byteLength(frame);
+          // A reader still holding earlier-tick bytes that this tick would
+          // push past the cap is genuinely behind. This tick alone passing
+          // the cap only bounds the batch: the rest resumes on the next tick.
+          if (backlog > 0 && backlog + queued > streamQueueCap) { lagged = true; break; }
+          if (queued > streamQueueCap) { partial = true; break; }
         }
         // Ephemeral typing indicators ride the stream as synthetic `typing`
         // events with no `id:` — they never disturb Last-Event-ID resume.
         // Emitted only when the visible typist set changes for this connection.
-        if (!lagging()) {
+        if (!lagged) {
           const typists = currentTypists(typingBeats, roomId, entry.memberId);
           const key = typingKey(typists);
           if (key !== entry.lastTypingKey) {
@@ -928,10 +942,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
           }
         }
-        if (lagging()) lag();
+        if (lagged) lag();
         // Advance past invisible rows only after the complete visible batch
-        // was queued. A lagging stream must resume from its last sent event.
-        else cursor = batch.next;
+        // was queued. A partial tick resumes from its last sent event, so a
+        // lagging stream resumes from the last event the client can see.
+        else if (!partial) cursor = batch.next;
       } catch (error) {
         if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
           end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
@@ -1955,7 +1970,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const gr2Alias = gr2PublicPath(url.pathname);
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
-      const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}))(\.json)?$/.exec(url.pathname);
+      const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
@@ -2173,9 +2188,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         protectWrite(req, auth, false); rate(`account-default-room:${auth.account.id}`, 10);
-        const existing = store.db.prepare(
-          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1").get(auth.account.id);
-        if (existing) return json(res, 200, { room: { id: existing.room_id }, created: false });
+        // R266-n1: read the default room the way /api/account-rooms lists
+        // rooms. Iterate the account's membership rows, keep only rooms where
+        // the account still holds an active human membership (same 403
+        // filter), and prefer kind=personal. A former member with only
+        // inactive rows falls through to the no-resurrect rule below instead
+        // of landing on a room the server would 403.
+        let activeRoom = null, activePersonal = null;
+        const membershipRows = store.db.prepare(
+          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(auth.account.id);
+        for (const { room_id: candidateId } of membershipRows) {
+          try { store.authenticateAccountSession(token, candidateId, binding); }
+          catch (error) { if (error.status !== 403) throw error; continue; }
+          if (activeRoom === null) activeRoom = candidateId;
+          const kind = store.db.prepare(
+            "SELECT json_extract(projection,'$.room.kind') AS kind FROM rooms WHERE id=?").get(candidateId)?.kind;
+          if (kind === "personal" && activePersonal === null) activePersonal = candidateId;
+        }
+        if (activeRoom) return json(res, 200, { room: { id: activePersonal ?? activeRoom }, created: false });
         // An account that has ever held a room but holds none now deliberately
         // left (or was removed from) all of them — never resurrect a room.
         const row = store.db.prepare("SELECT ever_had_room, display_name FROM accounts WHERE id=?").get(auth.account.id);
@@ -4089,7 +4119,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
         const snapshotView = params.has("view") ? "work" : "full";
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1");
+        const auditHeader = req.headers["x-project-room-audit-view"];
+        if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full");
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and

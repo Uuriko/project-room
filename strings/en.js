@@ -431,5 +431,8 @@ export default {
   "human.intent.shortContinue": "Shared · Add to request",
   "human.intent.shortRetryAsk": "Retry · Room",
   "human.intent.shortRetryChat": "Retry · Message",
-  "human.intent.shortRetryPrivate": "Retry · Private · {name}"
+  "human.intent.shortRetryPrivate": "Retry · Private · {name}",
+  "record.invalidView": "Choose a supported record view.",
+  "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
+  "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>"
 };

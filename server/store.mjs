@@ -27,7 +27,7 @@ import {
   applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
-  TRUST_OFF_CODE, trustOffMessage, firstBlockedWakeTarget,
+  TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
@@ -546,6 +546,8 @@ const invitationSchema = `
     expires_at INTEGER NOT NULL,
     authenticated_until INTEGER,
     created_at INTEGER NOT NULL,
+    login_method_kind TEXT,
+    login_method_ref TEXT,
     CHECK(
       (account_id IS NULL AND account_auth_epoch IS NULL AND parent_credential_hash IS NULL AND authenticated_until IS NULL)
       OR
@@ -1131,6 +1133,16 @@ const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_s
   projection_bytes INTEGER NOT NULL
 )`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+// #3334: tag an integrity failure with the sub-check that threw, so the job
+// layer can report WHICH check failed on the public health surface. Only the
+// sub-check name (a fixed enum in server/jobs.mjs) is attached — never record
+// ids, bodies, or other record content.
+export function tagIntegritySubcheck(error, subcheck) {
+  if (error && typeof error === "object" && !error.integritySubcheck) {
+    try { error.integritySubcheck = subcheck; } catch { /* frozen errors keep the generic classification path */ }
+  }
+  return error;
+}
 const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL,
@@ -1997,22 +2009,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // hibernated wake does not start at share links forever. Each step is the
   // same check the constructor used to run.
   async runDeferredIntegrityBatch({ deadline = Infinity, yieldBetween = async () => {} } = {}) {
+    // Step names double as the #3334 failure tags: when a step throws, the
+    // error carries the step's name so the health surface can name the
+    // failing sub-check instead of a bare "1 error(s) in tick".
     const steps = [
-      () => this.shareLinks.verify(),
-      () => this.agentConnections.verify(),
-      () => this.inbox.verify(),
-      () => this.email.verify(),
-      () => this.channelUpdates.verify(),
-      () => this.quarantineSplits.verify(),
-      () => verifyRoomLifecycle(this),
-      () => { if (!this.readOnly) this.identities.expireInactive(); },
-      () => this.backfillReferralDepth(500),
+      ["share_links", () => this.shareLinks.verify()],
+      ["agent_connections", () => this.agentConnections.verify()],
+      ["inbox", () => this.inbox.verify()],
+      ["email", () => this.email.verify()],
+      ["channel_updates", () => this.channelUpdates.verify()],
+      ["quarantine_splits", () => this.quarantineSplits.verify()],
+      ["room_lifecycle", () => verifyRoomLifecycle(this)],
+      ["identity_expiry", () => { if (!this.readOnly) this.identities.expireInactive(); }],
+      ["referral_depth", () => this.backfillReferralDepth(500)],
       // MSG-2: replay message events here, one budgeted batch per visit,
       // then check one caught-up room. This batch runs as the "integrity"
       // job in server/jobs.mjs, so the backfill inherits that job's cadence,
       // budget and runtimes without a second registry entry.
-      () => this.backfillMessages({ deadline }),
-      () => this.checkMessagesParity()
+      ["messages_backfill", () => this.backfillMessages({ deadline })],
+      ["messages_parity", () => this.checkMessagesParity()]
     ];
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
     if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
@@ -2027,7 +2042,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (ran > 0) remember(step);
         return { ran, next: step, budgetExceeded: 1 };
       }
-      steps[step]();
+      try {
+        steps[step][1]();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, steps[step][0]);
+      }
       step = (step + 1) % steps.length;
       ran += 1;
       await yieldBetween();
@@ -2144,7 +2163,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
-    const incremental = this.incrementalIntegrityCheck();
+    let incremental;
+    try {
+      incremental = this.incrementalIntegrityCheck();
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "incremental");
+    }
     if (incremental.ok) {
       await yieldBetween();
       if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
@@ -2160,25 +2184,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     await yieldBetween();
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
-    if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
-    const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
-    for (const id of ids) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-      this.verifyInvitationRecord(id);
-      await yieldBetween();
+    try {
+      const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
+      if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
+      const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
+      for (const id of ids) {
+        if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+        this.verifyInvitationRecord(id);
+        await yieldBetween();
+      }
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "invitation_audit");
     }
     if (this.helpProjectionPresent()) {
       if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-      this.verifyHelpHistory();
+      try {
+        this.verifyHelpHistory();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, "help_history");
+      }
       await yieldBetween();
     }
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    try {
+      this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "snapshot");
+    }
     await yieldBetween();
-    const after = this.integrityChecksum();
-    this.writeIntegritySnapshot(after.text);
-    this.rememberIntegrityRoomState();
+    let after;
+    try {
+      after = this.integrityChecksum();
+      this.writeIntegritySnapshot(after.text);
+      this.rememberIntegrityRoomState();
+    } catch (error) {
+      throw tagIntegritySubcheck(error, "snapshot");
+    }
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
@@ -3957,11 +3998,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false) {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+      if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
       const room = this.room(roomId);
@@ -3972,8 +4014,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
+      // Preserve the same committed tail and its activity-dependent selectors.
+      // Message bodies already travel in the projection; the complete audit
+      // tail remains the default and is requested when Record opens.
+      const events = rows.reverse().map(r => JSON.parse(r.body));
+      const eventLog = auditView === "activity" ? events.filter(event => event.type === "decision.recorded"
+        || /^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(event.type)
+        || event.data?.workItemId !== undefined) : events;
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog: rows.reverse().map(r => JSON.parse(r.body)) }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
 
@@ -5205,6 +5254,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       catch (error) {
         if (error?.code === TRUST_OFF_CODE) fail(403, TRUST_OFF_CODE, error.message);
+        if (error?.code === CHANNEL_ARCHIVED_CODE) fail(409, CHANNEL_ARCHIVED_CODE, error.message);
         if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
         if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {

@@ -422,6 +422,47 @@ test("writeKvBackup refuses a manifest for a torn export", async t => {
   assert.equal(kv.map.has("room-backups/2026-10-08.ndjson"), false, "no manifest is written for a torn export");
 });
 
+test("writeKvBackup refuses a manifest for a same-count torn export (#3407)", async t => {
+  const { store } = openStore(t, 3);
+  const text = exportNdjsonText(store.db);
+  // Swap one event row's id: the watermark and trailer counts still agree,
+  // so only the trailer hash can see the tear. The R2 writer refuses these
+  // bytes; the KV writer used to certify them with a manifest, which also
+  // made the day unretryable (the next tick skipped: "exists").
+  const lines = text.split("\n");
+  const index = lines.findIndex(line => line.includes('"table":"events"'));
+  assert.ok(index >= 0, "the fixture export has an events row");
+  const record = JSON.parse(lines[index]);
+  record.row = { ...record.row, id: crypto.randomUUID() };
+  lines[index] = JSON.stringify(record);
+  const kv = fakeKv();
+  await assert.rejects(() => writeKvBackup(kv, "room-backups/2026-10-08.ndjson", lines.join("\n")), /torn/);
+  assert.equal(kv.map.has("room-backups/2026-10-08.ndjson"), false, "no manifest is written for a same-count tear");
+});
+
+test("writeKvBackup refuses the net-zero mid-stream tear the count check cannot see (#3407)", async t => {
+  const { ndjson } = await tornExportNdjson(t, async store => {
+    const victim = store.db.prepare("SELECT id FROM events WHERE room_id='commons' ORDER BY sequence LIMIT 1").get().id;
+    store.db.prepare("DELETE FROM events WHERE id=?").run(victim);
+    const seq = store.db.prepare("SELECT COALESCE(MAX(sequence), 0) AS m FROM events WHERE room_id='commons'").get().m + 1;
+    store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES ('commons', ?, ?, ?)")
+      .run(seq, crypto.randomUUID(), JSON.stringify({ id: crypto.randomUUID(), type: T.MESSAGE_POSTED, roomId: "commons", actorId: "owner", at: new Date().toISOString(), data: { messageId: "m-swap", body: "swapped" } }));
+  });
+  const kv = fakeKv();
+  await assert.rejects(() => writeKvBackup(kv, "room-backups/2026-10-08.ndjson", ndjson), /torn/);
+  assert.equal(kv.map.has("room-backups/2026-10-08.ndjson"), false);
+});
+
+test("writeKvBackup still certifies a trailer-less legacy export", async t => {
+  const { store } = openStore(t, 2);
+  const text = exportNdjsonText(store.db);
+  const legacy = text.split("\n").filter(line => !line.includes('"kind":"trailer"')).join("\n");
+  const kv = fakeKv();
+  const manifest = await writeKvBackup(kv, "room-backups/2026-10-08.ndjson", legacy);
+  assert.equal(manifest.kind, "room-backup-manifest");
+  assert.ok(kv.map.has("room-backups/2026-10-08.ndjson"));
+});
+
 test("an untorn export carries a verified trailer; older trailer-less exports still replay", async t => {
   const { directory, store } = openStore(t, 3);
   const text = exportNdjsonText(store.db);
@@ -504,4 +545,23 @@ test("export pages never read a whole large table at once", t => {
   assert.ok(events > 250);
   for (const _line of exportNdjsonLines(spy)) { /* drain */ }
   assert.ok(biggest <= 100, `events were read ${biggest} rows at once`);
+});
+
+test("replayNdjson refuses a tampered non-event row and reports the verification level (#3325)", t => {
+  const { directory, store } = openFixture(t);
+  const ndjson = exportNdjsonText(store.db);
+  const clean = replayNdjson(ndjson, join(directory, "clean", "room.sqlite"));
+  assert.equal(clean.verified, true);
+  assert.equal(clean.contentVerification, "full", "a version 2 trailer pins every loadable table");
+  let done = false;
+  const tampered = ndjson.split("\n").map(line => {
+    if (done || !line.includes('"table":"account_credentials"')) return line;
+    const record = JSON.parse(line);
+    if (typeof record.row.expires_at !== "number") return line;
+    record.row.expires_at += 315576000000;
+    done = true;
+    return JSON.stringify(record);
+  }).join("\n");
+  assert.ok(done, "fixture export has an account_credentials row to tamper");
+  assert.throws(() => replayNdjson(tampered, join(directory, "tampered", "room.sqlite")), /table digest does not match for account_credentials/);
 });

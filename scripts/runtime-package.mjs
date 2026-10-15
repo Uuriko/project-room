@@ -254,6 +254,7 @@ optional.push("server/agent-webhook-subscriptions.mjs"); // Lane D: per-agent we
 optional.push("server/webhook-dispatch.mjs"); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/identity-verification.mjs"); // RC-2026-09-18-049: pure agent verification tiers (imported by server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQLite bridge + ownership (imported by server/store.mjs and server/agent-plugin-routes.mjs)
+optional.push("server/agent-listener-contract.mjs"); // Shared HTTP/MCP receiving lease authority.
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
 optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)

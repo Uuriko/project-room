@@ -24,7 +24,7 @@
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
 
 export const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -704,12 +704,23 @@ export function backfillRoomWorkItems(store, roomId, { nowMs = Date.now(), dryRu
   for (const [claimId, mapped] of rows) {
     const current = existing.get(claimId) ?? null;
     if (current && diverged.some(entry => entry.claimId === claimId)) continue;
+    try {
+      // #3465: validate the mapped row through the state machine BEFORE
+      // storing it. The registry's persisted-row codec decodes stored rows
+      // without validation, so a row stored verbatim from the projection's
+      // free-form fields (a full URL in `repository` -> `repo`, say) is
+      // readable but throws on its first state-machine touch — one such
+      // row wedged the claim-prs sweep for every room (#3464). Rows that
+      // fail validation are reported here, never stored; an already-stored
+      // row whose mapped form fails is named too, so the operator cleanup
+      // can find it.
+      workOf(mapped);
+    } catch (error) {
+      planErrors.push(`${claimId}: ${error?.message ?? String(error)}`);
+      continue;
+    }
     if (current && sameClaimRow(current, mapped)) { report.unchanged += 1; continue; }
     try {
-      // Validate the mapped row the same way every board write is
-      // validated: a set/get round-trip through the durable registry
-      // applies the persisted-row codec; the engine-level check happens
-      // in tests via updateWork on mapped rows.
       if (!dryRun) store.workClaims.set(roomId, mapped);
       if (current) report.updated += 1; else report.created += 1;
     } catch (error) {

@@ -37,6 +37,13 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     await json(await call('/api/rooms/commons/commands', { data: {
       id: randomUUID(), type: 'message.posted', data: { messageId: 'presence-time-probe', body: 'Timestamp adapter probe' }
     }, headers: { Authorization: `Bearer ${ownerKey}` } }), 201);
+    const fullAudit = await json(await call('/api/rooms/commons?messages=recent', { headers: { Authorization: `Bearer ${ownerKey}` } }));
+    const activity = await json(await call('/api/rooms/commons?messages=recent', { headers: { Authorization: `Bearer ${ownerKey}`, 'X-Project-Room-Audit-View': 'activity-v1' } }));
+    assert.equal(activity.auditView, 'activity'); assert.equal(activity.auditVersion, 1);
+    assert.deepEqual(activity.state.messages, fullAudit.state.messages);
+    assert.equal(activity.sequence, fullAudit.sequence);
+    assert.ok(fullAudit.state.eventLog.some(e => e.type === 'message.posted'));
+    assert.equal(activity.state.eventLog.some(e => e.type === 'message.posted'), false);
     const presenceProbe = await json(await call('/api/rooms/commons/presence', {
       headers: { Authorization: `Bearer ${ownerKey}` }
     }));

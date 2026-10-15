@@ -13,6 +13,9 @@ import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
+import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -308,6 +311,7 @@ function validWakeArgs(name, args) {
   const selected = WAKE_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (name === "heartbeat_get" || name === "webhook_list") return true;
+  if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
       && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
@@ -321,7 +325,7 @@ function validWakeArgs(name, args) {
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
-  if (name === "heartbeat_ack") return validSignalIds(args.signalIds);
+  if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
   if (name === "wake_pause" || name === "wake_resume") {
     const reasonOk = args.reason === undefined || args.reason === null || typeof args.reason === "string" && args.reason.length <= 200;
     const memberOk = args.memberId === undefined || validId(args.memberId);
@@ -656,7 +660,7 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
-    next, pushConfigured: result.pushConfigured, reachability: result.reachability
+    next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {})
   };
 }
 
@@ -709,14 +713,38 @@ async function callWakeTool(store, secret, identity, name, args) {
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
     const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
-    if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
-    const result = store.agentHeartbeats.heartbeat({
-      agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification, workWakes: args.workWakes
-    });
-    return heartbeatReceipt(agentId, result);
+    // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
+    // API key gets the same pull-only guard and host namespace as HTTP.
+    {
+      const resolveAuth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } });
+      const initial = resolveAuth(null, MCP_WAKE_SCOPE);
+      const data = { ...args, mode, wakeUrl, cadenceSeconds, pushNotification };
+      if (initial.scopedKey) assertScopedKeyListener(store, initial.identityId, data);
+      else if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
+      return store.transaction(() => {
+        const auth = resolveAuth(null, MCP_WAKE_SCOPE);
+        if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+        const result = heartbeatWithListener(store, auth, data);
+        if (auth.scopedKey) result.host = { ...result.host, hostId: args.hostId };
+        return heartbeatReceipt(agentId, result);
+      });
+    }
   }
-  if (name === "heartbeat_get") return store.agentHeartbeats.statusOf(agentId);
-  if (name === "heartbeat_ack") return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds });
+  if (name === "heartbeat_get") {
+    // R269-1 v2: a room-scoped key reads the same scoped presence view as HTTP GET.
+    const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+    return auth.scopedKey ? scopedKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(agentId);
+  }
+  if (name === "heartbeat_ack") {
+    // R273-1: with or without a fencingToken, ack inside the credential's own
+    // scope like POST /api/agent-heartbeats/ack, so a room-scoped key cannot
+    // ack another room's wakes.
+    return store.transaction(() => {
+      const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+      if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null });
+    });
+  }
   if (name === "wake_pause") {
     const requestId = args.requestId ?? randomUUID();
     return store.wakeQueue.pause(secret, args.roomId, { requestId, reason: args.reason ?? null }, null, { memberId: args.memberId ?? null });
@@ -896,6 +924,11 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
         }
+        // R274-1: a webhook subscription fans out every room the identity is
+        // linked in, so hold API keys to webhooks:manage like /api/agent-webhooks.
+        if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) {
+          return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
+        }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
@@ -916,6 +949,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
  // wildcard rule in agent-plugin-routes.mjs.
 const MCP_INBOX_SCOPE = "mcp:inbox";
 const MCP_WAKE_SCOPE = "mcp:wake";
+const MCP_WEBHOOKS_SCOPE = "webhooks:manage";
 function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return true;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);

@@ -55,6 +55,17 @@
 //     releasing waiters — work assignments silently degraded to heartbeat
 //     cadence for exactly the hosts that wait on poll. Host consent is
 //     unchanged: a host that never opted in still sees no work wakes.
+// 12. cross-namespace derivation (HELD-POLL-RELEASE) — contract: a scoped
+//     credential (room key or rak_) polling without hostId while the
+//     identity's hosts all live under ANOTHER credential's namespace
+//     still gets a promptly released held wait, parked on its own
+//     credential's derived slot. Regression: the prefix-filtered
+//     derivation yielded no waiter at all, so the held poll rode the
+//     bare timer to window expiry (JOURNEY Phase 2: S4/S6 at ~20.6s of a
+//     20s window on landed main) while notePoll — registration-checked
+//     namespace-blind — let it wait. Deriving the OTHER credential's
+//     host instead would wedge that host's waiter slot (test 10), so
+//     the fallback must stay inside the polling credential's namespace.
 //
 // Synthetic fixtures only — loopback HTTP, no external calls or real credentials.
 import test from "node:test";
@@ -295,6 +306,69 @@ test("room-key poll without hostId derives its credential host", async t => {
   assert.deepEqual(doc.pendingWakes, []);
   assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("rk_"),
     "derived room-key host is the credential-derived host id");
+});
+
+test("room-key poll without hostId is released promptly when the identity's hosts are rak_-namespaced", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("rk-cross-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "rkxagent",
+    displayName: "RK cross agent", permissions: ["accept_work"],
+  });
+  // The standard-setup shape: the agent's only host is heartbeated by the
+  // saved rak_ credential, so it lives under the ak_ namespace.
+  const onboarding = f.store.agentPlugin.issueOnboardingMcpToken(
+    { identityId: identity.identityId, roomId: "commons", label: "probe" });
+  const beat = await post(origin, "/api/agent-heartbeats",
+    { hostId: "journey-edge", mode: "wakeable", cadenceSeconds: 300 }, onboarding.credential);
+  assert.equal(beat.status, 200);
+  // The legacy room key polls with no hostId (JOURNEY S4/S6 mechanics):
+  // its own namespace holds no host, yet the held wait must release at
+  // mention time — on the credential's derived slot, not at expiry.
+  const roomKey = f.store.issueAccessKey("commons", "rkxagent");
+  const held = get(origin, "/api/agent-wakes/poll?waitMs=5000", roomKey).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
+    data: { messageId: "m-cross-rk", body: "hey @rkxagent, prompt release please" } });
+  const doc = await held;
+  assert.equal(doc.timedOut, false);
+  assert.ok(doc.pendingWakes.some(w => w.messageId === "m-cross-rk"),
+    `held poll released with the mention: ${JSON.stringify(doc.pendingWakes.map(w => w.messageId))}`);
+  assert.ok(doc.waitedMs < 2500, `released at mention time, not window expiry: waitedMs=${doc.waitedMs} of 5000`);
+  assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("rk_"),
+    `wait parked on the room key's own derived slot: ${doc.hostId}`);
+  // The rak_ host's own slot was never disturbed: it still polls cleanly.
+  const own = await (await get(origin, "/api/agent-wakes/poll?hostId=journey-edge&waitMs=0", onboarding.credential)).json();
+  assert.equal(own.hostId.endsWith("journey-edge"), true);
+});
+
+test("scoped-key poll without hostId is released promptly when the identity's hosts are rk_-namespaced", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("ak-cross-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "akxagent",
+    displayName: "AK cross agent", permissions: ["accept_work"],
+  });
+  // Mirror image: the identity's only host is the room key's pull-only
+  // seat (rk_ namespace); the saved rak_ credential polls without hostId.
+  const roomKey = f.store.issueAccessKey("commons", "akxagent");
+  const beat = await post(origin, "/api/agent-heartbeats", { hostId: "edge", mode: "pull-only" }, roomKey);
+  assert.equal(beat.status, 200);
+  const onboarding = f.store.agentPlugin.issueOnboardingMcpToken(
+    { identityId: identity.identityId, roomId: "commons", label: "probe" });
+  const held = get(origin, "/api/agent-wakes/poll?waitMs=5000", onboarding.credential).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
+    data: { messageId: "m-cross-ak", body: "hey @akxagent, prompt release please" } });
+  const doc = await held;
+  assert.equal(doc.timedOut, false);
+  assert.ok(doc.pendingWakes.some(w => w.messageId === "m-cross-ak"),
+    `held poll released with the mention: ${JSON.stringify(doc.pendingWakes.map(w => w.messageId))}`);
+  assert.ok(doc.waitedMs < 2500, `released at mention time, not window expiry: waitedMs=${doc.waitedMs} of 5000`);
+  assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("ak_"),
+    `wait parked on the scoped key's own derived slot: ${doc.hostId}`);
 });
 
 test("poll times out cleanly when nothing arrives", async t => {

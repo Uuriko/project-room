@@ -12,7 +12,8 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPEN = new Set(["proposed", "accepted", "working", "blocked"]);
-export const PUBLIC_RECEIPT_ID = /^(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})$/;
+export const PUBLIC_RECEIPT_ID = /^(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})$/;
+export const LOT_RECEIPT_ID = /^lot_[a-f0-9]{16}$/;
 export const DIRECTORY_PAGE_SIZE = 50;
 export const PUBLIC_BACKFILL_BATCH = 20;
 
@@ -624,8 +625,123 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
 
 export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
+  if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
   return row ? rowToPublic(row) : null;
+}
+
+const cleanText = (value, max) => {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return text ? text.slice(0, max) : null;
+};
+
+const finiteNumber = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+
+// Bounty lot receipts are composed at read time from the escrow ledger —
+// the same derivation the member-gated credits history uses (one lot is
+// one zero-sum journal movement; server/bounty-escrow.mjs history()). No
+// lot rows are stored in public_receipts: the journal is the record, and
+// a stored copy could drift from it. A lot becomes a public receipt only
+// once its bounty carries a recorded settlement verdict (paid out,
+// failed, unverified, or split — every terminal path stamps one via
+// _recordSettlement). Before settlement, and for journal lots that are
+// not bounty movements (transfers carry no bounty_id), the id is a 404.
+// Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
+export function publicLotReceiptById(store, id) {
+  if (typeof id !== "string" || !LOT_RECEIPT_ID.test(id)) return null;
+  let entries;
+  try {
+    entries = store.db.prepare(`SELECT entry_id, room_id, account_id, at, kind, bounty_id,
+      amount, lot_state, hash, prev_hash, memo, actor_kind, actor_id, receipt_id
+      FROM bounty_journal WHERE lot_id=? ORDER BY seq LIMIT 100`).all(id);
+  } catch { return null; } // a store with no escrow ledger has no lot receipts
+  if (!entries.length) return null;
+  const first = entries[0];
+  const roomId = first.room_id;
+  const bountyId = first.bounty_id;
+  if (typeof roomId !== "string" || typeof bountyId !== "string" || !bountyId) return null;
+  let bounty;
+  try {
+    bounty = store.db.prepare(`SELECT room_id, title, amount_millis, poster, verifier, claimant,
+      state, rubric_hash, rubric_version, submission_hash, resolution_json, created_at
+      FROM bounty_records WHERE bounty_id=?`).get(bountyId);
+  } catch { return null; }
+  if (!bounty || bounty.room_id !== roomId) return null;
+  let resolution = null;
+  try { resolution = bounty.resolution_json ? JSON.parse(bounty.resolution_json) : null; } catch { resolution = null; }
+  const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
+  if (!settlement || typeof settlement !== "object") return null;
+  if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) return null;
+  let roomTitle = null;
+  try {
+    if (isListed(store, roomId)) {
+      roomTitle = cleanName(store.db.prepare("SELECT title FROM public_rooms WHERE slug=?").get(roomId)?.title ?? null);
+    }
+  } catch { roomTitle = null; }
+  const debit = entries.find(entry => entry.amount < 0) ?? null;
+  const credit = entries.find(entry => entry.amount > 0) ?? null;
+  const principal = credit ?? first;
+  const amountMillis = Math.abs(principal.amount);
+  const settledBy = settlement.settledBy && typeof settlement.settledBy === "object"
+    ? { kind: cleanText(settlement.settledBy.kind, 32), id: cleanText(settlement.settledBy.id, 256) }
+    : null;
+  return {
+    schema: "project-room-public-receipt/1",
+    id,
+    title: cleanName(bounty.title) ?? "Bounty",
+    source: "bounty-lot",
+    room: { id: roomId, title: roomTitle },
+    agents: [],
+    humans: [],
+    pullRequest: null,
+    mergedAt: null,
+    hashes: hashList(entries.map(entry => HEX64.test(entry.hash ?? "") ? `sha256:${entry.hash}` : null).filter(Boolean)),
+    at: iso(first.at) ?? new Date(0).toISOString(),
+    startHref: startHref(null),
+    lot: {
+      bountyId,
+      kind: first.kind,
+      kinds: [...new Set(entries.map(entry => entry.kind))],
+      amountMillis,
+      amountCredits: amountMillis / 1000,
+      from: debit ? { account: debit.account_id, lotState: debit.lot_state } : null,
+      to: { account: principal.account_id, lotState: principal.lot_state },
+      memo: cleanText(first.memo, 500),
+      actor: first.actor_kind ? { kind: first.actor_kind, id: first.actor_id } : null,
+      poster: cleanText(bounty.poster, 256),
+      worker: cleanText(bounty.claimant, 256),
+      verifier: cleanText(bounty.verifier, 256),
+      bountyState: cleanText(bounty.state, 32),
+      awardMillis: bounty.amount_millis,
+      awardCredits: finiteNumber(bounty.amount_millis) === null ? null : bounty.amount_millis / 1000,
+      rubricHash: HEX64.test(bounty.rubric_hash ?? "") ? bounty.rubric_hash : null,
+      rubricVersion: Number.isInteger(bounty.rubric_version) ? bounty.rubric_version : null,
+      submissionHash: HEX64.test(bounty.submission_hash ?? "") ? bounty.submission_hash : null,
+      settlement: {
+        kind: cleanText(settlement.kind, 32),
+        workerMillis: Number.isSafeInteger(settlement.workerMillis) ? settlement.workerMillis : null,
+        workerCredits: finiteNumber(settlement.workerCredits),
+        refundMillis: Number.isSafeInteger(settlement.refundMillis) ? settlement.refundMillis : null,
+        refundCredits: finiteNumber(settlement.refundCredits),
+        reason: cleanText(settlement.reason, 500),
+        settledAt: iso(settlement.settledAt),
+        settledBy: settledBy && settledBy.id ? settledBy : null,
+      },
+      movements: entries.map(entry => ({
+        entryId: entry.entry_id,
+        kind: entry.kind,
+        account: entry.account_id,
+        lotState: entry.lot_state,
+        amountMillis: entry.amount,
+      })),
+      entries: entries.map(entry => entry.entry_id),
+      signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
+      journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
+      prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,
+      bountyCreatedAt: iso(bounty.created_at),
+    },
+  };
 }
 
 export function collectPublicReceipts(store) {

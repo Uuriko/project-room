@@ -40,18 +40,32 @@ export const mcpAttachmentBodyBytes = base64LengthForBytes(attachmentLimits.file
 
 const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
 
+// Encoding validity ONLY (#3436): the size cap is not part of this check.
+// Folding it in made every over-cap upload report as an encoding error and
+// left the 413 branch below unreachable for base64 input.
 export function validAttachmentData(value) {
-  if (typeof value !== "string" || value.length > base64LengthForBytes(attachmentLimits.fileBytes)) return false;
+  if (typeof value !== "string") return false;
   if (value.length % 4 !== 0) return false;
   if (value.length > 0 && !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return false;
   return true;
 }
 
+// Exact decoded byte count of a well-formed base64 string, computed before
+// decoding so an over-cap payload is refused for its size, not its shape.
+export function base64DecodedLength(value) {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
+}
+
 function decodeData(value) {
   if (!validAttachmentData(value)) fail(422, "invalid_attachment", "data must be canonical base64 with no whitespace");
+  // Size before decode, naming the limit and the actual size (#3436; the AX
+  // *_too_large recovery reads the limit from the message).
+  const decodedLength = base64DecodedLength(value);
+  if (decodedLength > attachmentLimits.fileBytes)
+    fail(413, "attachment_too_large", `File is ${decodedLength} bytes; the room attachment size limit is ${attachmentLimits.fileBytes} bytes`);
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) fail(422, "invalid_attachment", "data must be canonical base64 with no whitespace");
-  if (bytes.length > attachmentLimits.fileBytes) fail(413, "attachment_too_large", "File exceeds the room attachment size limit");
   return bytes;
 }
 
