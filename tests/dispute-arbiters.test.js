@@ -113,6 +113,43 @@ test("sortition excludes parties and the executor", () => {
   assert.equal(r.unavailable, "no-arbitrator"); // only 1 eligible left
 });
 
+test("sortition never seats the same lane twice when lanes contain duplicates", () => {
+  const arbiters = createArbiters();
+  // Regression #2928: [x,x,y,z] used to draw panels like [z,x,x], which
+  // recordPanelDecision could never accept (duplicate-lane votes rejected).
+  const lanes = [
+    { lane: "x", trust_level: "elevated" },
+    { lane: "x", trust_level: "elevated" },
+    { lane: "y", trust_level: "standard" },
+    { lane: "z", trust_level: "standard" },
+  ];
+  for (const disputeId of ["D-dup-1", "D-dup-2", "D-dup-3", "D-dup-4"]) {
+    const { panel } = arbiters.drawPanel({ disputeId, lanes });
+    assert.equal(panel.length, 3);
+    assert.deepEqual(panel.map(p => p.lane).sort(), ["x", "y", "z"]);
+    // The drawn panel must actually be able to record a decision.
+    const votes = panel.map((p, i) => ({
+      lane: p.lane,
+      outcome: i < 2 ? "upheld" : "rejected",
+      reasonCodes: ["frivolous"],
+    }));
+    const { decision } = arbiters.recordPanelDecision({ panel, votes });
+    assert.equal(decision.outcome, "upheld");
+  }
+});
+
+test("duplicate lanes do not count toward the panel size", () => {
+  const arbiters = createArbiters();
+  const lanes = [
+    { lane: "x", trust_level: "elevated" },
+    { lane: "x", trust_level: "elevated" },
+    { lane: "y", trust_level: "standard" },
+  ];
+  const r = arbiters.drawPanel({ disputeId: "D-dup-short", lanes });
+  assert.equal(r.unavailable, "no-arbitrator");
+  assert.match(r.reason, /only 2 eligible lanes/);
+});
+
 test("panel decision: majority wins with the majority's reason codes", () => {
   const arbiters = createArbiters();
   const lanes = [
@@ -165,4 +202,16 @@ test("registry read path parses agent-card frontmatter", () => {
   assert.equal(lanes[0].trust_level, "elevated");
   assert.equal(lanes[1].trust_level, "new");
   assert.equal(lanes[2].lane, "notes"); // falls back to filename
+});
+
+test("registry read path dedupes cards for the same lane (first card wins)", () => {
+  const arbiters = createArbiters();
+  const cards = [
+    { name: "quill.md", content: "---\nlane: quill\ntrust_level: elevated\n---\n# card\n" },
+    { name: "quill-copy.md", content: "---\nlane: quill\ntrust_level: new\n---\n# duplicate\n" },
+    { name: "instinct.md", content: "---\nlane: instinct\ntrust_level: standard\n---\n# card\n" },
+  ];
+  const lanes = arbiters.parseLaneCards(cards);
+  assert.deepEqual(lanes.map(l => l.lane), ["quill", "instinct"]);
+  assert.equal(lanes[0].trust_level, "elevated");
 });

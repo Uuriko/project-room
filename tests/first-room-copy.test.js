@@ -49,3 +49,11 @@ test("ensureDefaultRoom wires the failure copy and keeps the genuine empty state
   assert.equal(genuineEmpty, 1,
     "the genuine 'No rooms yet.' empty-list branch keeps its copy exactly once");
 });
+
+test("ensureDefaultRoom treats the server's { room: null } no-resurrect answer as the empty state, not a failure", () => {
+  const body = ensureDefaultRoomBody(readFileSync(path.join(repoRoot, "src/app.js"), "utf8"));
+  const nullBranch = body.match(/else if \(body && body\.room === null\)([^;]*);/);
+  assert.ok(nullBranch, "ensureDefaultRoom has an explicit branch for { room: null }");
+  assert.ok(!nullBranch[1].includes("FIRST_ROOM_SETUP_FAILURE"),
+    "an account that left every room must not see 'Couldn't set up your first room'");
+});

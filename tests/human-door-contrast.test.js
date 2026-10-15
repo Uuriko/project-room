@@ -11,12 +11,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { agentPages } from "../scripts/build-agent-docs.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const stylesCss = readFileSync(join(ROOT, "src", "styles.css"), "utf8");
 const offersCss = readFileSync(join(ROOT, "src", "project-offers.css"), "utf8");
 const aboutHtml = readFileSync(join(ROOT, "about.html"), "utf8");
-const docsHtml = readFileSync(join(ROOT, "docs", "agents", "index.html"), "utf8");
+// docs/agents/*.html are generated build output (no longer committed): use
+// the builder's in-memory render of the index page.
+const docsHtml = agentPages().get("docs/agents/index.html");
 
 function lum(hex) {
   const c = hex.replace("#", "");

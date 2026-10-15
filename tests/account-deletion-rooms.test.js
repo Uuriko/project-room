@@ -210,3 +210,27 @@ test("an account that joined a room through a share link can delete itself (join
   const again = await fetch(`${origin}/api/account/deletion/plan`, { headers: { Cookie: headers.Cookie } });
   assert.equal(again.status, 401, "the old cookie no longer authenticates");
 });
+
+test("account deletion also purges archived message rows that are no longer in the projection", async t => {
+  const ctx = await deletionAccount(t, 9);
+  const roomId = "solo-archived";
+  const { key } = createRoom(ctx, roomId, "personal", "Solo archived");
+  ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "old-secret", body: SECRET } });
+  ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "new-note", body: "recent" } });
+  const db = ctx.f.store.db;
+  const through = db.prepare("SELECT seq FROM messages WHERE room_id=? AND message_id='old-secret'").get(roomId).seq;
+  const archivedIds = new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=?").all(roomId, through).map(row => row.message_id));
+  const projection = JSON.parse(db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+  projection.messages = projection.messages.filter(message => !archivedIds.has(message.id));
+  projection.messagesArchive = { throughSeq: through, count: archivedIds.size };
+  db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), roomId);
+  assert.ok(db.prepare("SELECT record_json FROM messages WHERE room_id=? AND message_id='old-secret'").get(roomId).record_json.includes(SECRET));
+
+  const planned = await (await get(ctx.origin, "/api/account/deletion/plan", ctx.creds.cookie)).json();
+  const res = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: planned.confirmationToken }, ctx.creds);
+  assert.equal(res.status, 200, await res.clone().text());
+
+  const rows = db.prepare("SELECT message_id, body, record_json FROM messages WHERE room_id=?").all(roomId);
+  assert.ok(rows.length > 0);
+  for (const row of rows) assert.equal(`${row.body}${row.record_json}`.includes(SECRET), false, `${row.message_id} keeps no secret text`);
+});

@@ -55,7 +55,7 @@ high-risk accounts, loosen none without writing down why.
 
 `src/totp-2fa.mjs` is not in the tree. The server has no TOTP enrollment and
 stores no TOTP seed, so this runbook has no TOTP generate, confirm, or
-cutover step. `docs/history/TOTP-2FA.md` describes a module that was not
+cutover step. `archive/docs/history/TOTP-2FA.md` describes a module that was not
 shipped.
 
 ### 3.2 Passkey credential rotation

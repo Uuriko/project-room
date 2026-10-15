@@ -51,7 +51,7 @@ async function roomWithFriend(origin, fixture) {
   const reqRes = await post(origin, "/api/access-requests", JSON.stringify({
     roomId, identityId: friend.identityId, displayName: "Friend",
     requestedPermissions: ["accept_work"], note: null, requestId,
-  }), null);
+  }), friend.secret);
   assert.equal(reqRes.status, 201);
   const decideRes = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, JSON.stringify({
     decision: "approve", permissions: ["accept_work"], note: null,

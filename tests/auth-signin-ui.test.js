@@ -65,6 +65,24 @@ function mount(routes = {}) {
   return { client, signins, container, ui };
 }
 
+for (const outcome of ["success", "network failure"]) test(`obsolete signup ${outcome} cannot restore over a newer identity`, async () => {
+  let resolveReply, rejectReply;
+  const response = new Promise((resolve, reject) => { resolveReply = resolve; rejectReply = reject; });
+  const { client, container, ui, signins } = mount({ "/api/auth/password/signup": () => response });
+  ui.showPassword("signup");
+  const submission = container.listeners.submit[0](submitForm("password", { email: "old-signup@example.invalid", password: "synthetic-password" }));
+  while (!client.calls.length) await Promise.resolve();
+  const replacement = { authenticated: true, account: { id: "replacement" } };
+  client.generation++; client.session = replacement;
+  if (outcome === "success") resolveReply({ status: "check_email", mailConfigured: false });
+  else rejectReply(new Error("Connection lost"));
+  await submission;
+  assert.equal(client.session, replacement);
+  assert.equal(client.calls.filter(call => call.path === "/api/account-session").length, 0, "obsolete signup cannot initiate another account restore");
+  assert.deepEqual(signins, [], "obsolete signup cannot report success for another identity");
+  assert.equal(ui.canLeave(), true);
+});
+
 
 test("primary entry exposes password sign-in and contextual recovery", async () => {
   const { container } = mount();
@@ -75,18 +93,23 @@ test("primary entry exposes password sign-in and contextual recovery", async () 
   assert.match(container.innerHTML, /data-signin-form="reset-request"/);
   assert.match(container.innerHTML, /data-email-method="magic"/);
 });
-test("default sign-in view offers a first-class magic-link CTA", async () => {
+test("email-link alternative is available within recovery without an extra options menu", async () => {
   const { container } = mount({ "/api/auth/magic/request": { status: "sent" } });
   assert.match(container.innerHTML, /data-signin-form="password"/);
-  // Visible without going through "Forgot password?" first.
+  assert.doesNotMatch(container.innerHTML, /signin-more|data-email-method="magic"/);
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
   assert.match(container.innerHTML, /data-email-method="magic"/);
   assert.match(container.innerHTML, /Email me a sign-in link/);
+  // The recovery option lands on the ONE merged form (#3341) — there is
+  // no separate magic-request view to choose.
   await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));
-  assert.match(container.innerHTML, /data-signin-form="magic-request"/);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  assert.doesNotMatch(container.innerHTML, /data-signin-form="magic-request"/);
+  assert.match(container.innerHTML, /Leave it blank/, "the merged form teaches the blank-password link path");
 });
 test("unconfigured delivery stays visible after pending state clears", async () => {
   const { container, ui } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
-  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.equal(ui.canLeave(), true);
   assert.equal(container.status.textContent, "Delivery unavailable");
   assert.match(container.innerHTML, /role="alert"/);
@@ -94,7 +117,7 @@ test("unconfigured delivery stays visible after pending state clears", async () 
 test("delivered email offers verification code only after explicit selection", async () => {
   const { container, client, signins, ui } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { authenticated: true, account: { id: "a" } } });
   ui.showMagic();
-  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.match(container.innerHTML, /Check m@example.invalid/);
   assert.doesNotMatch(container.innerHTML, /name="code"/);
   await container.listeners.click[0](clickOnDataset("magic-manual-code"));
@@ -106,12 +129,12 @@ test("email request carries the host's invitation destination without authentica
   const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); let signed = 0;
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onMagicLinkRequest: () => "/#invite/synthetic" });
   const container = fakeContainer(); ui.mount(container);
-  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.equal(client.calls[0].data.returnTo, "/#invite/synthetic"); assert.equal(signed, 0);
 });
 async function readyCode(ui, container) {
   ui.showMagic();
-  await container.listeners.submit[0](submitForm("magic-request", { email: "m@example.invalid" }));
+  await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   await container.listeners.click[0](clickOnDataset("magic-manual-code"));
 }
 test("pending authentication prevents leaving until its actual result", async () => {
@@ -191,8 +214,31 @@ test("contextual password login and creation use the guarded authentication rout
   await container.listeners.submit[0](submitForm("password", { email: "p@example.invalid", password: "synthetic-password" }));
   assert.equal(client.calls[1].path, "/api/auth/password/signup"); assert.equal(signins.length, 2);
   await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));
-  assert.match(container.innerHTML, /data-signin-form="magic-request"/); ui.clear();
+  assert.match(container.innerHTML, /data-signin-form="password"/, "the magic method switch lands on the merged form"); ui.clear();
   assert.doesNotMatch(container.innerHTML, /p@example.invalid/);
+});
+test("merged form: a blank password asks for an email link, a filled one logs in (#3341)", async () => {
+  const { container, client, signins } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/password/login": { authenticated: true, account: { id: "a" } } });
+  // Blank password -> link request; the password route is never called.
+  await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
+  assert.equal(client.calls[0].path, "/api/auth/magic/request");
+  assert.match(container.innerHTML, /Check m@example.invalid/);
+  // "Use a different email" returns to the merged form.
+  await container.listeners.click[0](clickOnDataset("magic-restart"));
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  // Filled password -> password login.
+  await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "synthetic-password" }));
+  assert.equal(client.calls[1].path, "/api/auth/password/login");
+  assert.equal(signins.length, 1);
+});
+test("merged form: password is optional only when mail can send a link (#3341)", async () => {
+  const { container } = mount();
+  assert.doesNotMatch(container.innerHTML, /name="password"[^>]*required/, "no required attribute while a link fallback exists");
+  assert.match(container.innerHTML, /Leave it blank/);
+  const unconfigured = mountWithOptions({ providers: { mail: { configured: false } } });
+  await flushOptions();
+  assert.match(unconfigured.container.innerHTML, /name="password"[^>]*required/, "password is required when no link can be sent");
+  assert.doesNotMatch(unconfigured.container.innerHTML, /Leave it blank/);
 });
 test("declining password authentication sends no request", async () => {
   const client = stubClient(); const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => false });
@@ -301,4 +347,41 @@ test("duplicate signup on a mail-configured room still promises the sign-in link
   await container.listeners.click[0](clickOnDataset("password-mode", { passwordMode: "signup" }));
   await container.listeners.submit[0](submitForm("password", { email: "dup@example.invalid", password: "synthetic-password-1" }));
   assert.match(container.status.textContent, /check your email for a sign-in link/i);
+});
+
+const flushOptions = async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); };
+
+function mountWithOptions(options) {
+  const client = stubClient({});
+  const ui = createAuthSigninUI({
+    accountClient: client,
+    ensureAccountSession: async () => {},
+    onSignedIn: async () => {},
+    loadSigninOptions: async () => options
+  });
+  const container = fakeContainer();
+  ui.mount(container);
+  return { client, container, ui };
+}
+
+test("unconfigured mail hides the email-link offers and coerces magic entries to password (#3341)", async () => {
+  const { container, ui } = mountWithOptions({ providers: { mail: { configured: false } } });
+  await flushOptions();
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
+  assert.match(container.innerHTML, /data-signin-form="reset-request"/);
+  assert.doesNotMatch(container.innerHTML, /data-email-method="magic"/, "no email-link offer when this deployment cannot send mail");
+  assert.match(container.innerHTML, /Email password reset link/, "password recovery remains offered");
+  // Programmatic entries into the magic views coerce to password sign-in.
+  assert.equal(ui.showMagic(), true);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+  assert.equal(ui.showView("magic-request"), true);
+  assert.match(container.innerHTML, /data-signin-form="password"/);
+});
+
+test("configured mail keeps the email-link offers (#3341)", async () => {
+  const { container } = mountWithOptions({ providers: { mail: { configured: true } } });
+  await flushOptions();
+  await container.listeners.click[0](clickOnDataset("forgot-password"));
+  assert.match(container.innerHTML, /data-email-method="magic"/);
+  assert.match(container.innerHTML, /Email me a sign-in link instead/);
 });

@@ -16,13 +16,32 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
-  batchPullOutcome, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
+  batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
   pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest, usableEtag
 } from "./claim-coordination.mjs";
+
+// #3464: the durable registry decodes stored rows WITHOUT validation while
+// every state-machine touch re-validates, so one stored row with a malformed
+// field (a full URL in `repo`, say) is readable but throws on first touch —
+// and the whole-table phases below touch everything, so one bad row wedged
+// the sweep for every room (prod, 2026-10-13T23:57Z onward). Per-item
+// isolation: skip the row, count it, and name it in the operator log.
+// Repairing or deleting the row itself is operator work (diagnosis §7); the
+// sweep's job is to keep everyone else moving and to say which row is bad.
+function noteSkippedInvalidClaim(skipped, roomId, claimId, error) {
+  const entry = { roomId, claimId: claimId ?? null, error: String(error?.message ?? error).slice(0, 200) };
+  // Several phases touch the same row in one tick; report each row once.
+  if (Array.isArray(skipped)) {
+    if (skipped.some(prior => prior.roomId === roomId && prior.claimId === entry.claimId)) return entry;
+    skipped.push(entry);
+  }
+  console.warn(`[claim-prs] skipped invalid claim row ${roomId}/${entry.claimId}: ${entry.error}`);
+  return entry;
+}
 
 const LOOKUP_LIMIT = 4;
 const LOOKUP_LIMIT_NO_TOKEN = 1;
@@ -160,6 +179,35 @@ async function fetchCommitDocument(url, { fetchImpl, token, nowMs, deadline = In
   return { kind: "ok", body: read.body };
 }
 
+// The rollup reads only the combined status's state, its total_count, and
+// the first https target_url, so a split read persists just that digest on
+// the pull instead of the whole GitHub body.
+function digestCiStatus(body) {
+  if (!body || typeof body !== "object") return null;
+  const total = Number(body.total_count);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const target = Array.isArray(body.statuses)
+    ? body.statuses.find(entry => typeof entry?.target_url === "string" && entry.target_url.startsWith("https://"))
+    : null;
+  return Object.freeze({
+    state: typeof body.state === "string" ? body.state : null,
+    totalCount: total,
+    targetUrl: target ? target.target_url : null
+  });
+}
+
+// Expand a persisted digest back into the body shape rollupClaimCi reads.
+function ciStatusBody(digest) {
+  if (!digest || typeof digest !== "object") return null;
+  const total = Number(digest.totalCount);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return {
+    state: typeof digest.state === "string" ? digest.state : null,
+    total_count: total,
+    statuses: typeof digest.targetUrl === "string" ? [{ target_url: digest.targetUrl }] : []
+  };
+}
+
 // Combined commit status, then check runs, inside the calls still left in
 // this tick. A missing call leaves the cursor where the next tick continues.
 async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, budget, deadline = Infinity }) {
@@ -168,13 +216,21 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
   let status = null;
   let checkRuns = [];
   let cursor = pullRequest.ciCursor === "checks" ? "checks" : "status";
+  // Resuming at "checks": the earlier leg already fetched the combined
+  // status and its digest was persisted on the pull. Fold it back in, or
+  // the rollup below would see the check runs alone.
+  if (cursor === "checks") status = ciStatusBody(pullRequest.ciStatus);
   if (cursor === "status") {
     if (budget.remaining <= 0 || Date.now() > deadline) return { cursor, partial: true, budget: Date.now() > deadline };
     budget.remaining -= 1;
     const read = await fetchCommitDocument(`${base}/status`, { fetchImpl, token, nowMs, deadline });
     if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return read;
-    if (read.kind === "ok") status = read.body;
+    // A failed fetch is not an empty status: leave the cursor on "status"
+    // so the next tick retries this leg instead of rolling up a bogus CI
+    // state built from the missing half.
+    if (read.kind !== "ok") return { cursor, partial: true, status };
+    status = read.body;
     cursor = "checks";
   }
   if (cursor === "checks") {
@@ -183,7 +239,11 @@ async function readCommitCi(pullRequest, headSha, { fetchImpl, token, nowMs, bud
     const read = await fetchCommitDocument(`${base}/check-runs`, { fetchImpl, token, nowMs, deadline });
     if (read.kind === "budget") return { cursor, partial: true, budget: true, status };
     if (read.kind === "rateLimited" || read.kind === "unconfigured") return { ...read, status, cursor };
-    if (read.kind === "ok") checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
+    // Same guard for the check-runs leg: a failed fetch must not advance
+    // the cursor to "done" or record a rollup built from the status alone.
+    // The status already fetched rides along so the resume keeps it.
+    if (read.kind !== "ok") return { cursor, partial: true, status };
+    checkRuns = Array.isArray(read.body?.check_runs) ? read.body.check_runs : [];
     cursor = "done";
   }
   const rollup = rollupClaimCi({ status, checkRuns, pullUrl: pullRequest.url });
@@ -239,7 +299,9 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       } else if (signals.ci) {
         looked = { ...looked, ci: signals.ci, ciCursor: signals.cursor };
       } else if (signals.cursor) {
-        looked = { ...looked, ciCursor: signals.cursor };
+        // A split read: keep the combined status it already fetched, or the
+        // resumed leg would roll up the check runs alone.
+        looked = { ...looked, ciCursor: signals.cursor, ciStatus: digestCiStatus(signals.status) };
       }
       if (signals.budget) {
         const result = {
@@ -330,7 +392,14 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
       changed = recorded.changed;
     }
     if (result.ciCursor) {
-      next = { ...next, pullRequest: { ...next.pullRequest, ciCursor: result.ciCursor } };
+      next = { ...next, pullRequest: {
+        ...next.pullRequest,
+        ciCursor: result.ciCursor,
+        // The combined-status digest of a split read rides with its cursor.
+        // A completed read folded the status into result.ci, so it clears;
+        // a result carrying no digest keeps the one already stored.
+        ciStatus: result.ci ? null : (result.ciStatus !== undefined ? result.ciStatus : (next.pullRequest.ciStatus ?? null))
+      } };
     }
     const delay = result.ciCursor && result.ciCursor !== "done"
       ? 0
@@ -429,22 +498,217 @@ function loadDueClaims(store, nowMs) {
   return due;
 }
 
+// Search fallback (bug-claim-pr-sync-rate-limited-no-settle-20261010). Prod
+// polls without a token, so the per-pull REST lookups share 60 core requests
+// an hour per egress IP, and the shared reset can hold every claim for an hour.
+// GitHub's search API has its own quota (10 a minute without a token). While
+// the core budget is spent, one search per tick walks a repo's pulls merged in
+// the last 14 days, oldest-created first from a stored cursor, so every held
+// pull is reached within a bounded number of ticks. Matching claims settle
+// through the same commitPullRequestLookup path.
+// - Only a merge settles here. A merge is final; an unmerged close can be
+//   reopened, so a close waits for the REST lookup.
+// - land and deploy claims need the merge sha, so they also wait for REST.
+// - Each hit must name the same repo and pull number; the body is bounded.
+// - A search 403 or 429 backs the search off on its own row.
+// CLAIM_PR_SEARCH_BATCH=0 turns this off.
+const SEARCH_ROOM = "_claim-pr-search";
+const SEARCH_PAGE = 50;
+const SEARCH_WINDOW_MS = 14 * 24 * 3600 * 1000;
+const SEARCH_BODY_CHARS = 1_000_000;
+const SEARCH_BACKOFF_MS = 60_000;
+const SEARCH_MAX_PAGE = 1000 / SEARCH_PAGE;
+const ISO_SECOND = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+function readSearchState(store) {
+  try {
+    const row = store.db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?").get(SEARCH_ROOM);
+    const parsed = row ? JSON.parse(row.config_json) : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+
+function writeSearchState(store, state, nowMs) {
+  store.db.prepare(`INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)
+    ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
+    .run(SEARCH_ROOM, JSON.stringify(state), nowMs);
+}
+
+// Held claims with an unsettled pull, read as (room, claim, url) columns only:
+// no row is decoded unless a search hit names its pull.
+function heldPullIndex(store) {
+  let rows = [];
+  try {
+    rows = store.db.prepare(`
+      SELECT room_id AS roomId, claim_id AS claimId,
+        COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) AS state,
+        COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'), '[]') AS links,
+        COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url')) AS url
+      FROM work_claims
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
+    `).all();
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return new Map();
+    throw error;
+  }
+  const index = new Map();
+  for (const row of rows) {
+    let urls = [];
+    try { urls = (JSON.parse(row.links) ?? []).map(pull => pull?.url); } catch { /* fall back to the primary link */ }
+    if (typeof row.url === "string") urls.push(row.url);
+    for (const url of new Set(urls.filter(value => typeof value === "string"))) {
+      const parsed = parsePullRequestUrl(url);
+      if (!parsed) continue;
+      const repo = parsed.repo.toLowerCase();
+      const byRepo = index.get(repo) ?? Object.assign(new Map(), { name: parsed.repo });
+      const list = byRepo.get(parsed.number) ?? [];
+      list.push({ roomId: row.roomId, claimId: row.claimId, url: parsed.url });
+      byRepo.set(parsed.number, list);
+      index.set(repo, byRepo);
+    }
+  }
+  return index;
+}
+
+function sameApiRepo(value, want) {
+  try {
+    const url = new URL(String(value ?? ""));
+    return url.origin === "https://api.github.com" && !url.search && !url.hash && url.pathname.toLowerCase() === `/repos/${want}`;
+  } catch { return false; }
+}
+
+async function searchMergedPulls(repo, cursor, windowStart, { fetchImpl, token, deadline, page = 1 }) {
+  const budgetMs = deadline - Date.now();
+  if (!(budgetMs > 0)) return { kind: "deadline" };
+  // Eligibility is the merge time (a PR opened long ago and merged today is in);
+  // the created cursor only pages through that set.
+  const q = `repo:${repo} is:pr is:merged merged:>=${windowStart}${cursor ? ` created:>=${cursor}` : ""}`;
+  const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}&sort=created&order=asc&per_page=${SEARCH_PAGE}${page > 1 ? `&page=${page}` : ""}`;
+  let response;
+  try {
+    response = await fetchImpl(url, { headers: githubHeaders(token), signal: AbortSignal.timeout(Math.min(5000, budgetMs)) });
+  } catch { return { kind: "error" }; }
+  if (response.status === 403 || response.status === 429) {
+    const retryAfter = Number(responseHeader(response, "retry-after"));
+    const reset = Number(responseHeader(response, "x-ratelimit-reset"));
+    return { kind: "rateLimited", retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null, resetMs: Number.isFinite(reset) && reset > 0 ? reset * 1000 : null };
+  }
+  if (response.status !== 200) return { kind: "error" };
+  const length = responseHeader(response, "content-length");
+  if (length && /^\d+$/.test(length) && Number(length) > SEARCH_BODY_CHARS) return { kind: "error" };
+  let body;
+  try {
+    const text = typeof response.text === "function" ? await response.text() : JSON.stringify(await response.json());
+    if (text.length > SEARCH_BODY_CHARS) return { kind: "error" };
+    body = JSON.parse(text);
+  } catch { return { kind: "error" }; }
+  const items = Array.isArray(body?.items) ? body.items : [];
+  const merged = new Set();
+  let lastCreated = null;
+  let firstCreated = null;
+  const want = repo.toLowerCase();
+  for (const hit of items) {
+    if (typeof hit?.created_at === "string") { lastCreated = hit.created_at; firstCreated ??= hit.created_at; }
+    if (!Number.isSafeInteger(hit?.number) || hit.state !== "closed") continue;
+    if (!sameApiRepo(hit.repository_url, want)) continue;
+    const pull = hit.pull_request;
+    if (!pull || typeof pull.merged_at !== "string" || !pull.merged_at) continue;
+    const html = parsePullRequestUrl(pull.html_url);
+    if (!html || html.repo.toLowerCase() !== want || html.number !== hit.number) continue;
+    merged.add(hit.number);
+  }
+  return { kind: "ok", merged, full: items.length >= SEARCH_PAGE, firstCreated, lastCreated };
+}
+
+export async function settleFromSearch(store, { env = null, fetchImpl = fetch, token = null, nowMs = Date.now(), deadline = Infinity } = {}) {
+  if (String((env ?? {}).CLAIM_PR_SEARCH_BATCH ?? "").trim() === "0") return 0;
+  const state = readSearchState(store);
+  if (Number(state.rateLimitedUntil) > nowMs) return 0;
+  const index = heldPullIndex(store);
+  if (!index.size) return 0;
+  // One repo per tick, in turn.
+  const repos = [...index.keys()].sort();
+  const repo = repos[(Number.isSafeInteger(state.turn) ? state.turn : 0) % repos.length];
+  const byNumber = index.get(repo);
+  const windowStart = new Date(nowMs - SEARCH_WINDOW_MS).toISOString().slice(0, 10);
+  const saved = state.cursors?.[repo];
+  const cursor = typeof saved === "string" && ISO_SECOND.test(saved) ? saved : null;
+  const savedPage = Number(state.pages?.[repo]);
+  const page = cursor && Number.isSafeInteger(savedPage) && savedPage > 1 ? savedPage : 1;
+  const found = await searchMergedPulls(byNumber.name, cursor, windowStart, { fetchImpl, token, deadline, page });
+  // The turn advances whatever happened, so one failing repo cannot hold the others.
+  const next = { ...state, turn: ((Number.isSafeInteger(state.turn) ? state.turn : 0) + 1) % 1_000_000, cursors: { ...(state.cursors ?? {}) }, pages: { ...(state.pages ?? {}) } };
+  delete next.rateLimitedUntil;
+  if (found.kind === "rateLimited") {
+    const until = Math.max(nowMs + SEARCH_BACKOFF_MS, found.retryAfterMs ? nowMs + found.retryAfterMs : 0, found.resetMs ?? 0);
+    writeSearchState(store, { ...next, rateLimitedUntil: until }, nowMs);
+    return 0;
+  }
+  if (found.kind !== "ok") {
+    writeSearchState(store, next, nowMs);
+    return 0;
+  }
+  // A full page continues from its last created time (inclusive, so a tie at
+  // the page edge repeats rather than skips). A full page that is all one
+  // created second pages within that second (page=2, 3, ... up to GitHub's
+  // 1,000-result cap) instead of looping or skipping. A short page starts the
+  // walk over.
+  delete next.pages[repo];
+  if (found.full && ISO_SECOND.test(found.lastCreated ?? "")) {
+    if (cursor && found.firstCreated === cursor && found.lastCreated === cursor) {
+      if (page < SEARCH_MAX_PAGE) { next.cursors[repo] = cursor; next.pages[repo] = page + 1; }
+      else next.cursors[repo] = new Date(Date.parse(cursor) + 1000).toISOString().replace(".000Z", "Z");
+    } else next.cursors[repo] = found.lastCreated;
+  } else delete next.cursors[repo];
+  let settled = 0;
+  store.workClaims.transaction(() => {
+    writeSearchState(store, next, nowMs);
+    for (const number of found.merged) {
+      for (const { roomId, claimId, url } of byNumber.get(number) ?? []) {
+        const current = store.workClaims.get(roomId, claimId);
+        if (!current || current.kind === "land" || current.kind === "deploy") continue;
+        // #3464: settling re-validates; one invalid row must not roll back
+        // the whole search batch's settlements.
+        try {
+          if (commitPullRequestLookup(store, store.workClaims, roomId, current, { url, kind: "merged", mergedSha: null }, nowMs)) settled += 1;
+        } catch (error) {
+          noteSkippedInvalidClaim(null, roomId, claimId, error);
+        }
+      }
+    }
+  });
+  return settled;
+}
+
 // Poll every room that has an open pull link. A shared reset skips the tick
 // before any request. A missing token does not fail the tick.
 export async function syncClaimPullRequests(store, { env = null, fetchImpl = fetch, nowMs = Date.now(), token = undefined, deadline = Infinity, yieldBetween = null } = {}) {
   if (!store?.db || !store.workClaims) return { checked: 0, updated: 0 };
-  closeDeployedClaims(store, nowMs);
+  // #3464: rows skipped by the whole-table phases ride every return path, so
+  // a tick that polls nothing still reports the poison it stepped over. The
+  // count is numeric and survives into the job heartbeat summary; the item
+  // detail stays on this return value and the operator log.
+  const skippedInvalid = [];
+  const skipSummary = () => skippedInvalid.length
+    ? { skippedInvalid: skippedInvalid.length, skippedInvalidItems: skippedInvalid }
+    : {};
+  closeDeployedClaims(store, nowMs, skippedInvalid);
   // #1526 B2: sweep lapsed leases before polling, exactly like the HTTP board
   // path (sweepRoom in server/work-claim-routes.mjs). A claim whose lease
   // lapsed is auto-released (lease_expired event, flake signal) so the tick
   // can never settle a dead round as done — the cron and HTTP paths agree.
-  sweepExpiredClaimLeases(store, nowMs);
-  sweepStaleUnclaimedClaims(store, nowMs);
+  sweepExpiredClaimLeases(store, nowMs, skippedInvalid);
+  sweepStaleUnclaimedClaims(store, nowMs, { skipped: skippedInvalid });
   const access = token === undefined ? githubToken(env ?? process.env) : token;
-  if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1 };
-  if (readClaimPullBudget(store) > nowMs) return { checked: 0, updated: 0, rateLimited: true };
+  if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1, ...skipSummary() };
+  // While the shared core budget is spent, the REST poll makes no call; the
+  // search batch (separate quota) still settles merged and closed pulls.
+  if (readClaimPullBudget(store) > nowMs) {
+    const searchSettled = await settleFromSearch(store, { env: env ?? process.env, fetchImpl, token: access, nowMs, deadline });
+    return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}), ...skipSummary() };
+  }
   const due = loadDueClaims(store, nowMs);
-  if (due.length === 0) return { checked: 0, updated: 0 };
+  if (due.length === 0) return { checked: 0, updated: 0, ...skipSummary() };
   // Claim ids are room-scoped, so lookup results carry their room and the
   // room map is keyed by (roomId, claimId): the same claimId can be due in
   // two rooms in one tick, and a bare-claimId key would settle one room's
@@ -464,7 +728,13 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       const roomId = roomOf.get(roomKey(result.roomId, result.claimId));
       const current = store.workClaims.get(roomId, result.claimId);
       checked += 1;
-      if (commitPullRequestLookup(store, store.workClaims, roomId, current, result, nowMs)) updated += 1;
+      // #3464: settling re-validates through the state machine; one invalid
+      // due row must not roll back the whole batch's settlements.
+      try {
+        if (commitPullRequestLookup(store, store.workClaims, roomId, current, result, nowMs)) updated += 1;
+      } catch (error) {
+        noteSkippedInvalidClaim(skippedInvalid, roomId, result.claimId, error);
+      }
     }
     if (batch.rateLimitedUntil) {
       const byRoom = new Map();
@@ -477,10 +747,10 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
       writeClaimPullBudget(store, batch.rateLimitedUntil, nowMs);
     }
   });
-  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}) };
+  return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...skipSummary() };
 }
 
-function closeDeployedClaims(store, nowMs) {
+function closeDeployedClaims(store, nowMs, skipped = null) {
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
@@ -490,12 +760,18 @@ function closeDeployedClaims(store, nowMs) {
   }
   for (const roomId of roomIds) {
     for (const item of store.workClaims.list(roomId)) {
-      const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
-      if (!closed) continue;
-      store.workClaims.set(roomId, closed);
-      emitWorkClaimEvent(store, roomId, {
-        actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
-      });
+      // #3464: closeWhenLive re-validates the stored row; isolate per item
+      // so one invalid row cannot abort the phase for every other room.
+      try {
+        const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
+        if (!closed) continue;
+        store.workClaims.set(roomId, closed);
+        emitWorkClaimEvent(store, roomId, {
+          actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
+        });
+      } catch (error) {
+        noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
+      }
     }
   }
 }
@@ -506,7 +782,7 @@ function closeDeployedClaims(store, nowMs) {
 // the same facts on the HTTP path released it first (claim_flaked). Sweep
 // here with the same semantics — auto-release, lease_expired event, one
 // wake per expiry — so both settlement paths read the same world.
-function sweepExpiredClaimLeases(store, nowMs) {
+function sweepExpiredClaimLeases(store, nowMs, skipped = null) {
   let roomIds = [];
   try {
     roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
@@ -524,7 +800,15 @@ function sweepExpiredClaimLeases(store, nowMs) {
     if (expired.length === 0) continue;
     store.workClaims.transaction(() => {
       for (const before of expired) {
-        const [item] = releaseExpired([before], nowMs);
+        // #3464: releaseExpired re-validates through the state machine;
+        // isolate per item so one invalid row cannot roll back the room.
+        let item;
+        try {
+          [item] = releaseExpired([before], nowMs);
+        } catch (error) {
+          noteSkippedInvalidClaim(skipped, roomId, before?.id, error);
+          continue;
+        }
         if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
         store.workClaims.set(roomId, item);
         const receipt = emitWorkClaimEvent(store, roomId, {
@@ -555,7 +839,7 @@ function sweepExpiredClaimLeases(store, nowMs) {
 // history stamp, and no wake (nobody holds the item).
 export const STALE_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const lastStaleSweep = new WeakMap();
-export function sweepStaleUnclaimedClaims(store, nowMs, { force = false } = {}) {
+export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped = null } = {}) {
   if (!store?.db || !store.workClaims) return 0;
   const last = lastStaleSweep.get(store);
   if (!force && typeof last === "number" && nowMs - last >= 0 && nowMs - last < STALE_SWEEP_INTERVAL_MS) return 0;
@@ -572,7 +856,25 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false } = {}) 
   let closed = 0;
   for (const roomId of roomIds) {
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
-    const pairs = closeStaleUnclaimed(store.workClaims.list(roomId), nowMs);
+    const items = store.workClaims.list(roomId);
+    let pairs;
+    try {
+      pairs = closeStaleUnclaimed(items, nowMs);
+    } catch {
+      // #3464: closeStaleUnclaimed re-validates each dormant row through
+      // closeWork; one invalid row aborts the room's batch. Retry per item
+      // so the valid rows still close and the invalid ones are named.
+      pairs = [];
+      for (const item of items) {
+        try {
+          pairs.push(...closeStaleUnclaimed([item], nowMs));
+        } catch (error) {
+          noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
+        }
+        if (pairs.length >= STALE_SWEEP_BATCH) break;
+      }
+      pairs = pairs.slice(0, STALE_SWEEP_BATCH);
+    }
     if (pairs.length === 0) continue;
     store.workClaims.transaction(() => {
       for (const [, item] of pairs) {
@@ -601,9 +903,16 @@ export function applyPullRequestWebhook(store, payload, { nowMs = Date.now() } =
     store.workClaims.transaction(() => {
       for (const item of store.workClaims.list(roomId)) {
         if (!pullLinks(item).some(pull => pull.url === decision.url && !pull.outcome)) continue;
-        const settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
-          claimId: item.id, url: decision.url, kind: decision.outcome
-        }, nowMs);
+        // #3464: same per-item isolation as the poll path — one invalid
+        // linked row must not fail settlement for the rest of the room.
+        let settled = false;
+        try {
+          settled = commitPullRequestLookup(store, store.workClaims, roomId, item, {
+            claimId: item.id, url: decision.url, kind: decision.outcome
+          }, nowMs);
+        } catch (error) {
+          noteSkippedInvalidClaim(null, roomId, item.id, error);
+        }
         if (settled) applied.push({ roomId, claimId: item.id, outcome: decision.outcome });
       }
     });
@@ -651,7 +960,10 @@ export function readCachedDeployStatus(store) {
 // is not known yet.
 export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = null, nowMs = Date.now(), repo = null } = {}) {
   const live = SOURCE_REVISION;
-  const fallback = readCachedDeployStatus(store);
+  // Every path that does not complete a fresh GitHub read returns the cached
+  // main marked stale: it can predate a deploy, and callers must not read a
+  // live-vs-main mismatch out of it.
+  const fallback = { ...readCachedDeployStatus(store), stale: true };
   if (readClaimPullBudget(store) > nowMs) return fallback;
   const repository = repo || process.env.GITHUB_REPOSITORY || "Uuriko/project-room";
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) return fallback;
@@ -670,7 +982,7 @@ export async function readRoomDeployStatus(store, { fetchImpl = fetch, token = n
     if (limited.rateLimitedUntil) writeClaimPullBudget(store, limited.rateLimitedUntil, nowMs);
     return fallback;
   }
-  if (!response.ok) return { live, main: fallback.main, behind: fallback.behind, checkedAt: new Date(nowMs).toISOString() };
+  if (!response.ok) return { live, main: fallback.main, behind: fallback.behind, checkedAt: new Date(nowMs).toISOString(), stale: true };
   const read = await readJson(response);
   const sha = typeof read.body?.sha === "string" && SHA.test(read.body.sha) ? read.body.sha : null;
   const behind = sha && live === sha ? 0 : null;

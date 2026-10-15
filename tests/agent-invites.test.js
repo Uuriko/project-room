@@ -89,8 +89,15 @@ test("owner mints a one-time code; the raw code is never stored", async t => {
   assert.deepEqual(res.json.next.map(n => n.action), ["share-code", "preview-invite", "list-invites"]);
   assert.ok(res.json.next[0].description.includes(res.json.code),
     "share-code tells the owner what the invitee sends to redeem");
-  assert.ok(res.json.next[1].path.includes(encodeURIComponent(res.json.code)),
-    "preview-invite points at the pre-redemption consent screen for this code");
+  // #3259: the code travels in the POST body, never in a URL — the
+  // preview-invite step names the bare path and carries the code in its
+  // body example only.
+  assert.equal(res.json.next[1].method, "POST");
+  assert.equal(res.json.next[1].path, "/api/agent-invites/preview");
+  assert.ok(res.json.next[1].description.includes(res.json.code),
+    "preview-invite shows the owner the exact code to send in the POST body");
+  assert.ok(res.json.next.every(n => !String(n.path ?? "").includes(res.json.code)),
+    "no next step puts the live code in a path");
   assert.ok(res.json.next.every(n => typeof n.description === "string"),
     "every next step explains what to do");
 });
@@ -454,7 +461,7 @@ test("preview returns the grant without consuming the code", async t => {
   const { origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey, { profile: "contribute", expiresInMinutes: 60, displayName: "Plug Bot" });
   assert.equal(minted.status, 201, JSON.stringify(minted.json));
-  const preview = await get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(minted.json.code)}`);
+  const preview = await post(origin, "/api/agent-invites/preview", { code: minted.json.code });
   assert.equal(preview.status, 200, JSON.stringify(preview.json));
   assert.equal(preview.json.roomId, "commons");
   assert.equal(preview.json.roomTitle, "Project Room Commons");
@@ -471,7 +478,7 @@ test("preview returns the grant without consuming the code", async t => {
 
 test("preview folds failures like redeem: unknown, used, revoked, expired", async t => {
   const { origin, ownerKey } = await serve(t);
-  const preview = code => get(origin, `/api/agent-invites/preview?code=${encodeURIComponent(code)}`);
+  const preview = code => post(origin, "/api/agent-invites/preview", { code });
   const unknown = await preview("RM-AAAAAAAAAAAAAAAA");
   assert.equal(unknown.status, 404);
   assert.equal(unknown.json.error.code, "invite_unavailable");
@@ -714,7 +721,7 @@ test("consent screen names the room, grant, profile and expiry before any prompt
 });
 
 test("served discovery copy states the invite TTL range without mangled characters", async () => {
-  const { llmsTxt, llmsFullTxt, skillMd } = await import("../deploy/agent-discovery.mjs");
+  const { llmsTxt, llmsFullTxt, skillMd } = await import("../server/agent-discovery.mjs");
   for (const [name, body] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
     assert.ok(!/minutes201330/.test(body), `${name}: no mangled en dash in the TTL range`);
     if (name !== "SKILL.md") assert.match(body, /5 minutes to 30 days/, `${name}: names the 5 minute to 30 day range`);
@@ -801,4 +808,30 @@ test("ANCHOR-D7c: a malformed requestId is a 422, never a silent new redemption"
   // The code survived the malformed attempts untouched.
   const ok = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "D7 Bot" });
   assert.equal(ok.status, 201);
+});
+
+test("redeem: a member re-joining under its own name gets identity_already_linked, not a rename suggestion (#3382)", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const me = store.identities.create("Returning Agent");
+  const code1 = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  const code2 = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(code1.status, 201); assert.equal(code2.status, 201);
+  const joined = await post(origin, "/api/agent-invites/redeem", { code: code1.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(joined.status, 201, JSON.stringify(joined.json));
+  assert.equal(joined.json.identityId, me.identityId);
+  // Second fresh code, same identity, its OWN member name: the first
+  // refusal must be the reconcile answer (identity_already_linked), not
+  // display_name_unavailable's rename suggestion (W3 S4 leg C).
+  const again = await post(origin, "/api/agent-invites/redeem", { code: code2.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(again.status, 409, JSON.stringify(again.json));
+  assert.equal(again.json.error.code, "identity_already_linked");
+  // The refusal happened pre-burn: a stranger can still redeem code #2.
+  const stranger = await post(origin, "/api/agent-invites/redeem", { code: code2.json.code, displayName: "New Agent" });
+  assert.equal(stranger.status, 201, JSON.stringify(stranger.json));
+  // Contrast: a stranger colliding with an existing member's name still
+  // gets the rename guidance.
+  const code3 = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  const collide = await post(origin, "/api/agent-invites/redeem", { code: code3.json.code, displayName: "Returning Agent" });
+  assert.equal(collide.status, 422, JSON.stringify(collide.json));
+  assert.equal(collide.json.error.code, "display_name_unavailable");
 });

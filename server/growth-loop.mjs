@@ -231,11 +231,16 @@ function payoutsInWindow(store, roomId, referrerMemberId, now) {
     WHERE referrer_member_id=? AND activated_at IS NOT NULL AND activated_at>?`).get(referrerMemberId, since).n;
 }
 
-// First message starts the clock. The referral activates at firstMessage + 24h,
-// not at join, so an empty signup never counts. An agent the inviter minted
-// or owns never activates. Everyone else is capped at PAYOUT_DAILY_CAP
-// activations in a rolling day; a later day can still pay a referral that
-// already qualified.
+// First message starts the clock. The referral becomes eligible at
+// firstMessage + 24h, not at join, so an empty signup never counts. An agent
+// the inviter minted or owns never activates. Everyone else is capped at
+// PAYOUT_DAILY_CAP activations in a rolling day; a later day can still pay
+// a referral that already qualified. activated_at records the settlement
+// time (now), not the eligibility time: payoutsInWindow counts payouts in
+// the rolling window by activated_at, so backdating it to firstMessage +
+// 24h would let a delayed settlement (there is no timer — settlement only
+// runs when board()/creditsFor callers invoke it) drop payouts out of the
+// window they were actually paid in and bypass the cap.
 export function settleActivations(store, roomId) {
   ensurePayoutColumns(store.db);
   const pending = store.db.prepare(
@@ -269,7 +274,7 @@ export function settleActivations(store, roomId) {
     const first = firstByAuthor.get(row.refereeMemberId);
     if (first === undefined || now < first + ACTIVATION_DWELL_MS) continue;
     if (payoutsInWindow(store, roomId, row.referrerMemberId, now) >= PAYOUT_DAILY_CAP) continue;
-    if (activate.run(first + ACTIVATION_DWELL_MS, roomId, row.refereeMemberId).changes) settled += 1;
+    if (activate.run(now, roomId, row.refereeMemberId).changes) settled += 1;
   }
   return settled;
 }

@@ -5,6 +5,19 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
+// After a successful agent session on the standalone page
+// (/agent-signin, decision #37), the agent enters through the page's
+// Enter link; a first-time browser first gets the one-time
+// orientation card over the page — dismiss it if it is showing.
+async function enterRoomFromSigninPage(page) {
+  await page.locator("#agent-signin-enter-link").waitFor({ state: "visible" });
+  const card = page.locator("#agent-first-run");
+  await card.waitFor({ state: "visible", timeout: 3000 }).catch(() => {});
+  if (await card.isVisible()) await card.locator('[data-step="dismiss"]').click();
+  await page.locator("#agent-signin-enter-link").click();
+  await page.locator("#main").waitFor({ state: "visible" });
+}
+
 test("visible entry choices open focused flows without hiding pending agent sign-in", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture();
   const server = createRoomServer({ store: f.store });
@@ -21,11 +34,13 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator('[data-password-mode="signup"]').isVisible(), true);
-    assert.equal(await page.locator('[data-password-mode="login"]').isVisible(), true);
-    assert.equal(await page.locator("#google-signin").isVisible(), false);
+    assert.equal(await page.locator('[data-signin-form="password"]').isVisible(), true);
+    assert.equal(await page.locator("#google-signin").isVisible(), true);
+    // The wall's "Agent sign in" is a link to the standalone page now
+    // (decision #37); the whole flow below lives on /agent-signin.
     await page.locator("#agent-signin-button").click();
-    assert.equal(await page.locator("#join-agent-prompt").isVisible(), false);
-    assert.equal(await page.locator("#signin-extra").isVisible(), false);
+    await page.locator('[name="identityId"]').waitFor({ state: "visible" });
+    assert.equal(page.url().endsWith("/agent-signin"), true);
     assert.equal(await page.evaluate(() => document.activeElement.name), "identityId");
     let pendingRoute;
     const pending = new Promise(resolve => { pendingRoute = resolve; });
@@ -34,17 +49,21 @@ test("visible entry choices open focused flows without hiding pending agent sign
     await page.locator('[name="secret"]').fill("invalid-test-credential");
     await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
     const route = await pending;
-    await page.locator("#agent-auth-back").click();
-    assert.equal(await page.locator("#agent-auth-step").isVisible(), true, "pending request stays visible");
+    // Leaving mid-request is refused by the component's own guard, so
+    // the pending request stays on screen (the wall step behaved the
+    // same way through the same leave()).
+    await page.locator("#agent-signin-home").click();
+    assert.equal(page.url().endsWith("/agent-signin"), true, "pending request stays visible");
+    assert.equal(await page.locator('[data-agent-form="credentials"]').isVisible(), true);
     await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ message: "Test identity could not be verified." }) });
     await page.locator('[data-agent-status]').filter({ hasText: "That agent ID and secret don’t match. Check both and try again." }).waitFor();
-    await page.locator("#agent-auth-back").click();
-    assert.equal(await page.locator("#google-signin").isVisible(), false);
-    assert.equal(await page.evaluate(() => document.activeElement.id), "agent-signin-button");
+    await page.locator("#agent-signin-home").click();
+    await page.locator("#google-signin").waitFor({ state: "visible" });
     await page.locator("#agent-signin-button").click();
     await page.locator("[data-agent-new]").click();
-    await page.locator("#agent-auth-back").click();
+    await page.locator("#agent-signin-home").click();
     await page.locator("#agent-signin-button").click();
+    await page.locator('[name="identityId"]').waitFor({ state: "visible" });
     assert.equal(await page.evaluate(() => document.activeElement.name), "identityId", "leaving clears the phase and reopening focuses the saved identity field");
     await page.unroute("**/api/auth/agent/rooms");
     await page.route("**/api/auth/agent/rooms", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rooms: [], displayName: "Synthetic UI agent" }) }));
@@ -62,16 +81,16 @@ test("visible entry choices open focused flows without hiding pending agent sign
     assert.equal(await page.locator("[data-agent-have-invite], [data-agent-form='invite']").count(), 0);
     assert.equal(await page.locator("[data-agent-create-room]").isVisible(), true);
 
-    await page.locator("#agent-auth-back").click();
-    assert.equal(await page.locator('#auth-signin-ui [data-password-mode=signup]').isVisible(), true);
-    assert.equal(await page.locator("#agent-auth-step").isVisible(), false);
+    await page.locator("#agent-signin-home").click();
+    await page.locator('#auth-signin-ui [data-password-mode=signup]').waitFor({ state: "visible" });
+    assert.equal(await page.locator("#agent-auth-step").count(), 0, "the wall has no agent step anymore");
     assert.equal(await page.locator("#access-key, #signin-support-root, #signin-more, #signin-extra").count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     await page.close();
   }
 });
 
-test("agent browser sign-in opens a linked room and survives reload without the secret", { timeout: 60000 }, async t => {
+for (const accountCookie of [false, true]) test(`agent browser sign-in keeps its identity across reload (human cookie: ${accountCookie})`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture();
   const identity = f.store.identities.create("Browser test agent");
   const ownerKey = f.store.issueAccessKey("commons", "owner");
@@ -88,21 +107,36 @@ test("agent browser sign-in opens a linked room and survives reload without the 
   page.setDefaultTimeout(10000);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    await page.locator("#agent-signin-button").click();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  await page.goto(origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  if (accountCookie) {
+    const slot = await (await page.context().request.get(origin + "/api/account-session")).json();
+    const accountAccessKey = f.store.issueAccountAccessKey(f.store.accountForMember("commons", "owner").id);
+    const response = await page.context().request.post(origin + "/api/account-session", {
+      headers: { Origin: origin, "X-CSRF-Token": slot.csrf, "X-Session-Binding": slot.sessionBinding },
+      data: { accountAccessKey, expectedSessionRevision: slot.sessionRevision }
+    });
+    assert.equal(response.status(), 201);
+  }
+  await page.locator("#agent-signin-button").click();
   await page.locator('[name="identityId"]').fill(identity.identityId);
   await page.locator('[name="secret"]').fill(identity.secret);
   await page.locator('[data-agent-form="credentials"] button[type="submit"]').click();
   await page.getByRole("button", { name: f.store.room("commons").state.room.title, exact: true }).click();
-  await page.locator("#main").waitFor({ state: "visible" });
-  // First-run orientation: shows once after an agent's first browser sign-in.
+  // First-run orientation: shows once after an agent's first browser
+  // sign-in — on the sign-in page now (decision #37), and its steps
+  // (or the Enter link under it) take the agent into the room.
   await page.locator("#agent-first-run").waitFor({ state: "visible" });
   assert.match(await page.locator("#agent-first-run").textContent(), /DMs are open by default/);
   await page.locator('#agent-first-run [data-step="dismiss"]').click();
   await page.locator("#agent-first-run").waitFor({ state: "detached" });
   assert.equal(await page.evaluate(secret => Object.values(localStorage).concat(Object.values(sessionStorage)).some(value => value.includes(secret)), identity.secret), false);
+  await page.locator("#agent-signin-enter-link").click();
+  await page.locator("#main").waitFor({ state: "visible" });
   await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#identity-label").textContent(), "Browser test agent");
   assert.equal(await page.locator("#agent-first-run").count(), 0, "the orientation never shows again");
   assert.deepEqual(errors, []);
 });
@@ -164,7 +198,7 @@ for (const width of [1280, 390]) {
     assert.equal(sessionAttempts, 2);
     assert.equal(accepted.status(), 201);
     assert.equal(accepted.request().postDataJSON().identityId, identity.identityId);
-    await page.locator("#main").waitFor({ state: "visible" });
+    await enterRoomFromSigninPage(page);
     const rooms = f.store.identities.roomsForIdentity(identity.identityId);
     assert.equal(rooms.length, 1); assert.equal(rooms[0].title, "Returning agent test room");
     assert.equal(await page.locator('[data-agent-secret]').count(), 0);
@@ -195,7 +229,7 @@ for (const width of [1280, 390]) {
     await page.locator('[data-agent-create-room]').click();
     await page.locator('[name="roomTitle"]').fill("New agent test room");
     await page.locator('[data-agent-form="make-room"] button[type="submit"]').click();
-    await page.locator("#main").waitFor({ state: "visible" });
+    await enterRoomFromSigninPage(page);
     assert.equal(f.store.identities.roomsForIdentity(identity.identityId).length, 1);
     assert.equal(await page.locator('[data-agent-secret]').count(), 0);
     assert.doesNotMatch(page.url(), /pri_|secret=|privateKey=/);
@@ -214,11 +248,11 @@ test("leaving an unsaved new agent identity requires confirmation and clears it 
   await page.locator('[data-agent-form="create"] button[type="submit"]').click();
   await page.locator('[data-agent-created]').waitFor();
   page.once("dialog", dialog => { assert.match(dialog.message(), /cannot be recovered/); return dialog.dismiss(); });
-  await page.locator("#agent-auth-back").click();
+  await page.locator("#agent-signin-home").click();
   assert.equal(await page.locator('[data-agent-created]').isVisible(), true);
   assert.equal(await page.locator('[data-agent-secret][type="password"]').count(), 2);
   page.once("dialog", dialog => dialog.accept());
-  await page.locator("#agent-auth-back").click();
+  await page.locator("#agent-signin-home").click();
     await page.locator("#agent-signin-button").click();
   assert.equal(await page.locator('[name="identityId"]').inputValue(), "");
   assert.equal(await page.locator('[name="secret"]').inputValue(), "");

@@ -39,6 +39,33 @@
 // 9. aborted poll — contract: a client that disconnects mid-wait releases
 //    its host slot. Regression: dead connections wedging the slot so the
 //    next poll misbehaves.
+// 10. hostId derivation — contract: an omitted hostId is derived when the
+//     identity has exactly one registered host, so a cold single-host
+//     agent polls successfully on its first try; with no hosts the poll
+//     answers agent_not_registered (heartbeat-first sequencing), and with
+//     several hosts it 422s naming them. Regression: re-imposing the
+//     parameter the discovery packet never names (first-poll 422), or
+//     deriving across hosts and wedging the wrong host's waiter slot.
+// 11. poll/work parity (#3262) — contract: the poll door returns the same
+//     pending WORK wakes the heartbeat door returns for the opted-in host
+//     whose hostId the poll required, and a work transition releases a
+//     waiting poll the way enqueueWake does for mentions. Regression: the
+//     poll handler dropping hostId before notePoll (WorkWakes.pending
+//     refuses hostless readers by design) and WorkWakes.transition never
+//     releasing waiters — work assignments silently degraded to heartbeat
+//     cadence for exactly the hosts that wait on poll. Host consent is
+//     unchanged: a host that never opted in still sees no work wakes.
+// 12. cross-namespace derivation (HELD-POLL-RELEASE) — contract: a scoped
+//     credential (room key or rak_) polling without hostId while the
+//     identity's hosts all live under ANOTHER credential's namespace
+//     still gets a promptly released held wait, parked on its own
+//     credential's derived slot. Regression: the prefix-filtered
+//     derivation yielded no waiter at all, so the held poll rode the
+//     bare timer to window expiry (JOURNEY Phase 2: S4/S6 at ~20.6s of a
+//     20s window on landed main) while notePoll — registration-checked
+//     namespace-blind — let it wait. Deriving the OTHER credential's
+//     host instead would wedge that host's waiter slot (test 10), so
+//     the fallback must stay inside the polling credential's namespace.
 //
 // Synthetic fixtures only — loopback HTTP, no external calls or real credentials.
 import test from "node:test";
@@ -63,7 +90,7 @@ function unit(t) {
   const db = new DatabaseSync(":memory:");
   db.exec(agentHeartbeatSchema);
   let at = T0;
-  const hb = new AgentHeartbeats({ db, now: () => at }, { staleAfterMs: HEARTBEAT_STALE_AFTER_MS });
+  const hb = new AgentHeartbeats({ db, now: () => at, transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const result = fn(); db.exec("COMMIT"); return result; } catch (error) { db.exec("ROLLBACK"); throw error; } } }, { staleAfterMs: HEARTBEAT_STALE_AFTER_MS });
   t.after(() => db.close());
   return { hb, advance: ms => { at += ms; } };
 }
@@ -198,6 +225,9 @@ test("poll route: auth, scope, registration, and waitMs validation", async t => 
   assert.equal((await get(origin, "/api/agent-wakes/poll")).status, 401);
   assert.equal((await get(origin, "/api/agent-wakes/poll", wrongScope.credential)).status, 403);
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h", credential)), "agent_not_registered");
+  // No hostId and no hosts: the sequencing error surfaces, not the
+  // parameter error — heartbeat first is what a cold agent must learn.
+  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)), "agent_not_registered");
 
   // Register with no wakeUrl at all — the wakeable-by-default shape.
   const reported = await post(origin, "/api/agent-heartbeats", { hostId: "h" }, credential);
@@ -207,8 +237,12 @@ test("poll route: auth, scope, registration, and waitMs validation", async t => 
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=nope", credential)), "invalid_wake_poll");
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=-5", credential)), "invalid_wake_poll");
 
-  // hostId is required: one waiter per host.
-  assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)), "invalid_wake_poll");
+  // hostId omitted with exactly one registered host ("h", above): the
+  // host is derived — one waiter per host still holds, keyed by it.
+  const derived = await (await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)).json();
+  assert.equal(derived.hostId, "h");
+  assert.deepEqual(derived.pendingWakes, []);
+  // A supplied hostId is still validated exactly as before.
   assert.equal(await errorCode(await get(origin, "/api/agent-wakes/poll?hostId=nope!&waitMs=0", credential)), "invalid_wake_poll");
 
   // waitMs=0 short-poll with nothing queued: immediate empty return.
@@ -216,6 +250,125 @@ test("poll route: auth, scope, registration, and waitMs validation", async t => 
   assert.deepEqual(empty.pendingWakes, []);
   assert.equal(empty.timedOut, false);
   assert.equal(empty.waitedMs, 0);
+});
+
+test("poll without hostId derives the single host and its held wait is released by a signal", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { identity, credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "only-host" }, credential);
+  // A queued signal is returned immediately, addressed to the derived host.
+  f.store.agentHeartbeats.enqueueWake({ agentId: identity.identityId, kind: "mention", roomId: "commons", messageId: "m-queued" });
+  const immediate = await (await get(origin, "/api/agent-wakes/poll?waitMs=0", credential)).json();
+  assert.equal(immediate.hostId, "only-host");
+  assert.deepEqual(immediate.pendingWakes.map(w => w.messageId), ["m-queued"]);
+  f.store.agentHeartbeats.ackWakes({ agentId: identity.identityId, signalIds: [immediate.pendingWakes[0].signalId] });
+  // The held wait is registered under the derived host: a new signal
+  // releases it exactly as an explicit-hostId wait.
+  const held = get(origin, "/api/agent-wakes/poll?waitMs=5000", credential).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.agentHeartbeats.enqueueWake({ agentId: identity.identityId, kind: "dm", roomId: "commons", messageId: "m-held" });
+  const doc = await held;
+  assert.equal(doc.hostId, "only-host");
+  assert.equal(doc.timedOut, false);
+  assert.deepEqual(doc.pendingWakes.map(w => w.messageId), ["m-held"]);
+});
+
+test("poll without hostId is ambiguous with two registered hosts: 422 naming them", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const { credential } = await keyedAgent(t, f, origin);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h-a" }, credential);
+  await post(origin, "/api/agent-heartbeats", { hostId: "h-b" }, credential);
+  const res = await get(origin, "/api/agent-wakes/poll?waitMs=0", credential);
+  assert.equal(res.status, 422);
+  const error = (await res.json()).error;
+  assert.equal(error.code, "invalid_wake_poll");
+  assert.ok(error.message.includes("h-a") && error.message.includes("h-b"),
+    `422 names the registered hosts so the agent can pick: ${error.message}`);
+  // Either host still polls fine when named explicitly.
+  assert.equal((await get(origin, "/api/agent-wakes/poll?hostId=h-b&waitMs=0", credential)).status, 200);
+});
+
+test("room-key poll without hostId derives its credential host", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("rk-derive-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: identity.identityId,
+    displayName: "RK derive agent", permissions: ["accept_work"],
+  });
+  const roomKey = f.store.issueAccessKey("commons", identity.identityId);
+  assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h", mode: "pull-only" }, roomKey)).status, 200);
+  const res = await get(origin, "/api/agent-wakes/poll?waitMs=0", roomKey);
+  assert.equal(res.status, 200);
+  const doc = await res.json();
+  assert.deepEqual(doc.pendingWakes, []);
+  assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("rk_"),
+    "derived room-key host is the credential-derived host id");
+});
+
+test("room-key poll without hostId is released promptly when the identity's hosts are rak_-namespaced", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("rk-cross-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "rkxagent",
+    displayName: "RK cross agent", permissions: ["accept_work"],
+  });
+  // The standard-setup shape: the agent's only host is heartbeated by the
+  // saved rak_ credential, so it lives under the ak_ namespace.
+  const onboarding = f.store.agentPlugin.issueOnboardingMcpToken(
+    { identityId: identity.identityId, roomId: "commons", label: "probe" });
+  const beat = await post(origin, "/api/agent-heartbeats",
+    { hostId: "journey-edge", mode: "wakeable", cadenceSeconds: 300 }, onboarding.credential);
+  assert.equal(beat.status, 200);
+  // The legacy room key polls with no hostId (JOURNEY S4/S6 mechanics):
+  // its own namespace holds no host, yet the held wait must release at
+  // mention time — on the credential's derived slot, not at expiry.
+  const roomKey = f.store.issueAccessKey("commons", "rkxagent");
+  const held = get(origin, "/api/agent-wakes/poll?waitMs=5000", roomKey).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
+    data: { messageId: "m-cross-rk", body: "hey @rkxagent, prompt release please" } });
+  const doc = await held;
+  assert.equal(doc.timedOut, false);
+  assert.ok(doc.pendingWakes.some(w => w.messageId === "m-cross-rk"),
+    `held poll released with the mention: ${JSON.stringify(doc.pendingWakes.map(w => w.messageId))}`);
+  assert.ok(doc.waitedMs < 2500, `released at mention time, not window expiry: waitedMs=${doc.waitedMs} of 5000`);
+  assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("rk_"),
+    `wait parked on the room key's own derived slot: ${doc.hostId}`);
+  // The rak_ host's own slot was never disturbed: it still polls cleanly.
+  const own = await (await get(origin, "/api/agent-wakes/poll?hostId=journey-edge&waitMs=0", onboarding.credential)).json();
+  assert.equal(own.hostId.endsWith("journey-edge"), true);
+});
+
+test("scoped-key poll without hostId is released promptly when the identity's hosts are rk_-namespaced", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("ak-cross-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "akxagent",
+    displayName: "AK cross agent", permissions: ["accept_work"],
+  });
+  // Mirror image: the identity's only host is the room key's pull-only
+  // seat (rk_ namespace); the saved rak_ credential polls without hostId.
+  const roomKey = f.store.issueAccessKey("commons", "akxagent");
+  const beat = await post(origin, "/api/agent-heartbeats", { hostId: "edge", mode: "pull-only" }, roomKey);
+  assert.equal(beat.status, 200);
+  const onboarding = f.store.agentPlugin.issueOnboardingMcpToken(
+    { identityId: identity.identityId, roomId: "commons", label: "probe" });
+  const held = get(origin, "/api/agent-wakes/poll?waitMs=5000", onboarding.credential).then(r => r.json());
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
+    data: { messageId: "m-cross-ak", body: "hey @akxagent, prompt release please" } });
+  const doc = await held;
+  assert.equal(doc.timedOut, false);
+  assert.ok(doc.pendingWakes.some(w => w.messageId === "m-cross-ak"),
+    `held poll released with the mention: ${JSON.stringify(doc.pendingWakes.map(w => w.messageId))}`);
+  assert.ok(doc.waitedMs < 2500, `released at mention time, not window expiry: waitedMs=${doc.waitedMs} of 5000`);
+  assert.ok(typeof doc.hostId === "string" && doc.hostId.startsWith("ak_"),
+    `wait parked on the scoped key's own derived slot: ${doc.hostId}`);
 });
 
 test("poll times out cleanly when nothing arrives", async t => {
@@ -454,4 +607,65 @@ test("fresh wakeable host retains between-poll mention across database restart u
   assert.equal(pullBeat.more, false);
   const attention = await (await get(origin, "/api/needs-me", worker.secret)).json();
   assert.ok(attention.items.some(item => item.id === "pull-message"));
+});
+
+test("poll returns the opted-in host's pending work wakes, like heartbeat (#3262)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("work-poll-agent");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "workwake",
+    displayName: "Work wake", permissions: ["accept_work"],
+  });
+  const beat = body => post(origin, "/api/agent-heartbeats", body, identity.secret).then(r => r.json());
+  await beat({ hostId: "worker", mode: "pull-only", workWakes: true });
+  await beat({ hostId: "lurker", mode: "pull-only" });
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "work.proposed",
+    data: { workItemId: "poll-work", title: "Synthetic assignment", definitionOfDone: "Synthetic requirement",
+      mode: "read", accountableMemberId: "workwake" } });
+
+  // Control: the heartbeat door returns the work wake for the opted-in host.
+  const viaBeat = await beat({ hostId: "worker", mode: "pull-only" });
+  assert.deepEqual(viaBeat.pendingWakes.map(w => [w.kind, w.workItemId]), [["work", "poll-work"]]);
+
+  // The poll door must return the same wake for the same host.
+  const viaPoll = await (await get(origin, "/api/agent-wakes/poll?hostId=worker&waitMs=0", identity.secret)).json();
+  assert.deepEqual(viaPoll.pendingWakes.map(w => [w.kind, w.workItemId]), [["work", "poll-work"]],
+    "poll door returns the opted-in host's work wakes");
+  assert.equal(viaPoll.pendingWakes[0].signalId, viaBeat.pendingWakes[0].signalId);
+
+  // notePoll forwards its hostId the same way; hostless reads stay empty.
+  assert.deepEqual(
+    f.store.agentHeartbeats.notePoll({ agentId: identity.identityId, hostId: "worker" }).pendingWakes.map(w => w.workItemId),
+    ["poll-work"]);
+  assert.deepEqual(
+    f.store.agentHeartbeats.notePoll({ agentId: identity.identityId }).pendingWakes, [],
+    "hostless notePoll still gains no work signals");
+
+  // Consent is per host: the registered host that never opted in sees none.
+  const lurker = await (await get(origin, "/api/agent-wakes/poll?hostId=lurker&waitMs=0", identity.secret)).json();
+  assert.deepEqual(lurker.pendingWakes, [], "a host that never opted in sees no work wakes on poll either");
+});
+
+test("a work transition releases a waiting poll with the work wake (#3262)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const identity = f.store.identities.create("work-poll-agent-2");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: identity.identityId, memberId: "workwake",
+    displayName: "Work wake", permissions: ["accept_work"],
+  });
+  await post(origin, "/api/agent-heartbeats", { hostId: "worker", mode: "pull-only", workWakes: true }, identity.secret);
+
+  const pollPromise = get(origin, "/api/agent-wakes/poll?hostId=worker&waitMs=10000", identity.secret).then(r => r.json());
+  // Let the poll register its waiter, then land a work transition while it waits.
+  await new Promise(resolve => setTimeout(resolve, 150));
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "work.proposed",
+    data: { workItemId: "poll-work-live", title: "Synthetic assignment", definitionOfDone: "Synthetic requirement",
+      mode: "read", accountableMemberId: "workwake" } });
+
+  const doc = await pollPromise;
+  assert.equal(doc.timedOut, false, "the work transition released the wait");
+  assert.ok(doc.waitedMs < 9000, `released by the transition, not the timeout (waited ${doc.waitedMs}ms)`);
+  assert.deepEqual(doc.pendingWakes.map(w => [w.kind, w.workItemId]), [["work", "poll-work-live"]]);
 });

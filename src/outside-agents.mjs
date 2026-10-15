@@ -84,14 +84,23 @@ export function planOutsideAgentVerify(messages, members, roomId, approverId, in
   const decision = input.decision;
   const existing = assembleOutsideAgents(messages, members, { verifiers }).find(agent => agent.externalRef === externalRef);
   if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before deciding on its link");
-  if (!existing.linkedMemberId && !existing.verifiedBy)
-    fail(422, "outside_agent_unlinked", "There is no link to decide on for this agent");
   // A decision belongs to the link it was made on. Replay only when the
   // same decision already covers the CURRENT pending link; after a re-link
-  // the same verdict is a new decision and must record (A34).
+  // the same verdict is a new decision and must record (A34). A repeated
+  // deny is also a replay when its link is already gone: repeating it
+  // changes nothing, and the 422 below would turn an idempotent retry into
+  // an error.
   const pendingLinkId = existing.linkMessageId ?? null;
-  if (existing.latestDecision === decision && existing.decidedLinkMessageId === pendingLinkId)
+  if (existing.latestDecision === decision &&
+      (existing.decidedLinkMessageId === pendingLinkId ||
+        (decision === "denied" && pendingLinkId === null)))
     return { recorded: "replay", externalRef, decision };
+  // With no link in effect there is nothing to decide on. A denial clears
+  // the link, so deny -> approve without a re-link must not post: the old
+  // check let verifiedBy satisfy it, which recorded verified=true on a null
+  // link and silently pre-verified the member's next re-link.
+  if (!existing.linkedMemberId)
+    fail(422, "outside_agent_unlinked", "There is no link to decide on for this agent");
   const record = { v: 1, kind: "verify", externalRef, decision, decidedBy: approverId, decidedAt: Date.now() };
   return { recorded: "verify", externalRef, decision,
     commandId: commandId("verify", roomId, approverId, externalRef, decision, pendingLinkId ?? "none"),
@@ -114,6 +123,9 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
       agent.linkedMemberId = record.memberId;
       agent.linkedBy = authorId;
       agent.linkMessageId = messageId;
+      // A newly applied link has had no decision made on it yet: it must
+      // never inherit verification from an earlier (or link-less) state.
+      agent.verified = false;
       return true;
     }
     return false;
@@ -124,6 +136,13 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
   const applyVerify = (agent, record, authorId) => {
     if (!agent) return false;
     if (!(verifiers instanceof Set) || !verifiers.has(authorId) || authorId !== record.decidedBy) return false;
+    // A decision belongs to a link in effect (the planner refuses to write
+    // one without a link for the same reason): honoring an approval when
+    // no link is in effect recorded verified=true on a null link and
+    // silently pre-verified the next link. A verify record seen
+    // over a windowed or out-of-order message set (before its link, or
+    // after a denial cleared it) must therefore be ignored here too.
+    if (agent.linkedMemberId === null) return false;
     agent.latestDecision = record.decision;
     agent.verifiedBy = record.decidedBy;
     agent.verifiedAt = record.decidedAt;
@@ -157,6 +176,16 @@ export function assembleOutsideAgents(messages, members = {}, { verifiers = null
           verifiedBy: null, verifiedAt: null, latestDecision: null,
           linkMessageId: null, decidedLinkMessageId: null
         });
+        // Links buffered before this introduction (L-42) take effect as
+        // soon as the agent exists, so a verify record that follows the
+        // introduction in the message set is decided on that link rather
+        // than falling under the no-link rule above.
+        const agent = agents.get(record.externalRef);
+        for (let i = pendingLinks.length - 1; i >= 0; i--) {
+          if (pendingLinks[i].record.externalRef === record.externalRef
+              && applyLink(agent, pendingLinks[i].record, pendingLinks[i].authorId, pendingLinks[i].messageId))
+            pendingLinks.splice(i, 1);
+        }
       } else if (message.authorId !== existing.introducedBy && !existing.sightings.some(row => row.memberId === message.authorId)) {
         existing.sightings.push({ memberId: message.authorId, messageId: message.id });
       }

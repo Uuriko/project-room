@@ -67,6 +67,23 @@ export function summaryFailure(result) {
   return null;
 }
 
+const DETAIL_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
+const DETAIL_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
+
+// A job may attach a sanitized failure detail (stable codes and classes
+// only, e.g. the integrity job's failing sub-check — #3334). Every field
+// must be a short token, so no id, body or secret can ride this channel
+// onto the public health surface.
+export function sanitizeFailureDetail(detail) {
+  if (!detail || typeof detail !== "object") return null;
+  const out = {};
+  if (typeof detail.code === "string" && DETAIL_CODE.test(detail.code)) out.code = detail.code;
+  for (const key of ["subcheck", "errorClass", "recordClass"]) {
+    if (typeof detail[key] === "string" && DETAIL_TOKEN.test(detail[key])) out[key] = detail[key];
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // Numbers and booleans only: summaries must never carry ids, bodies or secrets.
 export function compactSummary(result) {
   if (!result || typeof result !== 'object') return null;
@@ -101,13 +118,13 @@ export async function runCronJobs(runners, {
       const durationMs = now() - startedAt;
       console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: !failure, durationMs }));
       if (failure) log(`[${name}] cron tick reported failure: ${failure}`);
-      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result) });
+      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result), failure: failure ? sanitizeFailureDetail(result?.failureDetail) : null });
     } catch (error) {
       const message = errorText(job, error);
       const durationMs = now() - startedAt;
       console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: false, durationMs }));
       log(`[${name}] cron tick failed: ${message}`);
-      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null });
+      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null, failure: sanitizeFailureDetail(error?.failureDetail) });
     }
   }
   return outcomes;
@@ -121,9 +138,9 @@ export function applyOutcomes(previous, outcomes) {
     const prior = next[outcome.job] ?? {};
     const at = Number.isFinite(outcome.at) ? outcome.at : Date.now();
     next[outcome.job] = outcome.ok
-      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary) }
+      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
-        lastDurationMs: outcome.durationMs ?? null };
+        lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure) };
   }
   return next;
 }
@@ -146,6 +163,9 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
     const stale = enabled && !waiting && (ageSeconds === null || ageSeconds > staleAfterSeconds);
     const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
+    // A tick that succeeded but was held by GitHub's rate limit did no work.
+    // Show it, without turning a recoverable wait into a 503.
+    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited' : null;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
@@ -155,21 +175,29 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       secondsSinceSuccess: enabled ? ageSeconds : null,
       lastError: record.lastError ?? null,
       lastErrorAt: iso(record.lastErrorAt),
+      lastErrorCode: record.lastFailure?.code ?? null,
+      lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
+      lastErrorClass: record.lastFailure?.errorClass ?? null,
+      lastErrorRecordClass: record.lastFailure?.recordClass ?? null,
+      lastDurationMs: record.lastDurationMs ?? null,
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
+      lastSummaryAt: iso(record.lastSummaryAt),
       stale,
+      degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : 'ok'
+      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
-  const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing' : 'ok';
+  const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing'
+    : active.some(job => job.status === 'degraded') ? 'degraded' : 'ok';
   return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
 }
 
 export function jobHealthResponse(view, { head = false } = {}) {
   const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
-  return new Response(head ? null : JSON.stringify(view), { status: view?.status === 'ok' ? 200 : 503, headers });
+  return new Response(head ? null : JSON.stringify(view), { status: view?.status === 'ok' || view?.status === 'degraded' ? 200 : 503, headers });
 }
 
 export function jobHealthUnavailable({ head = false } = {}) {

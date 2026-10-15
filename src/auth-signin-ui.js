@@ -1,7 +1,21 @@
 import { uiText } from './strings.js';
 // Email sign-in uses a delivered single-use link. The account cookie stays
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
-import { escapeHtml } from "./account-settings-ui.js";
+import { escapeHtml, base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+
+export function toAuthenticationPublicKey(options) {
+  const { challengeId: _challengeId, ...publicKey } = options;
+  return { ...publicKey, challenge: base64urlToBytes(options.challenge),
+    allowCredentials: (options.allowCredentials ?? []).map(credential => ({ ...credential, id: base64urlToBytes(credential.id) })) };
+}
+
+export function toAuthenticationResponse(credential) {
+  return { id: credential.id, rawId: bytesToBase64url(credential.rawId), type: credential.type,
+    response: { clientDataJSON: bytesToBase64url(credential.response.clientDataJSON),
+      authenticatorData: bytesToBase64url(credential.response.authenticatorData),
+      signature: bytesToBase64url(credential.response.signature),
+      userHandle: credential.response.userHandle == null ? null : bytesToBase64url(credential.response.userHandle) } };
+}
 
 // Shared by startup routing and redemption so malformed reset links do not
 // reserve the invitation journey. This classifies input; it never consumes it.
@@ -25,22 +39,52 @@ export function classifyAuthLink(params) {
   return { kind: hasReset ? "reset" : "magic", proof, email };
 }
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack }) {
-  let container = null, welcome = false;
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions }) {
+  let container = null, welcome = false, mountedBefore = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
+  // Whether this deployment can actually send sign-in email, learned from
+  // the public /api/auth/signin-options feed at mount. Defaults to true
+  // (fail-open to the historical behavior, whose submit-time honesty stays
+  // as backstop) until the feed positively reports mail unconfigured —
+  // only then are the email-link offers hidden (§8.1: never offer a
+  // sign-in method the deployment cannot serve).
+  let mailConfigured = true;
   const surface = () => container;
   const statusNode = () => surface()?.querySelector("[data-signin-status]") ?? null;
   function setStatus(text, error = false) {
     statusText = text; statusError = error;
+    // A fresh sign-in outcome supersedes the stale panel-level notice left by
+    // sign-out (e.g. "Session ended; private drafts were cleared."): one alert
+    // at a time, so two red role=alert errors never show together.
+    if (text) {
+      const panelNotice = globalThis.document?.getElementById?.("auth-error");
+      if (panelNotice && panelNotice !== statusNode() && panelNotice.textContent) panelNotice.textContent = "";
+    }
     const node = statusNode();
     if (node) { node.textContent = text; node.classList.toggle("visible", Boolean(text)); node.classList.toggle("error", Boolean(text) && error); }
   }
   async function authedSession() {
     await ensureAccountSession();
     return accountClient.currentSession("signing in");
+  }
+  // Learn the deployment's sign-in capabilities once at mount, through
+  // the host-injected loader (kept off accountClient.request so request
+  // accounting in hosts/tests is untouched). Only a positive "mail not
+  // configured" answer changes anything; a missing loader or any failure
+  // (offline, older server) leaves the historical behavior in place.
+  async function loadSigninCapabilities() {
+    if (typeof loadSigninOptions !== "function") return;
+    try {
+      const options = await loadSigninOptions();
+      if (options?.providers?.mail?.configured === false) {
+        mailConfigured = false;
+        if (emailMethod === "magic" && !pendingLink) { emailMethod = "password"; passwordMode = "login"; }
+        render();
+      }
+    } catch { /* fail open — see the mailConfigured note above */ }
   }
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
   const mutationApi = async (session, path, data, validate) => {
@@ -73,12 +117,21 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingLink) return "account-switch";
     if (emailMethod === "forgot") return "forgot";
     if (emailMethod === "reset") return `reset-${resetPhase}`;
-    return emailMethod === "password" ? `password-${passwordMode}` : `magic-${magicPhase}`;
+    // The merged form is the only email entry (#3341): a magic state in
+    // its request phase reports as the password view it renders.
+    if (emailMethod === "magic") return magicPhase === "sent" ? "magic-sent" : `password-${passwordMode}`;
+    return `password-${passwordMode}`;
   }
   function showView(view) {
     if (busy || pendingTerms) return false;
     const valid = ["welcome", "password-login", "password-signup", "forgot", "reset-request", "reset-sent", "reset-form", "magic-request", "magic-sent", "account-switch"];
     if (!valid.includes(view)) return false;
+    // "magic-request" is a retired view name (#3341 merge); stored
+    // history entries and older hosts still ask for it — it lands on
+    // the merged form.
+    if (view === "magic-request") view = "password-login";
+    // An unconfigured-mail deployment has no magic views to show.
+    if (view.startsWith("magic-") && !mailConfigured) view = "password-login";
     if (view === "account-switch") { if (!pendingLink) return false; }
     else {
       pendingLink = null;
@@ -104,23 +157,37 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (pendingTerms) return uiText("signin.copy.005", { fragmentA: busy ? "disabled" : "" });
     if (welcome) return uiText("signin.copy.004");
     if (pendingLink) return uiText("signin.copy.006", { fragmentA: busy ? "disabled" : "" });
-    if (emailMethod === "forgot") return uiText("signin.copy.007");
-    if (emailMethod === "reset") {
+    // #3341 (one-email-field merge): there is no separate magic-request
+    // view anymore — the password form IS the email form. emailMethod
+    // "magic" survives only in its sent phase (a link/code is on its
+    // way); any other magic state renders the merged form below.
+    const method = emailMethod === "magic" && magicPhase !== "sent" ? "password" : emailMethod;
+    if (method === "forgot") {
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      return uiText("signin.copy.007") + (mailConfigured ? uiText("signin.magic.action") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
+    }
+    if (method === "reset") {
       if (resetPhase === "sent") return uiText("signin.copy.008", { fragmentA: escapeHtml(resetEmail) });
       if (resetPhase === "form") return uiText("signin.copy.009", { fragmentA: busy ? "disabled" : "" });
-      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" });
+      const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
+      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (mailConfigured ? uiText("signin.magic.instead") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
-    if (emailMethod === "password") {
+    if (method === "password") {
       const signup = passwordMode === "signup";
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'minlength="10" aria-describedby="signup-password-hint"' : "", fragmentD: signup ? '<p class="form-hint" id="signup-password-hint">10–256 characters</p>' : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account" });
+      // The merged form: in login mode the password is optional whenever
+      // this deployment can email a sign-in link instead — the input
+      // carries `required` only for signup, or when mail is
+      // unconfigured and a password is the only way in. The hint in
+      // fragmentD teaches the blank-password path.
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'required minlength="10"' : (mailConfigured ? "" : "required"), fragmentD: !signup && mailConfigured ? uiText("signin.copy.035") : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
     }
-    if (magicPhase === "sent") return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
-    return uiText("signin.copy.015", { fragmentA: escapeHtml(magicEmail), fragmentB: busy ? "disabled" : "" });
+    return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
   }
   function render() {
+    if (mountedBefore && !container) return;
     const node = surface();
     const view = currentView();
-    const hideBack = view === "welcome" || view === "terms";
+    const hideBack = view === "welcome" || view === "terms" || view.startsWith("password-");
     if (node) node.innerHTML = ["", hideBack ? "" : `<button type="button" class="text-button" data-signin-back ${busy ? "disabled" : ""}>Back</button>`, "<div data-signin-panel>", panelHtml(), "</div><p class=\"status form-status\" role=\"alert\" data-signin-status></p>"].join('');
     if (node) {
       node.setAttribute("aria-busy", String(busy));
@@ -162,15 +229,53 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       throw error;
     }
   }
+  // Ask the server to email a sign-in link/code for this address (the
+  // merged form's blank-password path, #3341). The endpoint answers
+  // uniformly whether or not the address has an account, so nothing
+  // leaks about which addresses are registered. Returns true when the
+  // sent view should show; on the honest "unavailable" answer it sets
+  // the status itself and returns false.
+  async function requestEmailLink(session, email) {
+    const returnTo = onMagicLinkRequest?.();
+    const reply = await api(session, "/api/auth/magic/request", { email, ...(returnTo ? { returnTo } : {}) });
+    if (reply?.status === "unavailable") { setStatus(reply.message || uiText("signin.copy.030"), true); return false; }
+    if (reply?.status !== "sent") throw new Error(uiText("signin.copy.031"));
+    emailMethod = "magic"; magicEmail = email; magicPhase = "sent"; magicManualCode = false;
+    return true;
+  }
   const onClick = async event => {
     if (busy) return;
+    if (event.target?.closest?.("[data-passkey-signin]")) {
+      const provider = credentials ?? globalThis.navigator?.credentials;
+      if (!provider?.get || await beforeSignIn?.() === false) return;
+      const email = surface()?.querySelector('[name="email"]')?.value?.trim();
+      if (email) passwordEmail = email;
+      await withBusy(async () => {
+        try {
+          const session = await authedSession();
+          const generation = accountClient.generation;
+          const options = await api(session, "/api/auth/passkey/authenticate/options", {});
+          const credential = await provider.get({ publicKey: toAuthenticationPublicKey(options) });
+          if (!credential) throw Object.assign(new Error(), { name: "NotAllowedError" });
+          if (!accountClient.owns(generation, session)) throw new Error(uiText("signin.copy.001"));
+          const view = await authApi(session, "/api/auth/passkey/authenticate/finish", {
+            challengeId: options.challengeId, response: toAuthenticationResponse(credential), sessionRevision: session.sessionRevision
+          });
+          await finish(view);
+        } catch (error) {
+          if (error?.name === "NotAllowedError") throw new Error(uiText("signin.passkey.cancelled"));
+          throw error;
+        }
+      });
+      return;
+    }
     const visibility = event.target?.closest?.("[data-password-visibility]");
     if (visibility) {
       const input = surface()?.querySelector('[name="password"]');
       if (!input) return;
       const shown = input.type === "password";
       input.type = shown ? "text" : "password";
-      visibility.textContent = shown ? "Hide password" : "Show password";
+      visibility.setAttribute("aria-label", shown ? "Hide password" : "Show password");
       visibility.setAttribute("aria-pressed", String(shown));
       return;
     }
@@ -184,7 +289,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (recovery) {
       const email = surface()?.querySelector('[name="email"]')?.value?.trim();
       if (email) passwordEmail = magicEmail = resetEmail = email;
-      showView(recovery.dataset.recoveryOption === "reset" ? "reset-request" : "magic-request"); return;
+      // The "email me a link" recovery option lands on the merged form
+      // (#3341): submitting it with a blank password sends the link.
+      showView(recovery.dataset.recoveryOption === "reset" ? "reset-request" : "password-login"); return;
     }
     const method = event.target?.closest?.("[data-email-method]");
     const mode = event.target?.closest?.("[data-password-mode]");
@@ -192,8 +299,9 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       welcome = false;
       const currentEmail = surface()?.querySelector('[name="email"]')?.value;
       if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
-      if (method) emailMethod = method.dataset.emailMethod === "password" ? "password" : "magic";
-      if (mode) emailMethod = "password";
+      // One merged email form (#3341): every method/mode switch lands
+      // on it; the mode switch still chooses login vs signup.
+      emailMethod = "password";
       if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
       pendingLink = null; magicPhase = "request"; setStatus(""); render();
       surface()?.querySelector('[name="email"]')?.focus(); return;
@@ -266,17 +374,26 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (passwordMode === "signup" && (fields.password?.length < 10 || fields.password?.length > 256)) {
         setStatus(uiText("signin.copy.024"), true); return;
       }
-      if (await beforeSignIn?.() === false) return;
+      // Merged form (#3341): in login mode with mail configured, a blank
+      // password is a link request, not a sign-in attempt — like the old
+      // magic-request submit it does not consult beforeSignIn (asking
+      // for a link signs nothing in and clears nothing; the host's gate
+      // applies when a password is presented or a code/link redeemed).
+      const linkRequest = passwordMode !== "signup" && !fields.password && mailConfigured;
+      if (!linkRequest && await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();
         if (passwordMode === "signup") {
-          // The signup mail (verify, or the already-registered notice) links
-          // back to the same place a magic link would: room, account home, or
-          // the open #invite/ or #join/ link, so an invitee keeps the invite.
+          // Signup also rotates the account cookie. Reconcile an uncertain
+          // result and ignore obsolete replies just as password login does.
           const returnTo = onMagicLinkRequest?.();
-          const reply = await api(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision, ...(returnTo ? { returnTo } : {}) });
-          if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
+          const reply = await mutationApi(session, "/api/auth/password/signup", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision, ...(returnTo ? { returnTo } : {}) },
+            reply => {
+              if (reply?.status !== "check_email" || typeof reply.mailConfigured !== "boolean") throw new Error(uiText("signin.copy.025"));
+              return true;
+            });
           const restored = await accountClient.restore();
+          if (!restored) return; // A newer restoration owns the account now.
           if (restored?.authenticated) {
             await onSignedIn?.(restored);
             setStatus(reply.mailConfigured ? uiText("signin.copy.026") : uiText("signin.copy.027"));
@@ -289,6 +406,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
           }
           return;
         }
+        if (linkRequest) { await requestEmailLink(session, passwordEmail); return; }
         const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
         await finish(view);
       }); return;
@@ -298,17 +416,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       if (!magicManualCode || !code || await beforeSignIn?.() === false) return;
       await withBusy(() => redeem(magicEmail, code)); return;
     }
-    const resetting = form.dataset.signinForm === "reset-request";
-    if (!resetting && form.dataset.signinForm !== "magic-request") return;
+    if (form.dataset.signinForm !== "reset-request") return;
     const email = [...form.querySelectorAll('input[name]')].find(input => input.name === "email")?.value?.trim() ?? "";
-    if (resetting) resetEmail = email; else magicEmail = email;
+    resetEmail = email;
     await withBusy(async () => {
       const session = await authedSession();
       const returnTo = onMagicLinkRequest?.();
-      const reply = await api(session, resetting ? "/api/auth/password/reset/request" : "/api/auth/magic/request", { email, ...(returnTo ? { returnTo } : {}) });
+      const reply = await api(session, "/api/auth/password/reset/request", { email, ...(returnTo ? { returnTo } : {}) });
       if (reply?.status === "unavailable") { setStatus(reply.message || uiText("signin.copy.030"), true); return; }
       if (reply?.status !== "sent") throw new Error(uiText("signin.copy.031"));
-      if (resetting) resetPhase = "sent"; else magicPhase = "sent"; magicManualCode = false;
+      resetPhase = "sent";
       render();
     });
   };
@@ -380,14 +497,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     showWelcome() { return showView("welcome"); },
     showPassword(mode = "login") { return showView(mode === "signup" ? "password-signup" : "password-login"); },
     showMagic() {
+      // #3341: there is no separate magic view to open — the merged
+      // form is the email entry (a blank password asks for the link).
+      // Kept as the hosts' "open email sign-in" entry point; coercion
+      // for unconfigured mail is now simply what the form is.
       if (busy) return false;
-      welcome = false; emailMethod = "magic"; if (!pendingLink) magicPhase = "request"; render(); return true;
+      return showView("password-login");
     },
     openEmail(mode = "magic", panel) {
       if (busy) return false;
       if (panel && container && !panel.contains?.(container)) panel.prepend?.(container);
       if (panel) panel.hidden = false;
-      emailMethod = mode === "password" ? "password" : "magic";
+      // The mode argument is retained for host compatibility; both
+      // modes open the one merged form (#3341).
+      emailMethod = "password";
       render(); return true;
     },
     closeEmail() { return back(); },
@@ -396,8 +519,14 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       onBusyChange?.(false);
       render();
     },
+    unmount() {
+      container?.removeEventListener("click", onClick);
+      container?.removeEventListener("submit", onSubmit);
+      container = null;
+    },
     mount(target) {
-      container = target; render(); bind(container);
+      container = target; mountedBefore = true; render(); bind(container);
+      void loadSigninCapabilities();
       return consumeMagicLinkFromUrl();
     }
   };

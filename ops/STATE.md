@@ -32,3 +32,9 @@ The source was an on-demand v2-format operator export, because no v2 KV copy exi
   - room instructions written by an agent owner.
   The live rooms serve fine. This is why real restores use `--audit report`. It is not a backup defect.
 - Cleanup: the throwaway store, the export, and all drill files were deleted from the box after verification.
+
+## GitHub polling for Board claims (2026-10-10)
+
+- The `project-room` Worker has no `GITHUB_TOKEN` or `GH_TOKEN` secret (checked with `wrangler secret list`, names only). `claim-prs` therefore polls GitHub anonymously: 60 core requests an hour, shared by Cloudflare's egress IPs, and one pull lookup per tick. On Oct 10 that quota was spent, and the merged #2479 and #2492 did not settle their held claims for over an hour.
+- Since bug-claim-pr-sync-rate-limited-no-settle-20261010: while the core budget is spent, one GitHub search call per tick (a separate quota, own backoff) walks merged pulls from a cursor and settles held claims whose pull merged. An unmerged close waits for the REST lookup. A rate-limited tick reads `degraded` in `/api/health/jobs` (still HTTP 200). `CLAIM_PR_SEARCH_BATCH=0` turns the search off.
+- Optional and not set: a `GITHUB_TOKEN` Worker secret on `project-room` (a fine-grained, read-only token for public repository metadata) raises the core quota to 5,000 an hour and the lookups to four per tick. The search path works without it.

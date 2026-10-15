@@ -68,6 +68,26 @@ test("an explicit secrets-allowlist marker recovers a line the gate would otherw
   assert.equal(recovered.status, 0, recovered.stdout);
 });
 
+test("an added line whose content starts with '++' is scanned, at its own line", () => {
+  const token = "ghp_" + "A".repeat(36);
+  const result = runDiff([
+    "diff --git a/server/pay.mjs b/server/pay.mjs",
+    "--- a/server/pay.mjs",
+    "+++ b/server/pay.mjs",
+    "@@ -1,0 +1,3 @@",
+    `+const a = "${token}";`,
+    `+++const b = "${token}";`,
+    `+const c = "${token}";`,
+    "",
+  ].join("\n"));
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /scan-secrets: 3 possible secret\(s\)/);
+  assert.match(result.stderr, /server\/pay\.mjs:1 \[GitHub classic token\]/);
+  assert.match(result.stderr, /server\/pay\.mjs:2 \[GitHub classic token\]/);
+  // The line after the '++' line keeps its true number (no off-by-one shift).
+  assert.match(result.stderr, /server\/pay\.mjs:3 \[GitHub classic token\]/);
+});
+
 test("a clean added line stays clean", () => {
   const result = runDiff(addedDiff("const billing = ready;"));
   assert.equal(result.status, 0, result.stdout);

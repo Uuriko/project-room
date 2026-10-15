@@ -193,6 +193,43 @@ test("overflow digest resumes with every omitted public message on the next run"
   for (const m of messages) assert.equal(combined.split(`· \`${m.messageId}\``).length - 1, 1);
 });
 
+// Regression (#2883): the cursor scan used to page oldest-first and stop
+// after 30 pages (3000 comments), so on a busier door issue the newest
+// digest marker was never fetched and every run re-posted a duplicate digest.
+test("outbound cursor scan finds the newest digest marker beyond 3000 older comments", async () => {
+  const bot = { login: "github-actions[bot]", type: "Bot" };
+  const filler = { body: "busy discussion", user: { login: "uuriko", type: "User" } };
+  const comments = [
+    { body: `${OUT_MARKER} seq=10 -->\nold digest`, user: bot },
+    ...Array.from({ length: 3498 }, () => filler),
+    { body: `${OUT_MARKER} seq=99 -->\nlatest digest`, user: bot }
+  ];
+  assert.equal(comments.length, 3500);
+  const requestedUrls = [];
+  const fetchImpl = async (url, init = {}) => {
+    if (!init.method || init.method === "GET") {
+      requestedUrls.push(url);
+      const parsed = new URL(url);
+      const page = Number(parsed.searchParams.get("page") ?? 1);
+      const perPage = Number(parsed.searchParams.get("per_page") ?? 100);
+      const ordered = parsed.searchParams.get("direction") === "desc" ? [...comments].reverse() : comments;
+      return new Response(JSON.stringify(ordered.slice((page - 1) * perPage, page * perPage)));
+    }
+    const comment = { ...JSON.parse(init.body), user: bot };
+    comments.push(comment); return new Response(JSON.stringify(comment), { status: 201 });
+  };
+  let requestedAfter;
+  const client = { roomMessages: async ({ after }) => { requestedAfter = after;
+    return { messages: after < 99 ? [{ sequence: 50, from: "peer", messageId: "dup-50", body: "already mirrored" }] : [],
+      next: Math.max(after, 99), hasMore: false };
+  } };
+  const result = await runOutbound({ repo, doorIssue: 7, token: "synthetic", client, roomId: "commons", selfMemberId: "door", fetchImpl });
+  assert.equal(requestedAfter, 99, "cursor must come from the newest digest, not the oldest fetched page");
+  assert.equal(result.posted, false);
+  assert.equal(comments.length, 3500, "no duplicate digest may be posted");
+  assert.ok(requestedUrls.length <= 2, `newest-first scan should stop at the first trusted marker, fetched ${requestedUrls.length} pages`);
+});
+
 test("forged markers from humans, other bots and quoted text cannot advance outbound cursor", async () => {
   const comments = [
     { body: "<!-- room-door:out seq=999 -->", user: { login: "stranger", type: "User" } },

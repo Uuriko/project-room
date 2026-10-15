@@ -33,7 +33,6 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   page.on("pageerror", error => errors.push(error.message));
   const destination = `${origin}/?room=commons`;
   await page.goto(destination);
-  await page.locator('[data-password-mode="login"]').tap();
   const passwordForm = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await passwordForm.waitFor({ state: "visible" });
   assert.equal(await page.locator("#email-signin").count(), 0);
@@ -50,12 +49,13 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
   await page.locator('[data-signin-form="reset-request"] [name="email"]').fill('mobile-navigation@example.invalid');
   await page.locator('[data-email-method="magic"]').tap();
-  const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
+  // #3341: the recovery option lands on the one merged form (there is
+  // no separate magic-request view, and the root form has no Back
+  // button — the touch-target guard moves to the email field itself).
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.waitFor({ state: "visible" });
-  const back = await page.locator("[data-signin-back]").boundingBox();
-  const email = await form.locator("label").first().boundingBox();
-  assert.ok(back.height >= 44, "Back has a usable touch target");
-  assert.ok(back.y + back.height <= email.y, "Back does not overlap the email label or input");
+  const emailBox = await form.locator('[name="email"]').boundingBox();
+  assert.ok(emailBox.height >= 44, "email field has a usable touch target");
   assert.equal(await form.locator('[name="email"]').inputValue(), "mobile-navigation@example.invalid", "switching recovery methods keeps the edited email");
   let release;
   const held = new Promise(resolve => { release = resolve; });
@@ -65,21 +65,28 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   const route = await held;
   const priorEvents = await page.evaluate(() => window.historyEvents);
   await page.evaluate(() => history.back());
-  await page.waitForFunction(count => window.historyEvents >= count + 2 && history.state?.roomSigninView === "magic-request", priorEvents);
+  // Arriving at the merged form from recovery records no history
+  // entry (password views are the unrecorded base), so the current
+  // entry still names the recovery view; what matters is that Back
+  // fired and was undone (+2 popstates) with the form still up.
+  await page.waitForFunction(count => window.historyEvents >= count + 2 && history.state?.roomSigninView === "reset-request", priorEvents);
   assert.equal(await form.isVisible(), true, "pending email request remains visible after Back is undone");
   assert.equal(page.url(), destination);
   assert.equal(requests, 1, "navigation does not replay the pending request");
   await route.continue();
   await page.locator("#auth-signin-ui").getByText(/Check .* for your sign-in link/).waitFor();
   assert.equal(sent.length, 1, "one real request reaches the configured mail seam");
+  // Post-sent Back walks the recorded entries: the sent view's entry
+  // replaced the recovery entry with the merged form's, so the first
+  // Back lands on the merged form — which, as the root form, has no
+  // Back button of its own; the next step back is the browser's.
   await page.locator("[data-signin-back]").tap();
-  await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
-  await page.locator("[data-signin-back]").tap();
+  await passwordForm.waitFor({ state: "visible" });
+  await page.evaluate(() => history.back());
   await passwordForm.waitFor({ state: "visible" });
   assert.equal(page.url(), destination);
   await page.locator("[data-forgot-password]").tap();
   await page.reload();
-  await page.locator('[data-password-mode="login"]').tap();
   await passwordForm.waitFor({ state: "visible" });
   await page.locator("[data-forgot-password]").tap();
   await page.locator("[data-signin-back]").tap();

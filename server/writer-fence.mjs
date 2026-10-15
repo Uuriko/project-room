@@ -262,9 +262,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
   // to them, and the activity module owns its schema.
+  // activity_fanout_failures (#3261) is the same module's failure journal,
+  // created by the same schema exec.
   "activity_events",
   "read_horizons",
   "saved_messages",
+  "activity_fanout_failures",
   // web_fetch_cache + web_fetch_log (room-side web fetch, RC-2026-09-23-102):
   // page cache and the per-request fetch journal (no page content journaled).
   // Purely additive and intentionally NOT fenced — older writers have no
@@ -486,7 +489,19 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
   "seeker_declarations",
   "work_offer_terms",
 ]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES]);
+// Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
+// purely additive, created lazily on first lease use. CX5-FIX adds
+// agent_wake_room_activity (room-attributed listener activity), created
+// lazily on first room-scoped poll/heartbeat.
+const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
+// runOnce replay journal (server/run-once.mjs): purely additive, created
+// lazily on first table-backed runOnce() use.
+const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);
+// workItems -> board claims backfill marker (server/work-item-board.mjs,
+// decision #10): purely additive, created lazily on first backfill pass;
+// older writers have no code path to it.
+const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
@@ -495,13 +510,16 @@ const v34FencedTables = Object.freeze([...new Set([...deployedV28Tables, ...rebu
 const v37FencedTables = Object.freeze([...v34FencedTables, "messages"]);
 export const applicationTables = Object.freeze([...new Set([...deployedV28Tables, ...rebuiltAdditiveTables, ...unfencedAdditiveTables, "messages"])]);
 const tablesFor = version => version <= 27 ? ({ 6: v6Tables, 7: v7Tables, 8: v8Tables, 9: v14Tables, 10: v14Tables, 11: v14Tables, 12: v14Tables, 13: v14Tables, 14: v14Tables, 15: v17Tables, 16: v17Tables, 17: v17Tables, 18: tables, 19: tables, 20: tables, 21: tables, 22: tables, 23: tables, 24: tables, 25: tables, 26: tables, 27: v27Tables })[version]
-  : version === 28 ? v27Tables : version <= 33 ? deployedV28Tables : version <= 36 ? v34FencedTables : v37FencedTables;
+  : version === 28 ? deployedV28Tables : version <= 33 ? deployedV28Tables : version <= 36 ? v34FencedTables : v37FencedTables;
 export const fenceDefinitions = version => Object.freeze(tablesFor(version).flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v${version}_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v${version}() IS NOT ${version} THEN RAISE(ABORT,'unsupported database writer') END; END` });
 })));
-// v28's deployed lineage included attachment triggers; accept them as known
-// history while requiring only the rebuilt set when opening a rebuilt v28 DB.
+// v28's deployed lineage included invite/attachment triggers, so
+// fenceDefinitions(28) covers the deployed set: verifyWriterFence requires
+// those triggers whenever their tables are present. A rebuilt v28 database
+// never created those tables, and verifyWriterFence skips absent tables, so
+// a rebuilt v28 database is still accepted with only its own fence set.
 const deployedV28FenceDefinitions = Object.freeze(deployedV28Tables.flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
   const name = `writer_v28_${table}_${operation.toLowerCase()}`;
   return Object.freeze({ name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v28() IS NOT 28 THEN RAISE(ABORT,'unsupported database writer') END; END` });
