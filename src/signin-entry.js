@@ -3,6 +3,7 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { applyStoredTheme } from "./account-settings-ui.js";
 import { rememberAccountHint } from "./browser-session.js";
 import { createSigninNavigation } from "./signin-navigation.js";
+import { mountLandingHero } from "./landing-hero.js";
 import { uiText } from "./strings.js";
 
 export function mountSigninEntry({ openWorkspace }) {
@@ -77,6 +78,9 @@ export function mountSigninEntry({ openWorkspace }) {
     unmount: () => agentUi?.unmount()
   };
   applyStoredTheme();
+  // #3548: the collaboration hero fronts the wall for logged-out visitors;
+  // it is disposed with the entry, before the workspace takes the page.
+  const disposeHero = mountLandingHero();
   $("#static-hero")?.remove();
   $("#auth-panel").hidden = false;
   $("#session-menu").classList.add("empty");
@@ -127,7 +131,7 @@ export function mountSigninEntry({ openWorkspace }) {
     active = false;
     $("#auth-panel").inert = false;
     $("#auth-panel").removeAttribute("aria-busy");
-    listeners.abort(); navigation.dispose(); signin.unmount(); agent.unmount();
+    listeners.abort(); disposeHero(); navigation.dispose(); signin.unmount(); agent.unmount();
     $("#signin-controller").prepend($("#auth-signin-ui"));
     if ($("#agent-auth-step")) $("#agent-auth-step").hidden = true;
   };

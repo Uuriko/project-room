@@ -2,6 +2,7 @@ import { uiText } from './strings.js';
 // Email sign-in uses a delivered single-use link. The account cookie stays
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
 import { escapeHtml, base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+import { setGithubSigninVerified } from "./provider-gate.js";
 
 export function toAuthenticationPublicKey(options) {
   const { challengeId: _challengeId, ...publicKey } = options;
@@ -79,6 +80,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (typeof loadSigninOptions !== "function") return;
     try {
       const options = await loadSigninOptions();
+      // #3548: unlike mail above (fail-open), the GitHub gate fails closed —
+      // only an explicit configured+verified answer opens the door; a feed
+      // without the github block (older server) leaves it hidden.
+      if (options?.providers?.github) {
+        setGithubSigninVerified(options.providers.github.configured === true
+          && options.providers.github.verified === true);
+      }
       if (options?.providers?.mail?.configured === false) {
         mailConfigured = false;
         if (emailMethod === "magic" && !pendingLink) { emailMethod = "password"; passwordMode = "login"; }

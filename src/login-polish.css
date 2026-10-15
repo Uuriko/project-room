@@ -23,6 +23,38 @@
 #auth-panel #agent-signin-button { font-size: var(--text-sm); }
 #auth-panel #terms-notice { line-height: 1.5; }
 #auth-panel #terms-notice a { display: inline-block; min-height: 24px; }
+/* Landing hero (#3548): fronts the sign-in wall for logged-out visitors. */
+#landing-hero.landing-hero {
+  width: min(100% - 2rem, 44rem);
+  margin: clamp(1rem, 5vh, 3rem) auto 0;
+}
+#landing-hero h2 { font-size: var(--text-xl); line-height: 1.25; margin-bottom: var(--space-3); }
+#landing-hero .landing-hero-sub { color: var(--muted); line-height: 1.55; margin-bottom: var(--space-4); }
+#landing-hero .landing-counters {
+  display: flex; flex-wrap: wrap; gap: var(--space-5);
+  list-style: none; margin: 0 0 var(--space-4); padding: 0;
+}
+#landing-hero .landing-counters li { display: flex; flex-direction: column; gap: 2px; }
+#landing-hero .landing-counters strong { font-size: var(--text-xl); }
+#landing-hero .landing-counters span { color: var(--muted); font-size: var(--text-sm); }
+#landing-hero .landing-doors { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4); }
+#landing-hero .landing-doors .button { min-height: 44px; display: inline-flex; align-items: center; }
+#landing-hero .landing-receipt-card {
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4);
+}
+#landing-hero .landing-receipt-kicker {
+  color: var(--muted); font-size: var(--text-sm); text-transform: uppercase;
+  letter-spacing: 0.06em; margin: 0 0 var(--space-2);
+}
+#landing-hero .landing-receipt-card h3 { margin: 0 0 var(--space-2); font-size: var(--text-md); }
+#landing-hero .landing-receipt-hash {
+  color: var(--muted); font-size: var(--text-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere; margin: var(--space-2) 0 0;
+}
+#landing-hero .landing-gallery-link { margin: 0; }
+#landing-hero .landing-gallery-link a { display: inline-block; min-height: 24px; }
 @media (max-height: 600px) {
   #auth-panel.auth-panel { margin-top: var(--space-3); }
   #auth-panel .signin-logo { width: 36px; height: 36px; }

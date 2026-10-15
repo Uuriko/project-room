@@ -632,6 +632,22 @@ export function collectPublicReceipts(store) {
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all().map(rowToPublic);
 }
 
+// Landing counters (#3548): computed from the same visible set the gallery
+// serves — never hand-typed. "Receipts issued" counts every visible public
+// receipt. "Results verified" counts the subset whose row exists only
+// because the server verified the outcome: work-claim rows are projected
+// solely after a server-settled merge (serverVerifiedMerge), and
+// public-work rows solely when the finish path issues a receipt over the
+// artifact hash. Work-item rows record member-reported completions, so they
+// count as issued, not verified.
+export function publicReceiptCounts(store) {
+  const visible = `FROM public_receipts WHERE ${HIDDEN_RECEIPT}`;
+  const receiptsIssued = store.db.prepare(`SELECT COUNT(*) AS n ${visible}`).get().n;
+  const resultsVerified = store.db.prepare(
+    `SELECT COUNT(*) AS n ${visible} AND source IN ('work-claim', 'public-work')`).get().n;
+  return { resultsVerified, receiptsIssued };
+}
+
 export function listPublicReceiptSitemap(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({

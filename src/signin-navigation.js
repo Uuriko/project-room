@@ -1,6 +1,16 @@
+import { githubSigninVerified, onGithubSigninGateChange } from "./provider-gate.js";
+
 export function createSigninNavigation({ getUI, active }) {
   const $ = selector => document.querySelector(selector);
   let current = "password-login", replay = false;
+  // #3548: the GitHub door is gated on deployment verification, not just
+  // the view — hidden on the welcome view as before, and hidden everywhere
+  // until the provider gate opens. Re-applied live when the gate changes.
+  const applyGithubVisibility = () => {
+    const button = $("#github-signin");
+    if (button) button.hidden = current === "welcome" || !githubSigninVerified();
+  };
+  const releaseGate = onGithubSigninGateChange(() => { if (active()) applyGithubVisibility(); });
   function sync(view) {
     const previous = current;
     current = view;
@@ -22,7 +32,7 @@ export function createSigninNavigation({ getUI, active }) {
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
     $("#google-signin").hidden = view === "welcome";
-    $("#github-signin").hidden = view === "welcome";
+    applyGithubVisibility();
     $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {
@@ -43,6 +53,6 @@ export function createSigninNavigation({ getUI, active }) {
       if (active() && history.state?.roomSigninView) { history.back(); return false; }
       return true;
     },
-    dispose() { window.removeEventListener("popstate", onPopState); }
+    dispose() { releaseGate(); window.removeEventListener("popstate", onPopState); }
   };
 }

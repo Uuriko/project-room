@@ -2,9 +2,12 @@
 // strangers, slow connections and crawlers — not an empty "Connecting to
 // room service…" shell. The contracts, in priority order:
 //
-// 1. A no-JS fetch sees only the wordmark and an enable-JavaScript message.
+// 1. The static wordmark block itself carries only the wordmark and an
+//    enable-JavaScript message. (Since #3548 the front-door hero lives in
+//    its own section beside this block, server-rendered per charter D5;
+//    this file's contract covers the static block, not the whole page.)
 // 2. Link-preview crawlers get OG/Twitter metadata.
-// 3. The landing has no educational links or invite pitch.
+// 3. The static block has no educational links or invite pitch.
 // 4. The hero says plainly that the live room needs JavaScript, via <noscript>.
 // 5. Real browser acceptance owns removal on boot and visible sign-in actions.
 //

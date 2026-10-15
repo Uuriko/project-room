@@ -103,6 +103,10 @@ if (accountSettingsSummary) accountSettingsSummary.textContent = "Account";
 // 2026-10-03 P1-1). It comes down the moment the app boots so it never
 // double-renders with the live UI. Module top level: runs before any render.
 $("#static-hero")?.remove();
+// The landing hero (#3548) is the logged-out front door; the sign-in entry
+// owns it there. Once the workspace boots it comes down with the static
+// hero so a signed-in session never renders the front door.
+$("#landing-hero")?.remove();
 $("#skip-link").addEventListener("click", event => {
   event.preventDefault();
   const target = !$("#inbox-panel").hidden ? "#inbox-heading"

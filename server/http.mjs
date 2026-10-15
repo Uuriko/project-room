@@ -7,6 +7,7 @@ import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
+import { buildLandingFeed, renderLandingHtml } from "./landing-page.mjs";
 import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -2143,6 +2144,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return res.end();
           }
           if (reviewedPublicSearchPaths.includes(canonical)) res.setHeader("X-Robots-Tag", "all");
+        }
+        if (path === "index.html" && req.method === "GET") {
+          // #3548 / charter D5: the front door's facts (live counters, the
+          // featured real receipt) are server-rendered into the raw HTML —
+          // visible text for crawlers and no-JS visitors alike, computed at
+          // request time. The client feed refreshes the same slots after
+          // boot. A render failure serves the unfilled shell, never a 500
+          // at the door. no-store: the featured receipt is toggle-
+          // controlled, like the receipts routes.
+          try {
+            data = Buffer.from(renderLandingHtml(data.toString("utf8"), buildLandingFeed(store)), "utf8");
+            res.setHeader("Cache-Control", "no-store");
+          } catch { /* serve the shell unfilled rather than fail the door */ }
         }
         // RFC 8288 discovery hints on the public HTML door too: a cold agent
         // starting at GET / alone can find the agent card from Link headers.
