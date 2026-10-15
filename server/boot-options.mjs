@@ -1,4 +1,5 @@
 import { googleConfig } from './google-oauth.mjs';
+import { githubConfig } from './github-oauth.mjs';
 import { gmailConfig } from './gmail-mailbox.mjs';
 // The default boot path wires its HTTP server arguments here so both the
 // local/staging entry point (server.mjs) and any test can build the exact
@@ -16,6 +17,7 @@ export function defaultServerArgs({ store, env = process.env, ...rest }) {
     ? createMagicLinkMailer({ send, baseUrl: rest.origin ?? null })
     : createMagicLinkMailer();
   const googleAuth = rest.origin ? googleConfig(env, rest.origin) : null;
+  const githubAuth = rest.origin ? githubConfig(env, rest.origin) : null;
   const gmailAuth = rest.origin ? gmailConfig(env, rest.origin, googleAuth) : null;
-  return { googleAuth, gmailAuth, ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer };
+  return { googleAuth, githubAuth, gmailAuth, ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer };
 }

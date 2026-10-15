@@ -817,6 +817,18 @@ export function retryUnconfirmed(error, wasUnconfirmed = false) {
   return !(scopeRejected || (wasUnconfirmed ? originalRejected : rejected));
 }
 
+// A composer draft's command may be forgotten (so the next send mints a new
+// one) only when the refusal proves the original was never written. The server
+// answers command_rejected and channel_archived after the exact-operation
+// lookup, so a retry of an already-written command gets its duplicate receipt
+// instead. Transport and pre-ledger size/rate errors cannot unlock an earlier
+// uncertain operation.
+export function draftRefused(error, hadPending = false) {
+  if (!hadPending && [400, 404, 409, 413, 422].includes(error?.status)) return true;
+  return (error?.code === "command_rejected" && [409, 422].includes(error.status))
+    || (error?.code === "channel_archived" && error.status === 409);
+}
+
 export function draftCommand(previous, type, data, causationId = null) {
   const contents = JSON.stringify({ type, data, causationId });
   return previous?.contents === contents ? previous : { contents, command: { id: crypto.randomUUID(), type, data, ...(causationId ? { causationId } : {}) } };

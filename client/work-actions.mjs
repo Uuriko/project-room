@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
@@ -72,7 +72,7 @@ const definitions = [
 const actions = new Map(definitions.map(([name, title, type, description, properties, required = Object.keys(properties)]) => {
   const fields = type === T.WORK_PROPOSED ? { requestId: common.requestId, workItemId: id } : type === T.WORK_HALT_CLEARED ? { requestId: common.requestId } : common;
   return ["room_" + name, { type, tool: { name: "room_" + name, title, description: description + retry,
-    inputSchema: object({ ...fields, ...properties }, [...Object.keys(fields).filter(key => key !== "requestId"), ...required]),
+    inputSchema: object({ ...fields, ...properties }, [...new Set([...Object.keys(fields), ...required])]),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
 }));
 export const workTools = [...actions.values()].map(action => action.tool);
@@ -101,8 +101,15 @@ export function validWorkArguments(name, args) {
   return true;
 }
 export function buildWorkCommand(name, args) {
+  // #2862: requestId is the command id / idempotency key, so it must be
+  // caller-supplied and stable across retries. Substituting a fresh
+  // randomUUID() for a missing/invalid one minted a second command on
+  // retry, the server could not deduplicate, and the action applied twice.
+  // Name the missing field (as room_reply does) so the caller can repair it.
+  if (actions.has(name) && args && !validId(args.requestId))
+    throw Object.assign(new Error(`${name} requires requestId: supply one stable id per operation and keep it unchanged when retrying an unknown result`), { code: "missing_request_id" });
   if (!validWorkArguments(name, args)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
-  const requestId = validId(args.requestId) ? args.requestId : randomUUID();
+  const requestId = args.requestId;
   const { requestId: _requestId, ...data } = structuredClone(args), command = { id: requestId, type: actions.get(name).type, data };
   if (name === "room_submit_text_result") data.evidenceKind = "room_text";
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) throw Object.assign(new Error("Work action exceeds the command limit"), { code: "work_action_too_large" });
@@ -150,7 +157,7 @@ const refusals = {
 };
 export function workActionRefusal(cause) {
   const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message });
-  if (["invalid_work_action", "work_action_too_large"].includes(cause?.code)) return { type: "work_input_refused", code: cause.code,
+  if (["invalid_work_action", "work_action_too_large", "missing_request_id"].includes(cause?.code)) return { type: "work_input_refused", code: cause.code,
     outcome: "this_attempt_not_sent", message: "Input was not sent. Use the listed fields and reduce text/checks to fit the command limit. If this ID had an earlier uncertain attempt, reconcile its original input before changing it.",
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   if (![409, 422].includes(cause?.status) || !Object.hasOwn(refusals, cause.code)) return null;

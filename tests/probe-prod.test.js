@@ -61,6 +61,31 @@ test('valid public responses permit a matching revision and detect a real mismat
   });
 });
 
+test('failing job health is reported separately and does not fail the drift verdict (#3531)', async t => {
+  let liveRevision = revision;
+  // Production's shape: the canary answers 503 carrying the job-health
+  // document whenever the aggregate job status is not ok.
+  const failingJobs = path => path === '/api/health/jobs'
+    ? { status: 503, body: { schema: 'room.job-health/1', status: 'failing', jobs: [{ name: 'integrity', status: 'failing' }, { name: 'webhook-dispatch', status: 'ok' }, { name: 'gmail-sync', status: 'disabled' }] } }
+    : healthy(path);
+  const base = await withServer(t, path => path === '/api/version'
+    ? { status: 200, body: { status: 'ok', sourceRevision: liveRevision } } : failingJobs(path));
+  const result = await run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.probe_verdict, 'healthy');
+  assert.equal(report.drift, false);
+  assert.equal(report.jobs_health.status, 'failing');
+  assert.deepEqual(report.jobs_health.failing, ['integrity']);
+  liveRevision = 'f'.repeat(40);
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
+    assert.equal(error.code, 1);
+    const drifted = JSON.parse(error.stdout);
+    assert.equal(drifted.drift, true);
+    assert.equal(drifted.jobs_health.status, 'failing');
+    return true;
+  });
+});
+
 test('a lag inside both budgets is healthy, and crossing either budget is drift', async t => {
   const parent = (await run('git', ['rev-parse', 'HEAD~1'])).stdout.trim();
   const count = Number((await run('git', ['rev-list', '--count', 'HEAD~1..HEAD'])).stdout.trim());
