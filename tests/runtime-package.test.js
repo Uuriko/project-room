@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { createRuntimePackage, verifyRuntimePackage, publicAssets, allowed } from "../scripts/runtime-package.mjs";
+import { createRuntimePackage, verifyRuntimePackage, publicAssets, allowed, generatedAgentPages } from "../scripts/runtime-package.mjs";
 import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
@@ -28,6 +28,12 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   }
   const committedSchema = Number(/STORE_SCHEMA_VERSION = (\d+)/.exec(execFileSync("git", ["show", commit + ":server/writer-fence.mjs"], { cwd: repository, encoding: "utf8" }))[1]);
   assert.equal(receipt.schemaVersion, committedSchema); assert.deepEqual(publicAssets, assetPaths);
+  // Decision #36 drift guard: the generated-pages exclusion in the package
+  // contract names exactly the docs/agents/*.html entries of the asset list —
+  // a new agent page joins the exclusion (and the CF build) by being listed,
+  // and a renamed one cannot silently fall out of it.
+  assert.deepEqual([...generatedAgentPages].sort(),
+    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path)).sort());
   // The package must contain exactly the allowlisted files that exist at this commit.
   // The allowlist (scripts/runtime-package.mjs) is the single source of truth;
   // the import-closure test below guarantees it covers every imported module,
@@ -72,11 +78,25 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     assert.deepEqual(JSON.parse(cold.stdout), { tools: toolCount, assistantTools: packagedTools.includes("...assistantTools") ? ["room_assistant_context", "room_assistant_action"] : [], helper: "function",
       command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
   }
+  if (existsSync(join(destination, "scripts/run-codex-room.mjs"))) {
+    const cold = spawnSync(process.execPath, [join(destination, "scripts/run-codex-room.mjs"), "--help"], {
+      cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8"
+    });
+    assert.equal(cold.status, 0, cold.stderr);
+    assert.match(cold.stdout, /RUN_ID/);
+    assert.equal(existsSync(join(destination, "docs/CODEX-ROOM-HOST.md")), true);
+    assert.equal(existsSync(join(destination, "scripts/room-assistant-scratch.mjs")), false);
+    assert.equal(existsSync(join(destination, "scripts/acceptance-fixture.mjs")), false);
+  }
   assert.throws(() => verifyRuntimePackage(destination, { expectedCommit: "0".repeat(40) }));
-  const { buildAssets, assetPaths: committedAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
-  const { templateAssetPaths: committedTemplates } = await import(pathToFileURL(join(destination, "deploy/public-assets.mjs")));
-  // Templates such as join.html are copied for the worker loader and are not raw URLs.
-  const packagedAssets = [...committedAssets, ...committedTemplates];
+  const { buildAssets } = await import(pathToFileURL(join(destination, "cloudflare/build-assets.mjs")));
+  const { templateAssetPaths: committedTemplates } = await import(pathToFileURL(join(destination, "server/public-assets.mjs")));
+  // The package's own manifest is the asset contract (decision #36: the
+  // generated agent pages are not in it — the packaged builder skips them);
+  // templates such as join.html are copied for the worker loader and are
+  // not raw URLs, so they ride along as before.
+  const manifestAssets = JSON.parse(readFileSync(join(destination, "runtime-manifest.json"), "utf8")).publicAssets;
+  const packagedAssets = [...manifestAssets, ...committedTemplates];
   const assets = join(directory, "assets");
   assert.equal(await buildAssets(pathToFileURL(assets + "/")), packagedAssets.length);
   for (const path of packagedAssets) assert.deepEqual(readFileSync(join(assets, path)), readFileSync(join(destination, path)));
@@ -88,7 +108,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   // is "dev") and update the manifest hash. A real production build goes
   // through scripts/sign-agent-card.mjs, which fails closed without the key.
   {
-    const signedPath = "deploy/agent-card-signed.mjs";
+    const signedPath = "server/agent-card-signed.mjs";
     const module = `// Fixture-signed by tests/runtime-package.test.js for the packaged\n// production boot probe — not a real signature (see scripts/sign-agent-card.mjs).\nexport const AGENT_CARD_SIGNATURE = "fixture-signature";\nexport const AGENT_CARD_SIGNED_REVISION = "dev";\nexport const AGENT_CARD_UNSIGNED_REASON = null;\nexport const AGENT_CARD_JWS_SIGNATURES = null;\n`;
     writeFileSync(join(destination, signedPath), module);
     const manifestPath = join(destination, "runtime-manifest.json");
@@ -247,4 +267,16 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   const cold = spawnSync(process.execPath, ["--input-type=module", "-e", program], { cwd: directory, env: { PATH: "/unavailable" }, encoding: "utf8" });
   assert.equal(cold.status, 0, cold.stderr); assert.deepEqual(JSON.parse(cold.stdout), { version: 3, pending: 0, unchanged: true });
   assert.deepEqual(verifyRuntimePackage(destination), receipt);
+});
+
+
+test("Codex host entrypoint and every dependency ship without scratch demo fixtures", () => {
+  const entry = "scripts/run-codex-room.mjs";
+  const closure = new Set([entry, ...importClosure(entry, repository)]);
+  assert.deepEqual([...closure].filter(path => !allowed.has(path)), []);
+  assert.equal(closure.has("client/codex-runtime.mjs"), true);
+  assert.equal(closure.has("client/codex-shared-assistant.mjs"), true);
+  assert.equal(closure.has("client/codex-stdio.mjs"), true);
+  assert.equal(closure.has("scripts/room-assistant-scratch.mjs"), false);
+  assert.equal(closure.has("scripts/acceptance-fixture.mjs"), false);
 });

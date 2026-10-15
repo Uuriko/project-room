@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
 // Public opportunity feed (v2).
 //
@@ -100,7 +101,8 @@ const parseSince = value => {
 
 const TERMINAL_WORK_STATES = new Set(["completed", "superseded"]);
 
-// Listed, feed-enabled, non-archived rooms only.
+// Listed, feed-enabled, non-archived rooms only — and never a room the
+// operator unpublished: that takedown overrides the owner's listing here too.
 function listedRoomIds(db, roomId) {
   if (roomId != null) {
     if (typeof roomId !== "string" || !roomId || roomId.length > 128) fail(422, "invalid_room", "room must be a room id");
@@ -109,14 +111,14 @@ function listedRoomIds(db, roomId) {
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
         WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL AND s.room_id = ?`).get(roomId);
-    return row ? [row.roomId] : [];
+    return row && !isUnpublished(db, "room", row.roomId) ? [row.roomId] : [];
   }
   return db.prepare(`
       SELECT s.room_id AS roomId
       FROM room_directory_settings s
       JOIN rooms r ON r.id = s.room_id
       WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL
-      ORDER BY s.room_id ASC`).all().map(r => r.roomId);
+      ORDER BY s.room_id ASC`).all().map(r => r.roomId).filter(id => !isUnpublished(db, "room", id));
 }
 
 function roomProjection(db, roomId) {

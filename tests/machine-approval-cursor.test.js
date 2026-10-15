@@ -140,6 +140,35 @@ test("the request records the room position it was posted at", async t => {
   assert.ok(Number.isSafeInteger(rows[requested.code].after) && rows[requested.code].after > 0, "the request records the room position it was posted at");
 });
 
+test("taking an approval does not clobber a code requested during the scan", async t => {
+  const { origin, ownerKey, home } = await serve(t);
+  const requested = await requestApproval({ home, origin, roomId: "commons", secret: ownerKey, ownerMemberId: "owner", className: "shell.desk", detail: "desk shell" });
+  assert.equal(requested.ok, true);
+  await say(origin, ownerKey, `approve ${requested.code}`);
+  // While takeApproval is awaiting the room's events, another caller (the
+  // daemon) records a fresh request in the same file. The taking save must
+  // not write its pre-scan snapshot over that newer state.
+  const realFetch = globalThis.fetch;
+  let injected = false;
+  globalThis.fetch = (url, init) => {
+    if (!injected && String(url).includes("/events?")) {
+      injected = true;
+      const path = join(home, "approvals.json");
+      const rows = JSON.parse(readFileSync(path, "utf8"));
+      rows.concurrent = { className: "credential.use", ownerMemberId: "owner", expiresAt: Date.now() + 60_000, createdAt: Date.now(), used: false };
+      writeFileSync(path, JSON.stringify(rows));
+    }
+    return realFetch(url, init);
+  };
+  t.after(() => { globalThis.fetch = realFetch; });
+  const taken = await takeApproval({ home, origin, roomId: "commons", secret: ownerKey, code: requested.code });
+  assert.equal(taken.ok, true);
+  const rows = JSON.parse(readFileSync(join(home, "approvals.json"), "utf8"));
+  assert.equal(rows[requested.code].used, true);
+  assert.ok(rows.concurrent, "a code requested during the scan survives the taking save");
+  assert.equal(rows.concurrent.used, false);
+});
+
 test("a pending approval saved before this change (no cursor) still works", async t => {
   const { origin, ownerKey, home } = await serve(t, { seed: 5 });
   writeFileSync(join(home, "approvals.json"), JSON.stringify({ legacy: { className: "shell.desk", ownerMemberId: "owner", expiresAt: Date.now() + 60_000, createdAt: Date.now(), used: false } }));

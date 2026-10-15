@@ -7,6 +7,7 @@ import { auditTextResults } from "./text-results.mjs";
 import { auditCharters } from "../src/room-charter.js";
 import { auditReplyRequests } from "./reply-requests.mjs";
 import { auditWorkHelp } from "./work-help.mjs";
+import { compactReplayLikeArchive, archivedMessageIds } from "./messages-store.mjs";
 
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -32,6 +33,8 @@ export function auditRecovery(store) {
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {
       const actual = store.room(row.id), rebuilt = store.rebuildProjection(row.id);
+      // An archived room's stored projection is compacted; compare the replay compacted the same way.
+      compactReplayLikeArchive(store.db, row.id, rebuilt.state);
       // Phase 2 channels: old stored projections may lack channels while the
       // replay backfills them. Messages in old projections also lack channelId
       // (new code adds it). Compare ignoring channels and message channelIds,
@@ -115,7 +118,7 @@ export function auditRecovery(store) {
       });
       auditTextResults(store.db, actual.state, history);
       auditCharters(actual.state, history, checkpoint);
-      auditReplyRequests(actual.state, history, checkpoint);
+      auditReplyRequests(actual.state, history, checkpoint, archivedMessageIds(store.db, row.id));
       auditWorkHelp(actual.state, history, checkpoint);
       eventCount += history.length;
       rooms.set(row.id, actual.state);

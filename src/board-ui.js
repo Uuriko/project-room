@@ -207,10 +207,14 @@ export function paintClaimChat(state, list) {
   }
 }
 
+const FULL_SHA = /^[0-9a-f]{40}$/;
 function liveLabel(status) {
-  if (!status || typeof status.behind !== "number") return "Deploy status unknown";
-  if (status.behind === 0) return "Live matches main";
-  if (status.behind > 0) return "Live is behind main";
+  // The server sends behind = 0 when live and main match and null otherwise,
+  // never a count, so a known mismatch has to be read from the two shas. A
+  // held (stale) read can lag a fresh deploy, so it stays unknown.
+  if (status && status.behind === 0) return "Live matches main";
+  if (status && typeof status.behind === "number" && status.behind > 0) return "Live is behind main";
+  if (status && !status.stale && FULL_SHA.test(status.live ?? "") && FULL_SHA.test(status.main ?? "") && status.live !== status.main) return uiText("board.live.differs");
   return "Deploy status unknown";
 }
 
@@ -473,9 +477,18 @@ function filterBarHtml(filter = {}) {
 }
 
 export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {} } = {}) {
-  const visible = filterClaims(items, filter, viewer?.id, members);
-  const columns = placeClaims(visible, now);
-  const byId = new Map(visible.map(item => [item.id, item]));
+  const all = Array.isArray(items) ? items : [];
+  const visible = filterClaims(all, filter, viewer?.id, members);
+  // The filter narrows display only: placement and dependency status are
+  // facts about the full loaded board. Place every claim against the full
+  // list (so a filtered-out prerequisite still counts as met or unmet
+  // exactly as it is), then keep only the visible cards in each column.
+  // Card lookups likewise resolve against the full list, so a dependency
+  // the filter hid reports its real status instead of "unknown".
+  const visibleIds = new Set(visible.map(item => item.id));
+  const placed = placeClaims(all, now);
+  const columns = Object.fromEntries(Object.entries(placed).map(([id, rows]) => [id, rows.filter(item => visibleIds.has(item.id))]));
+  const byId = new Map(all.map(item => [item.id, item]));
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
   const sweep = viewer.manage ? `<button type="button" class="button secondary" id="board-close-stale" data-claim-action="sweep" data-focus-key="board-close-stale">Close stale</button>` : "";
   const capForm = viewer.owner ? `<form data-claim-cap><label>Claims per member <input name="maxMemberOpenClaims" data-focus-key="board-cap-value" type="number" min="1" max="10000" value="${escapeHtml(String(cap ?? 20))}" aria-label="Open claims per member"></label><button type="submit" data-focus-key="board-cap-save">Save cap</button></form>` : "";
@@ -491,15 +504,15 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // precedence — skeleton while the first read is in flight, the error (not
   // the empty copy) on a failed load with nothing to show.
   const emptyCopy = `<p class="board-empty">${escapeHtml(emptyBoardCopy(capabilities, { canWrite, signedIn: Boolean(viewer?.id) }))}</p>${hint}`;
-  const board = items.length
+  const board = all.length
     ? [bar, hint, filterEmptyCopy(filter, visible.length) || columnsHtml].join("")
     : loading ? boardSkeletonHtml()
     : loadError ? ""
     : [bar, hint, emptyCopy].join("");
-  const needsMe = items.length ? needsMeHtml(items, viewer, members, now) : "";
+  const needsMe = all.length ? needsMeHtml(all, viewer, members, now) : "";
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
-  const loadingNote = loading ? uiText(items.length ? "board.loading.002" : "board.loading.001") : "";
+  const loadingNote = loading ? uiText(all.length ? "board.loading.002" : "board.loading.001") : "";
   return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 

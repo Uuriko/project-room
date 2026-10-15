@@ -190,6 +190,33 @@ test("a choice closes the starter with a result card, then the first agent is as
   assert.equal(store.room("script-room").state.messages.length, before);
 });
 
+test("guide does not announce a chosen claim that someone else already took", async t => {
+  const { origin, store } = await serve(t);
+  await createRoom(origin, store, "taken", {
+    roomId: "taken-room", title: "Scratch", purpose: "See a close.", kind: "personal", displayName: "Gus", intent: "bug"
+  });
+  const ownerKey = store.issueAccessKey("taken-room", "owner");
+  const choice = await bearer(origin, "/api/rooms/taken-room/commands", ownerKey, {
+    id: "pick-agree-taken", type: "message.posted", data: { messageId: "pick-agree-taken", body: "agent-pair-agree" }
+  });
+  assert.equal(choice.status, 201, await choice.clone().text());
+  assert.equal(store.workClaims.get("taken-room", "starter-receipt").state, "done");
+  // Someone else takes the chosen claim before the first agent joins.
+  const taken = await bearer(origin, "/api/rooms/taken-room/work-claims/agent-pair-agree/claim", ownerKey, {});
+  assert.equal(taken.status, 200, await taken.clone().text());
+  assert.equal(store.workClaims.get("taken-room", "agent-pair-agree").owner, "owner");
+  // The first agent joins; the guide must not announce the claim as theirs or wake them for it.
+  const identity = store.identities.create("Late Agent");
+  store.identities.link(ownerKey, "taken-room", {
+    identityId: identity.identityId, displayName: "Late Agent", permissions: ["accept_work", "complete_work"]
+  });
+  assert.equal(runGuideStep(store, "taken-room", store.now()), null);
+  const assign = store.room("taken-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
+  assert.equal(assign, undefined, "guide must not announce a claim held by someone else as the agent's");
+  assert.equal(store.workClaims.get("taken-room", "agent-pair-agree").owner, "owner");
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE agent_id=? AND room_id=?").get(identity.identityId, "taken-room").n, 0, "agent is not woken for a claim they do not hold");
+});
+
 test("done claims of every delivery mode get one in-room receipt card", async t => {
   const { origin, store } = await serve(t);
   await createRoom(origin, store, "receipts", {

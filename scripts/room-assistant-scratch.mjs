@@ -22,32 +22,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { createRoomClient } from "../client/room-assistant-client.mjs";
+export { createRoomClient } from "../client/room-assistant-client.mjs";
+
 export const SCRIPTED_LABEL = "Scripted scratch host (no model)";
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
 const stable = (...parts) => createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 32);
-
-export function createRoomClient({ origin, roomId, token, fetchImpl = fetch }) {
-  const base = `${origin.replace(/\/$/, "")}/api/rooms/${encodeURIComponent(roomId)}`;
-  async function call(method, path, body) {
-    const response = await fetchImpl(`${base}${path}`, {
-      method, headers: { authorization: `Bearer ${token}`, origin, ...(body ? { "content-type": "application/json" } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {})
-    });
-    const text = await response.text();
-    let value = null; try { value = text ? JSON.parse(text) : null; } catch { value = { raw: text.slice(0, 200) }; }
-    if (!response.ok) throw Object.assign(new Error(value?.error?.message || `HTTP ${response.status}`), { status: response.status, code: value?.error?.code, value });
-    return value;
-  }
-  return {
-    roomId,
-    assistant: () => call("GET", "/assistant"),
-    act: input => call("POST", "/assistant", input),
-    message: async id => (await call("GET", `/conversation?messageId=${encodeURIComponent(id)}`)).messages?.find(m => m.id === id) ?? null,
-    recent: async (limit = 100) => (await call("GET", `/conversation?limit=${limit}`)).messages ?? [],
-    members: async () => (await call("GET", ""))?.state?.members ?? {},
-    post: (messageId, body, extra = {}) => call("POST", "/commands", { id: stable("cmd", messageId), type: "message.posted", data: { messageId, body, ...extra } })
-  };
-}
 
 // Default executor: deterministic, labelled, and honest that nothing reasoned.
 export async function scriptedExecute(brief) {
@@ -121,6 +101,9 @@ export async function runHostOnce(client, { memberId, hostId = memberId, execute
     const stopped = await acknowledge(run);
     if (stopped) { outcomes.push({ runId: run.id, state: stopped }); continue; }
     if (run.status === "resume_requested") run = (await report("working", "Resumed.")).result;
+    // A run this host reserved reads "unknown" once its reports go quiet for two
+    // minutes (a crash or restart). The attempt id is stable, so pick it back up.
+    if (run.status === "unknown" && run.attemptId === attemptId) run = (await report("working", "Picked up again after a host restart.")).result;
     if (run.status !== "working") { outcomes.push({ runId: run.id, waiting: run.status }); continue; }
     const reread = async () => (await client.assistant()).runs.find(r => r.id === run.id);
     // Each attempt: brief, execute, re-read, then publish only if the run is

@@ -1,6 +1,6 @@
 // Public agent-invite join page: consent screen + self-serve join.
 // The page is unauthenticated and stateless. It previews the invite
-// (GET /api/agent-invites/preview), collects a display name, then mints
+// (POST /api/agent-invites/preview, code in the body), collects a display name, then mints
 // the identity and redeems the invite in one call (POST /api/join).
 // The one-time identity secret is shown once on the success screen —
 // browser sessions are human-only by design, so the secret is the
@@ -11,14 +11,101 @@
 
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
+import { AccountClient } from "./client.js";
+import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
+import { readAccessRequest } from "./invite-context.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
-// "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the code, else null.
+// "/join/RM-ABC" or "/room/join/RM-ABC" (www door) -> the claimed code,
+// else null. A code carried in the URL is a CLAIM, not a verdict: the
+// server preview is the authority, and a bogus or expired code must reach
+// it so the visitor lands on the error state ("this invite is no longer
+// valid") instead of a silent entry form. Only the token SHAPE is checked
+// here (single path segment); the strict RM- shape is enforced on what a
+// human types into the entry form (parseInviteCodeInput below), where a
+// non-code means "not a code yet", not an error screen.
 export function parseJoinCode(pathname) {
   const match = /^\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})\/?$/.exec(String(pathname ?? ""));
   const code = (match?.[1] ?? "").toUpperCase();
-  return JOIN_CODE_PATTERN.test(code) ? code : null;
+  return code || null;
+}
+
+// A human is usually handed a bare code (or a whole link pasted from chat),
+// not a tidy /join/<code> URL: accept the code or a full invite link and
+// normalize to the canonical code. Strict on purpose — this validates the
+// entry FORM, where a bad shape is corrected inline before navigating;
+// URL-carried codes take the claimed-code path above instead.
+export function parseInviteCodeInput(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const linkMatch = /\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})(?:[/?#\s]|$)/.exec(text);
+  const candidate = (linkMatch?.[1] ?? text).toUpperCase();
+  return JOIN_CODE_PATTERN.test(candidate) ? candidate : null;
+}
+
+// A ?code= value is a claimed code too (same rule as the path segment):
+// single-token shape or nothing; the server preview judges validity.
+export function claimedCode(value) {
+  const text = String(value ?? "").trim().toUpperCase();
+  return /^[A-Z0-9_-]{1,64}$/.test(text) ? text : null;
+}
+
+// The code for this page load: the path wins; ?code= is the fallback so a
+// link shared as /join?code=RM-… works too.
+export function joinCodeFromLocation(locationLike) {
+  const fromPath = parseJoinCode(locationLike?.pathname);
+  if (fromPath) return fromPath;
+  const params = new URLSearchParams(String(locationLike?.search ?? "").replace(/^\?/, ""));
+  return claimedCode(params.get("code"));
+}
+
+// Where the code-entry form sends the browser: the canonical code URL on
+// the same door the visitor arrived through.
+export function joinCodePath(code, pathname) {
+  const door = String(pathname ?? "").startsWith("/room/") ? "/room" : "";
+  return [door, "join", encodeURIComponent(code)].join("/");
+}
+
+// The room whose address this page was served at: /rooms/<id> (and its
+// /room/ twin) serves this page in room mode (human-map §8.2 — the
+// address is the join page).
+export function joinRoomIdFromPath(pathname) {
+  const match = /^\/(?:room\/)?rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/?$/.exec(String(pathname ?? ""));
+  return match?.[1] ?? null;
+}
+
+// The room named by a ?room= hand-off, shape-checked so the entry screen
+// only ever echoes a plausible room id.
+export function joinRoomHint(search) {
+  const params = new URLSearchParams(String(search ?? "").replace(/^\?/, ""));
+  const room = params.get("room") ?? "";
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room) ? room : null;
+}
+
+// Which room the request-access door files against, and whether the
+// visitor may change it. The room's own address fixes the room; a ?room=
+// hint prefills an editable field; the bare entry page defaults to the
+// open community room (the account panel door's behavior, consolidated
+// onto this page — human-map §8.1: one request-access door).
+export function requestDoorRoom(pathname, search) {
+  const pathRoom = joinRoomIdFromPath(pathname);
+  if (pathRoom) return { roomId: pathRoom, fixed: true };
+  const hint = joinRoomHint(search);
+  if (hint) return { roomId: hint, fixed: false };
+  return { roomId: GENERAL_REQUEST_DEFAULT_ROOM_ID, fixed: false };
+}
+
+// The referrer a hand-off link carried (?ref=, the receipt-footer
+// convention src/app.js's GR1 stash uses), validated the same way:
+// at most 80 chars, no control characters. The app's acquisition-intent
+// consumer re-homes its "request" intent to this page and passes the
+// stashed referrer along so the door can prefill "Who referred you?".
+export function requestDoorReferrer(search) {
+  const params = new URLSearchParams(String(search ?? "").replace(/^\?/, ""));
+  const ref = params.get("ref") ?? "";
+  if (!ref || ref.length > 80 || /[\u0000-\u001f\u007f]/.test(ref)) return null;
+  return ref;
 }
 
 // API base for this page's fetches: the www door serves the room under /room.
@@ -52,15 +139,15 @@ export function joinNextHref(roomId, locationLike = globalThis.location) {
 }
 
 export const PERMISSION_LABELS = Object.freeze({
-  steer: "Steer work (claim and direct tasks)",
+  steer: "Claim work",
   accept_work: "Accept work",
-  complete_work: "Complete work",
-  verify: "Verify others' work",
-  write_external: "Post outside the room",
+  complete_work: "Finish work",
+  verify: "Verify work",
+  write_external: "Post outside",
   manage_members: "Manage members",
-  decide: "Room decisions",
-  invite_member: "Invite members",
-  manage_claims: "Manage claims",
+  decide: "Decide",
+  invite_member: "Invite",
+  manage_claims: "Claims",
 });
 
 export function permissionLabel(permission) {
@@ -83,6 +170,9 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
 // Every branch names what happened and what to do — no dead ends.
 export function joinErrorMessage({ status, code, action = "join" } = {}) {
   const again = "Check your connection and try again.";
+  if ((code === "request_timeout" || code === "preview_timeout") && action === "join") {
+    return { title: uiText("join.timedOut.title"), message: uiText("join.timedOut.message"), retry: true };
+  }
   if (status === 0) return { title: "Couldn't reach the room", message: again, retry: true };
   switch (code) {
     case "invite_unavailable":
@@ -127,10 +217,14 @@ export function validateJoinName(name) {
 function $(id) { return document.getElementById(id); }
 
 function show(section) {
-  for (const id of ["join-loading", "join-consent", "join-success", "join-error"]) {
+  for (const id of ["join-loading", "join-enter", "join-consent", "join-success", "join-error"]) {
     const el = $(id);
     if (el) el.hidden = id !== section;
   }
+  // The request-access door rides alongside the entry card only; the
+  // consent/success/error screens own the page on their own.
+  const request = $("join-request");
+  if (request) request.hidden = section !== "join-enter";
 }
 
 function fail({ title, message, retry }) {
@@ -141,22 +235,39 @@ function fail({ title, message, retry }) {
   if (retryEl) retryEl.hidden = !retry;
 }
 
-async function apiFetch(url, { method = "GET", data } = {}) {
-  let response;
+// Every apiFetch call is bounded by this deadline so a stalled network can
+// never leave the page stuck — neither on the loader (#1608, preview) nor on
+// the disabled "Joining…" button (#2979, redeem). Must stay below the join
+// watchdog in join-watchdog.js (15s) so the module handles the timeout
+// first when it is running. Exported for unit tests.
+export const API_TIMEOUT_MS = 10_000;
+
+export async function apiFetch(url, { method = "GET", data, timeoutMs = API_TIMEOUT_MS, fetchImpl = globalThis.fetch } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    response = await fetch(url, {
-      method,
-      credentials: "same-origin",
-      headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
-      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
-    });
-  } catch {
-    return { ok: false, status: 0, error: { code: "network_error" } };
+    let response;
+    try {
+      response = await fetchImpl(url, {
+        method,
+        credentials: "same-origin",
+        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }) },
+        signal: controller.signal,
+        ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+      });
+    } catch {
+      return { ok: false, status: 0, error: { code: controller.signal.aborted ? "request_timeout" : "network_error" } };
+    }
+    let body = null;
+    try { body = await response.json(); } catch {
+      if (controller.signal.aborted) return { ok: false, status: 0, error: { code: "request_timeout" } };
+      /* non-JSON body */
+    }
+    if (!response.ok) return { ok: false, status: response.status, error: body?.error ?? { code: "request_failed" } };
+    return { ok: true, status: response.status, body };
+  } finally {
+    clearTimeout(timer);
   }
-  let body = null;
-  try { body = await response.json(); } catch { /* non-JSON body */ }
-  if (!response.ok) return { ok: false, status: response.status, error: body?.error ?? { code: "request_failed" } };
-  return { ok: true, status: response.status, body };
 }
 
 function renderConsent(preview) {
@@ -165,7 +276,7 @@ function renderConsent(preview) {
   const inviterEl = $("join-inviter");
   if (inviterEl) inviterEl.textContent = preview.inviterDisplayName ? `Invited by ${preview.inviterDisplayName}` : "";
   const profileEl = $("join-profile");
-  if (profileEl) profileEl.textContent = preview.profile === "custom" ? "Custom access" : `Access: ${preview.profile}`;
+  if (profileEl) profileEl.textContent = preview.profile === "custom" ? "Custom access" : "";
   const list = $("join-permissions");
   if (list) {
     list.textContent = "";
@@ -181,20 +292,136 @@ function renderConsent(preview) {
   $("join-name")?.focus();
 }
 
-// The preview fetch has no server-side deadline; bound it so a stalled
-// network can never leave the loader up forever (#1608). Must stay below
-// the inline watchdog in join.html (15s) so the module handles the timeout
-// first when it is running.
-const PREVIEW_TIMEOUT_MS = 10_000;
-
 // Retry starts a newer boot(); an older boot resolving late must not clobber
 // it — without this, a timed-out first attempt firing after a retry would
 // blank a screen the retry already rendered.
 let bootSeq = 0;
 
+// #3260: one requestId per invite code for this page session. If the join
+// response is lost after the server committed, the retry replays the same
+// redemption (duplicate: true) instead of dying on the burned code with
+// the minted identity orphaned server-side.
+let joinRequestId = null;
+let joinRequestIdFor = null;
+function requestIdForJoin(code) {
+  if (joinRequestIdFor !== code) {
+    joinRequestIdFor = code;
+    joinRequestId = `join-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  }
+  return joinRequestId;
+}
+
+// No code in the URL is not an error any more: a human holding a bare
+// code gets the entry form (H-S3). The form navigates to the canonical
+// /join/<code> URL, so the preview/consent flow below stays the only
+// join path. Wired once-only, like the retry button.
+function renderEnter() {
+  const room = joinRoomIdFromPath(globalThis.location?.pathname) ?? joinRoomHint(globalThis.location?.search);
+  const roomEl = $("join-enter-room");
+  if (roomEl) {
+    if (room) {
+      const textEl = $("join-enter-room-text");
+      if (textEl) textEl.textContent = `Room "${room}" — enter its invite code below, or if you're already a member:`;
+      const openEl = $("join-enter-open");
+      if (openEl) openEl.href = roomEntryHref(room);
+      roomEl.hidden = false;
+    } else roomEl.hidden = true;
+  }
+  const form = $("join-enter-form");
+  if (form && !form.dataset.enterWired) {
+    form.dataset.enterWired = "1";
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      const statusEl = $("join-enter-status");
+      const code = parseInviteCodeInput($("join-enter-code")?.value);
+      if (!code) {
+        if (statusEl) { statusEl.textContent = "That doesn't look like an invite code. Codes look like RM-XXXXXX — or paste the whole invite link."; statusEl.classList.add("visible"); }
+        $("join-enter-code")?.focus();
+        return;
+      }
+      globalThis.location.assign(joinCodePath(code, globalThis.location?.pathname));
+    });
+  }
+  renderRequestDoor();
+  show("join-enter");
+  $("join-enter-code")?.focus();
+}
+
+// The consolidated request-access door (human-map §8.1): the join page is
+// the one place a human without a code asks a room owner in. Submission
+// reuses the existing flow (src/request-access.js): mint a self-serve
+// identity (an identity alone grants nothing), file POST
+// /api/access-requests with its secret as proof, stash for idempotent
+// retries. Wired once-only, like the entry form.
+function renderRequestDoor() {
+  const card = $("join-request");
+  if (!card) return;
+  const { roomId, fixed } = requestDoorRoom(globalThis.location?.pathname, globalThis.location?.search);
+  const roomRow = $("join-request-room-row");
+  const roomInput = $("join-request-room");
+  const fixedEl = $("join-request-room-fixed");
+  if (fixed) {
+    if (roomRow) roomRow.hidden = true;
+    if (fixedEl) { fixedEl.textContent = uiText("join.request.roomFixed", { roomId }); fixedEl.hidden = false; }
+  } else if (roomInput && !roomInput.dataset.prefilled) {
+    roomInput.dataset.prefilled = "1";
+    roomInput.value = roomId;
+  }
+  // A hand-off link may carry the referrer (?ref= — the app's
+  // acquisition-intent re-home passes its stashed receipt referrer);
+  // prefill once, never over what the visitor typed.
+  const referredInput = $("join-request-referred");
+  if (referredInput && !referredInput.dataset.prefilled) {
+    referredInput.dataset.prefilled = "1";
+    const referrer = requestDoorReferrer(globalThis.location?.search);
+    if (referrer && !referredInput.value) referredInput.value = referrer;
+  }
+  // The submit flow stashes the requester's name per room; a returning
+  // requester gets it back (the retired account door did the same).
+  const nameInput = $("join-request-name");
+  if (nameInput && !nameInput.dataset.prefilled) {
+    nameInput.dataset.prefilled = "1";
+    const stashed = readAccessRequest(globalThis.sessionStorage, roomId);
+    if (stashed?.displayName && !nameInput.value) nameInput.value = stashed.displayName;
+  }
+  const form = $("join-request-form");
+  if (form && !form.dataset.requestWired) {
+    form.dataset.requestWired = "1";
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const statusEl = $("join-request-status");
+      const submitEl = $("join-request-submit");
+      if (submitEl) submitEl.disabled = true;
+      if (statusEl) { statusEl.textContent = uiText("join.request.sending"); statusEl.classList.add("visible"); statusEl.classList.remove("error"); }
+      try {
+        const result = await submitGeneralAccessRequest({
+          client: new AccountClient(),
+          storage: globalThis.sessionStorage,
+          roomId: fixed ? roomId : $("join-request-room")?.value,
+          displayName: $("join-request-name")?.value,
+          note: $("join-request-note")?.value,
+          referredBy: $("join-request-referred")?.value,
+        });
+        form.hidden = true;
+        if (statusEl) statusEl.textContent = uiText("join.request.sent", { roomId: result.roomId, requestId: result.requestId });
+      } catch (error) {
+        if (submitEl) submitEl.disabled = false;
+        const message = error?.code === "rate_limited" || error?.status === 429
+          ? uiText("join.request.rateLimited")
+          : error?.code === "already_member"
+            ? uiText("join.request.alreadyMember")
+            : typeof error?.message === "string" && error.message ? error.message : uiText("join.request.failed");
+        if (statusEl) { statusEl.textContent = message; statusEl.classList.add("visible", "error"); }
+        $("join-request-name")?.focus({ preventScroll: true });
+      }
+    });
+  }
+  card.hidden = false;
+}
+
 async function boot() {
   const seq = ++bootSeq;
-  const code = parseJoinCode(globalThis.location?.pathname);
+  const code = joinCodeFromLocation(globalThis.location);
   // Register the retry button before any network call: when the preview
   // fetch fails, the user must still be able to retry (L-39). Once-only so
   // repeated retries don't stack duplicate boot() handlers.
@@ -204,16 +431,15 @@ async function boot() {
     retryEl.addEventListener("click", () => boot());
   }
   if (!code) {
-    // #1608: a missing token is not a broken link — name what's missing and
-    // the two ways forward, instead of leaving the loader up.
-    fail({ title: "No invite found", message: "Ask a room owner for an invite link, or sign in and request access.", retry: false });
+    // #1608: a missing token is not a broken link — the entry form names
+    // what's missing and gives the way forward, instead of a dead end.
+    renderEnter();
     return;
   }
   const apiBase = serviceApiBase(globalThis.location?.pathname);
-  const preview = await Promise.race([
-    apiFetch(`${apiBase}/agent-invites/preview?code=${encodeURIComponent(code)}`),
-    new Promise(resolve => setTimeout(() => resolve({ ok: false, status: 0, error: { code: "preview_timeout" } }), PREVIEW_TIMEOUT_MS)),
-  ]);
+  // apiFetch bounds this with API_TIMEOUT_MS, so a stalled preview can
+  // never leave the loader up forever (#1608).
+  const preview = await apiFetch(`${apiBase}/agent-invites/preview`, { method: "POST", data: { code } });
   if (seq !== bootSeq) return;
   if (!preview.ok) {
     fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));
@@ -236,7 +462,7 @@ async function boot() {
     if (statusEl) { statusEl.textContent = "Joining…"; statusEl.classList.add("visible"); }
     // One call mints the identity and redeems the invite atomically.
     // /room/api/* is rewritten to /api/* on the www door, so this works on both.
-    const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code } });
+    const joined = await apiFetch(`${apiBase}/join`, { method: "POST", data: { displayName: name, inviteCode: code, requestId: requestIdForJoin(code) } });
     if (!joined.ok) {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
@@ -245,7 +471,9 @@ async function boot() {
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
     }
-    // roomToken is the honest name for the room-scoped credential; identitySecret is its deprecated alias.
+    // The page displays the room-scoped roomToken; since #3380 the response's
+    // identitySecret is the identity's durable secret, shown once at join for
+    // the API caller to save — the browser flow rides its session cookie.
     const { roomId, displayName, sessionExpiresAt } = joined.body ?? {};
     const identitySecret = joined.body?.roomToken ?? joined.body?.identitySecret;
     if (typeof identitySecret !== "string" || typeof roomId !== "string") {

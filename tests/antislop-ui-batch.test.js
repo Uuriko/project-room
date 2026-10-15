@@ -11,7 +11,7 @@ test("the inbox empty state names Connect Gmail only while that button can show 
 
 test("sign-in form text links are 44 px tap targets; Advanced on Add agent shows a marker", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(css, /#auth-signin-ui \.text-button, #agent-auth-step \.text-button \{ min-height: 44px; font-size: var\(--text-sm\); \}/);
+  assert.match(css, /#auth-signin-ui \.text-button, #agent-signin-ui \.text-button \{ min-height: 44px; font-size: var\(--text-sm\); \}/);
   assert.match(css, /#agent-connect-advanced > summary::before \{ content: "\\25B8";/);
   assert.match(css, /#agent-connect-advanced\[open\] > summary::before \{ content: "\\25BE"; \}/);
 });

@@ -16,10 +16,32 @@ test("flags hand-written transaction control statements", () => {
   assert.deepEqual(lint('db.exec("  begin exclusive transaction; ");'), [1]);
 });
 
+test("flags transaction control hidden in interpolated templates, concatenation and variables", () => {
+  // Regression for #2900: staticString() used to give up on any template with
+  // expressions and on identifiers, so `BEGIN ${mode}` with mode="IMMEDIATE"
+  // executed a hand-written transaction the rule exists to forbid.
+  assert.deepEqual(lint("db.exec(`BEGIN ${mode}`);"), [1]);
+  assert.deepEqual(lint("db.exec(`BEGIN ${mode} TRANSACTION`);"), [1]);
+  assert.deepEqual(lint("db.exec(`SAVEPOINT ${name}`);"), [1]);
+  assert.deepEqual(lint("db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`);"), [1, 1]);
+  assert.deepEqual(lint("db.exec(`COMMIT ${suffix}`);"), [1]);
+  assert.deepEqual(lint('db.exec("BEGIN " + mode);'), [1]);
+  assert.deepEqual(lint('const sql = "BEGIN IMMEDIATE";\ndb.exec(sql);'), [2]);
+  assert.deepEqual(lint("const mode = 'IMMEDIATE';\ndb.exec(`BEGIN ${mode}`);"), [2]);
+  assert.deepEqual(lint("const sql = `COMMIT`;\ndb.prepare(sql).run();"), [2]);
+  assert.deepEqual(lint('db.exec(flag ? "BEGIN" : "SELECT 1");'), [1]);
+});
+
 test("does not flag triggers, other SQL, dynamic SQL or the helper", () => {
   assert.deepEqual(lint('db.exec("CREATE TRIGGER t BEFORE UPDATE ON x BEGIN SELECT RAISE(ABORT,\'no\'); END");'), []);
   assert.deepEqual(lint('db.exec("PRAGMA foreign_keys=ON"); db.prepare("SELECT 1").get();'), []);
-  assert.deepEqual(lint("db.exec(`BEGIN ${mode}`); db.exec(sql);"), []);
+  assert.deepEqual(lint("db.exec(`CREATE TRIGGER ${name} BEFORE UPDATE ON x BEGIN SELECT RAISE(ABORT,'no'); END`);"), []);
+  assert.deepEqual(lint("db.exec(`SELECT * FROM t WHERE id=${id}`); db.exec(`INSERT INTO t VALUES (${v})`);"), []);
+  assert.deepEqual(lint("db.exec(`DROP TRIGGER ${name}`); db.exec(`${stmt}`);"), []);
+  // A value the rule cannot resolve statically (parameter, import, or a
+  // reassigned variable) stays unflagged: it is not known to be a transaction.
+  assert.deepEqual(lint("db.exec(sql);"), []);
+  assert.deepEqual(lint('let sql = "BEGIN"; sql = loadSql(); db.exec(sql);'), []);
   assert.deepEqual(lint("store.transaction(() => db.prepare(\"INSERT INTO t VALUES (1)\").run());"), []);
   assert.equal(isTransactionSql("BEGIN SELECT 1; END"), false);
   assert.equal(isTransactionSql("END TRANSACTION"), true);

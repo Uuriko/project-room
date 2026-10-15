@@ -479,7 +479,15 @@ export class AccountLoginMethods {
     const now = this.#now.bind(this);
     return {
       getCredential(credentialId) {
-        const row = db.prepare("SELECT * FROM account_passkey_credentials WHERE credential_id=? AND disabled=0").get(credentialId);
+        // Both disabled flags gate authentication: the credential row's own
+        // and the parent login method's. Disabling the passkey method
+        // (setMethodDisabled, POST /api/auth/methods/disable) flips only
+        // account_login_methods.disabled — nothing syncs the credential row —
+        // so the lookup must join the method or a disabled passkey still
+        // authenticates.
+        const row = db.prepare(`SELECT c.* FROM account_passkey_credentials c
+          JOIN account_login_methods m ON m.id = c.method_id
+          WHERE c.credential_id=? AND c.disabled=0 AND m.disabled=0`).get(credentialId);
         if (!row) return undefined;
         return {
           id: row.credential_id, rawId: row.credential_id, rpId: row.rp_id,
