@@ -1,12 +1,12 @@
 # Project Room v0
 
-Initial product contract, 2026-09-05. The former spec-only hold is superseded; current development follows the [team workflow](history/WORKFLOW.md).
+Initial product contract, 2026-09-05. The former spec-only hold is superseded; current development follows the [team workflow](../archive/docs/history/WORKFLOW.md).
 
 ## Product and first users
 
 Help a small team and its agents finish one project without the operator forwarding context between tools. The first demonstration includes two authenticated people, an executor, and an independent verifier in one Room. A Room is the project in v0; a separate one-to-one Project object adds no useful behavior.
 
-The [first workflow](history/FIRST-WORKFLOW.md) defines the screen and review demonstration. Conversation stays conversational. Only accepted work needs an assignment; asking a question does not require creating a task.
+The [first workflow](../archive/docs/history/FIRST-WORKFLOW.md) defines the screen and review demonstration. Conversation stays conversational. Only accepted work needs an assignment; asking a question does not require creating a task.
 
 ## One object model
 
@@ -61,8 +61,8 @@ Defer automatic skill generation, automatic benchmarks or model routing, bot mar
 
 ## Adjacent product: Compute bridge (Phase 1+)
 
-Phase 0 is unchanged. Project Room and Dasha Compute stay separate products. A later bridge may let a Work Item POST a job to `compute/api` and record a Receipt Event. See [FOLD-COMPUTE-ROOM](history/FOLD-COMPUTE-ROOM.md) and [BRIDGE-COMPUTE](history/BRIDGE-COMPUTE.md).
+Phase 0 is unchanged. Project Room and Dasha Compute stay separate products. A later bridge may let a Work Item POST a job to `compute/api` and record a Receipt Event. See [FOLD-COMPUTE-ROOM](../archive/docs/history/FOLD-COMPUTE-ROOM.md) and [BRIDGE-COMPUTE](../archive/docs/history/BRIDGE-COMPUTE.md).
 
 ## Adjacent contract: Contribution ledger (docs now; derived rollup 0.5+)
 
-Phase 0 is unchanged. Contribution is a read-model over existing completion, verification, decision, and Artifact facts — not a second product or a disconnected scoreboard. v0 of the ledger is visible share weights only; no auto-payout. Message volume is not value. See [CONTRIBUTION-LEDGER](history/CONTRIBUTION-LEDGER.md). The isolated contribution-rollup package was removed from this repository. Designs and fixtures coordinate in the room (issue #266 is frozen; see [ROOM-COORDINATION.md](ROOM-COORDINATION.md)).
+Phase 0 is unchanged. Contribution is a read-model over existing completion, verification, decision, and Artifact facts — not a second product or a disconnected scoreboard. v0 of the ledger is visible share weights only; no auto-payout. Message volume is not value. See [CONTRIBUTION-LEDGER](../archive/docs/history/CONTRIBUTION-LEDGER.md). The isolated contribution-rollup package was removed from this repository. Designs and fixtures coordinate in the room (issue #266 is frozen; see [ROOM-COORDINATION.md](ROOM-COORDINATION.md)).

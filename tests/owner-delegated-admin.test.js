@@ -56,7 +56,7 @@ test("delegated agent approves an access request", t => {
   requests.request("commons", {
     identityId: newcomer.identityId, displayName: "New Agent",
     requestedPermissions: ["accept_work"], note: "let me in", requestId
-  });
+  }, newcomer.secret);
   const decided = requests.decide(agent, "commons", requestId, { decision: "approve", permissions: ["accept_work"] });
   assert.equal(decided.status, "approved");
   assert.equal(decided.decidedBy, "agent");

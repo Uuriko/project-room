@@ -23,7 +23,7 @@
 //   - tombstoned messages render as "deleted" with no body and no edit
 //     history — the same visibility rule the projection applies. The JSONL
 //     export applies that same rule before it is written
-//     (docs/history/EXPORT-RETENTION-DELETION.md).
+//     (archive/docs/history/EXPORT-RETENTION-DELETION.md).
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T } from "../src/events.js";
 

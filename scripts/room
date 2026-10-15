@@ -632,7 +632,7 @@ reduce_state() { # $1=now_epoch $2=comment_count $3=watermark ; stdin: events ->
      --arg board "$(board_addr)" '
     def trim: gsub("^[ \t]+|[ \t]+$"; "");
     def iso($e): ($e | strftime("%Y-%m-%dT%H:%M:%SZ"));
-    def epoch($s): (($s | fromdate) // 0);
+    def epoch($s): (try ($s | fromdate) catch 0);
     def state_word($s): (($s | capture("^(?<w>[a-z]+)") | .w) // $s);
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
     def legal($from; $to):
@@ -1354,7 +1354,7 @@ render_md() { # $1=now_epoch $2=registry_json $3=watcher_state ; stdin: state JS
   local now="$1" reg="$2" watcher="${3:-active}"
   jq -r --argjson now "$now" --arg board "$(board_addr)" --argjson reg "$reg" --arg watcher "$watcher" '
     def iso($e): ($e | strftime("%Y-%m-%dT%H:%M:%SZ"));
-    def epoch($s): (($s | fromdate) // 0);
+    def epoch($s): (try ($s | fromdate) catch 0);
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
     def row($t): "\($t.task_id) | \($t.lane // "(none)")\(if $t.prose then " (prose)" else "" end) | \($t.state) | \($t.lease_expires_at // "-") | \($t.files | join(", "))";
 
@@ -1768,7 +1768,7 @@ live_rows_json() { # -> {open,expiring,lanes} rebuilt from the board
   st="$(build_state)"; reg="$(registry_json)"; now="$(lease_now)"
   printf '%s' "$st" | jq --argjson now "$now" --argjson reg "$reg" '
     def is_live($s): (["submitted","working","suspended"] | index($s)) != null;
-    def epoch($s): (($s | fromdate) // 0);
+    def epoch($s): (try ($s | fromdate) catch 0);
     ([.tasks[] | select(is_live(.state))] | sort_by(.lease_expires_at // "9999")) as $o
     | ([$o[] | .lane] | map(select(. != null)) | unique) as $ll
     | {open: [$o[] | {task_id, lane:(.lane // "(none)"), state,

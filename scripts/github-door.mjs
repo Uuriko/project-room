@@ -98,12 +98,34 @@ async function gh(path, { token, method = "GET", body, fetchImpl = globalThis.fe
   return response.status === 204 ? null : response.json();
 }
 
-async function allComments(repo, issue, token, fetchImpl) {
+// A comment readCursor() would trust as a cursor: posted by the workflow
+// publisher and opening with a well-formed cursor marker.
+function isCursorComment(c) {
+  return c?.user?.login === "github-actions[bot]" && c.user.type === "Bot" &&
+    /^<!-- room-door:out seq=\d+ -->\n/.test(c?.body ?? "");
+}
+
+// Only the marker-bearing comments matter for the outbound cursor, and the
+// cursor lives in the newest of them — so scan newest-first instead of
+// oldest-first. The previous oldest-first scan stopped after 30 pages
+// (3000 comments), so on a busier door issue the newest digest markers were
+// never fetched, the cursor stayed stuck, and every run re-posted the same
+// messages as a fresh digest.
+//
+// Outbound runs are serialized by the workflow's concurrency group and
+// every digest/checkpoint this script posts carries a higher seq than the
+// one before, so the first page (newest-first) containing a trusted cursor
+// comment holds the highest cursor; older pages cannot advance it. Pages
+// whose only markers are forged or quoted do not stop the scan, because
+// readCursor() would not trust them either. There is no page cap: if no
+// trusted marker has been posted yet, the scan walks the whole issue and
+// readCursor() correctly returns 0.
+async function cursorComments(repo, issue, token, fetchImpl) {
   const out = [];
-  for (let page = 1; page <= 30; page++) {
-    const batch = await gh(`/repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`, { token, fetchImpl });
-    out.push(...batch);
-    if (batch.length < 100) break;
+  for (let page = 1; ; page++) {
+    const batch = await gh(`/repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}&sort=created&direction=desc`, { token, fetchImpl });
+    out.push(...batch.filter(c => c.body?.includes(OUT_MARKER)));
+    if (batch.some(isCursorComment) || batch.length < 100) break;
   }
   return out;
 }
@@ -121,7 +143,7 @@ export async function runInbound({ event, repo, client, allow, doorIssue }) {
 }
 
 export async function runOutbound({ repo, doorIssue, token, client, roomId, selfMemberId, fetchImpl = globalThis.fetch }) {
-  const cursor = readCursor((await allComments(repo, doorIssue, token, fetchImpl)).filter(c => c.body?.includes(OUT_MARKER)));
+  const cursor = readCursor(await cursorComments(repo, doorIssue, token, fetchImpl));
   const messages = []; let after = cursor;
   for (let i = 0; i < 20; i++) {
     const page = await client.roomMessages({ after, limit: 100 });

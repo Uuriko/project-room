@@ -76,8 +76,8 @@ test("compact login and signup remain usable in both themes and small windows", 
     await page.screenshot({ path: `test-results/login-polish/${theme}-${viewport.width}x${viewport.height}.png`, fullPage: true });
   }
   await page.locator('#agent-signin-button').click();
-  await page.locator('#agent-auth-step').waitFor({ state: 'visible' });
-  await page.locator('#agent-auth-back').click();
+  await page.locator('#agent-signin-ui [name="identityId"]').waitFor({ state: 'visible' });
+  await page.locator('#agent-signin-home').click();
   await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
   await page.locator('[name="email"]').focus(); await page.keyboard.press('Tab');
   assert.equal(await page.locator('[name="password"]').evaluate(el => el === document.activeElement), true);

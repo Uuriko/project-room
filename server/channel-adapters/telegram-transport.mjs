@@ -117,9 +117,24 @@ export class TelegramTransport {
       const description = redactTelegram(value?.description ?? "");
       if (response.status === 401 || response.status === 404) { this.#record("failed", "unauthorized"); fail(409, "channel_connection_unavailable", "Telegram rejected the bot token. Check TELEGRAM_BOT_TOKEN."); }
       if (retryableTelegramStatus(response.status)) { this.#record("failed", response.status === 429 ? "rate_limited" : "server_error"); continue; }
-      // 400 / 403 and other definitive answers: the reply will never be delivered as written.
-      const receipt = { operationId, previewVersion, outcome: "rejected", providerId: null, code: slug(description) };
-      await this.#receipts.set(operationId, receipt); this.#record("rejected", receipt.code); return receipt;
+      // Definitive rejection only: Telegram itself answering 400/403 with
+      // its error envelope (ok:false, and an error_code that does not
+      // contradict the HTTP status) proves the reply will never be
+      // delivered as written, so only that is stored as a "rejected"
+      // receipt. Everything else that reaches here is non-definitive
+      // (#2922): a 200 with an unparseable body or ok!==true, a 200
+      // without a usable message_id, an intermediary's 409/422, or a
+      // 400/403 without Telegram's envelope does not prove refusal —
+      // the message may already have been delivered. Treat those like
+      // the other uncertain answers: retry bounded, then report
+      // unavailable below, leaving the attempt unknown with no receipt
+      // for submit retries to replay as a permanent rejection.
+      if ((response.status === 400 || response.status === 403) && object(value) && value.ok === false
+        && (value.error_code == null || (Number.isSafeInteger(value.error_code) && value.error_code === response.status))) {
+        const receipt = { operationId, previewVersion, outcome: "rejected", providerId: null, code: slug(description) };
+        await this.#receipts.set(operationId, receipt); this.#record("rejected", receipt.code); return receipt;
+      }
+      this.#record("failed", "uncertain_response"); continue;
     }
     const headers = lastStatus === 429 && retryAfter ? { "Retry-After": Math.ceil(retryAfter) } : null;
     fail(503, "channel_sending_unavailable", lastStatus === "network" ? "Telegram could not be reached. The attempt stays unknown until reconciled."
