@@ -20,6 +20,33 @@ function seed(db) {
   ) VALUES('aev_bbbbbbbbbbbbbbbbbbbb','signup',1,?,'human','unknown','system','unknown','{"origin":"github"}',1,1)`).run(AT);
 }
 
+test("export stamps only the rows it actually exported, not rows inserted during the sink put", async () => {
+  const db = new DatabaseSync(":memory:");
+  seed(db);
+  const LATE_ID = "aev_cccccccccccccccccccc";
+  let bodySeen = null;
+  // Simulate a backfilled row arriving while the sink put awaits network I/O:
+  // its `at` is inside the exported hour, but it is not in the exported body.
+  const sink = {
+    kind: "r2",
+    async put(key, body) {
+      bodySeen = body;
+      db.prepare(`INSERT INTO analytics_events(
+        id, name, v, at, actor_kind, source, source_detail, loop, props, weight, backfilled
+      ) VALUES(?,'signup',1,?,'human','unknown','system','unknown','{"origin":"github"}',1,1)`).run(LATE_ID, AT);
+      return { stored: true, key };
+    },
+    async head() { return null; }
+  };
+  const result = await exportAnalytics(db, sink, { hour: AT, now: AT + 1000 });
+  assert.equal(result.exported, 2);
+  assert.ok(bodySeen && !bodySeen.includes(LATE_ID), "late row must not be in the exported body");
+  const late = db.prepare("SELECT exported_at FROM analytics_events WHERE id=?").get(LATE_ID);
+  assert.equal(late.exported_at, null, "row inserted during put must not be marked exported");
+  assert.equal(db.prepare("SELECT count(*) AS n FROM analytics_events WHERE exported_at IS NOT NULL").get().n, 2);
+  db.close();
+});
+
 test("export writes one object per hour and row range, and a null sink leaves rows unexported", async t => {
   const dir = mkdtempSync(join(tmpdir(), "analytics-export-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

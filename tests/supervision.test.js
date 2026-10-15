@@ -548,6 +548,25 @@ test("fired before the deadline is rejected (the window is still open)", () => {
     err => err instanceof SupervisionError && err.code === "undo_window_open");
 });
 
+test("fired from acting is rejected — the confirm gate cannot be skipped (#2960)", () => {
+  // 'acting' means a confirm-gated suggestion was shown but NOT confirmed:
+  // only confirm {confirmed:true} may move it to pending_undo, from which
+  // 'fired' becomes legal. Reporting it fired straight from 'acting' would
+  // record an unconfirmed confirm-class write as dispatched.
+  const card = newCard({ state: "acting", pickedSuggestion: suggestions2[1] });
+  assert.throws(
+    () => applyCardTransition(card, { type: "fired" }, { now: NOW }),
+    err => err instanceof SupervisionError && err.code === "illegal_transition");
+});
+
+test("the confirm path still reaches dispatched: acting → confirm → fired", () => {
+  const acting = newCard({ state: "acting", pickedSuggestion: suggestions2[1] });
+  const confirmed = applyCardTransition(acting, { type: "confirm", confirmed: true }, { now: NOW });
+  const out = applyCardTransition(confirmed, { type: "fired" }, { now: NOW });
+  assert.equal(out.state, "dispatched");
+  assert.equal(out.firedAtMs, NOW);
+});
+
 test("dismiss is an audit trail, never a delete", () => {
   const card = newCard({ state: "seen" });
   const out = applyCardTransition(card, { type: "dismiss", note: "not my lane" }, { now: NOW });

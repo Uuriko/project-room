@@ -473,11 +473,23 @@ export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verif
       check(verifyMergeRef(ref), "unverified_merge_ref", "ref did not verify against a merge record");
     }
     const at = new Date(clock()).toISOString();
-    const attributions = feedbackIds.map(id => {
+    // Pre-validate every id before mutating any: applying payouts inside
+    // the validation loop left earlier ids paid/transitioned when a later
+    // id failed, and the retry then failed on the already-transitioned
+    // first id — the paid outcome became unretryable (#2844). A repeated
+    // id can never satisfy the second occurrence (the first transitions
+    // it out of "promoted"), so duplicates fail here too.
+    const seen = new Set();
+    const resolved = feedbackIds.map(id => {
       const item = items.get(id);
       check(item, "not_found", `feedback id not found: ${id}`);
-      check(item.status === "promoted", "invalid_transition",
-        `cannot record outcome on feedback in status ${item.status}`);
+      check(!seen.has(id) && item.status === "promoted", "invalid_transition",
+        `cannot record outcome on feedback in status ${seen.has(id) ? "promoted (duplicate id)" : item.status}`);
+      seen.add(id);
+      return item;
+    });
+    const attributions = feedbackIds.map((id, index) => {
+      const item = resolved[index];
       const status = kind === "merged" ? "merged" : "adopted";
       const updated = Object.freeze({ ...item, status,
         outcome: Object.freeze({ kind, ref, recordedBy, at }) });

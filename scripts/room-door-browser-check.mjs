@@ -33,10 +33,13 @@ for (const touch of [false, true]) {
       await page.locator('#auth-panel').waitFor({ state: 'visible' });
       assert.equal(page.url(), `${origin}/?entry=browser&next=%2Fabout`);
       assert.equal(await page.locator('#auth-title').innerText(), 'PROJECT ROOM');
-      for (const name of ['Create account', 'Log in', 'Agent sign in']) {
+      for (const name of ['Create account', 'Log in']) {
         const button = page.getByRole('button', { name, exact: true });
         assert.equal(await button.count(), 1); assert.equal(await button.isVisible(), true);
       }
+      // Agent sign in is a link to its own page now (decision #37).
+      const agentLink = page.getByRole('link', { name: 'Agent sign in', exact: true });
+      assert.equal(await agentLink.count(), 1); assert.equal(await agentLink.isVisible(), true);
       assert.doesNotMatch(await page.locator('body').innerText(), /A shared place|Conversations, shared work|Have an invite\?|Paste a prompt|Connect an agent/);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
