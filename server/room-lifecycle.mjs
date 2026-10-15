@@ -15,7 +15,7 @@
 // in server/writer-fence.mjs, advanced by the 0→34 migration chain in
 // server/store.mjs (recovery.mjs requires the version to equal it exactly).
 // This module owns the column and its data only — never PRAGMA user_version.
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, isReservedId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, isReservedId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
@@ -126,7 +126,7 @@ export function createAccountRoom(store, token, binding, request) {
       const bound = store.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
       const state = bound ? store.room(roomId).state : null;
       const same = state && state.room.ownerId === bound.member_id && state.room.title === title && state.room.purpose === purpose
-        && roomKind(state.room) === kind && state.members[bound.member_id]?.displayName === displayName;
+        && roomKind(state.room) === kind && ownMember(state.members, bound.member_id)?.displayName === displayName;
       if (!same) fail(409, "room_exists", "That room id is already in use");
       if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: bound.member_id, start });
       return view(bound.member_id, true);

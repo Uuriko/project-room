@@ -83,10 +83,10 @@ async function* byteChunks(body) {
 // (event count after the last table). If both parse and the counts differ, a
 // write landed mid-export: refuse the manifest, so no manifest ever claims a
 // torn backup is the day's good copy. Parts already written have no manifest
-// and expire on their own; the job logs the failure. The count is the cheap
-// check here; replayNdjson re-verifies the trailer hash, which also catches
-// same-count tears. An absent or unparseable trailer (older exports) skips
-// this check; restore time is the backstop.
+// and expire on their own; the job logs the failure. Both writers also
+// verify the trailer hash at write time (below), which catches same-count
+// tears; replayNdjson re-verifies it at restore. An absent or unparseable
+// trailer (older exports) skips these checks; restore time is the backstop.
 const HEAD_LINE_CAP = 1024 * 1024;
 const TAIL_KEEP = 8192;
 
@@ -153,6 +153,51 @@ function trailerHashReason(bytes) {
   } catch { return null; }
 }
 
+// Streaming twin of trailerHashReason for the KV writer, which never holds
+// the whole export: it splits the stream into lines as bytes arrive, keeps
+// only the event tuples (room_id, sequence, id — a few dozen bytes per event
+// against kilobytes per exported row) plus the last line, and delivers the
+// same verdict when the stream ends. #3407: without this, the KV path — the
+// production target — certified a same-count torn export with a manifest and
+// the day became unretryable, while the R2 path refused the identical bytes.
+function trailerHashTracker() {
+  const decoder = new TextDecoder();
+  const tuples = [];
+  let buffered = "";
+  let lastLine = "";
+  const noteLine = line => {
+    if (!line.trim()) return;
+    lastLine = line;
+    let record;
+    try { record = JSON.parse(line); } catch { return; }
+    if (record?.table === "events") tuples.push([record.row?.room_id, record.row?.sequence, record.row?.id]);
+  };
+  return {
+    note(chunk) {
+      buffered += decoder.decode(chunk, { stream: true });
+      const lines = buffered.split("\n");
+      buffered = lines.pop();
+      for (const line of lines) noteLine(line);
+    },
+    finish() {
+      buffered += decoder.decode();
+      if (buffered) noteLine(buffered);
+      buffered = "";
+      try {
+        const last = JSON.parse(lastLine);
+        if (last?.kind !== "trailer") return null;
+        if (!Number.isSafeInteger(last.events) || typeof last.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(last.eventsHash)) return null;
+        if (tuples.length !== last.events) return `event count moved: the trailer counts ${last.events} but the export holds ${tuples.length} events`;
+        tuples.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1]));
+        const hash = createHash("sha256");
+        for (const [roomId, sequence, id] of tuples) hash.update(`${roomId}\t${sequence}\t${id}\n`);
+        if (hash.digest("hex") !== last.eventsHash) return "event log changed during the export (same count, different rows)";
+        return null;
+      } catch { return null; }
+    }
+  };
+}
+
 // Streams the export into parts so at most one part sits in memory.
 export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds = BACKUP_KV_TTL_SECONDS, now = Date.now() } = {}) {
   const whole = createHash("sha256");
@@ -162,7 +207,8 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
   let total = 0;
   const options = { expirationTtl: ttlSeconds };
   const tracker = headTailTracker();
-  const noteHeadTail = chunk => tracker.note(chunk);
+  const hashTracker = trailerHashTracker();
+  const noteHeadTail = chunk => { tracker.note(chunk); hashTracker.note(chunk); };
   const flush = async () => {
     if (!pendingBytes && parts.length) return;
     const bytes = concatBytes(pending, pendingBytes);
@@ -189,6 +235,8 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
     const reason = tornReason(tracker.headLine, tracker.tail);
     if (reason) throw new Error(`room-backup: refusing manifest, export torn (${reason})`);
   }
+  const hashReason = hashTracker.finish();
+  if (hashReason) throw new Error(`room-backup: refusing manifest, export torn (${hashReason})`);
   if (pendingBytes || !parts.length) await flush();
   const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
   await kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } });

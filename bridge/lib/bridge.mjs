@@ -17,12 +17,15 @@
  *    bodies never reach the audit log (bytes/lines/sha256 only).
  *  - Idempotency: writes require an idempotencyKey (uuid v4); 15-min dedupe.
  *  - Timeouts per method (5–30s); retries: idempotent reads 3x, writes only
- *    on no-response with the same key (2x); backoff with full jitter;
+ *    on no-response (2x), retransmitting the SAME socket request id — for
+ *    writes the caller's idempotencyKey — so a retry after a lost response
+ *    is a dedupeable retransmission, not a new write (#2868); backoff with
+ *    full jitter;
  *    per-tenant circuit breaker (5 failures → open 60s → ping probe).
  *  - Audit: JSONL per call, redacted, denies included; 30-day retention.
  */
 import { createServer } from 'node:http';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 
 import { BridgeError, bridgeError } from './errors.mjs';
@@ -183,7 +186,7 @@ export function createBridge(opts = {}) {
   // ------------------------------------------------------------------
   // Core invoke: fence → breaker → retry → audit
   // ------------------------------------------------------------------
-  async function invoke(tenantId, route, socketMethod, params, { timeoutMs, write, idempotent, target, auditExtra } = {}) {
+  async function invoke(tenantId, route, socketMethod, params, { timeoutMs, write, idempotent, target, auditExtra, dedupeKey } = {}) {
     const t0 = Date.now();
     const log = (entry) => audit.write({
       tenant: tenantId, route, socketMethod, target: target ?? null,
@@ -205,6 +208,13 @@ export function createBridge(opts = {}) {
     }
     const isProbe = gate === 'probe';
     const maxAttempts = write ? 2 : 3;
+    // One socket request id for the whole logical call, reused on every
+    // retry attempt. For writes this is the caller's HTTP idempotencyKey,
+    // so the internal retry — and a later caller retry of the same write —
+    // retransmits the same request id instead of minting a fresh one with
+    // no dedupe key, which would re-execute the write when the first
+    // attempt had already executed but its response was lost (#2868).
+    const requestId = write && typeof dedupeKey === 'string' && dedupeKey ? dedupeKey : randomUUID();
     let attempt = 0;
     // The breaker counts LOGICAL calls, not retry attempts: one invoke that
     // burns its whole retry budget is a single failure signal.
@@ -212,7 +222,7 @@ export function createBridge(opts = {}) {
     for (;;) {
       attempt += 1;
       try {
-        const result = await socket.callOnce(tenant.socketPath, socketMethod, params, timeoutMs);
+        const result = await socket.callOnce(tenant.socketPath, socketMethod, params, timeoutMs, { requestId });
         breaker.recordSuccess(tenantId);
         return { result, log };
       } catch (err) {
@@ -367,7 +377,7 @@ export function createBridge(opts = {}) {
         });
         const { result } = await invoke(tenantId, route, 'agent.start', {
           argv: built.argv, env: built.env, ...(built.cwd ? { cwd: built.cwd } : {}),
-        }, { timeoutMs: timeouts.spawn, write: true, idempotent: false, target: null });
+        }, { timeoutMs: timeouts.spawn, write: true, idempotent: false, target: null, dedupeKey: body.idempotencyKey });
         regPanes(tenantId, [result.paneId]);
         return {
           paneId: result.paneId, agentId: result.agentId,
@@ -394,7 +404,7 @@ export function createBridge(opts = {}) {
         const rec = resolveHandle(tenantId, body.handle);
         if (typeof body.text !== 'string') throw bridgeError('input', 'send needs a text string');
         await verifyOccupant(tenantId, rec);
-        await invoke(tenantId, route, 'agent.prompt', { paneId: rec.paneId, text: body.text }, { timeoutMs: timeouts.send, write: true, idempotent: false, target: rec.paneId });
+        await invoke(tenantId, route, 'agent.prompt', { paneId: rec.paneId, text: body.text }, { timeoutMs: timeouts.send, write: true, idempotent: false, target: rec.paneId, dedupeKey: body.idempotencyKey });
         return { ok: true };
       }
       case 'keys': {
@@ -404,7 +414,7 @@ export function createBridge(opts = {}) {
           throw bridgeError('input', 'keys must be a non-empty array of <=64 short strings');
         }
         await verifyOccupant(tenantId, rec);
-        await invoke(tenantId, route, 'agent.send_keys', { paneId: rec.paneId, keys: body.keys }, { timeoutMs: timeouts.keys, write: true, idempotent: false, target: rec.paneId, auditExtra: { auditedPerCall: true } });
+        await invoke(tenantId, route, 'agent.send_keys', { paneId: rec.paneId, keys: body.keys }, { timeoutMs: timeouts.keys, write: true, idempotent: false, target: rec.paneId, dedupeKey: body.idempotencyKey, auditExtra: { auditedPerCall: true } });
         return { ok: true };
       }
       case 'wait': {
@@ -413,7 +423,7 @@ export function createBridge(opts = {}) {
         const kind = body.kind ?? 'state';
         const timeoutMs = Math.min(Math.max(Number(body.timeoutMs) || 30_000, 1), timeouts.wait);
         if (kind === 'state') {
-          const { result } = await invoke(tenantId, route, 'agent.wait', { paneId: rec.paneId, timeoutMs }, { timeoutMs: timeoutMs + 5_000, write: true, idempotent: false, target: rec.paneId });
+          const { result } = await invoke(tenantId, route, 'agent.wait', { paneId: rec.paneId, timeoutMs }, { timeoutMs: timeoutMs + 5_000, write: true, idempotent: false, target: rec.paneId, dedupeKey: body.idempotencyKey });
           return { state: result.state ?? result };
         }
         if (kind === 'output') {
@@ -422,7 +432,7 @@ export function createBridge(opts = {}) {
           }
           // wait_for_output is a targeted secret-harvesting primitive
           // (risk-review §1.5) — audited per call.
-          const { result } = await invoke(tenantId, route, 'pane.wait_for_output', { paneId: rec.paneId, pattern: body.pattern, timeoutMs }, { timeoutMs: timeoutMs + 5_000, write: true, idempotent: false, target: rec.paneId, auditExtra: { auditedPerCall: true, pattern: body.pattern } });
+          const { result } = await invoke(tenantId, route, 'pane.wait_for_output', { paneId: rec.paneId, pattern: body.pattern, timeoutMs }, { timeoutMs: timeoutMs + 5_000, write: true, idempotent: false, target: rec.paneId, dedupeKey: body.idempotencyKey, auditExtra: { auditedPerCall: true, pattern: body.pattern } });
           return { matched: result.matched ?? result };
         }
         throw bridgeError('input', `bad wait kind: ${kind}`);
@@ -455,13 +465,13 @@ export function createBridge(opts = {}) {
             params.argv = body.resumeArgv.map(String);
           }
         }
-        await invoke(tenantId, route, method, params, { timeoutMs: timeouts.report, write: true, idempotent: false, target: rec.paneId });
+        await invoke(tenantId, route, method, params, { timeoutMs: timeouts.report, write: true, idempotent: false, target: rec.paneId, dedupeKey: body.idempotencyKey });
         return { ok: true };
       }
       case 'close': {
         const paneId = resolvePane(tenantId, body);
         await checkPaneOwnership(tenantId, paneId);
-        await invoke(tenantId, route, 'pane.close', { paneId }, { timeoutMs: timeouts.close, write: true, idempotent: false, target: paneId });
+        await invoke(tenantId, route, 'pane.close', { paneId }, { timeoutMs: timeouts.close, write: true, idempotent: false, target: paneId, dedupeKey: body.idempotencyKey });
         dropHandlesForPane(tenantId, paneId);
         paneRegistry.get(tenantId)?.delete(paneId);
         return { ok: true };

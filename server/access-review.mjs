@@ -8,6 +8,7 @@
 // and the CLI print the same object. No token, secret or hash is ever
 // selected — the report is meant to be pasted into a review ticket.
 import { ServiceError } from "./store.mjs";
+import { ownMember } from "../src/events.js";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
 export const ACCESS_REVIEW_FORMAT = "project-room-access-review-v1";
@@ -114,7 +115,7 @@ export function assembleAccessReview(store, roomId) {
   const agentIdentities = db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
       i.display_name AS displayName FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
       WHERE l.room_id=? ORDER BY l.linked_at, l.identity_id`).all(roomId).map(row => {
-    const member = state.members[row.memberId];
+    const member = ownMember(state.members, row.memberId);
     const authority = member ? authorityOf(member) : { authorityPaths: delegationByIdentity.has(row.identityId) ? ["membership_delegation"] : [], dualGrantHazard: false };
     return {
       identityId: row.identityId, displayName: row.displayName, memberId: row.memberId, linkedAt: iso(row.linkedAt),

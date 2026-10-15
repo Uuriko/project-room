@@ -363,7 +363,9 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 /* antislop #6: on the sign-in surfaces, text links are real tap targets
    (14 px text, 44 px row) inside the form steps. The welcome view and chat
    rows keep the compact size above. */
-#auth-signin-ui .text-button, #agent-auth-step .text-button { min-height: 44px; font-size: var(--text-sm); }
+/* #agent-signin-ui is the agent sign-in component's mount on its own
+   page (/agent-signin) — the same 44px floor applies there. */
+#auth-signin-ui .text-button, #agent-signin-ui .text-button { min-height: 44px; font-size: var(--text-sm); }
 #join-account-rooms-link { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); }
 /* UI calming #2: the "⋯" overflow menu holds Save as result / Pin / Make this
    work / Record decision / moderation; it fades in with the other actions.
@@ -728,6 +730,10 @@ button, .button, .message-to-work { min-height: 44px; }
 .message:focus-visible, .message-list:focus-visible, .work-card:focus-visible, .presence-member:focus-visible, .event-list li:focus-visible, #room-title:focus-visible, #conversation-title:focus-visible, #thread-title:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .message-time { margin-left: .2rem; text-decoration: none; }
 .message-time time { color: var(--muted); }
+/* Timestamp permalinks are standalone controls, not inline prose links. */
+@media (pointer: coarse), (max-width: 500px) {
+  .message-time { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding-inline: .2rem; }
+}
 .message-links { flex-wrap: wrap; gap: .3rem 1rem; }
 .message-to-work, .thread-link { font-size: .875rem; }
 .thread-link { padding: .4rem .65rem; border: 1px solid #374b68; border-radius: .45rem; background: #172335; color: #bcd5ff; }
@@ -1708,8 +1714,6 @@ summary { overflow-wrap: anywhere; }
 /* Visible entry routes, each opening a focused sign-in flow. */
 .signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }
 .signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: var(--text-sm); color: var(--muted); text-decoration: none; }
-#agent-auth-step { margin-top: 1rem; }
-#agent-auth-back { min-height: 44px; }
 
 #auth-signin-ui form { display: grid; gap: .75rem; }
 #auth-signin-ui [data-signin-panel] { display: grid; gap: .75rem; }
@@ -1788,7 +1792,7 @@ summary { overflow-wrap: anywhere; }
 [data-signin-form="password"] > .form-hint { grid-column: 1 / -1; margin: 0; }
 
 /* The entrance offers two choices; explanation and agent entry live in More. */
-@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.woff2") format("woff2"), url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
 #auth-panel.auth-panel { width: min(100% - 3rem, 25rem); max-width: 25rem; margin: clamp(5rem, 18vh, 12rem) auto 3rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .auth-panel #auth-title { font-family: RoomWordmark, var(--font-sans); font-size: var(--text-wordmark); font-weight: 400; letter-spacing: -.07em; line-height: 1.1; text-align: center; margin-bottom: 2.75rem; white-space: normal; }
 .signin-welcome { display: grid; gap: .75rem; }
@@ -1801,8 +1805,9 @@ summary { overflow-wrap: anywhere; }
 .signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: var(--text-sm); }
 #signin-entry-routes { margin-top: .6rem; }
 #signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
+#signin-entry-routes #join-code-link { justify-self: center; display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); text-decoration: none; }
 [data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
-#terms-notice { order: 3; margin: .5rem 0 0; font-size: var(--text-xs); text-align: center; }
+#terms-notice { margin: .5rem 0 0; font-size: var(--text-xs); text-align: center; }
 @media (max-width: 520px) { #auth-panel.auth-panel { margin-top: 22vh; } }
 
 .app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
@@ -1814,3 +1819,7 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
 .join-agent .connect-steps li { margin: .35rem 0; }
 .join-agent .connect-steps strong { color: var(--text); }
+
+.inline-result { min-width: 0; margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.inline-result h2 { margin-block: 0 var(--space-2); font-size: var(--text-lg); }
+.inline-result .portable-actions { flex-wrap: wrap; }

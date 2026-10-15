@@ -111,10 +111,10 @@ test("member requests retain their rate limit, and retries do not spend it", asy
   assert.equal((await f.request("/api/rooms/commons/access-requests", f.owner)).body.requests.length, 5);
 });
 
-test("ordinary public admission still returns a join request", async t => {
+test("ordinary admission with identity proof still returns a join request", async t => {
   const f = await setup(t);
   const identity = f.store.identities.create("New Joiner");
-  const joined = await f.request("/api/access-requests", null, { roomId: "commons", identityId: identity.identityId,
+  const joined = await f.request("/api/access-requests", identity.secret, { roomId: "commons", identityId: identity.identityId,
     displayName: "New Joiner", requestedPermissions: ["accept_work"], requestId: "ordinary_join" });
   assert.equal(joined.status, 201);
   assert.equal(joined.body.kind, "join");

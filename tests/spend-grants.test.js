@@ -503,6 +503,95 @@ test("reserve lease: crashed reservations are reaped and the cap returns", async
   assert.equal(legacy.status, "voided");
 });
 
+// #3268: the settle paths ignored the reserve lease. They transitioned
+// purely on status='reserved', so a settle landing past expires_at
+// succeeded when no other priced call had run the reaper in between, and
+// failed (row voided) when one had — the money outcome was decided by
+// unrelated room activity. The settle transition itself must enforce the
+// lease (same COALESCE(expires_at, created_at + lease) deadline and the
+// same <= boundary as the reaper), on both the handle and the standalone
+// form, so a post-lease settle deterministically records no charge.
+test("settle enforces the reserve lease itself, with or without an intervening reaper (#3268)", async t => {
+  const { RESERVE_LEASE_MS } = await import("../server/spend-grants.mjs");
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  const db = f.store.db;
+  issueSpendGrant(db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: now,
+  });
+  const authz = (nonce, { room = false, at = now } = {}) => authorizeSpend(db, {
+    roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce, nowMs: at,
+    ...(room ? { roomAllowanceCents: 1000, roomCommittedCents: 0 } : {}),
+  });
+  const statusOf = nonce => db.prepare(`SELECT status FROM spend_authorizations
+    WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, nonce).status;
+  const roomStatusOf = nonce => db.prepare(`SELECT status FROM spend_room_reservations
+    WHERE room_id = ? AND nonce = ?`).get(roomId, nonce).status;
+  const pastLease = now + RESERVE_LEASE_MS + 60_000;
+
+  // Within the lease the handle settle still succeeds.
+  assert.equal(authz("lease-live").settle(now + RESERVE_LEASE_MS - 1), true,
+    "a settle inside the lease settles");
+  assert.equal(statusOf("lease-live"), "settled");
+
+  // Exactly at expires_at the reservation is expired (the reaper uses
+  // <=), so a standalone settle at the boundary must not charge either.
+  authz("lease-boundary");
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-boundary", nowMs: now + RESERVE_LEASE_MS }), false,
+    "a settle exactly at lease expiry records no charge");
+  assert.equal(statusOf("lease-boundary"), "reserved", "the refused settle did not settle the row");
+
+  // Case A (issue repro): past the lease, NO intervening authorize — the
+  // handle settle must fail even though the reaper never ran.
+  const expiredHandle = authz("lease-expired-handle", { room: true });
+  assert.equal(expiredHandle.settle(pastLease), false,
+    "a post-lease handle settle succeeds only if the lease is ignored");
+  assert.equal(statusOf("lease-expired-handle"), "reserved",
+    "the post-lease settle left the row unsettled, awaiting the reaper/void");
+  assert.equal(roomStatusOf("lease-expired-handle"), "active",
+    "a failed settle does not release the room reservation out from under a still-reserved row");
+  // Void is cleanup, not a charge: it stays available past the lease.
+  assert.equal(voidSpend(db, { roomId, agentId, nonce: "lease-expired-handle" }), true,
+    "voiding a past-lease reservation still releases it");
+  assert.equal(roomStatusOf("lease-expired-handle"), "released");
+
+  // Case A, standalone form: same reservation shape, settleSpend past the
+  // lease, still no reaper — same deterministic refusal.
+  authz("lease-expired-standalone");
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-expired-standalone", nowMs: pastLease }), false,
+    "a post-lease standalone settle records no charge");
+  assert.equal(statusOf("lease-expired-standalone"), "reserved");
+
+  // Case B (issue repro): an intervening authorize past the lease reaps
+  // the row first; settling afterwards returns the SAME false as Case A —
+  // the outcome no longer depends on unrelated room activity.
+  authz("lease-expired-reaped");
+  // One intervening priced call past the lease: authorizeSpend runs the
+  // reaper inside its own transaction, voiding every past-lease reserve.
+  authz("lease-intervening", { at: pastLease });
+  assert.equal(statusOf("lease-expired-reaped"), "voided", "the reaper voided the past-lease row");
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-expired-reaped", nowMs: pastLease }), false,
+    "settling a reaped reservation fails exactly like the un-reaped Case A");
+
+  // Legacy rows written before #1525 carry expires_at NULL; their deadline
+  // is created_at + lease (the reaper's COALESCE fallback) and settle must
+  // honour that fallback too, not treat NULL as never-expiring.
+  db.prepare(`INSERT INTO spend_authorizations
+      (room_id, agent_id, nonce, tool_name, price_cents, status, created_at, expires_at)
+      VALUES (?, ?, 'lease-legacy', 'room_put_file', '5', 'reserved', ?, NULL)`)
+    .run(roomId, agentId, now - RESERVE_LEASE_MS - 1);
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-legacy", nowMs: now }), false,
+    "a legacy NULL-expires_at reservation past its created_at deadline cannot settle");
+  assert.equal(statusOf("lease-legacy"), "reserved");
+
+  // Exactly one charge was ever recorded: the in-lease settle.
+  const settled = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(CAST(price_cents AS INTEGER)), 0) AS total
+    FROM spend_authorizations WHERE room_id = ? AND agent_id = ? AND status = 'settled'`).get(roomId, agentId);
+  assert.equal(settled.n, 1, "no post-lease settle recorded a charge");
+  assert.equal(settled.total, 5);
+});
+
 // --- Refusal honesty ---
 
 test("refusal names the tool and price in text and structured detail", async t => {
@@ -545,8 +634,10 @@ test("chargeSpendBeforeCall routes the check+reserve through store.transaction (
   assert.ok(error instanceof SpendGrantError, `expected SpendGrantError, got ${error}`);
   assert.equal(error.status, 402);
   assert.equal(error.code, "payment_required");
-  assert.equal(platformTxCalls, 1,
-    "the spend check+reserve must run inside the store platform transaction, never raw SQL");
+  assert.equal(platformTxCalls, 2,
+    "the spend paths must run inside the store platform transaction, never raw SQL: "
+    + "one transaction for the #3377 crash-recovery reap (committed independently, "
+    + "ahead of the charge) and one for the check+reserve itself");
 });
 
 // --- End-to-end through tools/call ---

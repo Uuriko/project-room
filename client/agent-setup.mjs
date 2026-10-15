@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { RoomAgentClient, assertServiceOrigin, createAgentIdentity, previewAgentInvite, redeemAgentInvite, previewSharedInvite, joinSharedInvite, requestAccess, listAgentRooms } from "./room-agent.mjs";
 import { readAgentConnection } from "./agent-connection.mjs";
 import { openSetupJournal, privateDirectory, atomicPrivateJson } from "./setup-journal.mjs";
-import { edgeDoorApiPath, ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath, ROOM_ORIGIN } from "../server/agent-discovery.mjs";
 import { parseShareInviteCode } from "../src/share-invite-code.js";
 import { validId } from "../src/events.js";
 
@@ -150,7 +150,9 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       const key = await issuer.createAgentKey({
         // Same scopes as the hosted onboarding token (agent-plugin-store.mjs):
         // since b42251c3 the MCP inbox/wake tools need mcp:inbox / mcp:wake.
-        scopes: [`mcp:room:${step.roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
+        // CX5-FIX: heartbeats:report/read let this saved credential run the
+        // room-scoped wake listener it is bound to (via mcp:room: above).
+        scopes: [`mcp:room:${step.roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
         label: saved.name,
         expiresAt: Date.now() + 30 * 86400000
       });

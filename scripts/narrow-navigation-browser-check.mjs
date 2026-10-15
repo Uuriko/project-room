@@ -49,6 +49,11 @@ test("narrow navigation: channel focus, thread room, search hands back the scree
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector("#conversation-title")?.textContent === "# design");
   // The drawer closes on a phone, so focus lands on the channel heading.
+  // The app performs that handoff in a setTimeout(0) after the click (see the
+  // #channel-list handler in src/app.js), so the title can update before
+  // focus moves: await the focus condition itself, with a finite timeout,
+  // instead of snapshotting activeElement immediately.
+  await page.waitForFunction(() => document.activeElement?.id === "conversation-title", null, { timeout: 5000 });
   assert.equal(await page.evaluate(() => document.activeElement?.id), "conversation-title", "focus lands on the picked channel, not <body>");
   await ensureSidebarOpen(page);
   await page.locator('#channel-list [data-channel="general"]').click();

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { EVENT_TYPES as T, validId } from "../src/events.js";
+import { EVENT_TYPES as T, validId, ownMember } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
@@ -73,7 +73,7 @@ export class AgentConnections {
   }
   authority(row) {
     const room = this.store.roomAuthority(row.room_id);
-    const sponsor = room.members[row.sponsor_member_id], member = room.members[row.member_id];
+    const sponsor = ownMember(room.members, row.sponsor_member_id), member = ownMember(room.members, row.member_id);
     const account = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.sponsor_account_id);
     const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.sponsor_member_id);
     if (!sponsor || sponsor.kind !== "human" || sponsor.active === false || sponsor.id !== room.ownerId
@@ -84,7 +84,7 @@ export class AgentConnections {
     return true;
   }
   view(row) {
-    const member = this.store.room(row.room_id).state.members[row.member_id];
+    const member = ownMember(this.store.room(row.room_id).state.members, row.member_id);
     const credential = this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(row.credential_hash);
     const status = row.status === "disconnected" ? "disconnected" : row.expires_at <= this.store.now() ? "expired"
       : !this.authority(row) ? "access_changed" : credential?.revoked !== 0 ? "revoked" : "key_issued";
@@ -217,9 +217,13 @@ export class AgentConnections {
           // RC-2026-09-24-201: stamp the identity on the member record so
           // the room state is self-describing (agent-rooms.mjs already does).
           ...(request.identityId ? { identityId: request.identityId } : {}) } }, binding);
-      if (action === "disconnect" && this.store.room(roomId).state.members[memberId].active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
-        data: { memberId, expectedMemberRevision, active: false, permissions: this.store.room(roomId).state.members[memberId].permissions } }, binding);
-      const member = this.store.room(roomId).state.members[memberId];
+      if (action === "disconnect" && ownMember(this.store.room(roomId).state.members, memberId)?.active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
+        data: { memberId, expectedMemberRevision, active: false, permissions: ownMember(this.store.room(roomId).state.members, memberId)?.permissions } }, binding);
+      // Read AFTER the create/disconnect commands above: downstream state
+      // persistence needs the post-command member (revision, permissions) —
+      // hoisting this read above the disconnect command was the #3283
+      // hosted-CI failure (verifyHistory rejected the stale member_revision).
+      const member = ownMember(this.store.room(roomId).state.members, memberId);
       if (membership) now = Date.parse(membership.event.at);
       if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
@@ -311,7 +315,7 @@ export class AgentConnections {
           || (index === 0 ? request.action !== "create" || state.created_at !== state.updated_at
             : request.action === "create" || previous.status === "disconnected" || request.expectedGeneration !== previous.generation
               || state.created_at !== previous.created_at)) invalid();
-        const room = this.store.room(row.room_id).state, sponsor = room.members[state.sponsor_member_id];
+        const room = this.store.room(row.room_id).state, sponsor = ownMember(room.members, state.sponsor_member_id);
         const account = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(state.sponsor_account_id);
         const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, state.sponsor_member_id);
         if (Object.keys(state).sort().join() !== Object.keys(row).sort().join()
@@ -347,7 +351,7 @@ export class AgentConnections {
         previous = state;
       }
       if (Object.keys(row).some(k => row[k] !== previous[k])) invalid();
-      const member = this.store.room(row.room_id).state.members[row.member_id];
+      const member = ownMember(this.store.room(row.room_id).state.members, row.member_id);
       if (!member || member.kind !== "agent" || member.revision < row.member_revision) invalid();
     }
   }

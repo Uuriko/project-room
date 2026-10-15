@@ -16,9 +16,15 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
+import { agentPages, PASTE_PAGE } from "../scripts/build-agent-docs.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const read = file => readFileSync(join(root, file), "utf8");
+// docs/agents/*.html are generated build output (no longer committed): read
+// those pages from the builder's in-memory render, everything else from disk.
+const generatedAgentPages = agentPages();
+const read = file => generatedAgentPages.has(file)
+  ? generatedAgentPages.get(file)
+  : readFileSync(join(root, file), "utf8");
 
 // Static human-door pages: URL path -> source file.
 const COMPARE = [
@@ -31,7 +37,7 @@ const COMPARE = [
 ];
 const AGENTS = [
   "claude-code", "codex", "cursor", "cline", "vscode", "aider",
-  "openai-agents-sdk", "langgraph", "crewai",
+  "openai-agents-sdk", "langgraph", "crewai", PASTE_PAGE.id,
 ];
 const pageFiles = new Map([
   ["/", "index.html"],

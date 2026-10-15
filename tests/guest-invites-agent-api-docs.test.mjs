@@ -56,9 +56,10 @@ function loadOperations() {
 
 test("every guest-invites operation is marked agent-API-only", () => {
   const ops = loadOperations();
-  // 6 top-level (GET, HEAD, preview, redeem, request, rotate) + 6 room-scoped
-  // owner operations.
-  assert.ok(ops.length >= 12, `expected the full guest-invites family documented, found ${ops.length}`);
+  // 5 top-level (GET, HEAD, preview, redeem, rotate — the self-serve
+  // request operation was removed in #3219) + 6 room-scoped owner
+  // operations.
+  assert.ok(ops.length >= 11, `expected the full guest-invites family documented, found ${ops.length}`);
   for (const { method, path, op } of ops) {
     assert.equal(
       String(op.get("x-consumer")),

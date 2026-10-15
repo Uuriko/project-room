@@ -38,6 +38,17 @@ test("unit shards execute each test file once and aggregate only complete curren
     const run = invoke("scripts/unit-ci.mjs", [`--shard=${index}/${SHARD_COUNT}`]);
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stdout, new RegExp(`unit-ci: shard ${index}/${SHARD_COUNT}`));
+    // Receipts carry per-file measured runtimes from the actual run, for
+    // scripts/refresh-unit-ci-durations.mjs to rebuild the durations table.
+    const shardReceipt = JSON.parse(readFileSync(join(dir, `test-results/unit-shard-${index}-of-${SHARD_COUNT}-attempt-1.json`), "utf8"));
+    assert.ok(shardReceipt.fileDurationsMs && typeof shardReceipt.fileDurationsMs === "object",
+      `shard ${index} receipt carries fileDurationsMs`);
+    assert.ok(Object.keys(shardReceipt.fileDurationsMs).length > 0,
+      `shard ${index} receipt fileDurationsMs is non-empty`);
+    for (const [file, ms] of Object.entries(shardReceipt.fileDurationsMs)) {
+      assert.ok(shardReceipt.files.includes(file), `fileDurationsMs key ${file} is one of the shard's files`);
+      assert.ok(Number.isFinite(ms) && ms >= 0, `fileDurationsMs[${file}] is a finite non-negative number`);
+    }
   }
   assert.deepEqual(readFileSync(join(dir, "executed.txt"), "utf8").trim().split("\n").map(Number).sort((a, b) => a - b), [...files.keys()]);
   const gate = (more = {}) => invoke("scripts/unit-shards-check.mjs", ["test-results"], more);
@@ -73,18 +84,19 @@ test("unit shard plan is complete, deterministic, and balanced on measured runti
   for (const shard of plan.shards) assert.ok(shard.files.length > 0 && shard.estimatedMs > 0);
   assert.throws(() => parseShard("1/4 trailing"), /Shard/);
   assert.throws(() => parseShard(`2/${SHARD_COUNT + 1}`), /Shard/);
-  // A new test file without a measurement is planned at the 5000ms default
-  // (unitPlan's estimate), so it never breaks the plan or the gate. Requiring
+  // A new test file without a measurement is planned at the conservative
+  // default (unitPlan's estimate: the median of the measured durations,
+  // floored at 5000ms), so it never breaks the plan or the gate. Requiring
   // a durations entry per new file failed every test-adding PR and made
   // scripts/unit-ci-durations.json the repo's top merge-conflict hotspot.
-  // Only a large unmeasured set is a real balance problem: past
-  // UNMEASURED_CAP files, refresh the durations file in one PR. The cap is
-  // absolute (about 3-4% of the suite) so 5s guesses never dominate the plan.
-  const UNMEASURED_CAP = 40;
+  // The unmeasured count is REPORTED, never failed on (#3292): the count is
+  // repo-global state that no single PR controls, and the durations table
+  // is now refreshed automatically from hosted shard receipts
+  // (scripts/refresh-unit-ci-durations.mjs), so a large unmeasured set is
+  // a freshness signal for that automation, not a gate on unrelated PRs.
   const measured = JSON.parse(readFileSync("scripts/unit-ci-durations.json", "utf8")).milliseconds;
   const unmeasured = plan.files.filter((file) => !(Number.isFinite(measured[file]) && measured[file] > 0));
-  assert.ok(unmeasured.length <= UNMEASURED_CAP,
-    `${unmeasured.length} of ${plan.files.length} unit files lack measured durations; refresh scripts/unit-ci-durations.json: ${unmeasured.join(", ")}`);
+  console.log(`unit shard plan: ${unmeasured.length} of ${plan.files.length} unit files lack measured durations (reported only, #3292)${unmeasured.length ? `: ${unmeasured.join(", ")}` : ""}`);
   const total = plan.shards.reduce((sum, shard) => sum + shard.estimatedMs, 0);
   for (const shard of plan.shards) {
     const share = shard.estimatedMs / total;

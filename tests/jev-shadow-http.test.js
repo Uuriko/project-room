@@ -49,6 +49,25 @@ test("join via invite journals a shadow admission decision and still admits", as
   assert.equal(json.counts.admission >= 1, true);
 });
 
+test("join journals sybilName against the other members, not the joiner's own just-added membership", async t => {
+  // Regression guard for the exact-match fix in sybilNameScore: admission is
+  // scored after the join, so the member list already contains the joiner.
+  // If the wiring did not exclude the joiner's own membership, an exact
+  // match would make every join self-match at sybilName 1.0.
+  const { origin, ownerKey, store } = await serve(t);
+  const minted = await post(origin, "/api/rooms/commons/agent-invites", { permissions: ["accept_work"] }, ownerKey);
+  assert.equal(minted.status, 201);
+  const joined = await post(origin, "/join", { displayName: "Twin Echo", inviteCode: (await minted.json()).code });
+  assert.equal(joined.status, 201);
+  const identityId = (await joined.json()).identityId;
+  const entry = store.jevShadow.list({ roomId: "commons", gate: "admission" })
+    .find(e => e.path === "join:invite" && e.identityId === identityId);
+  assert.ok(entry, "no admission entry for the join");
+  const sybil = entry.signals.find(s => s.key === "sybilName");
+  assert.ok(sybil.value < 1, JSON.stringify(sybil));
+  assert.doesNotMatch(sybil.detail, /similar to member "Twin Echo"/);
+});
+
 test("first-room join journals with path join:first-room", async t => {
   const { origin, store } = await serve(t);
   const joined = await post(origin, "/join", { displayName: "Fresh Human" });

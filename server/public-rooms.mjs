@@ -6,8 +6,8 @@
 // exception: it reads nothing at all — curated static content only.
 import { escapeHtml, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
-import { PUBLIC_PAGE_LASTMOD } from "../deploy/public-search.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";

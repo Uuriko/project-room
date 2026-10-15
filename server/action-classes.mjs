@@ -56,7 +56,6 @@ export const SURFACE_CLASSES = Object.freeze({
   "inbox-reply-sends": "act",        // server/inbox-transport.mjs: external send authority
   "email-import.mjs": "act",             // server/email-import.mjs: writes imported content into the room
   "share-links": "act",              // server/share-links.mjs: mints access-granting links
-  "guest-agent-links": "act",        // server/guest-agent-links.mjs: mints credentials
   "agent-access": "act",             // server/agent-connections|identities|invites.mjs: grants agent access
   "dispatch-journal": "act",         // server/dispatch-journal.mjs: launches jobs
   "operator-reads": "observe",       // backup/diagnostics/version/maintenance/recovery reads

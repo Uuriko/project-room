@@ -1,4 +1,7 @@
 // RC-2026-09-30-3611 (human-door P0-2): the general request-access door.
+// The door's home is the join page since the #3293 consolidation (the
+// account-panel door was retired in step 2); src/join.js wires this
+// module's orchestration to #join-request-form.
 // Contracts guarded here:
 //  1. The door builds a valid POST /api/access-requests body: non-empty
 //     roomId (default muse-room comes from the HTML), validated display
@@ -79,9 +82,14 @@ test("build: a pasted room link resolves to its room id", () => {
   // field has no maxlength and only the resolved room id is length-checked.
   const longLink = `https://room.trydemigod.com/?room=team-7&utm_source=${"x".repeat(300)}`;
   assert.equal(buildGeneralAccessRequest({ roomId: longLink, displayName: "Ada" }).roomId, "team-7");
+  const html = readFileSync(new URL("../join.html", import.meta.url), "utf8");
+  assert.match(html, /Room link/);
+  assert.doesNotMatch(html.match(/<input id="join-request-room"[^>]*>/)[0], /maxlength/);
+});
+
+test("the account panel no longer carries a request-access door (#3293 step 2)", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(html, /<label for="account-request-room">Room link<\/label>/);
-  assert.doesNotMatch(html.match(/<input id="account-request-room"[^>]*>/)[0], /maxlength/);
+  assert.doesNotMatch(html, /account-request-(access|form|room|name|note|referred|submit|status)/);
 });
 
 test("submit: mints once, submits with the minted identity, stashes the record", async () => {
@@ -95,6 +103,7 @@ test("submit: mints once, submits with the minted identity, stashes the record",
   const sent = client.calls[0];
   assert.equal(sent.roomId, "muse-room");
   assert.equal(sent.identityId, "ai_test123");
+  assert.equal(sent.secret, "pri_test", "the minted identity's secret travels with the filing as proof (issue #2912)");
   assert.equal(sent.displayName, "Ada");
   assert.match(sent.requestId, /^ar_[0-9a-f]{16}$/);
   assert.equal(result.requestId, sent.requestId);

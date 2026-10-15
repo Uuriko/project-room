@@ -495,15 +495,19 @@ export function createAccountSettingsUI({ accountClient, credentials = null, onA
   const refresh = async () => {
     if (profileOnly) return refreshProfile();
     const session = accountClient.currentSession("managing sign-in methods", { authenticated: true });
+    const generation = accountClient.generation, epoch = viewEpoch;
+    const owns = () => epoch === viewEpoch && accountClient.owns(generation, session);
     status("Loading sign-in methods\u2026");
     try {
       const data = await accountClient.request("/api/auth/methods", { session });
+      if (!owns()) return;
       state = { methods: Array.isArray(data.methods) ? data.methods : [], providers: data.providers ?? null,
         // The unverified-email form and the password-reset banner render from this.
         emailVerification: data.emailVerification ?? null, pendingEmail: state.pendingEmail ?? null };
       paint();
       status("");
     } catch (error) {
+      if (!owns()) return;
       paint();
       status(error?.message || "Could not load sign-in methods.");
     }

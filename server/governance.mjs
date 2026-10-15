@@ -9,9 +9,9 @@
 import { BUDGET_CAPS } from "../src/work-item-session.js";
 import {
   GUEST_AGENT_PERMISSIONS,
-  GUEST_AGENT_TTL_MS,
   GUEST_AGENT_KIND,
 } from "./guest-agent-links.mjs";
+import { GUEST_CREDENTIAL_TTL_DEFAULT_MS } from "./guest-invites.mjs";
 import { wakeQueueLimits } from "./wake-queue-limits.mjs";
 import { SEVERITY_KEEP_DAYS, ARCHIVE_AFTER_DAYS } from "./audit-retention.mjs";
 import {
@@ -55,18 +55,21 @@ const idempotencyProofs = () => ({
 // So ownerOnlyResume is false: the agent itself may resume.
 const ownerOnlyResume = () => false;
 
-// Guest tier: enforced in server/guest-agent-links.mjs — owner-issued,
-// single-use, GUEST_AGENT_PERMISSIONS (empty grant list) with read_chat
-// access, expiring after GUEST_AGENT_TTL_MS. Guests are visibly badged
-// (guest) everywhere and carry no claim-bearing permissions.
+// Guest tier: enforced in server/guest-invites.mjs — owner-issued,
+// single-use GX- invite codes redeem into the ga1. guest-agent tier
+// (server/guest-agent-links.mjs), GUEST_AGENT_PERMISSIONS (empty grant
+// list) with read_chat access, the credential expiring after
+// GUEST_CREDENTIAL_TTL_DEFAULT_MS by default (owner-settable 1h–14d).
+// Guests are visibly badged (guest) everywhere and carry no claim-bearing
+// permissions.
 const guestTier = () => ({
   permissions: [...GUEST_AGENT_PERMISSIONS],
   access: "read_chat",
   kind: GUEST_AGENT_KIND,
   reputationBearing: false,
   claimEligible: false,
-  ttl: `${GUEST_AGENT_TTL_MS / 3600000}h`,
-  ttlMs: GUEST_AGENT_TTL_MS,
+  ttl: `${GUEST_CREDENTIAL_TTL_DEFAULT_MS / 3600000}h`,
+  ttlMs: GUEST_CREDENTIAL_TTL_DEFAULT_MS,
   ownerIssued: true,
   singleUse: true,
 });

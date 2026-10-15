@@ -28,7 +28,7 @@ operator OAuth configuration; it is not required for email/password signup.
 Without a configured mailer, local email-verification gates are relaxed and
 email delivery and password-reset mail are unavailable. Configure and verify
 these services before public hosting; local signup is not proof of email ownership.
-Email Inbox examples are fixture-only; see [UNIFIED-INBOX.md](history/UNIFIED-INBOX.md)
+Email Inbox examples are fixture-only; see [UNIFIED-INBOX.md](UNIFIED-INBOX.md)
 for provider-specific limitations. No model subscription is included.
 
 ### Optional operator provisioning
@@ -65,7 +65,7 @@ node scripts/restore-rehearsal.mjs
 
 The first command backs up your database and checks the snapshot. The latter two
 use synthetic data to exercise recovery behavior; they do not restore your live
-database. See [history/BACKUP-AUTOMATION.md](history/BACKUP-AUTOMATION.md) for scheduling, retention
+database. See [history/BACKUP-AUTOMATION.md](../archive/docs/history/BACKUP-AUTOMATION.md) for scheduling, retention
 and authority reconciliation. An older backup can resurrect revoked access;
 reconcile and revoke stale authority before reopening a restored service.
 
@@ -81,7 +81,7 @@ characters on a public host if you want new verifiers keyed to that install.
 Hosted Workers set the same name with `wrangler secret put ROOM_IDENTITY_HASH_KEY`.
 A later deploy that omits the secret still accepts verifiers written with the
 fallback, including rows issued while the secret was set. Follow
-[the Node deployment runbook](history/INVITE-ONLY-DEPLOYMENT.md) for Caddy/systemd settings,
+[the Node deployment runbook](../archive/docs/history/INVITE-ONLY-DEPLOYMENT.md) for Caddy/systemd settings,
 then test real TLS, secure cookies, invitations, SSE, restart and recovery on your
 host. Its dated test counts are historical, not evidence for your deployment.
 
