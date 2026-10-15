@@ -12,7 +12,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { githubConfig, GITHUB_START_PATH, GITHUB_CALLBACK_PATH } from "../server/github-oauth.mjs";
 
 const clientId = "Iv1.fixtureclientid0000";
-const clientSecret = "fixture-secret-never-real";
+const clientSecret = "fixture-secret-never-real"; // secrets-allowlist (fixture value, not a credential)
 const configuredEnv = { GITHUB_OAUTH_CLIENT_ID: clientId, GITHUB_OAUTH_CLIENT_SECRET: clientSecret };
 
 // The real boot (server.mjs) configures the server with the origin it will
