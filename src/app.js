@@ -7592,8 +7592,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   const unread = state ? Math.max(0, client.sequence - Math.max(roomCursor, catchUpBoundary)) : 0;
   const contributions = owned ? contributionSteps(state, session.member.id, now) : [];
   renderContribution(contributions, owned);
-  setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
-    unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
+  setText("#catchup-count", current && (contributions.length || unread) ? String(contributions.length || unread) : "");
   $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.

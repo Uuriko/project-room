@@ -4,12 +4,13 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { clickChrome } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { axeSerious, assertAxeClean } from './a11y-axe-helper.mjs';
 
 const output = process.env.ROOM_BROWSER_OUTPUT;
-async function fixture(t, { width = 1280, theme = 'dark', member = 'owner', prepare } = {}) {
+async function fixture(t, { width = 1280, theme = 'dark', member = 'owner', prepare, setupPage } = {}) {
   const f = createAcceptanceFixture();
   prepare?.(f);
   const server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -20,6 +21,7 @@ async function fixture(t, { width = 1280, theme = 'dark', member = 'owner', prep
   const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 } });
   const page = await context.newPage();
   const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await setupPage?.(page);
   await page.goto(origin); await signInFixture(page, f.keys[member]);
   await page.locator('#main').waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.body.classList.contains('human-experience'));
@@ -47,6 +49,15 @@ for (const width of [1280, 390]) for (const theme of ['dark', 'light']) {
     for (const m of humans) f.access(m.id, false, []);
     await f.configure();
     await f.page.waitForFunction(() => document.querySelector('#room-assistant-status').textContent === 'Waiting for connection');
+    assert.equal(await f.page.locator('#room-assistant').isVisible(), false, 'idle agent chrome does not occupy the conversation');
+    assert.equal(await f.page.locator('#composer-intent').isVisible(), false, 'ordinary chat needs no visible mode label');
+    assert.equal(await f.page.locator('.site-footer').isVisible(), false, 'legal links stay out of the conversation');
+    assert.match(await f.page.locator('#composer-intent-description').textContent(), /Post a message in this channel/);
+    await f.capture('quiet-idle');
+    await f.page.locator('#room-more > summary').click();
+    assert.equal(await f.page.locator('#assistant-setup').isVisible(), true, 'setup remains reachable in More');
+    assert.equal(await f.page.locator('#human-project-open').isVisible(), true);
+    await f.page.keyboard.press('Escape');
     await f.send('Ordinary solo note, no execution requested.');
     assert.equal((await f.api()).runs.length, 0, 'room population never converts ordinary Send into execution');
     const peer = humans[0]; assert.ok(peer);
@@ -60,8 +71,10 @@ for (const width of [1280, 390]) for (const theme of ['dark', 'light']) {
     await f.page.locator('#message-input').fill('Explicitly ask the configured agent.');
     const cue = f.page.locator('#composer-intent');
     await cue.waitFor({ state: 'visible' });
-    assert.ok((await cue.textContent()).trim());
-    assert.ok((await f.page.locator('#message-input').getAttribute('aria-describedby') ?? '').split(/\s+/).includes('composer-intent'), 'composer intent is programmatically described');
+    assert.equal(await cue.textContent(), 'Shared · Room');
+    assert.match(await f.page.locator('#composer-intent-description').textContent(), /handled by Test producer.*Visible in this channel/);
+    assert.equal(await cue.getAttribute('aria-hidden'), 'true');
+    assert.ok((await f.page.locator('#message-input').getAttribute('aria-describedby') ?? '').split(/\s+/).includes('composer-intent-description'), 'composer intent is programmatically described');
     assertAxeClean(await axeSerious(f.page, { include: ['#message-form', '#composer-intent'] }), `explicit composer ${width}/${theme}`);
     const bounds = await f.page.locator('#ask-room').boundingBox(); assert.ok(bounds.width >= 44 && bounds.height >= 44);
     assert.equal(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
@@ -70,6 +83,9 @@ for (const width of [1280, 390]) for (const theme of ['dark', 'light']) {
     await f.page.waitForFunction(() => document.querySelector('#message-input').value === '');
     await f.page.waitForFunction(() => document.querySelector('#assistant-runs').textContent.includes('Explicitly ask'));
     assert.equal((await f.api()).runs.length, 1);
+    assert.equal(await f.page.locator('#room-assistant').isVisible(), true, 'pending work stays visible');
+    assert.equal(await f.page.locator('#assistant-face [data-cancel]').isVisible(), true);
+    await f.capture('pending-ask');
     assert.equal(f.state().messages.filter(m => m.body === 'Explicitly ask the configured agent.').length, 1);
     assert.deepEqual(f.errors, []);
   });
@@ -117,6 +133,8 @@ test('private message remains private even when Ask Room was selected', { timeou
   await f.configure();
   await f.page.locator('#ask-room').click();
   await f.page.locator('#message-to-select').selectOption('producer', { force: true });
+  assert.equal(await f.page.locator('#composer-intent').textContent(), 'Private · Test producer');
+  assert.match(await f.page.locator('#composer-intent-description').textContent(), /Private message to Test producer/);
   const body = 'A private note, not a shared assistant invocation.';
   await f.send(body);
   const messages = f.state().messages.filter(m => m.body === body);
@@ -317,4 +335,39 @@ for (const phase of ['preflight', 'message receipt']) test(`Pause and Stop canno
   assert.equal((await f.api()).runs.length, 2);
   assert.equal((await f.api()).runs.find(item => item.id === run.id).status, 'queued');
   assert.deepEqual(f.errors, []);
+});
+
+for (const width of [1280, 390]) test(`quiet controls restore in Advanced and legal links restore after signout (${width})`, { timeout: 30000 }, async t => {
+  const f = await fixture(t, { width });
+  await f.page.locator('#room-more > summary').click();
+  await f.page.locator('#assistant-setup').click();
+  await f.page.locator('#room-assistant-setup').waitFor({ state: 'visible' });
+  await f.page.locator('#room-assistant-setup [data-close-setup]').click();
+  await f.page.locator('#room-more > summary').click();
+  await f.page.locator('#topbar-settings').click();
+  assert.equal(await f.page.locator('#settings-dialog .site-footer').isVisible(), true);
+  await f.page.locator('#advanced-room-tools > summary').click();
+  await f.page.locator('#human-advanced').check();
+  await f.page.keyboard.press('Escape');
+  assert.equal(await f.page.locator('#room-assistant .assistant-heading').isVisible(), true);
+  await f.page.locator('#room-more > summary').click(); await f.page.locator('#topbar-settings').click();
+  await f.page.locator('#human-advanced').uncheck(); await f.page.keyboard.press('Escape');
+  assert.equal(await f.page.locator('#room-assistant').isVisible(), false);
+  await clickChrome(f.page, '#signout-button');
+  await f.page.locator('#auth-panel').waitFor({ state: 'visible' });
+  await f.page.waitForFunction(() => !document.querySelector('.site-footer')?.closest('#settings-dialog'));
+  assert.equal(await f.page.locator('.site-footer').isVisible(), false, 'the existing minimal sign-in surface hides its footer');
+  assert.equal(await f.page.locator('#settings-dialog .site-footer').count(), 0);
+  assert.deepEqual(f.errors, []);
+});
+
+test('quiet idle layout still exposes an initial assistant connection failure', { timeout: 30000 }, async t => {
+  const f = await fixture(t, { setupPage: page => page.route('**/api/rooms/commons/assistant', route => route.fulfill({ status: 503, json: { error: { code: 'assistant_unavailable', message: 'Assistant connection is temporarily unavailable.' } } })) });
+  await f.page.locator('#assistant-error').getByText('Assistant connection is temporarily unavailable.', { exact: true }).waitFor();
+  assert.equal(await f.page.locator('#room-assistant').isVisible(), true);
+  assert.equal(await f.page.locator('#assistant-face').isVisible(), false);
+  await f.page.locator('#message-input').fill('Ordinary conversation remains available.');
+  await f.page.locator('#message-form button[type=submit]').click();
+  await f.page.waitForFunction(() => document.querySelector('#message-input').value === '');
+  assert.equal(f.state().messages.filter(message => message.body === 'Ordinary conversation remains available.').length, 1);
 });

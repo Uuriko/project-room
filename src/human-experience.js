@@ -31,6 +31,22 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   section.setAttribute('aria-label', 'Room assistant');
   section.innerHTML = uiText("human.copy.001");
   $('#typing-indicator').before(section);
+  const heading = section.querySelector('.assistant-heading');
+  const footer = $('.site-footer');
+  const footerOrigin = document.createComment('site footer');
+  footer?.before(footerOrigin);
+  function syncChrome() {
+    const active = human() && Boolean(getState());
+    const simple = active && !document.body.classList.contains('human-advanced');
+    const destination = simple ? $('#room-more .room-more-actions') : section;
+    if (heading.parentNode !== destination) destination.prepend(heading);
+    if (footer) {
+      if (active && footer.parentNode !== $('#settings-dialog')) $('#settings-dialog').append(footer);
+      else if (!active && footer.previousSibling !== footerOrigin) footerOrigin.after(footer);
+    }
+    const liveRuns = Object.values(projection?.runs ?? {}).some(run => !CLOSED.includes(run.status));
+    section.hidden = !active || (simple && (!projection || face.hidden) && !liveRuns && !error && !operation && !rejectedOperation);
+  }
   // The status line is a persistent polite live region, so each state change
   // is announced once (R5-2); request text and buttons are rebuilt quietly.
   const face = document.createElement('div'); face.id = 'assistant-face'; face.hidden = true;
@@ -49,7 +65,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
   const intentCue = document.createElement('p'); intentCue.id = 'composer-intent'; intentCue.className = 'form-hint';
   $('#composer-hint').before(intentCue);
-  $('#message-input').setAttribute('aria-describedby', `${$('#message-input').getAttribute('aria-describedby') || ''} composer-intent`.trim());
+  const intentDescription = document.createElement('span'); intentDescription.id = 'composer-intent-description'; intentDescription.className = 'sr-only';
+  intentCue.after(intentDescription); intentCue.setAttribute('aria-hidden', 'true');
+  $('#message-input').setAttribute('aria-describedby', `${$('#message-input').getAttribute('aria-describedby') || ''} composer-intent-description`.trim());
   let intentRevision = 0, preflightBusy = false, dispatchReserved = false, setupFromDraft = false, composerScope = {};
   function dispatchBlocked() {
     if (!preflightBusy && !dispatchReserved) return false;
@@ -63,26 +81,28 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   function syncIntent(content = composerContent()) {
     composerScope = content;
     intentCue.hidden = !human() || !$('#request-mode-bar').hidden;
-    if (intentCue.hidden) return;
+    if (intentCue.hidden) { intentDescription.textContent = ''; return; }
+    function showCue(shortKey, description, parameters = {}) {
+      intentCue.textContent = shortKey ? uiText(shortKey, parameters) : '';
+      intentCue.hidden = !shortKey;
+      intentCue.title = description; intentDescription.textContent = description;
+    }
     const pending = getPendingMessage?.(), original = pending?.command?.data;
     const retry = original && Object.hasOwn(pending, 'assistantIntent') && original.body === content.body.trim()
       && (original.toMemberId || null) === (content.toMemberId || null) && (original.replyToId || null) === (content.replyToId || null)
       && (original.channelId || 'general') === (content.channelId || 'general')
       && Boolean(original.alsoSendToChannel) === Boolean(content.alsoSendToChannel);
+    const privateName = getState()?.members?.[content.toMemberId]?.displayName || uiText('human.intent.recipient');
     if (retry) {
-      intentCue.textContent = content.toMemberId
-        ? uiText('human.intent.retryPrivate', { name: getState()?.members?.[content.toMemberId]?.displayName || uiText('human.intent.recipient') })
-        : uiText(pending.assistantIntent ? 'human.intent.retryAsk' : 'human.intent.retryChat');
+      showCue(content.toMemberId ? 'human.intent.shortRetryPrivate' : pending.assistantIntent ? 'human.intent.shortRetryAsk' : 'human.intent.shortRetryChat',
+        content.toMemberId ? uiText('human.intent.retryPrivate', { name: privateName }) : uiText(pending.assistantIntent ? 'human.intent.retryAsk' : 'human.intent.retryChat'), { name: privateName });
       return;
     }
-    const coordinator = getState()?.members?.[projection?.assistant.coordinatorMemberId];
-    const name = coordinator?.displayName;
-    intentCue.textContent = content.toMemberId
-      ? uiText('human.intent.private', { name: getState()?.members?.[content.toMemberId]?.displayName || uiText('human.intent.recipient') })
-      : contribution ? uiText('human.intent.continue')
-        : selected || /^@Room\b/i.test(content.body.trim())
-          ? name ? uiText('human.intent.ask', { name }) : uiText('human.intent.connect')
-          : uiText('human.intent.chat');
+    const name = getState()?.members?.[projection?.assistant.coordinatorMemberId]?.displayName;
+    if (content.toMemberId) showCue('human.intent.shortPrivate', uiText('human.intent.private', { name: privateName }), { name: privateName });
+    else if (contribution) showCue('human.intent.shortContinue', uiText('human.intent.continue'));
+    else if (selected || /^@Room\b/i.test(content.body.trim())) showCue('human.intent.shortAsk', name ? uiText('human.intent.ask', { name }) : uiText('human.intent.connect'));
+    else showCue(null, uiText('human.intent.chat'));
   }
   $('#message-input').addEventListener('input', () => { intentRevision++; syncIntent(); });
   $('#message-to-select').addEventListener('change', () => { intentRevision++; syncIntent(); });
@@ -92,7 +112,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   $('#settings-dialog').append(advanced);
   $('#human-advanced').addEventListener('change', () => {
     document.body.classList.toggle('human-advanced', $('#human-advanced').checked);
-    refreshTranscript();
+    syncChrome(); refreshTranscript();
     try { sessionStorage.setItem(`room-human-advanced:${boundary}`, String($('#human-advanced').checked)); } catch { /* session only */ }
   });
   const dialog = document.createElement('dialog'); dialog.id = 'human-project-dialog'; dialog.setAttribute('aria-labelledby', 'human-project-title');
@@ -131,9 +151,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   };
   function paint() {
     syncIntent();
-    if (!human() || !projection) return;
+    if (!human() || !projection) { syncChrome(); return; }
     const assistant = projection.assistant;
-    section.querySelector('strong').textContent = assistant.name || 'Room';
+    heading.querySelector('strong').textContent = assistant.name || 'Room';
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
@@ -209,7 +229,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       panel.innerHTML = runsHtml; panel._html = runsHtml; panel.scrollTop = scroll;
       if (focused) { const replacement = [...panel.querySelectorAll('button')].find(b => b.closest('[data-assistant-run]').dataset.assistantRun === runId && b.textContent === label); (replacement || $('#assistant-activity summary')).focus({preventScroll:true}); }
     }
-    $('#assistant-error').textContent = error; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation);
+    $('#assistant-error').textContent = error; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation); syncChrome();
   }
   function syncContribution() {
     const previous = JSON.stringify(contribution);
@@ -228,7 +248,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < (projection?.runs?.some(run => run.status === 'working') ? 500 : 3000)) return;
     const stamp = key(); reading = true; lastRead = Date.now();
     try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
-    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; } }
+    catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; syncChrome(); } }
     finally { reading = false; }
   }
   async function invoke() {
@@ -335,7 +355,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
-      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; boundary = ''; selected = false; section.querySelector('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
+      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; boundary = ''; selected = false; section.querySelector('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); syncChrome(); return; }
       if (boundary !== key()) {
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
         resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;

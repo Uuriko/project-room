@@ -9,6 +9,11 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
+async function openAssistantSetup(page) {
+  if (!await page.locator('#assistant-setup').isVisible()) await page.locator('#room-more > summary').click();
+  await page.locator('#assistant-setup').click();
+}
+
 function deferredResultResponse() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -73,7 +78,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
-  await owner.locator('#assistant-setup').click(); await owner.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(owner); await owner.locator('#room-assistant-setup select').selectOption('producer');
   await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
@@ -453,7 +458,8 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await panel.getByRole('button',{name:'Stop',exact:true}).click();
   await panel.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
-  await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor();
+  await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor({state:'attached'});
+  assert.equal(await page.locator('#room-assistant').isVisible(), false, 'deleted terminal requests no longer occupy the quiet conversation');
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
 });
@@ -579,7 +585,7 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   const roomOptions = () => page.locator('#mention-list .mention-option').evaluateAll(n => n.map(o => o.textContent.trim()).filter(t => /^Room(?! owner)/.test(t)).length);
   assert.equal(await roomOptions(), 0);
   await input.fill('');
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
   await input.fill('can you help? @Roo');
   await page.waitForFunction(() => [...document.querySelectorAll('#mention-list .mention-option')].some(o => /^Room(?! owner)/.test(o.textContent.trim())));
@@ -606,7 +612,7 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What is the plan?');
@@ -768,7 +774,7 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
   const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send('First question for the room?');
@@ -812,7 +818,7 @@ test('Add to this ask wires the composer into the run and names the ask', { time
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What should we prioritize?');

@@ -84,6 +84,32 @@ human-facing change against that.
 
 ## Copy
 
+### Conversation first, minimal chrome (John, Oct 14)
+
+The human experience is one shared conversation with colleagues and Room.
+Agents coordinate behind that conversation. Their internal discussions and
+connection controls are available on demand, not permanent furniture.
+
+Use “Codex, but multiplayer” as the layout and interaction heuristic (John,
+Oct 14): conversation first, work and results inline, details on demand.
+Inspect the open-source Codex implementation when evaluating its behavior;
+do not assume every desktop surface is present in that repository. Adapt the
+pattern for shared audiences, permissions, attribution, and concurrent work.
+
+- Show the message, result, or decision before explaining the system.
+- Remove text that repeats a label, selected state, author, or visible action.
+- Ordinary sending needs no instructional caption. Keep keyboard help
+  available to assistive technology and on demand.
+- Use short audience labels; retain precise privacy descriptions accessibly.
+- Idle connection health belongs in room controls. Bring failures and missing
+  setup forward when they affect the action the person is taking.
+- Keep results and requests in context; avoid parallel dashboard summaries of
+  the same conversation. Preserve attribution and deliberate agent invocation.
+- Do not hide consent, external-action permission, uncertain delivery, or
+  decisions needed to continue. Show these at the relevant action.
+- Disclosures should have a clear purpose: room controls, message actions,
+  or work details. Do not turn one menu into a second application.
+
 - Use plain words, one per action. It's "Log in" everywhere. "Agent sign in"
   is the one named exception.
 - Never invent numbers, testimonials, customers, or claims. Show a real count
