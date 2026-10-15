@@ -72,6 +72,13 @@ export const KNOWN_CATEGORIES = Object.freeze({
   issued_access: { priority: 74, dependsOn: [] },
   sponsored_agents: { priority: 75, dependsOn: [] },
   inbox_receipts: { priority: 76, dependsOn: [] },
+  // WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge
+  // deletes for account targets (server/purge-registry.mjs, action
+  // "delete") must also purge on self-serve deletion: /api/account/delete
+  // runs only executeAccountDeletion, never the registry rows.
+  // (direct_channel_sends, quarantine_thread_splits, spam_quarantine are
+  // Fo's #2229 territory — folded into derived_inbox there, not duplicated.)
+  bounty_journal: { priority: 77, dependsOn: [] },
   profile: { priority: 100, dependsOn: [] },
 });
 

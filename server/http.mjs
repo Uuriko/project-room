@@ -909,18 +909,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     };
     const pump = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
+      // Lagging means bytes from an EARLIER tick are still unsent. Bytes
+      // written during this tick sit behind Node's per-tick queue, so
+      // measuring writableLength inside the write loop counts this tick's own
+      // batch and flags healthy readers whenever one page of visible events
+      // exceeds the cap. Judge lag once per tick, before writing.
+      if (lagging()) { lag(); return; }
+      const backlog = res.writableLength;
       try {
         const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
         if (!batch.events.length) res.write(": connected transport only\n\n");
+        let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
-          res.write(`id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`);
+          const frame = `id: ${item.sequence}\nevent: room-event\ndata: ${JSON.stringify(item)}\n\n`;
+          res.write(frame);
           cursor = item.sequence;
-          if (lagging()) break;
+          queued += Buffer.byteLength(frame);
+          // A reader still holding earlier-tick bytes that this tick would
+          // push past the cap is genuinely behind. This tick alone passing
+          // the cap only bounds the batch: the rest resumes on the next tick.
+          if (backlog > 0 && backlog + queued > streamQueueCap) { lagged = true; break; }
+          if (queued > streamQueueCap) { partial = true; break; }
         }
         // Ephemeral typing indicators ride the stream as synthetic `typing`
         // events with no `id:` — they never disturb Last-Event-ID resume.
         // Emitted only when the visible typist set changes for this connection.
-        if (!lagging()) {
+        if (!lagged) {
           const typists = currentTypists(typingBeats, roomId, entry.memberId);
           const key = typingKey(typists);
           if (key !== entry.lastTypingKey) {
@@ -928,10 +942,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
           }
         }
-        if (lagging()) lag();
+        if (lagged) lag();
         // Advance past invisible rows only after the complete visible batch
-        // was queued. A lagging stream must resume from its last sent event.
-        else cursor = batch.next;
+        // was queued. A partial tick resumes from its last sent event, so a
+        // lagging stream resumes from the last event the client can see.
+        else if (!partial) cursor = batch.next;
       } catch (error) {
         if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
           end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
