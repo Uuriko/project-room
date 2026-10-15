@@ -152,3 +152,35 @@ test("deletion plan discloses the new purge categories", t => {
   }
   assert.match(RETENTION_POLICY.summary, /private inbox/i);
 });
+
+// WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge deletes
+// (server/purge-registry.mjs, action "delete") survived SELF-SERVE account
+// deletion: the /api/account/delete path runs only executeAccountDeletion,
+// which never touched them. Before the fix, the bounty payment journal
+// survived a live deletion run. (direct_channel_sends, quarantine_thread_splits
+// and spam_quarantine are Fo's #2229 territory — folded into derived_inbox
+// there, not duplicated here.)
+function seedAccountJournals(store, A) {
+  const db = store.db;
+  db.prepare(`INSERT INTO bounty_journal(room_id,entry_id,account_id,at,kind,amount,lot_state,prev_hash,hash,memo)
+    VALUES('commons','bj1',?,'2026-10-10','attributed',2500,'attributed','p','h','bounty payout')`).run(A);
+}
+
+test("bounty journal is purged on self-serve account deletion", t => {
+  const { store, A } = setup(t);
+  seedAccountJournals(store, A);
+  const inventory = inventoryFromStore(store, A);
+  assert.equal(inventory.bounty_journal?.itemCount, 1, "bounty_journal counted in the deletion inventory");
+  deleteAccount(store, A);
+  const db = store.db;
+  assert.equal(db.prepare("SELECT count(*) AS n FROM bounty_journal WHERE account_id=?").get(A).n, 0,
+    "bounty journal purged");
+});
+
+test("deletion plan and retention policy disclose the bounty journal purge", t => {
+  const { store, A } = setup(t);
+  seedAccountJournals(store, A);
+  const { plan } = planAccountDeletion(store, A);
+  assert.ok(plan.categories.includes("bounty_journal"), "plan includes bounty_journal");
+  assert.ok(RETENTION_POLICY.purged.some(e => e.category === "bounty_journal"), "retention policy discloses bounty_journal");
+});
