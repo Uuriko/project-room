@@ -546,6 +546,8 @@ const invitationSchema = `
     expires_at INTEGER NOT NULL,
     authenticated_until INTEGER,
     created_at INTEGER NOT NULL,
+    login_method_kind TEXT,
+    login_method_ref TEXT,
     CHECK(
       (account_id IS NULL AND account_auth_epoch IS NULL AND parent_credential_hash IS NULL AND authenticated_until IS NULL)
       OR
