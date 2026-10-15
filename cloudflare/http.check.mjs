@@ -246,26 +246,6 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await json(nativeExchange, 201), { status: 'signed_in' });
     assert.match(nativeExchange.headers.get('set-cookie'), /^__Host-account_session=.*HttpOnly.*Secure/);
     await json(await call('/api/auth/desktop/session', { data: nativeProof }), 401);
-    // Target the actual native slot on Worker SQLite, not its retired OAuth grant.
-    const nativeCookie = nativeExchange.headers.get('set-cookie').split(';')[0];
-    const nativeView = await json(await call('/api/account-session', { headers: { Cookie: nativeCookie } }));
-    assert.equal(nativeView.authenticated, true);
-    const inventory = await json(await call('/api/account/sessions', { headers: mailHeaders }));
-    const nativeEntry = inventory.sessions.find(item => item.method === 'desktop');
-    assert.ok(nativeEntry);
-    assert.equal(nativeEntry.current, false);
-    assert.equal(nativeEntry.methodRef, 'project-room-macos');
-    await json(await call(`/api/account/sessions/${nativeEntry.id}`, {
-      method: 'DELETE', headers: { ...mailHeaders, Origin: origin }
-    }));
-    const nativeHeaders = { Cookie: nativeCookie, 'X-Session-Binding': nativeView.sessionBinding };
-    await json(await call('/api/account/sessions', { headers: nativeHeaders }), 401);
-    await json(await call(`/api/account/sessions/${nativeEntry.id}`, {
-      method: 'DELETE', headers: { ...mailHeaders, Origin: origin }
-    }), 404);
-    const remainingSessions = await json(await call('/api/account/sessions', { headers: mailHeaders }));
-    assert.deepEqual(remainingSessions.sessions, inventory.sessions.filter(item => item.id !== nativeEntry.id));
-    assert.equal(remainingSessions.sessions.filter(item => item.current).length, 1);
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
     const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
     assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);

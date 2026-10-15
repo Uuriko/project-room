@@ -222,11 +222,6 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
-  // Account-session inventory + targeted revocation (CX4). Native desktop
-  // sessions live here, not in the OAuth family: the desktop exchange
-  // retires its OAuth grant and keeps only the account-session slot.
-  route("/api/account/sessions", ["GET"], "account-session", "List the signed-in account's live account sessions (browser and native/desktop slots): public id, login method, created-at, authenticated-until, expiry, and whether each is the caller's current session.", "accountSessionsList"),
-  route("/api/account/sessions/{id}", ["DELETE"], "account-session", "Revoke one account session (browser or native slot) owned by the signed-in account. Only that session dies; the account's other sessions and every OAuth session are untouched. Unknown ids and other accounts' sessions both answer 404.", "accountSessionRevoke"),
   // Agent claim-block pre-validation (QA2 2026-10-04: served spec omitted it).
   route("/api/claims/validate", ["POST"], "open", "Validate a ```room-claim block before posting it. Unauthenticated by design; a pure function of the request body.", "validateClaimText",
     { requestBodies: { POST: CLAIM_VALIDATE_BODY } }),

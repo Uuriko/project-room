@@ -40,14 +40,6 @@ test("hosted and bound stdio selected-work hints and briefs expose callable part
   const bound = (await stdio.call("room_read_work", { workItemId: "task" })).result.structuredContent;
   assert.deepEqual(bound.replyRequestContext.requests.find(q => q.id === "pending").nextRead.arguments, { requestMessageId: "pending" });
   assert.equal((await stdio.call("room_read_request", bound.replyRequestContext.requests.find(q => q.id === "pending").nextRead.arguments)).result.structuredContent.selection.requestMessageId, "pending");
-  const selectedBatch = (await stdio.call("room_read_work", { workItemIds: ["task"], brief: false })).result.structuredContent;
-  const batchPointer = selectedBatch.items[0].replyRequestContext.requests.find(q => q.id === "pending").nextRead;
-  assert.deepEqual(batchPointer.arguments, { requestMessageId: "pending" });
-  assert.equal((await stdio.call(batchPointer.tool, batchPointer.arguments)).result.structuredContent.selection.requestMessageId, "pending");
-  const hostedBatch = (await call("room_read_work", { roomId: "test-room", workItemIds: ["task"], brief: false })).structuredContent;
-  const hostedBatchPointer = hostedBatch.items[0].replyRequestContext.requests.find(q => q.id === "pending").nextRead;
-  assert.deepEqual(hostedBatchPointer.arguments, { roomId: "test-room", requestMessageId: "pending" });
-  assert.equal((await call(hostedBatchPointer.tool, hostedBatchPointer.arguments)).structuredContent.selection.requestMessageId, "pending");
   const boundBrief = (await stdio.call("room_read_work", { workItemId: "task", brief: true })).result.structuredContent.brief;
   assert.match(boundBrief, /Pending linked reply requests: 26/); assert.match(boundBrief, /pending/);
   assert.equal(boundBrief.includes("PRIVATE-BODY-SENTINEL"), false);

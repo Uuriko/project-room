@@ -9,12 +9,10 @@ const stops = new Set(["pause_requested", "cancel_requested"]);
 // Best-effort public answer previews. The final result still uses atomic publish.
 // Full snapshots are bounded/throttled; no tool arguments or private reasoning.
 export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds, isCurrent = async () => true, emit = () => {}, intervalMs = 500 }) {
-  if (!Number.isSafeInteger(intervalMs) || intervalMs < 500 || intervalMs > 2147483647) throw new Error("Draft interval must be at least 500ms and fit a timer");
-  const parts = new Map(); let timer = null, pending = null, closed = false, sequence = 0, sent = "", checkedRevision = null, dirty = false, nextAt = 0;
-  const text = () => [...parts.values()].join("\n").slice(0, 65536).toWellFormed();
+  const parts = new Map(); let timer = null, pending = null, closed = false, sequence = 0, sent = "", checkedRevision = null;
   const send = async () => {
-    dirty = false;
-    if (!text().trim() || text() === sent) return;
+    const body = [...parts.values()].join("\n").slice(0, 65536).toWellFormed();
+    if (!body.trim() || body === sent) return;
     try {
       const current = await read();
       if (current.attemptId !== attemptId || current.status !== "working" || current.sourceDeleted
@@ -23,28 +21,12 @@ export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds,
         if (!await isCurrent(current)) return;
         checkedRevision = current.revision;
       }
-      // Include tokens received while checking authority without a second read.
-      const body = text();
       sequence = Math.max(sequence, current.answerDraftSequence ?? current.answerDraft?.sequence ?? 0) + 1;
       await act({ action: "draft", requestId: `codex-draft-${requestKey}-${sequence}`, sequence, body, expectedRevision: current.revision });
       sent = body;
-    } catch (error) {
-      // The credential-wide server cap also covers other runs/hosts. Preview
-      // throttling must never retry model work or delay its final publication.
-      if (error?.status === 429) nextAt = performance.now() + Math.max(60000, Number.isFinite(error.retryAfterMs) ? error.retryAfterMs : 0);
-    } finally { nextAt = Math.max(nextAt, performance.now() + intervalMs); }
+    } catch { /* Preview failure cannot rerun or invalidate completed work. */ }
   };
-  const flush = () => pending ??= send().finally(() => {
-    pending = null;
-    // Tokens can arrive during a slow write with no later delta to wake us.
-    if (!closed && dirty) schedule();
-  });
-  const schedule = () => {
-    if (closed || pending || timer || !dirty) return;
-    const remaining = nextAt - performance.now();
-    if (remaining <= 0) void flush();
-    else timer = setTimeout(() => { timer = null; schedule(); }, Math.ceil(remaining));
-  };
+  const flush = () => pending ??= send().finally(() => { pending = null; });
   return {
     emit(event) {
       emit(event);
@@ -52,14 +34,9 @@ export function assistantDraftSink({ read, act, attemptId, requestKey, inputIds,
         || event.phase != null && event.phase !== "final_answer" || typeof event.itemId !== "string" || typeof event.delta !== "string") return;
       if (!parts.has(event.itemId) && parts.size >= 32) return;
       parts.set(event.itemId, `${parts.get(event.itemId) ?? ""}${event.delta}`.slice(0, 65536));
-      dirty = true; schedule();
+      if (!timer) timer = setTimeout(() => { timer = null; void flush(); }, intervalMs);
     },
-    async close() {
-      closed = true; clearTimeout(timer); await pending;
-      // Final atomic publication already carries the complete answer. Do not
-      // add another preview inside the cooldown or wait for a trailing timer.
-      if (dirty && performance.now() >= nextAt) await flush();
-    }
+    async close() { closed = true; clearTimeout(timer); await pending; await flush(); }
   };
 }
 

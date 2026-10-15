@@ -3507,7 +3507,7 @@ function makeTimelineWorkNode(entry) {
 function setTimelineWorkNode(wnode, html) {
   if (wnode._content === html) return;
   const saved = captureDisclosures(wnode);
-  preserveResultFocus(wnode, () => { wnode.innerHTML = html; wnode._content = html; });
+  wnode.innerHTML = html; wnode._content = html;
   restoreDisclosures(wnode, saved);
 }
 // Use the same interleave for background card refreshes and message arrivals.
@@ -3587,7 +3587,7 @@ $("#invitation-signin-back").addEventListener("click", () => {
 });
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
@@ -5997,21 +5997,6 @@ const actionSpecs = {
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
 let resultView = null;
-const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
-const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
-function mountResultReader() {
-  if (!resultView) return;
-  const host = resultView.fromResults
-    ? [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === resultView.workItemId) ?? $("#results-panel")
-    : workRecord(resultView.workItemId);
-  if (host && resultReader.parentElement !== host) host.append(resultReader);
-}
-function preserveResultFocus(container, render) {
-  const focus = resultView && container.contains(resultReader) && resultReader.contains(document.activeElement) ? document.activeElement : null;
-  render();
-  if (resultView) mountResultReader();
-  if (focus?.isConnected) focus.focus({ preventScroll: true });
-}
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
 // stays as a seam for callers: "results" opens Settings at Results.
@@ -6123,36 +6108,24 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
     box.hidden = false;
   });
 }
-function resultDiscussionMessage(view) {
-  if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
-    || isRoomArchived(state)) return null;
-  // The ordinary thread composer does not inherit a DM audience.
-  return state.messages.find(message => !message.toMemberId && message.id === view.discussionId && message.workItemId === view.workItemId
-    && !message.deletedAt && message.body === view.body && !state.channels?.[messageChannelId(message)]?.archivedAt);
-}
 function resultStatus() {
-  mountResultReader();
   const view = resultView;
   if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
   const item = state.workItems[view.workItemId];
   const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
-  resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
+  $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
     : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
-  const retry = resultElement("result-retry");
-  resultElement("result-discuss").hidden = !resultDiscussionMessage(view);
-  resultElement("result-discuss").disabled = busy || requestReading || composerFiles.some(file => file.status === "uploading");
+  const retry = $("#result-retry");
   retry.hidden = !view.error && !view.retrying;
   retry.disabled = !view.error;
-  if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
 }
 function closeResult(restore = true) {
   const view = resultView;
-  resultView = null; resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
-  resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
-  resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
-  resultElement("result-discuss").hidden = true;
-  clearResultComparison(resultElement("result-diff"));
+  resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
+  $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
+  $("#result-original").hidden = true; $("#result-retry").hidden = true; $("#result-retry").disabled = true;
+  clearResultComparison($("#result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
@@ -6162,28 +6135,15 @@ function closeResult(restore = true) {
     const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
   }
 }
-resultElement("close-result").addEventListener("click", () => closeResult());
-resultElement("result-discuss").textContent = uiText("result.discuss");
-resultElement("result-discuss").addEventListener("click", () => {
-  const message = resultDiscussionMessage(resultView);
-  if (!message || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
-  closeResult(false);
-  revealMessage(message.id);
-  switchThread(conversation.rootById.get(message.id), true);
-  // An uncertain send already owns its exact reply target until it is resolved.
-  if (!pendingMessage) replyToId = message.id;
-  updateReply(); saveComposer(); persistDrafts();
-});
-resultElement("result-original").addEventListener("click", () => {
+$("#close-result").addEventListener("click", () => closeResult());
+$("#result-original").addEventListener("click", () => {
   const view = resultView;
   if (!view?.loaded || busy || !sameSession(view.generation, view.roomId, view.memberId)
     || !state.messages.some(message => message.id === view.originalId && message.workItemId === view.workItemId)) return;
   closeResult(false);
   history.replaceState(null, "", recordHref("message", view.originalId)); revealMessage(view.originalId);
 });
-resultReader.addEventListener("keydown", event => {
-  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeResult(); }
-});
+$("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
 function loadExactResult(view) {
   const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
   client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
@@ -6193,23 +6153,22 @@ function loadExactResult(view) {
     // than showing an empty box: the result was still reported and verified,
     // and the receipt still names what it was verified against.
     view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
-    resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
-    resultElement("result-body").hidden = Boolean(view.withdrawn);
+    $("#result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+    $("#result-body").hidden = Boolean(view.withdrawn);
     const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
       && message.body === value.result.text.body);
-    view.discussionId = message?.id; view.body = value.result.text.body;
     const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
-    view.originalId = original?.id; resultElement("result-original").hidden = !original;
+    view.originalId = original?.id; $("#result-original").hidden = !original;
     view.loaded = true; view.retrying = false;
-    if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
+    if (document.activeElement === $("#result-retry")) $("#close-result").focus({ preventScroll: true });
     resultStatus();
-    loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, resultElement("result-diff"), owns);
+    loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, $("#result-diff"), owns);
   }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
 }
-resultElement("result-retry").addEventListener("click", () => {
+$("#result-retry").addEventListener("click", () => {
   const view = resultView;
   if (!view?.error || busy || !sameSession(view.generation, view.roomId, view.memberId)) return;
-  if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
+  if (document.activeElement === $("#result-retry")) $("#close-result").focus({ preventScroll: true });
   view.error = false; view.retrying = true; resultStatus();
   loadExactResult(view);
 });
@@ -6222,13 +6181,11 @@ function readResult(e) {
     if (fromResults && !currentResult(item)) return;
     const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
       fromResults, previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
-    resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
-    resultElement("result-original").hidden = true;
-    resultElement("result-discuss").hidden = true;
-    const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
-    resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
-    mountResultReader(); resultReader.hidden = false;
-    resultElement("result-title").focus();
+    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
+    $("#result-original").hidden = true;
+    const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
+    $("#result-retry").hidden = true; $("#result-retry").disabled = true;
+    $("#result-dialog").showModal();
     loadExactResult(view);
     return;
   }
@@ -7546,7 +7503,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     const items = Object.values(state.workItems);
     if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
-    preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
+    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>');
     if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
     resultStatus();
     syncActionForm();

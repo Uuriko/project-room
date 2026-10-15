@@ -401,11 +401,7 @@ export class AgentPluginStore {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      // CX5-FIX: heartbeats:report/read let the saved credential run the
-      // room-scoped wake listener (createHeartbeatActor binds it to this
-      // room via the mcp:room: scope below). Without them the standard
-      // setup credential 403'd on its own listener surface.
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
+      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });

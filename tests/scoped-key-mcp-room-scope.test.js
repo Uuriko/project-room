@@ -138,9 +138,7 @@ test("onboarding MCP token keeps its full room+inbox+wake surface", async t => {
   });
   const token = store.agentPlugin.issueOnboardingMcpToken({ identityId: agent.identityId, roomId, label: "probe" });
   const key = token.credential;
-  // CX5-FIX: heartbeats:report/read join the set so the saved onboarding
-  // credential can run its room-scoped wake listener (see SYNC CX5-FIX).
-  assert.deepEqual(token.scopes, [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"]);
+  assert.deepEqual(token.scopes, [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"]);
   const posted = await call(origin, "room_post_message",
     { roomId, id: "ob-1", messageId: "ob-m1", body: "onboarding post" }, key);
   assert.equal(posted.body.result.isError ?? false, false);

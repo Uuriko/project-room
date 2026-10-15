@@ -8953,84 +8953,6 @@ paths:
         '403': { description: origin_denied or csrf_denied }
         '409': { description: Stale expectedSessionRevision }
         '422': { description: invalid_logout }
-  /api/account/sessions:
-    get:
-      summary: List the account's live account sessions
-      description: |
-        CX4. Account-session read (account_session cookie plus
-        X-Session-Binding). One entry per live account-session slot the
-        account holds — browser sessions and native (desktop) sessions
-        alike, because the native desktop exchange retires its OAuth grant
-        at redemption and keeps only the slot; those sessions never appear
-        in /api/oauth/sessions. Each entry names the login method recorded
-        at sign-in (a desktop session says method "desktop"), the slot's
-        creation time, its authenticated-until and expiry, and whether it
-        is the caller's own current session. A caller only ever sees their
-        own sessions.
-      security:
-        - accountSession: []
-      responses:
-        '200':
-          description: "{ sessions: [{ id, method, methodRef, createdAt, authenticatedUntil, expiresAt, current }] }"
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [sessions]
-                properties:
-                  sessions:
-                    type: array
-                    items:
-                      type: object
-                      required: [id, createdAt, authenticatedUntil, expiresAt, current]
-                      properties:
-                        id: { type: string, description: "Public session id (the :id for DELETE /api/account/sessions/{id}); a one-way derivation, never a credential" }
-                        method: { type: [string, "null"], description: "Login method kind recorded at sign-in (desktop, magic, password, passkey, google, access-key, ...); null for sessions minted before methods were recorded" }
-                        methodRef: { type: [string, "null"], description: "Public login-method handle recorded at sign-in, when the method carries one" }
-                        createdAt: { type: integer, description: "Slot creation, ms epoch" }
-                        authenticatedUntil: { type: integer, description: "End of the authenticated window, ms epoch" }
-                        expiresAt: { type: integer, description: "Slot expiry, ms epoch" }
-                        current: { type: boolean, description: "True for the caller's own session" }
-        '401': { description: unauthenticated }
-        '422': { description: session_binding_required }
-        '429': { description: rate_limited }
-  /api/account/sessions/{id}:
-    delete:
-      x-room-permission: self
-      summary: Revoke one account session owned by the account
-      description: |
-        CX4 targeted revocation. Account-session write (X-CSRF-Token,
-        Origin, X-Session-Binding), 60 per minute per address. Ends exactly
-        the named account session — browser or native — effective
-        immediately: its cookie, reads, and streams are denied from the
-        next request. The account's other sessions and every OAuth
-        session are untouched, and POST /api/oauth/sessions/revoke-all
-        keeps its OAuth-only semantics (it never reached these slots).
-        Unknown ids, already-dead sessions, and other accounts' sessions
-        all answer 404 session_not_found, so a caller cannot probe for
-        them.
-      security:
-        - accountSession: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, maxLength: 128 }
-      responses:
-        '200':
-          description: "{ revoked }"
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [revoked]
-                properties:
-                  revoked: { type: integer, description: "1 when the named live session was revoked" }
-        '401': { description: unauthenticated }
-        '403': { description: csrf_denied }
-        '404': { description: session_not_found }
-        '422': { description: session_binding_required }
-        '429': { description: rate_limited }
   /api/auth/recovery-codes/generate:
     post:
       summary: Mint or regenerate the account's recovery-code set (slice 6)
@@ -10976,17 +10898,6 @@ paths:
       description: >-
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `heartbeats:report` scope (403 `insufficient_scope` without it).
-        A `rak_` key carrying exactly one `mcp:room:<roomId>` scope — the
-        credential standard setup saves — is bound to that room as a
-        room-scoped listener: it may run the room-hosted poll listener for
-        the bound room, may not register wake URLs or push (403
-        `scoped_key_wake_refused`), its hosts are stored in a key-specific
-        namespace while responses echo the caller's own hostId, and the
-        identity's membership in the bound room is re-verified on every
-        call (403 `scoped_key_room_refused` once unlinked; several
-        `mcp:room:` scopes are refused the same way). A `rak_` key with
-        heartbeat scopes but no room scope is an owner-issued identity-level
-        key and follows the `pri_` rules.
         A room access key may also report pull-only presence when its active
         agent member is unambiguously linked to one unrevoked identity active
         in this room alone. It cannot install wake URLs or push configuration.
@@ -10995,14 +10906,6 @@ paths:
         Identity-owned hosts remain unchanged, and pendingWakes contains only
         this room's signals. Revocation and identity binding are checked again
         after body upload, before the synchronous write.
-        Optional `listenerLease` (`true` for the credential's own scope, or
-        `{ roomId }` naming a room queue) also acquires/renews the durable
-        listener lease for that queue in the same write; the response's
-        `listener` block reports `{ acquired, fencingToken?, leaseExpiresAt,
-        renewed? }` or `{ acquired: false, activeListenerId, leaseExpiresAt }`
-        — contention is data, never a heartbeat failure. While a lease is
-        live for a signal's room, ack for that signal requires the lease's
-        `fencingToken` (see `/api/agent-heartbeats/ack`).
         Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
         host), optional `mode` (defaults to `wakeable` — the host can wait on
         `/api/agent-wakes/poll` without a public endpoint, with an optional
@@ -11040,14 +10943,6 @@ paths:
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
                 cadenceSeconds: { type: number, exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
-                listenerLease:
-                  description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
-                  oneOf:
-                    - { type: boolean, enum: [true] }
-                    - type: object
-                      required: [roomId]
-                      properties:
-                        roomId: { type: string, minLength: 1 }
                 pushNotification:
                   type: object
                   required: [url, token]
@@ -11061,7 +10956,7 @@ paths:
                         schemes: { type: array, items: { type: string }, example: ["bearer"] }
                         credentials: { type: string, description: never echoed }
       responses:
-        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
         '422': { description: invalid_heartbeat }
@@ -11132,12 +11027,7 @@ paths:
         windowMs }`; with `roomId` returns `{ roomId, windowMs, asOf,
         wakeable: [{ agentId, wakeable }], notWakeable: [...] }` for that
         room's members — you must be a member of the room (a room access
-        key reads only its bound room). Room mode attributes activity per
-        room: identity-level listening counts in every room the identity
-        belongs to, while activity under a room-scoped credential (room
-        key or room-scoped `rak_` key) counts only for its own room — it
-        never advertises wakeability in another room after a membership
-        change. Exact poll timestamps are never
+        key reads only its bound room). Exact poll timestamps are never
         served (activity fingerprinting); the booleans are the data side
         for warning before @mentioning an idle agent. 120 requests per
         identity per minute.
@@ -11164,13 +11054,7 @@ paths:
         `{ acknowledged: [signalId] }`. A room access key meeting the same
         single-room binding requirements can acknowledge only this room's
         signals; other-room and unknown ids are not applied or disclosed.
-        Authorization is rechecked after upload. Optional `fencingToken`:
-        while a listener lease is live for a signal's room (or the signal
-        is claimed under one), the ack must carry that lease's token;
-        tokenless or wrong-token acks get 409 `listener_fenced` (or
-        `wake_signal_fenced` for a claim held by a lapsed lease that must
-        be re-claimed first). With no live lease or claim the token is
-        unnecessary and ack behaves as before. 120 per address per minute.
+        Authorization is rechecked after upload. 120 per address per minute.
       security:
         - bearerAuth: []
       requestBody:
@@ -11182,12 +11066,10 @@ paths:
               required: [signalIds]
               properties:
                 signalIds: { type: array, items: { type: string }, minItems: 1 }
-                fencingToken: { type: string, minLength: 1, description: "the live listener lease's fencing token, required to ack signals fenced by that lease" }
       responses:
         '200': { description: "{ acknowledged: [signalId] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
-        '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
         '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
   /api/access-requests/{id}:

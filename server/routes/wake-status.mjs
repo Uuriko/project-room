@@ -56,9 +56,7 @@ export async function readWakeStatus(ctx) {
       ctx.reject(403, "room_mismatch", "A room access key can only read its bound room");
     if (!auth.roomId && !isRoomMember(ctx.store, roomId, auth.identityId))
       ctx.reject(403, "room_membership_required", "Join the room to read its wake status");
-    // CX5-FIX: room mode attributes activity per room — identity-level
-    // activity counts, room-scoped activity counts only for its own room.
-    const list = ctx.store.agentHeartbeats.wakeStatusListForRoom(roomId);
+    const list = ctx.store.agentHeartbeats.wakeStatusList();
     const members = new Set(roomMemberIdentityIds(ctx.store, roomId));
     const wakeable = [], notWakeable = [];
     for (const entry of list.wakeable) if (members.has(entry.agentId)) wakeable.push(coarsen(true)(entry));

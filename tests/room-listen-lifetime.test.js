@@ -45,10 +45,7 @@ test('poll listener survives more than 256 handled wakes without consuming the l
       if (count < 257) {
         // The consuming host acknowledges handling. The pointer-only listener
         // must not do this itself or retain already-handled ids forever.
-        const lease = store.agentHeartbeats.acquireListenerLease({ agentId: agent.identityId,
-          roomId: 'lifetime-room', listenerId: 'lifetime-host' });
-        assert.equal(lease.acquired, true, 'the consuming host retains its receiving lease');
-        store.agentHeartbeats.ackWakes({ agentId: agent.identityId, signalIds: [pointer.signalId], fencingToken: lease.fencingToken });
+        store.agentHeartbeats.ackWakes({ agentId: agent.identityId, signalIds: [pointer.signalId] });
         current = enqueue();
       }
       done();

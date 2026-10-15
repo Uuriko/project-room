@@ -1815,7 +1815,3 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
 .join-agent .connect-steps li { margin: .35rem 0; }
 .join-agent .connect-steps strong { color: var(--text); }
-
-.inline-result { min-width: 0; margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
-.inline-result h2 { margin-block: 0 var(--space-2); font-size: var(--text-lg); }
-.inline-result .portable-actions { flex-wrap: wrap; }

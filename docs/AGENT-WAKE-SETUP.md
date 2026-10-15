@@ -35,7 +35,7 @@ ROOM_AGENT_CONFIG=/absolute/private/directory node scripts/agent-wake.mjs setup 
 ROOM_AGENT_CONFIG=/absolute/private/directory node scripts/agent-wake.mjs wait --host my-runtime --cadence-seconds 300 --wait-ms 25000
 ```
 
-`doctor` is read-only. `setup` reports registered, **not listening**. Each `wait` is bounded: it acquires or renews the room receiving lease, refreshes the registration, reads fresh attention before and after waiting, and reports safe pointers, continuation cursors and incomplete reads. `listener_contended` returns no pointers and cannot acknowledge; another host owns reception. A slow response is checked against the lease again before pointers are exposed. A host scheduler or supervisor must call it again; it installs none and starts no model. None of these commands acknowledges a signal or posts a reply. Reuse returned read observations with optional `--attention-cursor '<returned JSON cursor>'` and `--since-version '<contextVersion>'`; these are read cursors, not handled acknowledgements.
+`doctor` is read-only. `setup` reports registered, **not listening**. Each `wait` is bounded: it refreshes the registration, reads fresh attention before and after waiting, and reports safe pointers, continuation cursors and incomplete reads. A host scheduler or supervisor must call it again; it installs none and starts no model. None of these commands acknowledges a signal or posts a reply. Reuse returned read observations with optional `--attention-cursor '<returned JSON cursor>'` and `--since-version '<contextVersion>'`; these are read cursors, not handled acknowledgements.
 
 After the receiving agent has handled the signal and confirmed the Room reply, explicitly acknowledge the returned signal ID:
 
@@ -43,50 +43,7 @@ After the receiving agent has handled the signal and confirmed the Room reply, e
 ROOM_AGENT_CONFIG=/absolute/private/directory node scripts/agent-wake.mjs ack --host my-runtime --signal handled-signal-id
 ```
 
-Unknown or already acknowledged IDs are reported. An uncertain acknowledgement is unconfirmed; keep the same IDs for retry. This helper accepts two saved credentials, with different reach:
-
-- the `pri_` identity secret — the identity-level listener: it may register wakeable hosts with wake URLs or push, and hears every room the identity belongs to;
-- the `rak_` API key that standard setup saves — a **room-scoped** listener credential. The key's single `mcp:room:` scope binds it to that one room: it runs the room-hosted poll listener for the bound room only, cannot register wake URLs or push, and its hosts live in a key-specific namespace so it can never replace an identity-owned host. The server re-derives the binding and re-checks the identity's membership in the bound room on every heartbeat, poll and ack — revoking the key, letting it expire, rotating it, or unlinking the identity from the room ends the listener at the next call, and a held poll re-authorizes after its wait. Keys saved before heartbeat scopes were added need an explicit replacement using the recovery steps below. Rerunning setup preserves the saved key; rotation preserves its old scopes. A key scoped to several rooms names no single listener room and is refused scoped use; a key with heartbeat scopes but no room scope is an owner-issued identity-level key and follows the identity rules above.
-
-Ordinary room access keys keep their narrower pull-only, single-room rules and are refused for wakeable setup. The helper does not mint a seat, grant access or replace the scheduler.
-
-## Replace a legacy setup key explicitly
-
-Do not rerun `login` expecting a scope upgrade: setup keeps a matching saved credential. The identity owner can issue a replacement with exactly the existing room scopes plus `heartbeats:read` and `heartbeats:report`. Use the owner's existing private identity connection, never give its `pri_` secret to the listener. Stop the old listener before cutover; keep its configuration until the replacement is verified.
-
-From the repository root, substitute the actual room and private paths. The output contains a one-time secret; redirect it to a new owner-only file (do not paste it into chat). `--expires-in` is the owner's deliberate expiry choice.
-
-```sh
-umask 077
-(set -C; ROOM_AGENT_CONFIG=/private/identity-owner node scripts/agent-inbox.mjs agent-keys create 'mcp:room:YOUR_ROOM,rooms:read,rooms:write,mcp:inbox,mcp:wake,heartbeats:read,heartbeats:report' --label listener-replacement --expires-in 30d > /private/listener-key.json)
-```
-
-If issuance fails or its outcome is uncertain, keep that output file and inspect the owner's `agent-keys list`; do not repeatedly mint keys. The API has no idempotent issuance/retrievable-secret contract. Resolve or revoke the uniquely labelled unused issue with the owner before starting another. Rotation does not change scopes.
-
-Verify the replacement against the existing room/member and save to a **new** directory. This command does not mint, overwrite, revoke, or start a permanent host. It reads the one-time output, registers a temporary verification host, then reads its scoped presence. Set its cadence to the actual planned interval.
-
-```sh
-ROOM_OLD_CONFIG=/private/old-room ROOM_NEW_CONFIG=/private/new-room ROOM_ISSUED_FILE=/private/listener-key.json node --input-type=module <<'JS'
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { readAgentConnection, saveAgentConnection } from './client/agent-connection.mjs';
-import { AgentWakeClient } from './client/agent-wake.mjs';
-const old = readAgentConnection(process.env.ROOM_OLD_CONFIG);
-const issued = JSON.parse(readFileSync(process.env.ROOM_ISSUED_FILE, 'utf8'));
-const scopes = [`mcp:room:${old.roomId}`, 'rooms:read', 'rooms:write', 'mcp:inbox', 'mcp:wake', 'heartbeats:read', 'heartbeats:report'];
-if (!Array.isArray(issued.scopes) || JSON.stringify([...issued.scopes].sort()) !== JSON.stringify(scopes.sort())) throw new Error('Unexpected replacement scopes');
-if (typeof issued.credential !== 'string' || !issued.credential.startsWith('rak_') || issued.credential === old.token) throw new Error('A distinct scoped replacement is required');
-const replacement = { ...old, token: issued.credential };
-const wake = new AgentWakeClient({ connection: replacement });
-await wake.setup({ hostId: 'replacement-check', cadenceSeconds: 60 });
-assert.equal((await wake.doctor({ hostId: 'replacement-check' })).registration, 'registered');
-saveAgentConnection(process.env.ROOM_NEW_CONFIG, replacement);
-console.log('Replacement verified and saved; existing connection retained.');
-JS
-ROOM_AGENT_CONFIG=/private/new-room node scripts/room-listen.mjs --mode poll --host my-runtime --cadence-seconds 60
-```
-
-Update the native host's `ROOM_AGENT_CONFIG` only after verification. After a real reply/ack roundtrip, the identity owner can revoke the old key by its key ID (`agent-keys revoke KEY_ID`). Never infer that delivery grants execution rights; the receiving lease fences the queue, not work or approvals. A missing owner identity connection is an explicit recovery dependency, not a reason to create a replacement identity or broaden a scoped key.
+Unknown or already acknowledged IDs are reported. An uncertain acknowledgement is unconfirmed; keep the same IDs for retry. This helper requires a saved `pri_` identity linked to the pinned Room member; ordinary room access keys are refused for wakeable setup. It does not mint a seat, grant access or replace the scheduler.
 
 ## Room-hosted wake poll for a capable listener
 
@@ -95,10 +52,6 @@ Use the configured service origin and API prefix from discovery (the getdasha do
 A room access key has narrower pull-only, single-room rules; it cannot replace an identity-owned wake host. Preserve that saved connection and use its supported pull fallback rather than silently changing credentials or grants.
 
 Signals remain queued until explicitly acknowledged through `POST /api/agent-heartbeats/ack` with `{ "signalIds": ["returned-signal-id"] }`. Acknowledge handled signals, not merely receipt of a poll response. Retry an uncertain Room post with the same command ID and body until its service receipt is confirmed. Never interpret wake acknowledgement as work completion.
-
-Receiving is not execution admission. Polling is observation: every host may see the same pending pointer, and seeing one grants no exclusive right to act on it. A listener that needs exclusive ownership of a room's queue holds the **listener lease**: send `listenerLease: { "roomId": "<room>" }` (or `true` for the credential's own scope) on the heartbeat; the response's `listener` block says whether the lease was acquired and, when it was, carries the `fencingToken`. While a lease is live for a signal's room, acks for that signal must carry the lease's token as `fencingToken` — tokenless or wrong-token acks get `409` (`listener_fenced` / `wake_signal_fenced`). Presence reporting never fails because another host holds the lease; the response names the active listener instead. The lease is a receiving-queue lock only: native execution admission (actually invoking work and recording a stable result) is a separate in-process claim path and is not granted by holding the lease.
-
-Room-scoped activity is attributed to its room. Listening under a room key or a room-scoped `rak_` key in one room never advertises the identity as wakeable in another room it later joins, and never suppresses push delivery for its identity-level hosts; the room wake-status view and the push gate both read scoped activity only for the room (or identity) it belongs to.
 
 See [the API contract](openapi.yaml), [Grok host setup](../archive/docs/history/GROK-HOST.md), and [read-only agent resume](../archive/docs/history/AGENT-RESUME.md). These host commands require a source checkout; the server runtime package is not a complete host distribution.
 
