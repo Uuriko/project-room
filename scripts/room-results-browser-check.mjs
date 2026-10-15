@@ -232,6 +232,37 @@ test("creating new work from the composer requires explicit confirmed submission
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up on the result" && item.state === "proposed"));
 });
 
+test("creating work without choosing a verifier responds instead of silently doing nothing", { timeout: 30000 }, async t => {
+  const f = await setup(t, { expectedWrites: 1 }), p = f.p;
+  await openComposerOptions(p); await p.locator("#new-work-button").click();
+  await p.locator("#work-title-input").fill("Follow up without a verifier");
+  await p.locator("#work-done-input").fill("One clear next action.");
+  await p.locator("#assignee-select").selectOption("producer");
+  // Verification is required by default and the verifier select starts empty.
+  // The happy-path test above always selects a verifier first, which is why
+  // it never hit this trap: Create used to swallow the click with no request
+  // and no surfaced error.
+  assert.equal(await p.locator("#require-verification").isChecked(), true);
+  assert.equal(await p.locator("#verifier-select").inputValue(), "");
+  assert.equal(await p.locator("#work-options").evaluate(node => node.open), false);
+  await p.locator("#create-work-button").click();
+  // The dialog must respond: still open, Options expanded so the requirement
+  // is visible, the verifier select focused, and a plain hint naming what is
+  // missing. Nothing is created and no write is made.
+  assert.equal(await p.locator("#work-dialog").isVisible(), true);
+  assert.equal(await p.locator("#work-options").evaluate(node => node.open), true);
+  assert.equal(await p.locator("#verifier-select").evaluate(node => node === document.activeElement), true);
+  assert.equal(await p.locator("#verifier-hint").isVisible(), true);
+  assert.match(await p.locator("#verifier-hint").textContent(), /Choose who verifies this work/);
+  assert.equal(Object.values(f.state().workItems).some(item => item.title === "Follow up without a verifier"), false);
+  // Choosing a verifier clears the hint and Create succeeds.
+  await p.locator("#verifier-select").selectOption("reviewer");
+  assert.equal(await p.locator("#verifier-hint").isVisible(), false);
+  await p.locator("#create-work-button").click();
+  await p.locator("#work-dialog").waitFor({ state: "hidden" });
+  assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up without a verifier" && item.state === "proposed"));
+});
+
 for (const mobile of [false, true]) test(`automatic Results shortcut ${mobile ? "phone" : "desktop"}: appears for useful results and preserves settings`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile }), p = f.p;
   await p.locator("#message-input").fill("My unfinished thought");

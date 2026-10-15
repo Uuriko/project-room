@@ -1747,6 +1747,7 @@ function syncWorkForm() {
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
   $("#verifier-select").required = reviewing;
+  if ($("#verifier-select").value) $("#verifier-hint").hidden = true;
   const checks = [reviewing && "Review", $("#require-decision").checked && "approval"].filter(Boolean);
   $("#work-options-summary").textContent = !reviewing && active.length === 1 && active[0].kind === "human" && active[0].id === session.member.id
     ? uiText("human.workNoReview") : `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
@@ -5821,7 +5822,7 @@ function openWork(sourceId = null, reuseId = null) {
   workFormEpoch++; setWorkRetry(false);
   $("#new-work-form").reset();
   $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
-  $("#work-options").open = false;
+  $("#work-options").open = false; $("#verifier-hint").hidden = true;
   $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
   if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
@@ -5902,6 +5903,27 @@ $("#review-settings-button").addEventListener("click", () => {
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
 $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
 $("#new-work-form").addEventListener("change", syncWorkForm);
+// Create-work trap guard: verification is required by default but the verifier
+// select starts empty, so native validation swallowed the Create click with
+// no surfaced error (the requirement controls sit in the collapsed Options
+// group). Respond instead of ignoring: open Options so the requirement is
+// visible, name what is missing next to the select, and focus it. Defaults
+// are unchanged and no verifier is picked for the user.
+$("#create-work-button").addEventListener("click", e => {
+  const verifier = $("#verifier-select");
+  if (!$("#require-verification").checked || verifier.value) return;
+  // Respond only when the verifier is the form's first invalid control. If
+  // another required field is also unmet (title, done-when, assignee), let
+  // native validation run so it focuses that field instead of the verifier.
+  const firstInvalid = [...$("#new-work-form").querySelectorAll("input,select,textarea")]
+    .find(el => !el.disabled && typeof el.checkValidity === "function" && !el.checkValidity());
+  if (firstInvalid && firstInvalid !== verifier) return;
+  e.preventDefault();
+  $("#work-options").open = true;
+  $("#verifier-hint").textContent = uiText("human.workChooseVerifier");
+  $("#verifier-hint").hidden = false;
+  $("#verifier-select").focus();
+});
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
 $("#message-list").addEventListener("click", e => {
