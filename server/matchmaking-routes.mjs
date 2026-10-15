@@ -13,6 +13,12 @@
 // never read from the body — matching for someone else is a different
 // feature and needs its own consent story.
 //
+// The same rule applies to openings: the first member to declare an
+// opening's terms is recorded as its declarer (declared_by on the terms
+// row), and only that member may later overwrite or close those terms.
+// Without that check any member could re-price or close (open: false)
+// another member's opening by re-offering the same workId.
+//
 // Error contract: the pure modules throw Error with a plain message and no
 // HTTP status. Bad input maps to 422 invalid_matchmaking_input; an unknown
 // work item or decision to 404; a caller with no declaration on file to 409,
@@ -35,6 +41,7 @@ export function createMatchmakingRegistry() {
     putSeeker(roomId, row) { room(roomId).seekers.set(row.identity_id, row); return row; },
     getSeeker(roomId, seekerId) { return room(roomId).seekers.get(seekerId) ?? null; },
     putTerms(roomId, row) { room(roomId).terms.set(row.work_id, row); return row; },
+    getTerms(roomId, workId) { return room(roomId).terms.get(workId) ?? null; },
     termRows(roomId) { return [...room(roomId).terms.values()]; },
     putDecision(roomId, decision) { room(roomId).decisions.set(decision.decisionId, decision); return decision; },
     getDecision(roomId, id) { return room(roomId).decisions.get(id) ?? null; },
@@ -96,11 +103,28 @@ export function handleMatchmakingCore({ req, store, roomId, auth, matchmakingRou
         trustFloor: input.trustFloor ?? 0, open: input.open ?? true,
         deadline: input.deadline ?? null,
       }));
+      // Ownership: putTerms key-overwrites by work_id, so without this an
+      // offer for an existing opening would silently replace (or, with
+      // open: false, close) another member's terms. Only the member who
+      // first declared the opening may change it. A row with no recorded
+      // declarer fails closed rather than becoming claimable by whoever
+      // offers first. The lookup prefers getTerms when a registry offers
+      // it and falls back to termRows, which every registry already
+      // implements, so custom registries need no new method to be
+      // protected.
+      const existing = typeof registry.getTerms === "function"
+        ? registry.getTerms(roomId, opening.openingId)
+        : registry.termRows(roomId).find(row => row.work_id === opening.openingId) ?? null;
+      if (existing && existing.declared_by !== caller) {
+        reject(403, "opening_not_owner",
+          `Opening "${opening.openingId}" was declared by another member — only its declarer can change or close its terms`);
+      }
       registry.putTerms(roomId, {
         work_id: opening.openingId, room_id: roomId, reward_kind: opening.rewardKind,
         reward_amount: opening.rewardAmount, requires: JSON.stringify(opening.requires),
         size_minutes: opening.sizeMinutes, trust_floor: opening.trustFloor,
         deadline: opening.deadline, title: opening.title, open: opening.open,
+        declared_by: caller,
         declared_at: nowIso,
       });
       return json(null, 201, { roomId, opening });

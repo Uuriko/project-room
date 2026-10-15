@@ -40,3 +40,15 @@ test("ordinary multilingual text, marks, tabs, ANSI escapes and emoji stay allow
     assert.doesNotThrow(() => run(T.MESSAGE_POSTED, { body }), body);
   }
 });
+
+test("bodies made only of invisible characters are refused like empty ones (R217-1)", () => {
+  // "   " is refused as empty, but zero-width spaces, a Hangul filler or bare
+  // combining marks passed .trim() and posted as a blank bubble that still
+  // counts as unread. Visible text with joiners/marks stays allowed (above).
+  for (const body of ["\u200B\u200B", "\u3164", "\u0301\u0301", "\u2060\uFEFF", " \u200B\n\u200C "]) {
+    refused(T.MESSAGE_POSTED, { body }, /visible/);
+    refused(T.MESSAGE_EDITED, { messageId: "m1", body }, /visible/);
+    refused(T.DM_POSTED, { to: "ai_x", messageId: "m2", body }, /visible/);
+  }
+  for (const body of ["ok\u200B", "e\u0301", "👨‍👩‍👧", "\u200Fمرحبا"]) assert.doesNotThrow(() => run(T.MESSAGE_POSTED, { body }), body);
+});

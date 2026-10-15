@@ -402,7 +402,10 @@ test("simultaneous HTTP work requests admit one winner without a partial audit e
   const before = store.snapshot(owner, "commons").sequence;
   const requests = await Promise.all([1, 2].map(() => request("/api/rooms/commons/commands", { token: human, method: "POST", data: command(T.WORK_ACCEPTED, { workItemId: "race", expectedRevision: 0 }) })));
   assert.deepEqual(requests.map(r => r.status).sort(), [201, 409]);
-  assert.equal(store.snapshot(owner, "commons").sequence, before + 1);
+  // Decision #10 cutover: the winner's accept records two events — the
+  // work.accepted itself and the board card's "created" (work_claim.updated).
+  // The loser still records nothing: no partial audit event.
+  assert.equal(store.snapshot(owner, "commons").sequence, before + 2);
 });
 
 test("an exact-scope write claim can be released at event and projection capacity", t => {

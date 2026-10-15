@@ -111,10 +111,10 @@ test("member requests retain their rate limit, and retries do not spend it", asy
   assert.equal((await f.request("/api/rooms/commons/access-requests", f.owner)).body.requests.length, 5);
 });
 
-test("ordinary public admission still returns a join request", async t => {
+test("ordinary admission with identity proof still returns a join request", async t => {
   const f = await setup(t);
   const identity = f.store.identities.create("New Joiner");
-  const joined = await f.request("/api/access-requests", null, { roomId: "commons", identityId: identity.identityId,
+  const joined = await f.request("/api/access-requests", identity.secret, { roomId: "commons", identityId: identity.identityId,
     displayName: "New Joiner", requestedPermissions: ["accept_work"], requestId: "ordinary_join" });
   assert.equal(joined.status, 201);
   assert.equal(joined.body.kind, "join");
@@ -191,6 +191,31 @@ test("RT handler rows preserve the GET queue and share quota across both POST al
   await assert.rejects(invoke("POST", "/api/rooms/commons/access-requests", { requestedPermissions: ["accept_work"], requestId: "rt_over" }),
     error => error.status === 429 && error.code === "rate_limited");
   await assert.rejects(invoke("GET", "/api/rooms/commons/access-requests", null), error => error.status === 403);
+});
+
+test("replaying a requestId with different permissions or note conflicts instead of returning the old request", async t => {
+  const f = await setup(t);
+  const original = await f.ask({ permissions: ["accept_work"], note: "first note", requestId: "replay_conflict" });
+  assert.equal(original.status, 201);
+  assert.deepEqual(original.body.requestedPermissions, ["accept_work"]);
+  assert.equal(original.body.note, "first note");
+  // Identical replay is a true idempotent retry and still returns the original.
+  const retry = await f.ask({ permissions: ["accept_work"], note: "first note", requestId: "replay_conflict" });
+  assert.equal(retry.status, 201);
+  assert.deepEqual(retry.body.requestedPermissions, ["accept_work"]);
+  // Same requestId with expanded permissions must not silently echo the old request.
+  const changedPermissions = await f.ask({ permissions: ["accept_work", "complete_work"], note: "first note", requestId: "replay_conflict" });
+  assert.equal(changedPermissions.status, 409);
+  assert.equal(changedPermissions.body.error.code, "request_conflict");
+  // Same requestId with a different note must also conflict.
+  const changedNote = await f.ask({ permissions: ["accept_work"], note: "different note", requestId: "replay_conflict" });
+  assert.equal(changedNote.status, 409);
+  assert.equal(changedNote.body.error.code, "request_conflict");
+  // The stored request is untouched by the conflicting replays.
+  const queue = await f.request("/api/rooms/commons/access-requests", f.owner);
+  assert.equal(queue.body.requests.length, 1);
+  assert.deepEqual(queue.body.requests[0].requestedPermissions, ["accept_work"]);
+  assert.equal(queue.body.requests[0].note, "first note");
 });
 
 test("a member without membership administration cannot decide a permission upgrade (HTTP)", async t => {

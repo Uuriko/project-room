@@ -10,8 +10,8 @@ import { createRoomServer } from "../server/http.mjs";
 import {
   agentCard, agentCardJson, discoveryDoc, aiCatalog, robotsTxt, AGENT_CARD_A2A_PATH, DISCOVERY_PROTOCOL_VERSION,
   attachCardSignatureEnvelope, agentJwksJson,
-} from "../deploy/agent-discovery.mjs";
-import { AGENT_CARD_PUBLIC_KEY, AGENT_CARD_AGENT_ID, AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
+} from "../server/agent-discovery.mjs";
+import { AGENT_CARD_PUBLIC_KEY, AGENT_CARD_AGENT_ID, AGENT_CARD_KEY_ID } from "../server/agent-card-key.mjs";
 import {
   canonicalCardBytes, generateKeyPair, isValidPublicKey, signCard, verifyCardSignature,
   signCardJws, verifyCardJws, publicKeyToJwk,
@@ -120,7 +120,7 @@ test("pinned public key is a valid Ed25519 key and the card leaks no secrets", (
 });
 
 test("unsigned default: committed tree serves the card with no signature envelope", () => {
-  // deploy/agent-card-signed.mjs ships the null default; the deploy flow
+  // server/agent-card-signed.mjs ships the null default; the deploy flow
   // re-signs it (dirty worktree state, reverted after deploy).
   const card = agentCard();
   assert.equal(card.cardSignature ?? null, null);

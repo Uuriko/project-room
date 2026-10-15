@@ -25,7 +25,7 @@ test("requester cancel removes a pending access request from the owner queue", a
     displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"],
     requestId: "ar_cancel"
-  });
+  }, identity.secret);
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
@@ -52,7 +52,7 @@ test("requester cancel removes a pending access request from the owner queue", a
     assert.equal(requests.status("ar_cancel", identity.identityId).status, "pending");
   }
   const revoked = store.identities.create("Revoked Requester");
-  requests.request("commons", { identityId: revoked.identityId, displayName: "Revoked Requester", requestId: "ar_revoked", requestedPermissions: [] });
+  requests.request("commons", { identityId: revoked.identityId, displayName: "Revoked Requester", requestId: "ar_revoked", requestedPermissions: [] }, revoked.secret);
   store.identities.revoke(revoked.identityId, revoked.secret);
   const revokedReply = await fetch(`${origin}/api/access-requests/ar_revoked`, {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${revoked.secret}` },
@@ -102,7 +102,7 @@ test("direct link closes the identity's pending access request", async () => {
     displayName: "Already Admitted",
     requestedPermissions: ["accept_work"],
     requestId: "ar_direct"
-  });
+  }, identity.secret);
   store.identities.link(ownerToken, "commons", {
     identityId: identity.identityId,
     permissions: ["accept_work"]
@@ -131,7 +131,7 @@ test("approving an already-linked identity records the decision without a second
     displayName: "Granted First",
     requestedPermissions: ["manage_members"],
     requestId: "ar_already"
-  });
+  }, identity.secret);
   store.identities.link(ownerToken, "commons", {
     identityId: identity.identityId,
     permissions: ["accept_work"],

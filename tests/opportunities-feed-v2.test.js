@@ -12,6 +12,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { unpublishPublic } from "../server/legal-store.mjs";
 
 const ROOM = "commons";
 const OTHER_ROOM = "unlisted-room";
@@ -124,6 +125,20 @@ test("open help-wanted work in a listed room appears with a strict shape", async
   const serialized = JSON.stringify(opp);
   assert.ok(!serialized.includes("owner"), "member ids must not leak");
   assert.ok(!/invite|redeem|code/i.test(serialized), "no admission material");
+});
+
+test("operator unpublish removes the room's help-wanted work and bounties from the feed", async t => {
+  const fixture = serve(t);
+  const { get } = await started(t, fixture);
+  const { store, ownerKey } = fixture;
+  store.roomDirectory.set(ROOM, "owner", true);
+  propose(store, ownerKey, ROOM, "w-unpublished", "Help wanted title XYZ");
+  openHelp(store, ownerKey, ROOM, "w-unpublished", new Date(fixture.now() + 3600e3).toISOString());
+  seedBounty(store, { bountyId: "b-unpublished", roomId: ROOM, state: "funded", deadlineMs: fixture.now() + 3600e3 });
+  assert.equal((await (await get("/api/opportunities.json")).json()).opportunities.length, 2);
+  unpublishPublic(store.db, { kind: "room", id: ROOM, byAccount: "operator", now: fixture.now() });
+  assert.deepEqual((await (await get("/api/opportunities.json")).json()).opportunities, []);
+  assert.deepEqual((await (await get(`/api/opportunities.json?room=${ROOM}`)).json()).opportunities, []);
 });
 
 test("owner feed opt-out hides both help and bounties, not the public directory; re-enable restores them", async t => {
