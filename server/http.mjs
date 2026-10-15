@@ -1696,6 +1696,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (revoked === 0) reject(404, "session_not_found", "No such active session");
         return json(res, 200, { revoked });
       }
+      // GET /api/account/sessions + DELETE /api/account/sessions/{id}
+      // (account-session inventory + targeted revocation, CX4) live in the
+      // route table: server/routes/account-sessions.mjs.
       if (url.pathname === "/api/ready" && ["GET", "HEAD"].includes(req.method)) {
         try {
           if (store.storageStatus?.().unavailable) return json(res, 503, { status: "unavailable", reason: "storage_unavailable" }, req.method === "HEAD");

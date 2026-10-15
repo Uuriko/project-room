@@ -64,7 +64,11 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
+  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.contains(document.activeElement)), false, "inline reading does not trap keyboard navigation");
+  await f.page.keyboard.press("Shift+Tab");
+  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
   await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
   await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
@@ -125,7 +129,7 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     }).observe(document.querySelector("#message-list"), { childList: true, subtree: true });
   });
   const trace = async () => page.evaluate(() => ({ trace: window.__focusTrace, active: document.activeElement?.outerHTML.slice(0, 140),
-    dialogOpen: document.querySelector("#result-dialog").open, hasFocus: document.hasFocus(), scrollY }));
+    readerVisible: !document.querySelector("#result-dialog").hidden, hasFocus: document.hasFocus(), scrollY }));
   await page.locator("#message-input").fill("Keep this reviewer's conversation draft.");
   const measure = async (stage, panelSelector = null, textSelector = null) => {
     const value = await page.evaluate(({ panelSelector, textSelector }) => {
@@ -175,7 +179,7 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
     assert.equal(await page.locator("#result-title").textContent(), "A quiet room");
     assert.match(await page.locator("#result-status").textContent(), /Submitted by Room owner.*exact stored text/);
-    assert.equal(await page.locator("#close-result").evaluate(node => node === document.activeElement), true);
+    assert.equal(await page.locator("#result-title").evaluate(node => node === document.activeElement), true);
     await measure(stage, "#result-dialog", "#result-body");
     // Reading a result records the reader's basis, so the next snapshot can
     // re-render this card (it gains "What changed since revision N") and
