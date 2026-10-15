@@ -38,10 +38,10 @@ function median(sorted) {
   return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function roomExcluded(roomId, events, excludedRoomIds) {
+function roomExcluded(roomId, hasExcludedEvent, excludedRoomIds) {
   if (roomId === COMMONS_ROOM_ID || excludedRoomIds.has(roomId)) return true;
   if (structuralExclusion({ roomId })) return true;
-  return events.some(event => event.props?.excluded === true);
+  return hasExcludedEvent;
 }
 
 export function weeklyProductiveRooms({ events, messages = [], now, weeks = 12, excludedRoomIds = new Set() }) {
@@ -58,11 +58,22 @@ export function weeklyProductiveRooms({ events, messages = [], now, weeks = 12, 
     }
     return row;
   };
-  const excludedRooms = new Set();
+  // One pass over events (#2918): record which rooms appear with a finite
+  // timestamp and which rooms carry any props.excluded event (regardless of
+  // that event's timestamp, matching the previous per-room filter), then
+  // evaluate the exclusion checks once per distinct room instead of
+  // re-filtering the whole array for every event (previously O(n^2)).
+  const candidateRooms = new Set();
+  const roomsWithExcludedEvent = new Set();
   for (const event of events) {
-    if (!event.roomId || !Number.isFinite(event.at)) continue;
-    if (roomExcluded(event.roomId, events.filter(item => item.roomId === event.roomId), excludedRoomIds)) {
-      excludedRooms.add(event.roomId);
+    if (!event.roomId) continue;
+    if (Number.isFinite(event.at)) candidateRooms.add(event.roomId);
+    if (event.props?.excluded === true) roomsWithExcludedEvent.add(event.roomId);
+  }
+  const excludedRooms = new Set();
+  for (const roomId of candidateRooms) {
+    if (roomExcluded(roomId, roomsWithExcludedEvent.has(roomId), excludedRoomIds)) {
+      excludedRooms.add(roomId);
     }
   }
   const consider = (roomId, at, actorKind, closed) => {

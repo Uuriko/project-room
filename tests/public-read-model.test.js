@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { START_ROOM_URL } from "../deploy/room-entry.mjs";
+import { START_ROOM_URL } from "../server/room-entry.mjs";
 import { PUBLIC_START_URL, backfillPublicReadModel } from "../server/public-read-model.mjs";
 
 const SENTINEL = "SENTINEL-private-9f3a-not-public";

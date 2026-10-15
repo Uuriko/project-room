@@ -169,6 +169,27 @@ test("an account with no password verifier still answers 401 like an unknown ema
   assert.equal((await errBody(res)).code, "invalid_credentials");
 });
 
+test("the previously published dummy-verifier password never authenticates", async t => {
+  const { f, origin } = await startServer(t);
+  // The old DUMMY_PASSWORD_VERIFIER's plaintext was a public literal, so it
+  // passed the credential check for accounts with no real verifier and the
+  // request fell through to a different outcome — an enumeration oracle.
+  // Both an unknown email and a verifier-less account must answer the same
+  // uniform 401 as a wrong password.
+  const published = "dummy-password-verifier-placeholder";
+  const unknown = await post(origin, "/api/auth/password/login", { email: "nobody-here@example.invalid", password: published, ...freshSlot(f) });
+  assert.equal(unknown.status, 401);
+  assert.equal((await errBody(unknown)).code, "invalid_credentials");
+  const normalized = email(17);
+  const { createHash } = await import("node:crypto");
+  const id = `email:${createHash("sha256").update(normalized).digest("hex")}`;
+  f.store.createAccount(id, "password-signup");
+  f.store.accountLogins.linkMagicMethod(id, { email: normalized });
+  const noVerifier = await post(origin, "/api/auth/password/login", { email: normalized, password: published, ...freshSlot(f) });
+  assert.equal(noVerifier.status, 401);
+  assert.equal((await errBody(noVerifier)).code, "invalid_credentials");
+});
+
 test("per-email rate limit trips after 10 login attempts", async t => {
   const { f, origin } = await startServer(t);
   const slot = freshSlot(f);

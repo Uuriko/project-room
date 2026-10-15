@@ -21,6 +21,7 @@ import {
   idempotencyKey,
   isTerminalKind,
   findTerminalEntry,
+  directionTerminalEntry,
   buildPlan,
   batchPlan,
   deriveExitCode,
@@ -292,7 +293,10 @@ test("classifyClaim: file lease conflict defers", () => {
 test("idempotencyKey format + terminal kinds + findTerminalEntry", () => {
   assert.equal(idempotencyKey("muse-room", "clm_1"), "backfill:muse-room:clm_1");
   assert.equal(isTerminalKind("backfill_done"), true);
-  assert.equal(isTerminalKind("backfill_aborted"), true);
+  // #2884: an abort journals a failed, explicitly re-runnable attempt — it
+  // is not a completed operation and must never be terminal.
+  assert.equal(isTerminalKind("backfill_aborted"), false);
+  assert.equal(isTerminalKind("reverse_aborted"), false);
   assert.equal(isTerminalKind("backfill_start"), false);
   assert.equal(isTerminalKind("reverse_done"), true);
   const entries = [
@@ -301,6 +305,58 @@ test("idempotencyKey format + terminal kinds + findTerminalEntry", () => {
   ];
   assert.equal(findTerminalEntry(entries, "backfill:r:c").kind, "backfill_done");
   assert.equal(findTerminalEntry(entries, "backfill:r:other"), null);
+});
+
+test("idempotency: aborted attempts are retryable, never terminal (#2884)", () => {
+  const key = "backfill:r:c";
+  // The normal pre-B3 outcome: backfill_aborted / attach_path_not_landed,
+  // whose journal detail says to re-run. It must not read as terminal.
+  const backfillAborted = [
+    { kind: "backfill_start", idempotency_key: key },
+    { kind: "backfill_aborted", idempotency_key: key, reason: "attach_path_not_landed" },
+  ];
+  assert.equal(findTerminalEntry(backfillAborted, key), null);
+  const reverseAborted = [
+    { kind: "reverse_start", idempotency_key: key },
+    { kind: "reverse_aborted", idempotency_key: key, reason: "marker_path_not_landed" },
+  ];
+  assert.equal(findTerminalEntry(reverseAborted, key), null);
+  // An abort after a completed op neither erases nor extends the lane state:
+  // the latest completed entry still governs.
+  const doneThenAborted = [
+    { kind: "backfill_done", idempotency_key: key },
+    { kind: "backfill_start", idempotency_key: key },
+    { kind: "backfill_aborted", idempotency_key: key, reason: "executor_error" },
+  ];
+  assert.equal(findTerminalEntry(doneThenAborted, key).kind, "backfill_done");
+});
+
+test("idempotency: backfill and reverse do not block each other (#2884)", () => {
+  const key = "backfill:r:c";
+  // A migrated claim: migrate is a no-op, but reverse MUST still run —
+  // under the old shared check, backfill_done blocked reverse forever.
+  const migrated = [{ kind: "backfill_done", idempotency_key: key }];
+  assert.equal(directionTerminalEntry(migrated, key, "backfill_done").kind, "backfill_done");
+  assert.equal(directionTerminalEntry(migrated, key, "reverse_done"), null);
+  // A reversed claim: reverse is a no-op, but a re-migrate MUST still run.
+  const reversed = [
+    ...migrated,
+    { kind: "reverse_start", idempotency_key: key },
+    { kind: "reverse_done", idempotency_key: key },
+  ];
+  assert.equal(directionTerminalEntry(reversed, key, "reverse_done").kind, "reverse_done");
+  assert.equal(directionTerminalEntry(reversed, key, "backfill_done"), null);
+  // An aborted reverse leaves the claim on herdr: reverse retries, and
+  // migrate still correctly sees the claim as already migrated.
+  const reverseAborted = [
+    ...migrated,
+    { kind: "reverse_start", idempotency_key: key },
+    { kind: "reverse_aborted", idempotency_key: key, reason: "marker_path_not_landed" },
+  ];
+  assert.equal(directionTerminalEntry(reverseAborted, key, "reverse_done"), null);
+  assert.equal(directionTerminalEntry(reverseAborted, key, "backfill_done").kind, "backfill_done");
+  // Other claims' entries never interfere.
+  assert.equal(directionTerminalEntry(migrated, "backfill:r:other", "backfill_done"), null);
 });
 
 // ---- plan / batch / exit codes ------------------------------------------

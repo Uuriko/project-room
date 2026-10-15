@@ -14,6 +14,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createHandoffStore } from "../src/handoff-store.mjs";
+import { createDMRooms } from "../src/dm-room-wiring.mjs";
+import { createOwnerAlertDispatcher } from "../src/owner-alerts.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -25,20 +28,117 @@ import { initialRoom } from "../server/bootstrap.mjs";
 // M-29: handoff-store subscriber isolation
 // ---------------------------------------------------------------------------
 
+test("M-29: a throwing handoff subscriber does not fail the committed transition or starve later subscribers", () => {
+  const store = createHandoffStore({ storage: { load: () => null, save: () => {} } });
+  const seen = [];
+  store.subscribe(() => { throw new Error("subscriber blew up"); });
+  store.subscribe((event) => { seen.push(event.type); });
+  const handoff = store.propose(
+    { fromAgent: "a", toAgent: "b", taskId: "t-1", summary: "s", context: {} }, "a");
+  const result = store.accept(handoff.id, "b");
+  assert.equal(result.state, "accepted");
+  assert.deepEqual(seen, ["proposed", "accepted"]);
+  assert.equal(store.get(handoff.id).state, "accepted");
+});
+
 
 // ---------------------------------------------------------------------------
 // M-30: dm-room-wiring listener isolation
 // ---------------------------------------------------------------------------
+
+test("M-30: a throwing DM listener does not starve later listeners", () => {
+  const dm = createDMRooms();
+  const seen = [];
+  dm.onEvent(() => { throw new Error("listener blew up"); });
+  dm.onEvent((event) => { seen.push(event.type); });
+  const room = dm.openDM("alice", "bob");
+  assert.ok(seen.includes("room.opened"), `expected room.opened, saw ${JSON.stringify(seen)}`);
+  assert.equal(room.agentA, "alice");
+});
 
 
 // ---------------------------------------------------------------------------
 // M-31: dm-room-wiring restore rejects duplicate room ids
 // ---------------------------------------------------------------------------
 
+test("M-31: DM restore rejects a snapshot with two rooms sharing one id", () => {
+  const dm = createDMRooms();
+  const room = dm.openDM("alice", "bob");
+  const snapshot = JSON.parse(dm.snapshot());
+  // Same room id, different agent pair: the pair-key check alone cannot
+  // catch this; without the id check the second room silently overwrites
+  // the first.
+  const dup = { ...snapshot.rooms[0], agentA: "carol", agentB: "dave" };
+  snapshot.rooms.push(dup);
+  assert.throws(
+    () => dm.restore(JSON.stringify(snapshot)),
+    (err) => err.code === "DM_CORRUPT_SNAPSHOT",
+    "expected DM_CORRUPT_SNAPSHOT for duplicate room ids",
+  );
+  // The pre-existing room is untouched by the failed restore.
+  assert.equal(dm.get(room.id).agentA, "alice");
+});
+
 
 // ---------------------------------------------------------------------------
 // M-46: owner-alerts persist-before-notify
 // ---------------------------------------------------------------------------
+
+function raiseAndDispatchDeps({ storage, notifier }) {
+  return {
+    clock: () => 1_000_000,
+    backoff: () => 0,
+    sleep: () => Promise.resolve(),
+    storage,
+    notifier,
+  };
+}
+
+test("M-46: the in-flight dispatch attempt is persisted before notify runs", async () => {
+  const order = [];
+  const storage = {
+    load: () => null,
+    save: () => { order.push("persist"); },
+  };
+  const notifier = {
+    notify: async () => { order.push("notify"); },
+  };
+  const dispatcher = createOwnerAlertDispatcher(raiseAndDispatchDeps({ storage, notifier }));
+  const alert = dispatcher.raise({ severity: "critical", title: "t", body: "b", source: "test" });
+  order.length = 0; // ignore raise's persist; only dispatch's ordering matters
+  await dispatcher.dispatch(alert.id);
+  const firstPersist = order.indexOf("persist");
+  const firstNotify = order.indexOf("notify");
+  assert.ok(firstPersist !== -1, "expected a persist call");
+  assert.ok(firstNotify !== -1, "expected a notify call");
+  assert.ok(firstPersist < firstNotify, `persist must precede notify: ${JSON.stringify(order)}`);
+});
+
+test("M-46: a storage failure after a successful notify is a storage error, not a retried delivery", async () => {
+  let writes = 0;
+  const storage = {
+    load: () => null,
+    save: () => {
+      writes += 1;
+      // Writes: 1 = raise, 2 = in-flight attempt persist, 3 = post-notify
+      // settle. Fail the post-notify write: the send already happened.
+      if (writes > 2) throw new Error("disk is full");
+    },
+  };
+  let notifyCalls = 0;
+  const notifier = {
+    notify: async () => { notifyCalls += 1; },
+  };
+  const dispatcher = createOwnerAlertDispatcher(raiseAndDispatchDeps({ storage, notifier }));
+  const alert = dispatcher.raise({ severity: "critical", title: "t", body: "b", source: "test" });
+  await assert.rejects(
+    dispatcher.dispatch(alert.id),
+    (err) => err.code === "OA_STORAGE_ERROR",
+    "expected OA_STORAGE_ERROR, not OA_DELIVERY_FAILED",
+  );
+  assert.equal(notifyCalls, 1, "the alert must be sent exactly once");
+  assert.equal(dispatcher.get(alert.id).attempts.length, 1, "no retry after a post-notify storage failure");
+});
 
 // ---------------------------------------------------------------------------
 // M-8: per-store write-failure rollback

@@ -34,7 +34,8 @@ function fixture() {
   const listeners={};
   const container={innerHTML:'', addEventListener(name,fn){listeners[name]=fn},removeEventListener(){},contains(){return true},
     querySelector(selector){if(selector==='[data-deletion-dialog]')return dialog;if(selector==='form[data-form="delete-account"]')return form;return null;}};
-  const client={currentSession(){return {}},async request(path){
+  const client={session:{},generation:0,currentSession(){return this.session},
+    owns(generation,session){return generation===this.generation&&this.session===session},async request(path){
     if(path==='/api/auth/methods')return {methods:[{type:'password',email:'test@example.invalid'}]};
     if(path==='/api/account/deletion/plan')return {confirmationToken:'fixture-only',summary:{text:'Full inventory'},plan:{rooms:{}}};
     throw new Error('Unexpected request: '+path);

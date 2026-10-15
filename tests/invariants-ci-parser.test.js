@@ -1,6 +1,11 @@
 // Fail-first tests for scripts/invariants-ci.mjs (the invariant CI gate producer).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   invariantName,
   isFileLevelTest,
@@ -125,6 +130,45 @@ test("applyRunnerExitGuard fails closed when the runner dies but records pass", 
   const ok = [{ status: "pass" }];
   applyRunnerExitGuard(ok, 0, 1, "");
   assert.equal(ok.length, 1);
+});
+
+test("gate actually runs when the checkout path contains spaces", { timeout: 30000 }, () => {
+  // Regression for #2886: the gate compared argv[1] against the raw,
+  // percent-encoded URL pathname, so in a checkout whose path contains a
+  // space the main-module check never matched, runGate() was never invoked,
+  // and the script silently exited 0 having run no tests.
+  const root = mkdtempSync(join(tmpdir(), "invariants ci gate-"));
+  try {
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    mkdirSync(join(root, "tests", "invariants"), { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../scripts/invariants-ci.mjs", import.meta.url)),
+      join(root, "scripts", "invariants-ci.mjs"),
+    );
+    writeFileSync(
+      join(root, "tests", "invariants", "smoke.test.mjs"),
+      'import test from "node:test";\ntest("invariant smoke-space: dummy passes", () => {});\n',
+    );
+    // Spawn the gate the way CI does, as a standalone process: drop the test
+    // runner's context markers, which would make the gate's own nested
+    // `node --test` refuse to run any files ("run() called recursively").
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    delete env.NODE_TEST_WORKER_ID;
+    const proc = spawnSync(process.execPath, [join(root, "scripts", "invariants-ci.mjs")], {
+      cwd: root,
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(proc.status, 0, proc.stdout + proc.stderr);
+    assert.match(proc.stdout, /invariants: PASS/);
+    const results = readFileSync(join(root, "results", "invariants.jsonl"), "utf8");
+    assert.match(results, /"type":\s*"run_start"/);
+    assert.match(results, /"name":\s*"smoke-space"/);
+    assert.match(results, /"type":\s*"run_end"/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("renderMarkdown renders the table with the gate marker", () => {

@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { readAgentConnection } from "../client/agent-connection.mjs";
 
 export function homeOf(env = process.env) {
@@ -13,12 +13,20 @@ export function connectionsRoot(env = process.env) {
 
 export function safeName(name) {
   const slug = String(name ?? "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!slug || slug.length > 80) throw new Error("Choose an agent name of 1–80 characters");
+  // "." and ".." survive the character allowlist (and hyphen trimming turns
+  // "-..-", "-." or "..-" into them), but as path segments they are the
+  // connections root itself and its parent, not a connection directory.
+  if (!slug || slug === "." || slug === ".." || slug.length > 80) throw new Error("Choose an agent name of 1–80 characters");
   return slug;
 }
 
 export function connectionHome(name, env = process.env) {
-  return join(connectionsRoot(env), safeName(name));
+  const root = connectionsRoot(env);
+  const home = join(root, safeName(name));
+  // Defense in depth: the connection home must be a directory strictly
+  // inside the connections root, never the root itself or anything above it.
+  if (home === root || !home.startsWith(root + sep)) throw new Error("Choose an agent name of 1–80 characters");
+  return home;
 }
 
 function privateFile(path) {

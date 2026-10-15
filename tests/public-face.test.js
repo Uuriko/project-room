@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { PublicFace, roomPublicFaceSchema, PUBLIC_CODE_PREFIX } from "../server/public-face.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
+import { publicUnpublishSchema, unpublishPublic } from "../server/legal-store.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
@@ -12,6 +13,7 @@ function makeStore(states) {
   db.exec(roomPublicFaceSchema);
   db.exec(roomDirectorySchema);
   db.exec(PUBLIC_READ_MODEL_SCHEMA);
+  db.exec(publicUnpublishSchema);
   return {
     db,
     transaction(fn) {
@@ -79,6 +81,29 @@ test("disable nulls the code; face 404s afterwards", () => {
   assert.equal(off.enabled, false);
   assert.equal(off.publicCode, null);
   assert.equal(errOf(() => face.faceByCode(publicCode)).code, "face_not_found");
+});
+
+test("operator unpublish hides the face, feed and HTML despite a live public code", () => {
+  const store = makeStore({ r1: baseState() });
+  const face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  assert.ok(face.faceByCode(publicCode).messages.some(m => m.body === "hello room"));
+  assert.ok(face.feedByCode(publicCode).messages.some(m => m.body === "hello room"));
+  unpublishPublic(store.db, { kind: "room", id: "r1", byAccount: "operator", now: Date.now() });
+  assert.equal(errOf(() => face.faceByCode(publicCode)).code, "face_not_found");
+  assert.equal(errOf(() => face.feedByCode(publicCode)).code, "face_not_found");
+  assert.equal(errOf(() => face.faceHtml(publicCode)).code, "face_not_found");
+});
+
+test("archived room's face and feed 404 even with a live public code", () => {
+  const state = baseState();
+  const store = makeStore({ r1: state });
+  const face = new PublicFace(store);
+  const { publicCode } = face.enable("r1", "owner");
+  assert.ok(face.faceByCode(publicCode).messages.length > 0);
+  state.room.archivedAt = "2026-10-13T00:00:00.000Z";
+  assert.equal(errOf(() => face.faceByCode(publicCode)).code, "face_not_found");
+  assert.equal(errOf(() => face.feedByCode(publicCode)).code, "face_not_found");
 });
 
 test("sanitize: DMs excluded, handles only, no ids/emails, bodies capped", () => {

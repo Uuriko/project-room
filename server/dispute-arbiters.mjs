@@ -114,7 +114,9 @@ export function createArbiters() {
   // cards: [{ name, content }] — content is the card markdown.
   const parseLaneCards = (cards = []) => {
     if (!Array.isArray(cards)) fail("invalid_arbiter", "cards must be an array");
-    return cards.map(({ name, content }) => {
+    const seen = new Set();
+    const parsed = [];
+    for (const { name, content } of cards) {
       if (typeof content !== "string") fail("invalid_arbiter", `card "${name}" has no content`);
       const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       const fields = {};
@@ -122,10 +124,16 @@ export function createArbiters() {
         const kv = line.match(/^([a-z_]+):\s*(.+?)\s*$/);
         if (kv) fields[kv[1]] = kv[2].replace(/^"(.*)"$/, "$1");
       }
-      return { lane: fields.lane ?? String(name).replace(/\.md$/, ""),
+      const card = { lane: fields.lane ?? String(name).replace(/\.md$/, ""),
         trust_level: fields.trust_level ?? "new",
         model: fields.model ?? "unknown", lane_tag: fields.lane_tag ?? null };
-    });
+      // A lane is one seat-holder: a duplicate card for the same lane must
+      // not produce a second registry entry (first card wins).
+      if (seen.has(card.lane)) continue;
+      seen.add(card.lane);
+      parsed.push(card);
+    }
+    return parsed;
   };
 
   // Draw a 3-seat steward panel, deterministically seeded by dispute-id.
@@ -136,8 +144,16 @@ export function createArbiters() {
     if (!norm(disputeId)) fail("invalid_arbiter", "disputeId must be a non-empty string");
     if (!Array.isArray(lanes)) fail("invalid_arbiter", "lanes must be an array");
     const excluded = new Set(exclude);
-    const eligible = lanes.filter(l => l && ELIGIBLE_TRUST.has(l.trust_level)
-      && norm(l.lane) && !excluded.has(l.lane));
+    // Dedupe by lane name before counting seats: a lane can hold only one
+    // seat — recordPanelDecision rejects duplicate-lane votes, so seating
+    // the same lane twice would produce a panel that can never decide.
+    const seen = new Set();
+    const eligible = lanes.filter(l => {
+      if (!l || !ELIGIBLE_TRUST.has(l.trust_level) || !norm(l.lane)
+        || excluded.has(l.lane) || seen.has(l.lane)) return false;
+      seen.add(l.lane);
+      return true;
+    });
     if (eligible.length < PANEL_SIZE)
       return { unavailable: "no-arbitrator",
         reason: `only ${eligible.length} eligible lanes for a ${PANEL_SIZE}-seat panel` };

@@ -36,7 +36,7 @@ function partiesFromMessages(messages) {
 // projection when the page holds no follow-up events: parties resolve lazily
 // on the first follow-up check. rows: optional events in the same read, so a
 // DM that the projection no longer holds is still known.
-export function dmEventVisibility(viewerId, messagesOrThunk, rows = []) {
+export function dmEventVisibility(viewerId, messagesOrThunk, rows = [], lookupParties = null) {
   let parties = null;
   const getParties = () => {
     if (parties) return parties;
@@ -57,7 +57,18 @@ export function dmEventVisibility(viewerId, messagesOrThunk, rows = []) {
       return !event.data?.toMemberId || event.actorId === viewerId || event.data.toMemberId === viewerId;
     }
     if (!DM_FOLLOW_UP_TYPES.has(event.type)) return true;
-    const pair = getParties().get(event.data?.messageId);
+    // An archived DM is not in the projection; ask the table so its follow-up
+    // events stay hidden from non-parties.
+    const pair = getParties().get(event.data?.messageId) ?? lookupParties?.(event.data?.messageId);
     return !pair || pair.includes(viewerId);
   };
+}
+
+// RC-2026-09-19-070 (r96): dm.consent_changed is a sequenced pair event. It is
+// visible to the two parties and, for moderation, to the room owner. Everyone
+// else must not see it (SEC-19 pattern).
+export function dmConsentEventVisible(event, viewerId, isOwner = false) {
+  if (!event || event.type !== "dm.consent_changed") return true;
+  const data = event.data ?? {};
+  return data.requesterId === viewerId || data.targetId === viewerId || isOwner === true;
 }

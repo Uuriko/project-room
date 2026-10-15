@@ -17,12 +17,12 @@ const OUT = join(root, "server", "wiki-data.mjs");
 
 const PLANES = [
   "docs/ROOM-WIKI.md",
-  "docs/history/ROOM-PROCEDURES.md",
+  "docs/ROOM-PROCEDURES.md",
   "docs/*RUNBOOK*.md",
 ];
 
 export function buildWikiData(repoRoot = root) {
-  const procedures = parseProcedures(readFileSync(join(repoRoot, "docs", "history", "ROOM-PROCEDURES.md"), "utf8"));
+  const procedures = parseProcedures(readFileSync(join(repoRoot, "docs", "ROOM-PROCEDURES.md"), "utf8"));
   const entries = parseWikiEntries(readFileSync(join(repoRoot, "docs", "ROOM-WIKI.md"), "utf8"));
   const names = readdirSync(join(repoRoot, "docs")).filter(name => /RUNBOOK.*\.md$/i.test(name)).sort();
   const runbooks = parseRunbooks(

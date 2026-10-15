@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConnection } from "../paths.mjs";
 import { loadSecret, bearerHeader } from "../auth.mjs";
-import { edgeDoorApiPath } from "../../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../../server/agent-discovery.mjs";
 
 const usage = `room code share [--base <ref>] --title <text> [--claim <id>] [--replaces <cd-id>] [--branch <name>]
 room code share --file <path|-> --title <text>     (.mbox/.patch, .diff, .bundle)

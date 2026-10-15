@@ -545,6 +545,39 @@ test('F2: half-open probe success closes the breaker', async (t) => {
   } finally { await mock.close(); }
 });
 
+test('F3: half-open recovery works through connectSession (pre-check must not consume the probe)', async (t) => {
+  const mock = await startMockBridge({ failTimes: { '/v1/read': 999 } });
+  try {
+    const { readHerdrBridgeConfig, connectSession, TransportError, ServerError } = await import(ADAPTER_PATH);
+    const breakerStore = new Map();
+    const env = makeEnv(mock);
+    const config = readHerdrBridgeConfig(env);
+    const out = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    assert.equal(out.backend, 'herdr');
+    const { adapter } = out;
+    t.after(async () => { await adapter.disconnect().catch(() => {}); });
+    // Trip the breaker.
+    for (let i = 0; i < 5; i++) {
+      await assert.rejects(adapter.readPane('pane-1', 'recent'), (e) => e instanceof TransportError || e instanceof ServerError);
+    }
+    await assert.rejects(adapter.readPane('pane-1', 'recent'), (e) => e.code === 'bridge_circuit_open');
+    // Window not yet elapsed: a new session still fails fast as circuit_open.
+    const early = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    assert.equal(early.backend, 'legacy');
+    assert.equal(early.reason, 'circuit_open');
+    await new Promise((r) => setTimeout(r, 650)); // pass the half-open window
+    mock.state.failTimes['/v1/read'] = 0;          // bridge recovers
+    // Regression (#2853): connectSession's pre-check spent the single
+    // half-open probe, so connect()'s own ping was refused and a tripped
+    // bridge could never recover through connectSession.
+    const recovered = await connectSession({ config, tenantId: 'tenant-a', roomId: 'room-x', env, pins: TEST_PINS, breakerStore, circuitOpenMs: 500 });
+    assert.equal(recovered.backend, 'herdr', `expected recovery via connectSession, got ${recovered.backend}:${recovered.reason}`);
+    t.after(async () => { await recovered.adapter.disconnect().catch(() => {}); });
+    const pt = await recovered.adapter.readPane('pane-1', 'recent'); // normal traffic resumes
+    assert.equal(pt.text, 'hello');
+  } finally { await mock.close(); }
+});
+
 // ---------------------------------------------------------------------------
 // G. Subscribe / SSE — adapter-owned events_lost recovery
 // ---------------------------------------------------------------------------
@@ -928,5 +961,60 @@ test('K9: caller abort cancels an in-flight wait without a second bridge request
     const rejection = assert.rejects(waiting, /aborted/);
     await started; controller.abort(); await rejection;
     assert.equal(mock.state.requests.filter(r => r.route === '/v1/wait').length, 1);
+  } finally { await mock.close(); }
+});
+
+// ---------------------------------------------------------------------------
+// L. Caller-abort retry handling — an AbortSignal abort surfaces as
+// TimeoutError("aborted") but is a cancellation, not a bridge timeout, so
+// _call must not burn its remaining attempts (with jittered backoff) on it.
+// Regression (#2957): isRetryable returned true for every TimeoutError, so
+// an aborted call was retried; the retry's pre-abort check stopped a second
+// bridge request, but the abort only reached the caller after the extra
+// attempt and backoff. A pass-through spy on _fetchOnce makes the retry
+// burn observable deterministically (request counts alone cannot see it).
+// ---------------------------------------------------------------------------
+
+function countFetchAttempts(adapter) {
+  const original = adapter._fetchOnce.bind(adapter);
+  let count = 0;
+  adapter._fetchOnce = async (...args) => { count += 1; return original(...args); };
+  return () => count;
+}
+
+test('L1: caller abort of an in-flight wait is not retried — a single attempt', async t => {
+  let arrived;
+  const started = new Promise(resolve => { arrived = resolve; });
+  const mock = await startMockBridge({ handlers: { '/v1/wait': ({ res }) => {
+    arrived(); return new Promise(resolve => res.once('close', resolve));
+  } } });
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const attempts = countFetchAttempts(adapter);
+    const controller = new AbortController();
+    const waiting = adapter.waitForState('a', ['done'], { timeoutMs: 5000, signal: controller.signal });
+    const rejection = assert.rejects(waiting, /aborted/);
+    await started; controller.abort(); await rejection;
+    assert.equal(attempts(), 1, 'a caller abort must not be retried');
+    assert.equal(mock.state.requests.filter(r => r.route === '/v1/wait').length, 1);
+  } finally { await mock.close(); }
+});
+
+test('L2: an already-aborted signal makes a single _call attempt and no bridge request', async t => {
+  const mock = await startMockBridge();
+  try {
+    const { adapter } = await connectedAdapter(t, mock);
+    const attempts = countFetchAttempts(adapter);
+    const before = mock.state.requests.length;
+    await assert.rejects(
+      adapter._call({
+        adapterMethod: 'waitForState', timeoutMs: 1000, write: true,
+        signal: AbortSignal.abort(),
+        body: { mode: 'state', agentId: 'a', states: ['done'], timeoutMs: 1000 },
+      }),
+      /aborted/,
+    );
+    assert.equal(attempts(), 1, 'a pre-aborted call must not be retried');
+    assert.equal(mock.state.requests.length, before, 'no bridge request for an aborted call');
   } finally { await mock.close(); }
 });

@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateCriticalConfig } from "../server/boot-config.mjs";
-import { agentCard, agentCardSignatureState, markUnsignedCard } from "../deploy/agent-discovery.mjs";
-import { AGENT_CARD_UNSIGNED_REASON } from "../deploy/agent-card-signed.mjs";
+import { agentCard, agentCardSignatureState, markUnsignedCard } from "../server/agent-discovery.mjs";
+import { AGENT_CARD_UNSIGNED_REASON } from "../server/agent-card-signed.mjs";
 import { signAgentCard } from "../scripts/sign-agent-card.mjs";
 import { generateKeyPair } from "../server/agent-card-signing.mjs";
 
