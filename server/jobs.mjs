@@ -344,6 +344,24 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "public-work-reseed",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #3530: the keeper is due only when the public board's claimable
+    // supply is exactly zero and at least one anchored starter seed has
+    // a fully submitted latest round to advance.
+    enabled(_env, store) {
+      if (!store?.publicWorkClaims) return false;
+      const status = store.publicWorkClaims.starterPoolStatus();
+      return status.available && status.anchored > 0 && status.claimable === 0 && status.due.length > 0;
+    },
+    disabledReason: () => "Public-work starter pool has claimable tasks or no seed round is due",
+    async run(store, ctx) {
+      if (ctx.room?.reseedPublicWorkStarters) return ctx.room.reseedPublicWorkStarters();
+      return store.publicWorkClaims.reseedStarterPool();
+    }
+  }),
+  defineJob({
     name: "room-backup",
     cadenceMs: DAY_MS,
     slow: true,

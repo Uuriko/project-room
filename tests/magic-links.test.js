@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
-import { createMagicLinkMailer, magicLinkUnavailable, MAIL_NOT_CONFIGURED_MESSAGE } from "../server/magic-links.mjs";
+import { createMagicLinkMailer, magicLinkUnavailable, MAIL_NOT_CONFIGURED_MESSAGE, isMailRecipientRefusal, attemptAuthMailDelivery } from "../server/magic-links.mjs";
 
 const makeStore = (now = 1700000000000) => {
   const directory = mkdtempSync(join(tmpdir(), "magic-links-"));
@@ -73,6 +73,37 @@ test("mailer rejects calls missing a recipient or code before any send", async (
   await assert.rejects(() => mailer.sendMagicLink({ to: "ada@example.com" }), /recipient and a code/);
   await assert.rejects(() => mailer.sendMagicLink(), /recipient/);
   assert.equal(sent.length, 0);
+});
+
+const providerError = status => Object.assign(new Error(`send failed (HTTP ${status})`), { providerStatus: status });
+
+test("isMailRecipientRefusal classifies permanent provider refusals only (#3529)", () => {
+  // Permanent, recipient/request-class refusals: retrying cannot succeed.
+  for (const status of [400, 403, 404, 409, 422]) {
+    assert.equal(isMailRecipientRefusal(providerError(status)), true, `HTTP ${status} is a refusal`);
+  }
+  assert.equal(isMailRecipientRefusal(Object.assign(new Error("refused"), { recipientRefused: true })), true);
+  assert.equal(isMailRecipientRefusal(Object.assign(new Error("refused"), { code: "mail_recipient_refused" })), true);
+  // Transient or platform-wide failures stay retryable/loud, never absorbed.
+  for (const status of [401, 408, 429, 500, 502, 503]) {
+    assert.equal(isMailRecipientRefusal(providerError(status)), false, `HTTP ${status} is not a refusal`);
+  }
+  assert.equal(isMailRecipientRefusal(new Error("socket hangup")), false, "network errors carry no status");
+  assert.equal(isMailRecipientRefusal(null), false);
+  assert.equal(isMailRecipientRefusal("HTTP 422"), false, "a bare string is not a classified error");
+});
+
+test("attemptAuthMailDelivery absorbs refusals and rethrows transient failures (#3529)", async () => {
+  const warnings = [];
+  const warn = message => warnings.push(message);
+  assert.equal(await attemptAuthMailDelivery(async () => {}, "magic-request", warn), true);
+  assert.equal(await attemptAuthMailDelivery(async () => { throw providerError(422); }, "magic-request", warn), false);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /mail delivery refused \(magic-request\)/);
+  assert.match(warnings[0], /HTTP 422/, "the log keeps the provider status for operators");
+  await assert.rejects(() => attemptAuthMailDelivery(async () => { throw providerError(503); }, "magic-request", warn), /HTTP 503/);
+  await assert.rejects(() => attemptAuthMailDelivery(async () => { throw new Error("socket hangup"); }, "magic-request", warn), /socket hangup/);
+  assert.equal(warnings.length, 1, "transient failures are not logged as refusals");
 });
 
 test("mailer is frozen and ignores a non-function send", () => {

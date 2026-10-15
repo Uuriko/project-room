@@ -5,7 +5,7 @@ import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
-import { RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
+import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
@@ -34,7 +34,7 @@ import { installInbox } from "./inbox-ui.js";
 import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
-import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
@@ -122,7 +122,11 @@ function consumeInvitationFragment() {
   // human share-link tokens, so without a redirect this rendered "This
   // invitation link is unavailable." before any API call — even though the
   // code is redeemable on the /join page. Flag it; the call sites navigate.
-  if (AGENT_INVITE_CODE_PATTERN.test(candidate)) return { valid: false, secret: candidate, redirect: true };
+  // normalizeAgentInviteCode tolerates what the server and /join page
+  // tolerate (case, pasted whitespace, trailing slash/query junk) and never
+  // hijacks a 43-char human token.
+  const agentCode = normalizeAgentInviteCode(candidate);
+  if (agentCode) return { valid: false, secret: agentCode, redirect: true };
   return invitationTokenPattern.test(candidate)
     ? { valid: true, secret: candidate }
     : { valid: false, secret: null };
@@ -342,6 +346,7 @@ let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, catchUpBoundary = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
+let snapshotAuditView = "full", recordLoading = null, recordLoadFailed = false;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
 let accessEndContext = null;
 let lastComposerSelection = null;
@@ -376,11 +381,14 @@ try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
+  auditView: "activity",
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
+    snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
@@ -753,6 +761,13 @@ const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
   loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
+  onProviderCapabilities: providers => {
+    // The OAuth anchors are static HTML whose start routes 503 when the
+    // provider is not configured on this deployment; hide an anchor only
+    // on the feed's positive "configured: false" answer.
+    if (providers?.github?.configured === false) signinNavigation.setProviderUnavailable("github");
+    if (providers?.google?.configured === false) signinNavigation.setProviderUnavailable("google");
+  },
   onViewChange: syncSigninView,
   onBack: handleSigninBack,
   onPasswordResetComplete: async () => {
@@ -1080,11 +1095,16 @@ async function ensureDefaultRoom() {
   if (!owned?.authenticated) return null;
   defaultRoomFlight = (async () => {
     try {
+      const statusBeforeSetup = $("#account-rooms-status").textContent;
       $("#account-rooms-status").textContent = "Setting up your first room…";
       const body = await accountClient.request("/api/account/ensure-default-room", { method: "POST", data: {}, session: owned });
       if (accountClient.session !== owned) return null;
       // Refresh the list to show the new room (or the existing one).
       if (body?.room?.id) await loadAccountRooms();
+      // { room: null } is the server's deliberate no-resurrect answer for an
+      // account that left every room (R266-1 / #3508): put back the empty
+      // state the room list showed, never the setup-failure copy.
+      else if (body && body.room === null) $("#account-rooms-status").textContent = statusBeforeSetup;
       else $("#account-rooms-status").textContent = FIRST_ROOM_SETUP_FAILURE;
       return body;
     } catch {
@@ -2075,6 +2095,23 @@ function render() {
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
+  for (let parent = $("#record-panel").parentElement; parent && parent !== $("#settings-dialog"); parent = parent.parentElement)
+    if (parent.tagName === "DETAILS" && !parent.open) return;
+  if (snapshotAuditView === "activity") {
+    renderContent("#event-list", uiText(recordLoadFailed ? "record.failedHtml" : "record.loadingHtml"));
+    if (!recordLoading && !recordLoadFailed) {
+      const generation = client.generation;
+      const loading = client.setAuditView("full"); recordLoading = loading;
+      loading.catch(error => {
+        if (generation !== client.generation) return;
+        if ([401, 403].includes(error.status) || error.code === "session_binding_changed") client.handleFailure(error);
+        else recordLoadFailed = true;
+      })
+        .finally(() => { if (recordLoading === loading) recordLoading = null; if (generation === client.generation) renderRecordPanel(); });
+    }
+    return;
+  }
+  recordLoadFailed = false;
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 
   // Decision register (backlog F2): the register is read from the event feed.
@@ -2084,7 +2121,13 @@ function renderRecordPanel() {
     `<li><strong>${esc(e.data.statement)}</strong> <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
     || '<li class="rb-empty">No decisions recorded yet.</li>');
 }
-$("#record-panel").addEventListener("toggle", renderRecordPanel);
+$("#record-panel").addEventListener("toggle", () => {
+  if (!$("#record-panel").open) { recordLoadFailed = false; void client.setAuditView("activity").catch(() => {}); }
+  renderRecordPanel();
+});
+$("#event-list").addEventListener("click", event => {
+  if (event.target.closest("[data-record-retry]")) { recordLoadFailed = false; void client.refresh(null, { revalidate: true }).catch(() => { recordLoadFailed = true; renderRecordPanel(); }); renderRecordPanel(); }
+});
 // Phase 2 channels: one main channel plus user-created channels. Chat and work
 // share the timeline of the selected channel; work cards follow the channel of
 // their proposal message (the main channel when there is none).
@@ -3198,11 +3241,24 @@ function revealRoom() {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   focusRecord($("#room-title"));
 }
-function revealEvent(id) {
+function revealEvent(id, requireExisting = false) {
   if (!state || busy) return;
-  openSettings("record-panel");
-  focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
-    .find(node => node.dataset.eventRecordId === id));
+  const generation = client.generation, navigationHash = location.hash;
+  if (!requireExisting) openSettings("record-panel");
+  void client.setAuditView("full").then(() => {
+    if (generation !== client.generation || !state) return;
+    if (requireExisting && location.hash !== navigationHash) return;
+    if (requireExisting && !state.eventLog.some(event => event.id === id)) {
+      if (!$("#settings-dialog").open || !$("#record-panel").open) void client.setAuditView("activity").catch(() => {});
+      return;
+    }
+    if (requireExisting) openSettings("record-panel");
+    if (!$("#settings-dialog").open) return;
+    focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
+      .find(node => node.dataset.eventRecordId === id));
+  }).catch(error => {
+    if (generation === client.generation && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) client.handleFailure(error);
+  });
 }
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
@@ -3261,6 +3317,7 @@ function revealLocationHash() {
   for (const [prefix, reveal] of [["#message-", revealMessage], ["#work-", revealWork], ["#member-", revealMember], ["#event-", revealEvent]]) {
     if (!hash.startsWith(prefix)) continue;
     const id = decodeFragment(hash.slice(prefix.length));
+    if (id !== null && prefix === "#event-" && snapshotAuditView === "activity") { revealEvent(id, true); return; }
     const exists = prefix === "#message-" ? conversation.byId.has(id)
       : prefix === "#work-" ? Boolean(state.workItems[id])
       : prefix === "#member-" ? Boolean(state.members[id])
@@ -4106,10 +4163,9 @@ function submitRequest(form) {
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {
       if (generation !== client.generation || session !== identity || !state) return;
-      // command_rejected is issued after exact-operation lookup. Transport and
-      // pre-ledger size/rate errors cannot unlock an earlier uncertain operation.
-      if ((!hadPending && [400, 404, 409, 413, 422].includes(error.status))
-        || error.code === "command_rejected" && [409, 422].includes(error.status)) pendingMessage = null;
+      // draftRefused: only a refusal issued after the exact-operation lookup
+      // (command_rejected, channel_archived) unlocks an earlier uncertain send.
+      if (draftRefused(error, hadPending)) pendingMessage = null;
       saveComposer();
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.
@@ -7783,6 +7839,8 @@ document.addEventListener("click", event => {
 function closeSecondaryBoards() {
   $("#land-queue-panel").open = false;
   $("#referral-panel").open = false;
+  recordLoadFailed = false;
+  void client.setAuditView("activity").catch(() => {});
 }
 $("#settings-dialog").addEventListener("close", closeSecondaryBoards);
 $("#settings-dialog").addEventListener("cancel", closeSecondaryBoards);
