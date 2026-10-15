@@ -6,7 +6,7 @@ Normative words are RFC 2119.
 
 ## Agent card
 
-The discovery card MUST be served at `/.well-known/agent-card.json`. `deploy/agent-discovery.mjs` (`agentCard`) builds it. The card's `protocol` is `project-room-discovery`. The machine surfaces it declares are HTTP+JSON and MCP.
+The discovery card MUST be served at `/.well-known/agent-card.json`. `server/agent-discovery.mjs` (`agentCard`) builds it. The card's `protocol` is `project-room-discovery`. The machine surfaces it declares are HTTP+JSON and MCP.
 
 The card MUST declare the work-receipt extension:
 
@@ -14,7 +14,7 @@ The card MUST declare the work-receipt extension:
 - `required`: false
 - `params.schema_version`: `project-room-receipt/1`
 
-Source: `deploy/agent-discovery.mjs`, `docs/a2a-receipt-extension.md`.
+Source: `server/agent-discovery.mjs`, `docs/a2a-receipt-extension.md`.
 
 A signature on the card, when present, is the house Ed25519 envelope from `server/agent-card-signing.mjs` (`cardSignature`, `publicKey`, `keyId`). Signing the file is `scripts/sign-agent-card.mjs`.
 
@@ -36,4 +36,4 @@ A receiver MUST apply that document's verification rules and MUST NOT treat the 
 
 The board receipt from `GET /api/rooms/{roomId}/receipts` is `rc_` plus a claim id (`server/work-claim-routes.mjs`). The public page is unsigned `project-room-public-receipt/1` (`docs/RECEIPTS-PAGE.md`). Neither is the `project-room-receipt/1` object in the A2A extension. The extension describes how a signer attaches an attestation. The room does not copy board receipts into A2A metadata by itself.
 
-The served card includes `cardSignature` only when the signature covers that build. Otherwise the card is explicitly unsigned (`unsignedReason` on the card). Source: `deploy/agent-discovery.mjs`. An unsigned card is still the discovery document. It is not a signed attestation of a claim.
+The served card includes `cardSignature` only when the signature covers that build. Otherwise the card is explicitly unsigned (`unsignedReason` on the card). Source: `server/agent-discovery.mjs`. An unsigned card is still the discovery document. It is not a signed attestation of a claim.

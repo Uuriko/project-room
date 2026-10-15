@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { openMcpTestClient } from "../scripts/mcp-test-client.mjs";
+import { callHostedStdioTool, validHostedStdioArgs } from "../server/mcp-full-profile.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 test("real stdio process uses owner enrollment, selected work and stable draft retries across restart", { timeout: 20000 }, async t => {
@@ -27,6 +28,11 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.equal(assistant.roomId, "commons");
   assert.equal(assistant.assistant.availability, "not_connected");
   assert.deepEqual(assistant.runs, []);
+  const batchIds = ["test-handoff", "batch-two", "batch-three", "batch-four"];
+  for (const workItemId of batchIds.slice(1)) f.store.command(f.keys.owner, "commons", { id: workItemId, type: "work.proposed", data: {
+    workItemId, title: workItemId, definitionOfDone: "A useful decision", accountableMemberId: "owner", mode: "read",
+    independentVerificationRequired: false, ownerDecisionRequired: false
+  } });
   const before = f.store.snapshot(token, "commons");
   assert.equal((await mcp.call("room_check_access")).result.structuredContent.status, "credential_accepted");
   const selected = (await mcp.call("room_read_work", { workItemId: "test-handoff" })).result.structuredContent;
@@ -44,6 +50,18 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.match(compact.brief, /Suggested tool focus: work/);
   assert.equal(compact.brief.includes("Please prepare an agenda"), false);
   assert.ok(JSON.stringify(compact).length < JSON.stringify(selected).length);
+  const batch = (await mcp.call("room_read_work", { workItemIds: batchIds })).result.structuredContent;
+  const withoutReadTime = item => ({ ...item, brief: item.brief.replace(/Evaluated: [^\n]+/, "Evaluated: <fresh read>") });
+  assert.deepEqual(batch.items.map(item => item.workItemId), batchIds);
+  assert.deepEqual(withoutReadTime(batch.items[0]), withoutReadTime(compact));
+  assert.equal(batch.readOnly, true);
+  assert.equal(batch.atomicSnapshot, false);
+  const hosted = await callHostedStdioTool(f.store, token, "room_read_work", { roomId: "commons", workItemIds: batchIds });
+  assert.deepEqual(hosted.value.items.map(withoutReadTime), batch.items.map(withoutReadTime));
+  assert.equal(validHostedStdioArgs("room_read_work", { roomId: "commons", workItemIds: ["test-handoff", "test-handoff"] }), false);
+  const refusedBatch = (await mcp.call("room_read_work", { workItemIds: ["test-handoff", "missing-task"] })).result;
+  assert.equal(refusedBatch.isError, true);
+  assert.equal(Object.hasOwn(refusedBatch.structuredContent, "items"), false);
   assert.deepEqual(f.store.snapshot(token, "commons"), before);
   const input = { requestId: "stable-mcp-draft", workItemId: "test-handoff", packetId: "mcp-fixture", basisRevision: 0, body: "Synthetic draft for human review.", replyToId: "test-request" };
   const posted = (await mcp.call("room_post_draft", input)).result.structuredContent;
@@ -57,5 +75,10 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   f.store.agentConnections.apply(session.token, "commons", { action: "disconnect", requestId: "end-mcp", memberId: "mcp-agent", expectedOwnerRevision: 0, expectedMemberRevision: 0, expectedGeneration: 1 }, session.session.sessionBinding);
   const ended = (await mcp.call("room_check_access")).result;
   assert.equal(ended.isError, true); assert.equal(ended.structuredContent.code, "access_ended");
+  const endedBatch = (await mcp.call("room_read_work", { workItemIds: batchIds })).result;
+  assert.equal(endedBatch.isError, true);
+  assert.equal(Object.hasOwn(endedBatch.structuredContent, "items"), false);
+  await assert.rejects(callHostedStdioTool(f.store, token, "room_read_work", { roomId: "commons", workItemIds: batchIds }));
+
   assert.equal(JSON.stringify([posted, retry, ended]).includes(token), false);
 });

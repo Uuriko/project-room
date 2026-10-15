@@ -45,6 +45,19 @@ function assertLimited(error) {
   return true;
 }
 
+test("the flood-guard 429 names its bucket (AUX-13 follow-up)", t => {
+  const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
+  const f = openStore(t, () => clock.now);
+  for (let i = 0; i < 30; i++) post(f, "owner", i);
+  assert.throws(() => post(f, "owner", 30), (error) => {
+    assert.equal(error.status, 429);
+    assert.equal(error.code, "rate_limited");
+    assert.equal(error.headers["Retry-After"], "2");
+    assert.equal(error.headers["X-RateLimit-Bucket"], "chat-flood", "the 429 names the bucket that refused it");
+    return true;
+  });
+});
+
 test("30 posts pass, the 31st is 429, and a refilled bucket posts again", t => {
   const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
   const f = openStore(t, () => clock.now);
@@ -92,7 +105,10 @@ test("only chat posts and replies count; reactions, edits, deletes, reads, work,
   try {
     f.send("owner", T.DM_POSTED, { to: "ai_nobody", body: "ping", messageId: "dm-1" }, "dm-1");
   } catch (error) { assert.ok(notLimited(error)); }
-  assert.throws(() => post(f, "owner", 29), assertLimited);
+  // The DM above is refused after the flood check, so its token is refunded
+  // (#2951): this 30th successful post still lands, and the next is limited
+  // (asserted below, after the non-chat commands).
+  post(f, "owner", 29);
   f.send("owner", T.WORK_PROPOSED, {
     workItemId: "w1", title: "Help", definitionOfDone: "Done", accountableMemberId: "owner",
   }, "work-1");
@@ -177,4 +193,43 @@ test("dm.posted spends from the same budget as message.posted (guard unit level)
   }, "26th chat-equivalent is limited after 25 posts + 5 DMs: DMs are not a side channel");
   clock.now += 2000;
   guard.consume("commons", "alice", "dm.posted");
+});
+
+test("a chat post that fails validation after the flood check does not spend a token (#2951)", t => {
+  const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
+  const f = openStore(t, () => clock.now);
+  // The causation check runs inside store.command AFTER roomFlood.consume(),
+  // and the command transaction rolling back cannot roll back the in-memory
+  // bucket. More failed attempts than the whole burst must all stay 422 —
+  // on the old code the later ones turned into 429s as the tokens burned.
+  for (let i = 0; i < 35; i++) {
+    assert.throws(() => f.store.command(f.keys.owner, "commons", {
+      id: `bad-cause-${i}`, type: T.MESSAGE_POSTED, causationId: "no-such-event",
+      data: { messageId: `bad-${i}`, body: "should not land" },
+    }), error => {
+      assert.equal(error.status, 422);
+      assert.equal(error.code, "invalid_cause");
+      return true;
+    }, `failed attempt ${i} must be invalid_cause, not rate_limited`);
+  }
+  // The full burst is still available afterwards, and still enforced.
+  for (let i = 0; i < 30; i++) post(f, "owner", i);
+  assert.throws(() => post(f, "owner", 30), assertLimited);
+});
+
+test("guard.refund returns a spent token, capped at capacity, and ignores non-chat commands", () => {
+  const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
+  const guard = createRoomFloodGuard({ now: () => clock.now });
+  guard.consume("commons", "alice", "message.posted");
+  guard.refund("commons", "alice", "message.posted");
+  // Refunding a token that was never spent must not mint extra budget.
+  guard.refund("commons", "alice", "message.posted");
+  guard.refund("commons", "alice", "work.proposed");
+  guard.refund("commons", "bob", "message.posted");
+  for (let i = 0; i < 30; i++) guard.consume("commons", "alice", "message.posted");
+  assert.throws(() => guard.consume("commons", "alice", "message.posted"), error => {
+    assert.equal(error.status, 429);
+    return true;
+  });
+  for (let i = 0; i < 30; i++) guard.consume("commons", "bob", "message.posted");
 });

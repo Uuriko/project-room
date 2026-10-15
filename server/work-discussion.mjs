@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { validId } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -14,7 +15,41 @@ const integer = value => Number.isSafeInteger(value) && value >= 0;
 const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fields = "version roomId workItemId viewerId horizon anchorId since after".split(" ");
 
-export function discussionWindow({ sequence, roomId, workItemId, viewerId, cursor = null, since, limit = DISCUSSION_DEFAULT_LIMIT }) {
+const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const reset = () => fail("discussion_reset_required", "Discussion changed; discard retained discussion and restart a consistent read", 409);
+const v2Fields = [...fields, "kind", "scopeDigest", "prefixDigest"];
+function decode(token) {
+  try {
+    if (typeof token !== "string" || token.length > 2048 || !/^[A-Za-z0-9_-]+$/.test(token)) throw new Error();
+    const value = JSON.parse(Buffer.from(token, "base64url").toString("utf8"));
+    const keys = value?.version === 2 ? v2Fields : fields;
+    if (!value || Array.isArray(value) || Object.keys(value).length !== keys.length
+      || !keys.every(key => Object.hasOwn(value, key)) || encode(value) !== token) throw new Error();
+    return value;
+  } catch { fail("invalid_discussion", "Malformed discussion token"); }
+}
+
+export function discussionWindow({ sequence, roomId, workItemId, viewerId, cursor = null, since, consistent = false, resumeToken = null, limit = DISCUSSION_DEFAULT_LIMIT }) {
+  if (typeof consistent !== "boolean" || resumeToken !== null && (cursor !== null || since !== undefined)
+    || consistent && since !== undefined) fail("invalid_discussion", "Consistent reads use a completed token or continuation, never a numeric filter");
+  const token = resumeToken ?? cursor;
+  const decoded = token === null ? null : decode(token);
+  if (consistent || resumeToken !== null || decoded?.version === 2) {
+    if (!integer(limit) || limit < 1 || limit > DISCUSSION_MAX_LIMIT || since !== undefined) fail("invalid_discussion", "Choose a bounded consistent page");
+    if (decoded) {
+      if (decoded.version !== 2 || decoded.kind !== (resumeToken !== null ? "checkpoint" : "page")
+        || !integer(decoded.horizon) || !integer(decoded.since) || !integer(decoded.after)
+        || decoded.since > decoded.after || decoded.after > decoded.horizon || !validId(decoded.anchorId)
+        || decoded.kind === "page" && decoded.after >= decoded.horizon
+        || decoded.kind === "checkpoint" && (decoded.since !== decoded.horizon || decoded.after !== decoded.horizon)
+        || !/^[a-f0-9]{64}$/.test(decoded.scopeDigest) || !/^[a-f0-9]{64}$/.test(decoded.prefixDigest)) fail("invalid_discussion", "Invalid consistent discussion token");
+      if (decoded.roomId !== roomId || decoded.workItemId !== workItemId || decoded.viewerId !== viewerId || decoded.horizon > sequence) reset();
+    }
+    return { consistent: true, basis: decoded, horizon: resumeToken !== null || !decoded ? sequence : decoded.horizon,
+      since: resumeToken !== null ? decoded.horizon : decoded?.since ?? 0,
+      after: resumeToken !== null ? decoded.horizon : decoded?.after ?? 0,
+      anchorId: resumeToken !== null ? null : decoded?.anchorId ?? null, limit };
+  }
   if (!integer(limit) || limit < 1 || limit > DISCUSSION_MAX_LIMIT || (cursor !== null && since !== undefined)) fail("invalid_discussion", "Choose a bounded page and either a continuation or a starting checkpoint");
   if (cursor === null) {
     const after = since ?? 0;
@@ -39,11 +74,12 @@ const pick = (value, keys) => Object.fromEntries(keys.split(" ").filter(key => O
 
 // Metadata contains only immutable message-post IDs/sequences through the frozen
 // horizon. Bodies come from the canonical projection; mutable reactions are omitted.
-export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, now, metadata, window, anchorId, cursor = null, floor = null }) {
+export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, now, metadata, window, anchorId, cursor = null, floor = null, scope = null }) {
   const item = state.workItems[workItemId], byId = new Map(state.messages.map(message => [message.id, message]));
   const included = new Set(), selected = [];
   for (const post of metadata) {
     const message = byId.get(post.message_id || post.id);
+    if (!message && window.consistent) reset();
     if (!message) fail("discussion_history_changed", "Discussion history is unavailable; restart after recovery", 409);
     const relation = message.id === item.sourceMessageId ? "source" : message.workItemId === workItemId ? "linked"
       : !message.workItemId && included.has(message.replyToId) ? "reply" : null;
@@ -58,8 +94,20 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
     // PRIV-2: pre-join messages are hidden the same way (still in `included`,
     // so later public replies stay selected).
     if (!messageInHistory(message, floor)) continue;
+    // Retain ancestry above, but never deliver removed text to a durable cache.
+    if (window.consistent && (message.deletedAt || message.redacted || typeof message.body !== "string")) continue;
     selected.push({ sequence: post.sequence, eventId: post.id, relation, message });
   }
+  const scopeDigest = window.consistent ? digest(scope) : null;
+  // Hash the authorized current prefix, not just event IDs: recovery can keep
+  // IDs while replacing text, and edits/deletions retain the posting sequence.
+  const prefix = horizon => digest(["source-linked-descendants-v1", item.sourceMessageId ?? null,
+    selected.filter(row => row.sequence <= horizon).map(row => [row.sequence, row.eventId, row.relation,
+      pick(row.message, "id authorId body createdAt replyToId toMemberId workItemId revision"),
+      row.message.proposal ? pick(row.message.proposal, "packetId basisRevision submittedAtRevision attribution") : null])]);
+  if (window.consistent && window.basis && (window.basis.scopeDigest !== scopeDigest
+    || window.basis.prefixDigest !== prefix(window.basis.horizon))) reset();
+  const prefixDigest = window.consistent ? prefix(window.horizon) : null;
   if (cursor !== null && !selected.some(row => row.sequence === window.after)) fail("invalid_discussion", "Continuation must follow a selected message");
   const items = []; let bytes = 0, hasMore = false;
   for (const row of selected) {
@@ -74,13 +122,17 @@ export function selectedWorkDiscussion({ state, workItemId, viewerId, sequence, 
     }
     items.push(result); bytes += size;
   }
-  const nextCursor = hasMore ? encode({ version: 1, roomId: state.room.id, workItemId, viewerId,
-    horizon: window.horizon, anchorId, since: window.since, after: items.at(-1).sequence }) : null;
+  const makeToken = (kind, since, after) => encode({ version: 2, roomId: state.room.id, workItemId, viewerId,
+    horizon: window.horizon, anchorId, since, after, kind, scopeDigest, prefixDigest });
+  const nextCursor = hasMore ? window.consistent ? makeToken("page", window.since, items.at(-1).sequence)
+    : encode({ version: 1, roomId: state.room.id, workItemId, viewerId,
+      horizon: window.horizon, anchorId, since: window.since, after: items.at(-1).sequence }) : null;
   const ids = new Set(items.flatMap(({ message }) => [message.authorId, message.toMemberId]).filter(Boolean));
   const value = { contractVersion: 1, roomId: state.room.id, workItemId, viewerId,
     selection: { sourceMessageId: item.sourceMessageId ?? null, rule: "source-linked-descendants-v1" },
     discussion: { horizon: window.horizon, since: window.since, after: window.after, cursor, items, hasMore, nextCursor,
-      checkpoint: hasMore ? null : window.horizon, limit: window.limit, rowBytes: bytes },
+      checkpoint: hasMore ? null : window.horizon,
+      ...(window.consistent ? { consistent: true, resumeToken: hasMore ? null : makeToken("checkpoint", window.horizon, window.horizon) } : {}), limit: window.limit, rowBytes: bytes },
     current: { evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(), workRevision: item.revision,
       workState: item.state, next: nextWorkStep(item, now),
       participants: [...ids].map(id => state.members[id] ? pick(state.members[id], "id displayName kind active") : { id, unavailable: true }) },

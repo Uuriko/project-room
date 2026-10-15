@@ -5,7 +5,7 @@
 // HTML into #squads-list.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { squadsHtml } from "../src/squads-ui.js";
+import { installSquadsPanel, squadsHtml } from "../src/squads-ui.js";
 
 const squad = (over = {}) => ({
   id: "sq_abc", name: "crew", goal: "ship it", members: ["owner", "guest"],
@@ -36,6 +36,58 @@ test("squadsHtml marks disbanded squads and teaches the handle when empty", () =
   const empty = squadsHtml([], members);
   assert.ok(empty.includes("@squad/&lt;name&gt;"), "empty state teaches the mention handle");
   assert.ok(empty.includes("create squad"), "empty state offers the create action");
+});
+
+test("installSquadsPanel refetches on a later sync once the cached load is stale", async () => {
+  const realDocument = globalThis.document;
+  const realNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  const root = {
+    innerHTML: "",
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false,
+    addEventListener: () => {},
+    replaceChildren() { this.innerHTML = ""; },
+  };
+  globalThis.document = {
+    activeElement: null,
+    querySelector: selector => (selector === "#squads-list" ? root : null),
+  };
+  let serverSquads = [squad()];
+  let calls = 0;
+  const client = {
+    generation: 1,
+    path: suffix => `/api/rooms/room1${suffix}`,
+    async request() { calls++; return { squads: serverSquads }; },
+  };
+  try {
+    const panel = installSquadsPanel({
+      client,
+      getState: () => ({ members }),
+      getSession: () => ({ roomId: "room1", member: { id: "owner" } }),
+    });
+    await panel.sync();
+    assert.equal(calls, 1, "the first sync loads the squads");
+    assert.ok(root.innerHTML.includes("@squad/crew"), "the first snapshot is painted");
+
+    // Another member creates a squad; an immediate re-sync (e.g. a render)
+    // must not hammer the endpoint, so it still serves the fresh cache.
+    serverSquads = [squad(), squad({ id: "sq_def", name: "rescue" })];
+    await panel.sync();
+    assert.equal(calls, 1, "a sync inside the freshness window reuses the cache");
+
+    // Once the cached load is stale, a later sync refetches and the
+    // externally created squad appears without any local mutation.
+    now += 31_000;
+    await panel.sync();
+    assert.equal(calls, 2, "a sync after the freshness window refetches");
+    assert.ok(root.innerHTML.includes("@squad/rescue"), "the external squad change is painted");
+  } finally {
+    Date.now = realNow;
+    if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+  }
 });
 
 test("squadsHtml shows the disband button to the owner only", () => {

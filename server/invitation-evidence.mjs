@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
+import { event, EVENT_TYPES as T, ownMember, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
 
 // One complete receipt contract is shared by issuance of the joined event and audit.
@@ -27,7 +27,7 @@ export function invitationJoinedEvent(record) {
 }
 
 export function assertInvitationMembershipEvidence(record, linked, binding, room, { retiredInvitee = false } = {}) {
-  const member = room?.state.members[record.intended_member_id];
+  const member = ownMember(room?.state.members, record.intended_member_id);
   const origin = { kind: "invitation", invitationId: record.id, invitedByMemberId: record.issuer_member_id };
   const joined = linked && JSON.parse(linked.body);
   // W4-NEW-1 added displayNamePolicyVersion to newly issued joined events.
