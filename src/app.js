@@ -1080,11 +1080,16 @@ async function ensureDefaultRoom() {
   if (!owned?.authenticated) return null;
   defaultRoomFlight = (async () => {
     try {
+      const statusBeforeSetup = $("#account-rooms-status").textContent;
       $("#account-rooms-status").textContent = "Setting up your first room…";
       const body = await accountClient.request("/api/account/ensure-default-room", { method: "POST", data: {}, session: owned });
       if (accountClient.session !== owned) return null;
       // Refresh the list to show the new room (or the existing one).
       if (body?.room?.id) await loadAccountRooms();
+      // { room: null } is the server's deliberate no-resurrect answer for an
+      // account that left every room (R266-1 / #3508): put back the empty
+      // state the room list showed, never the setup-failure copy.
+      else if (body && body.room === null) $("#account-rooms-status").textContent = statusBeforeSetup;
       else $("#account-rooms-status").textContent = FIRST_ROOM_SETUP_FAILURE;
       return body;
     } catch {
