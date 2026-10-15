@@ -20,7 +20,7 @@
 // G11: read at call time; store.mjs imports this module, so no module-level copy.
 import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID } from "node:crypto";
-import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
+import { event, EVENT_TYPES as T, isRoomArchived, ownMember } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { ensureActivationColumn, ensurePayoutColumns, inviteMessage, memberReward, settleActivations, stampIssuer } from "./growth-loop.mjs";
 
@@ -64,8 +64,8 @@ export class Referrals {
     if (referrerMemberId === refereeMemberId) fail(422, "invalid_referral", "a member cannot refer themselves");
     if (!REFERRAL_VIA.includes(via)) fail(422, "invalid_referral", "via must be invite or request");
     const members = this.store.room(roomId).state.members ?? {};
-    const referrer = members[referrerMemberId];
-    const referee = members[refereeMemberId];
+    const referrer = ownMember(members, referrerMemberId);
+    const referee = ownMember(members, refereeMemberId);
     if (!referrer || referrer.active === false) fail(409, "invalid_referral", "referrer is not an active member");
     if (!referee || referee.active === false) fail(409, "invalid_referral", "referee is not an active member");
     const existing = this.db.prepare("SELECT completed_at AS completedAt, via FROM referrals WHERE room_id=? AND referee_member_id=?")
@@ -130,7 +130,7 @@ export class Referrals {
       if (!auth?.member) fail(401, "unauthenticated", "Room membership required");
       settleActivations(this.store, roomId);
       const members = this.store.room(roomId).state.members ?? {};
-      const nameOf = id => members[id]?.displayName ?? id;
+      const nameOf = id => ownMember(members, id)?.displayName ?? id;
       const rows = this.db.prepare(`SELECT referrer_member_id AS referrerMemberId, referee_member_id AS refereeMemberId,
           completed_at AS completedAt, via, activated_at AS activatedAt FROM referrals
           WHERE room_id=? AND (payout_block IS NULL OR payout_block != 'trace')
