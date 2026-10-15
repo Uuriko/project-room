@@ -220,3 +220,49 @@ test('HTTP observation is non-consuming for every host; ack under a live lease r
   const after = await f.request('/api/agent-wakes/poll?hostId=first&waitMs=0', identity.secret);
   assert.ok(!after.value.pendingWakes.some(row => row.signalId === wake.signalId));
 });
+
+test('an identity credential\'s {roomId} lease requires the live active agent member, not just the link row', async t => {
+  const f = await fixture(t);
+  const identity = f.addMember('Marta Kessler', 'commons', 'lease-member');
+  // Active member: the identity credential acquires the room lease and
+  // its fenced ack drains the room's signal.
+  const beat = await f.request('/api/agent-heartbeats', identity.secret,
+    { hostId: 'member-host', mode: 'pull-only', cadenceSeconds: 60, listenerLease: { roomId: 'commons' } });
+  assert.equal(beat.status, 200);
+  assert.equal(beat.value.listener.acquired, true);
+  const wake = f.store.agentHeartbeats.enqueueWake(
+    { agentId: identity.identityId, kind: 'mention', roomId: 'commons', messageId: 'member-pointer' }).signal;
+  const acked = await f.request('/api/agent-heartbeats/ack', identity.secret,
+    { signalIds: [wake.signalId], fencingToken: beat.value.listener.fencingToken });
+  assert.equal(acked.status, 200);
+  assert.deepEqual(acked.value.acknowledged, [wake.signalId]);
+  // Suspend the member. The identity_links row survives suspension, so a
+  // link-row-only membership check would keep renewing this lease
+  // (F-3497-1); the live member check the scoped-key path applies must
+  // refuse it here too.
+  const member = f.store.room('commons').state.members['lease-member'];
+  f.store.command(f.owners.commons, 'commons', { id: crypto.randomUUID(), type: 'member.access_changed', data: {
+    memberId: member.id, expectedMemberRevision: member.revision, permissions: [], active: false } });
+  const leaseRow = () => f.store.db.prepare(
+    'SELECT lease_expires_at AS expiresAt FROM agent_wake_listener_leases WHERE agent_id=? AND room_key=?')
+    .get(identity.identityId, 'commons');
+  const expiryBefore = leaseRow().expiresAt;
+  const renewed = await f.request('/api/agent-heartbeats', identity.secret,
+    { hostId: 'member-host', mode: 'pull-only', cadenceSeconds: 60, listenerLease: { roomId: 'commons' } });
+  assert.equal(renewed.status, 403);
+  assert.equal(renewed.value.error.code, 'room_mismatch');
+  // The refused heartbeat extended nothing: once the pre-suspension lease
+  // lapses, the suspended member's token claims nothing, so it can no
+  // longer ack the room's signals as their listener.
+  assert.equal(leaseRow().expiresAt, expiryBefore);
+  f.store.db.prepare('UPDATE agent_wake_listener_leases SET lease_expires_at=? WHERE agent_id=? AND room_key=?')
+    .run(Date.now() - 1000, identity.identityId, 'commons');
+  assert.throws(() => f.store.agentHeartbeats.claimWakeBatch(
+    { agentId: identity.identityId, roomId: 'commons', fencingToken: beat.value.listener.fencingToken }),
+    error => error.status === 409 && error.code === 'stale_listener');
+  // Plain presence is not membership-gated for identity credentials and
+  // is unchanged: only the lease branch carries the live check.
+  const plain = await f.request('/api/agent-heartbeats', identity.secret,
+    { hostId: 'member-host', mode: 'pull-only', cadenceSeconds: 60 });
+  assert.equal(plain.status, 200);
+});

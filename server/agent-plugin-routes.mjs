@@ -27,6 +27,7 @@ import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscrip
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
+import { ownMember } from "../src/events.js";
 
 // RC-2026-09-18-031: the room event vocabulary webhooks may subscribe to.
 // Canonical catalog in server/agent-webhook-subscriptions.mjs (derived
@@ -864,9 +865,14 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
             reject(403, "room_mismatch", "A room-scoped credential leases only its bound room");
           leaseRoomId = auth.roomId;
         } else if (requestedRoom !== null) {
-          const member = store.db.prepare(
-            "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoom, auth.identityId);
-          if (!member) reject(403, "room_mismatch", "The identity is not a member of the requested listener room");
+          const link = store.db.prepare(
+            "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoom, auth.identityId);
+          // Links survive access suspension (see scopedKeyRoomBinding):
+          // recheck the live room member, not just the identity mapping,
+          // before an identity-level credential may hold the room's lease.
+          const member = link ? ownMember(store.room(requestedRoom).state.members, link.memberId) : null;
+          if (!member || member.active === false || member.kind !== "agent" || member.identityId !== auth.identityId)
+            reject(403, "room_mismatch", "The identity is not a member of the requested listener room");
           leaseRoomId = requestedRoom;
         } else leaseRoomId = null;
         const lease = store.agentHeartbeats.acquireListenerLease({
