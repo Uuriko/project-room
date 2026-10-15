@@ -327,18 +327,31 @@ function loadState(db, roomId, cursor) {
   return { state: replayFrom(0, emptyRoomState()), seq: cursor.applied_seq };
 }
 
-function nextRoom(db) {
+function nextRoom(db, exclude = []) {
+  const excluded = exclude.length ? ` AND r.id NOT IN (${exclude.map(() => "?").join(",")})` : "";
   return db.prepare(`SELECT r.id AS id, r.sequence AS sequence
     FROM rooms r
     LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id
-    WHERE c.room_id IS NULL
+    WHERE (c.room_id IS NULL
       OR c.applied_seq != r.sequence
       OR (c.applied_seq > 0 AND NOT EXISTS (
         SELECT 1 FROM events e
         WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
-      ))
+      )))${excluded}
     ORDER BY r.id
-    LIMIT 1`).get() ?? null;
+    LIMIT 1`).get(...exclude) ?? null;
+}
+
+// True when a room's messages table has replayed to the room's current
+// sequence — the same predicate the parity sweep uses to pick its rooms.
+export function messagesBackfillCaughtUp(db, roomId) {
+  return Boolean(db.prepare(`SELECT 1 FROM rooms r
+    JOIN messages_backfill_cursor c ON c.room_id = r.id
+    WHERE r.id = ? AND c.applied_seq = r.sequence
+      AND ((c.applied_seq = 0 AND r.sequence = 0)
+        OR c.applied_event_id = (
+          SELECT e.id FROM events e WHERE e.room_id = r.id AND e.sequence = c.applied_seq
+        ))`).get(roomId));
 }
 
 function fillRoom(store, room, budget, expired, yieldBetween) {
@@ -387,35 +400,63 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
   return { events, stopped: false, budgetExceeded: false, appliedSeq: seq };
 }
 
+// Errors that indict the store itself (schema/storage), not one room's
+// data: isolating them per room would re-report the same systemic failure
+// once per room and bury the signal, so they still abort the call.
+// Everything else thrown while filling a room is that room's data — a log
+// that can no longer replay to the room's sequence, a malformed event body.
+function isRoomDataError(error) {
+  return !/no such (table|column)|missing schema|sqlite|database disk|disk full|readonly database/i
+    .test(String(error?.message ?? error));
+}
+
 // Replay message events into the messages table, one budgeted batch. A
 // commit lands every few events with the cursor, so a throw or a deadline
 // keeps the prefix and the next call continues there. Running it again
 // after the log is caught up writes nothing. A replaced log (importEvents)
 // drops that room's rows and starts again.
+//
+// Per-room isolation: a room whose log cannot replay is recorded in the
+// result's `failed` list and skipped, so one poisoned room cannot stop
+// every other room's backfill (the deferred integrity batch wedged on
+// exactly this shape). The room is retried on the next call — the failure
+// is reported, never silently passed.
 export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, deadline = Infinity, yieldBetween = () => {} } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not backfill messages");
   if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : MESSAGES_BACKFILL_BATCH;
-  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true };
+  const failed = [];
+  const failedIds = [];
+  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, failed };
   let events = 0;
   let rooms = 0;
   let roomId = null;
   let appliedSeq = null;
   const seen = new Set();
   while (events < cap) {
-    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq };
-    const room = nextRoom(store.db);
-    if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq };
-    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq };
+    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, failed };
+    const room = nextRoom(store.db, failedIds);
+    if (!room) return { done: failed.length === 0, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
+    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
     seen.add(room.id);
-    const wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, yieldBetween);
-    events += wrote.events;
     rooms += 1;
+    let wrote;
+    try {
+      wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, yieldBetween);
+    } catch (error) {
+      if (!isRoomDataError(error)) throw error;
+      failed.push({ roomId: room.id, error });
+      failedIds.push(room.id);
+      roomId = room.id;
+      appliedSeq = null;
+      continue;
+    }
+    events += wrote.events;
     roomId = room.id;
     appliedSeq = wrote.appliedSeq;
-    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq };
+    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, failed };
   }
-  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq };
+  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
 }
 
 function caughtUpSql(after) {
@@ -483,6 +524,38 @@ export function checkMessagesParity(store) {
   });
   if (result.error) throw result.error;
   return result.value;
+}
+
+// The deferred integrity batch's parity step. checkMessagesParity keeps its
+// throwing contract for direct callers; here, one room's "messages parity
+// failed" verdict is isolated instead: the room is reported through
+// `report`, the sweep advances past it, and the rooms queued behind it are
+// still checked in the same visit (healthy rooms are certified until one
+// passes or every caught-up room has been attempted). Anything that is not
+// a per-room parity verdict — schema, storage — still throws. A failed
+// room keeps its cleared certification, so the verdict is unchanged; only
+// the blast radius shrinks.
+export function runMessagesParityCheck(store, { report = () => {} } = {}) {
+  if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
+  const failures = [];
+  const attempted = new Set();
+  for (;;) {
+    const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
+    const roomId = nextParityRoom(store.db, sweepAfter);
+    if (!roomId || attempted.has(roomId)) break;
+    attempted.add(roomId);
+    try {
+      const certified = checkMessagesParity(store);
+      report({ roomId, error: null });
+      return { ...certified, failures };
+    } catch (error) {
+      if (!String(error?.message ?? error).startsWith("messages parity failed for ")) throw error;
+      failures.push({ roomId, error });
+      report({ roomId, error });
+      rememberSweep(store, roomId);
+    }
+  }
+  return { ok: failures.length === 0, checked: 0, roomId: null, failures };
 }
 
 function certifyMessagesParity(store) {
