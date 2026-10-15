@@ -1885,9 +1885,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           }
           return json(res, 200, store.publicWorkClaims.receipt(receiptId, viewer), req.method === "HEAD");
         }
+        // The claimable read is discovery of available work: it is
+        // served through the AvailableWork projection (listClaimable).
+        // The plain browse lists every state and stays on the facade.
+        const claimableOnly = ["1", "true"].includes(url.searchParams.get("claimable"));
         return json(res, 200, publicWorkTaskMatch
           ? store.publicWorkClaims.read(pathId(publicWorkTaskMatch[1]))
-          : store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "", claimable: ["1", "true"].includes(url.searchParams.get("claimable")) }), req.method === "HEAD");
+          : claimableOnly
+            ? store.publicWorkClaims.listClaimable({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "" })
+            : store.publicWorkClaims.list({ limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "", claimable: false }), req.method === "HEAD");
       }
       const projectOfferPublicMatch = /^\/api\/project-offers\/([^/]{1,128})(?:\/(brief.md))?$/.exec(url.pathname);
       if (url.pathname === "/api/project-offers" || projectOfferPublicMatch) {

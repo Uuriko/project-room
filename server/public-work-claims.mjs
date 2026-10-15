@@ -6,6 +6,7 @@ import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { availablePublicTasks } from './available-work.mjs'; // the AvailableWork projection: the one availability classification (B-2)
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -216,6 +217,35 @@ export class PublicWorkClaims {
       return { tasks: page, claimableCount,
         nextCursor: start + limit < tasks.length ? page.at(-1).taskId : null };
     });
+  }
+  // The claimable-only read of the public board, served THROUGH the
+  // AvailableWork projection (redesign charter B-2): the projection is
+  // the availability authority — which tasks are claimable, in which
+  // order, and how many there are (claimableCount) all come from
+  // availablePublicTasks, never from a second filter here. This method
+  // only materializes the page's packets (via read(), the same builder
+  // list() ends up in via packet()) and applies list()'s cursor
+  // arithmetic verbatim over the projection's ordering, so the two reads
+  // cannot disagree about a page. The browse read above stays on the
+  // facade: it serves every state including submitted, which is a
+  // transparency listing, not a discovery of available work.
+  listClaimable({ limit = 20, after = '' } = {}) {
+    check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
+    if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
+    // Full claimable set from the projection; paging happens here.
+    const { items, total } = availablePublicTasks(this.store, { limit: Number.MAX_SAFE_INTEGER });
+    let start = 0;
+    if (after !== '') {
+      const index = items.findIndex(item => item.id === after);
+      if (index >= 0) start = index + 1;
+      else {
+        const fallback = items.findIndex(item => item.id > after);
+        start = fallback < 0 ? items.length : fallback;
+      }
+    }
+    const page = items.slice(start, start + limit);
+    return { tasks: page.map(item => this.read(item.id)), claimableCount: total,
+      nextCursor: start + limit < total ? page.at(-1).id : null };
   }
   // #3530 keeper surface: the starter pool's state in the same terms the
   // public board serves. `due` lists the anchored seeds whose latest
