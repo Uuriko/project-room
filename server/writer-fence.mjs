@@ -405,6 +405,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
+  // integrity_failures (integrity batch isolation, #3334): durable
+  // per-record failure rows the integrity cron writes when it isolates a
+  // poisoned record instead of wedging the whole batch. Purely additive
+  // and intentionally NOT fenced — older writers have no code path to it,
+  // and a missing row only means no isolated failure is outstanding.
+  "integrity_failures",
   // messages_backfill_cursor (MSG-2): per-room replay cursor for events that
   // landed before the messages table, plus importEvents and initialize.
   // The integrity cron writes it. Older writers have no path to it. A missing
