@@ -15,7 +15,7 @@ import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
-import { assertScopedKeyListener } from "./room-key-presence.mjs";
+import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
@@ -713,7 +713,9 @@ async function callWakeTool(store, secret, identity, name, args) {
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
     const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
-    if (args.listenerLease !== undefined) {
+    // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
+    // API key gets the same pull-only guard and host namespace as HTTP.
+    {
       const resolveAuth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } });
       const initial = resolveAuth(null, MCP_WAKE_SCOPE);
       const data = { ...args, mode, wakeUrl, cadenceSeconds, pushNotification };
@@ -727,13 +729,12 @@ async function callWakeTool(store, secret, identity, name, args) {
         return heartbeatReceipt(agentId, result);
       });
     }
-    if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
-    const result = store.agentHeartbeats.heartbeat({
-      agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification, workWakes: args.workWakes
-    });
-    return heartbeatReceipt(agentId, result);
   }
-  if (name === "heartbeat_get") return store.agentHeartbeats.statusOf(agentId);
+  if (name === "heartbeat_get") {
+    // R269-1 v2: a room-scoped key reads the same scoped presence view as HTTP GET.
+    const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+    return auth.scopedKey ? scopedKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(agentId);
+  }
   if (name === "heartbeat_ack") {
     if (args.fencingToken === undefined) return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds });
     return store.transaction(() => {
