@@ -346,6 +346,7 @@ let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, catchUpBoundary = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
+let snapshotAuditView = "full", recordLoading = null, recordLoadFailed = false;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
 let accessEndContext = null;
 let lastComposerSelection = null;
@@ -380,11 +381,14 @@ try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
+  auditView: "activity",
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
+    snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
@@ -2084,6 +2088,23 @@ function render() {
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
+  for (let parent = $("#record-panel").parentElement; parent && parent !== $("#settings-dialog"); parent = parent.parentElement)
+    if (parent.tagName === "DETAILS" && !parent.open) return;
+  if (snapshotAuditView === "activity") {
+    renderContent("#event-list", uiText(recordLoadFailed ? "record.failedHtml" : "record.loadingHtml"));
+    if (!recordLoading && !recordLoadFailed) {
+      const generation = client.generation;
+      const loading = client.setAuditView("full"); recordLoading = loading;
+      loading.catch(error => {
+        if (generation !== client.generation) return;
+        if ([401, 403].includes(error.status) || error.code === "session_binding_changed") client.handleFailure(error);
+        else recordLoadFailed = true;
+      })
+        .finally(() => { if (recordLoading === loading) recordLoading = null; if (generation === client.generation) renderRecordPanel(); });
+    }
+    return;
+  }
+  recordLoadFailed = false;
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 
   // Decision register (backlog F2): the register is read from the event feed.
@@ -2093,7 +2114,13 @@ function renderRecordPanel() {
     `<li><strong>${esc(e.data.statement)}</strong> <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
     || '<li class="rb-empty">No decisions recorded yet.</li>');
 }
-$("#record-panel").addEventListener("toggle", renderRecordPanel);
+$("#record-panel").addEventListener("toggle", () => {
+  if (!$("#record-panel").open) { recordLoadFailed = false; void client.setAuditView("activity").catch(() => {}); }
+  renderRecordPanel();
+});
+$("#event-list").addEventListener("click", event => {
+  if (event.target.closest("[data-record-retry]")) { recordLoadFailed = false; void client.refresh(null, { revalidate: true }).catch(() => { recordLoadFailed = true; renderRecordPanel(); }); renderRecordPanel(); }
+});
 // Phase 2 channels: one main channel plus user-created channels. Chat and work
 // share the timeline of the selected channel; work cards follow the channel of
 // their proposal message (the main channel when there is none).
@@ -3207,11 +3234,24 @@ function revealRoom() {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   focusRecord($("#room-title"));
 }
-function revealEvent(id) {
+function revealEvent(id, requireExisting = false) {
   if (!state || busy) return;
-  openSettings("record-panel");
-  focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
-    .find(node => node.dataset.eventRecordId === id));
+  const generation = client.generation, navigationHash = location.hash;
+  if (!requireExisting) openSettings("record-panel");
+  void client.setAuditView("full").then(() => {
+    if (generation !== client.generation || !state) return;
+    if (requireExisting && location.hash !== navigationHash) return;
+    if (requireExisting && !state.eventLog.some(event => event.id === id)) {
+      if (!$("#settings-dialog").open || !$("#record-panel").open) void client.setAuditView("activity").catch(() => {});
+      return;
+    }
+    if (requireExisting) openSettings("record-panel");
+    if (!$("#settings-dialog").open) return;
+    focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
+      .find(node => node.dataset.eventRecordId === id));
+  }).catch(error => {
+    if (generation === client.generation && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) client.handleFailure(error);
+  });
 }
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
@@ -3270,6 +3310,7 @@ function revealLocationHash() {
   for (const [prefix, reveal] of [["#message-", revealMessage], ["#work-", revealWork], ["#member-", revealMember], ["#event-", revealEvent]]) {
     if (!hash.startsWith(prefix)) continue;
     const id = decodeFragment(hash.slice(prefix.length));
+    if (id !== null && prefix === "#event-" && snapshotAuditView === "activity") { revealEvent(id, true); return; }
     const exists = prefix === "#message-" ? conversation.byId.has(id)
       : prefix === "#work-" ? Boolean(state.workItems[id])
       : prefix === "#member-" ? Boolean(state.members[id])
@@ -7791,6 +7832,8 @@ document.addEventListener("click", event => {
 function closeSecondaryBoards() {
   $("#land-queue-panel").open = false;
   $("#referral-panel").open = false;
+  recordLoadFailed = false;
+  void client.setAuditView("activity").catch(() => {});
 }
 $("#settings-dialog").addEventListener("close", closeSecondaryBoards);
 $("#settings-dialog").addEventListener("cancel", closeSecondaryBoards);
