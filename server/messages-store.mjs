@@ -1,4 +1,6 @@
-import { hydrateProjection } from "./projection-at-rest.mjs";
+import { hydrateProjection, storedProjection } from "./projection-at-rest.mjs";
+import { closeKeepSet } from "./open-questions.mjs";
+export { closeKeepSet };
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
 // same transaction as the event insert. MSG-2 replays events that landed
@@ -231,17 +233,65 @@ function saveCursor(db, roomId, appliedSeq, eventId, state) {
 // the projection and live only in this table; they are not stale rows.
 export function archiveMarker(db, roomId) {
   const row = db.prepare(`SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,
-    json_extract(projection, '$.messagesArchive.count') AS count FROM rooms WHERE id=?`).get(roomId);
+    json_extract(projection, '$.messagesArchive.count') AS count,
+    json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?`).get(roomId);
   const throughSeq = Number.isInteger(row?.throughSeq) && row.throughSeq > 0 ? row.throughSeq : 0;
-  return { throughSeq, count: throughSeq && Number.isInteger(row.count) && row.count > 0 ? row.count : 0 };
+  // retainedIds: messages at or below throughSeq that stay in the projection
+  // (pinned, work-linked...). They are not archived and compare normally.
+  let retained = [];
+  if (throughSeq && typeof row.retained === "string") {
+    try { const parsed = JSON.parse(row.retained); if (Array.isArray(parsed)) retained = parsed.filter(id => typeof id === "string"); } catch { /* none */ }
+  }
+  return { throughSeq, count: throughSeq && Number.isInteger(row.count) && row.count > 0 ? row.count : 0, retainedIds: retained, retainedJson: JSON.stringify(retained) };
 }
 
 // One archived message row (seq at or below the marker), or null. Archived
 // messages are not in the projection, so readers that need one by id use this.
-export function archivedMessageRow(db, roomId, messageId) {
-  const { throughSeq } = archiveMarker(db, roomId);
+export function archivedMessageRow(db, roomId, messageId, marker = archiveMarker(db, roomId)) {
+  const { throughSeq, retainedJson } = marker;
   if (!throughSeq || typeof messageId !== "string") return null;
-  return db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=?").get(roomId, messageId, throughSeq) ?? null;
+  return db.prepare("SELECT * FROM messages WHERE room_id=? AND message_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+    .get(roomId, messageId, throughSeq, retainedJson) ?? null;
+}
+
+// Ids of the room's archived messages (no longer in the projection), for audits
+// that compare the projection with a full replay.
+export function archivedMessageIds(db, roomId) {
+  const { throughSeq, retainedJson } = archiveMarker(db, roomId);
+  if (!throughSeq) return new Set();
+  return new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+    .all(roomId, throughSeq, retainedJson).map(row => row.message_id));
+}
+
+// Current records of archived messages in one thread (the root itself when it is
+// archived, plus archived replies filed under it), oldest first.
+export function archivedThreadRecords(db, roomId, rootId) {
+  const { throughSeq, retainedJson } = archiveMarker(db, roomId);
+  if (!throughSeq || typeof rootId !== "string") return [];
+  // A reply's own replies hang off the thread's root, so read the whole thread
+  // (the caller builds the requested message's subtree). A top-level message has
+  // no thread_root_id: its thread is itself.
+  const own = db.prepare("SELECT thread_root_id FROM messages WHERE room_id=? AND message_id=?").get(roomId, rootId);
+  const threadId = own?.thread_root_id || rootId;
+  const out = [];
+  for (const row of db.prepare("SELECT record_json, body FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?)) AND (message_id=? OR thread_root_id=?) ORDER BY seq")
+    .all(roomId, throughSeq, retainedJson, threadId, threadId)) {
+    try { const record = JSON.parse(row.record_json); out.push(row.body === null ? record : { ...record, body: row.body }); } catch { /* unreadable rows are skipped */ }
+  }
+  return out;
+}
+
+// Current records of archived messages whose body contains the lowercase
+// needle, oldest first, for readers that scan every message (search).
+export function archivedMatchingRecords(db, roomId, needle) {
+  const { throughSeq, retainedJson } = archiveMarker(db, roomId);
+  if (!throughSeq) return [];
+  const out = [];
+  for (const row of db.prepare("SELECT body, record_json FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?)) AND body IS NOT NULL AND instr(lower(body), ?)>0 ORDER BY seq")
+    .all(roomId, throughSeq, retainedJson, needle)) {
+    try { out.push({ ...JSON.parse(row.record_json), body: row.body }); } catch { /* an unreadable record is not searchable */ }
+  }
+  return out;
 }
 
 function pruneMessages(db, roomId) {
@@ -456,11 +506,11 @@ function certifyMessagesParity(store) {
   }
   const archive = archiveMarker(store.db, roomId);
   const archivedRows = archive.throughSeq
-    ? store.db.prepare("SELECT message_id, reply_to_id FROM messages WHERE room_id=? AND seq<=?").all(roomId, archive.throughSeq) : [];
+    ? store.db.prepare("SELECT message_id, reply_to_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))").all(roomId, archive.throughSeq, archive.retainedJson) : [];
   if (archivedRows.length !== archive.count) throw new Error(`messages parity failed for ${roomId}: archived rows ${archivedRows.length}, marker count ${archive.count}`);
   // Archived parents stay reachable for the thread-root comparison.
   const threadMessages = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]), ...messages]);
-  for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND seq>?").all(roomId, archive.throughSeq)) {
+  for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))").all(roomId, archive.throughSeq, archive.retainedJson)) {
     const message = messages.get(row.message_id);
     let record, reactions;
     try { record = JSON.parse(row.record_json); reactions = row.reactions_json === null ? {} : JSON.parse(row.reactions_json); }
@@ -483,4 +533,152 @@ function certifyMessagesParity(store) {
   store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=applied_seq WHERE room_id=?").run(roomId));
   rememberSweep(store, roomId);
   return { ok: true, checked: 1, roomId, ...numbers };
+}
+
+// Messages that must stay in the projection: pinned, the source or evidence of
+// work, tied to a work item, or a reply request. Readers of those assume the
+// message is in state.messages.
+function retainedByState(state) {
+  const keep = new Set();
+  for (const pin of state.pins ?? []) if (typeof pin?.messageId === "string") keep.add(pin.messageId);
+  for (const item of Object.values(state.workItems ?? {})) {
+    if (typeof item?.sourceMessageId === "string") keep.add(item.sourceMessageId);
+    if (typeof item?.receipt?.nativeText?.messageId === "string") keep.add(item.receipt.nativeText.messageId);
+    if (typeof item?.receipt?.evidenceMessageId === "string") keep.add(item.receipt.evidenceMessageId);
+  }
+  for (const id of Object.keys(state.replyRequests ?? {})) keep.add(id);
+  for (const message of state.messages ?? []) if (typeof message?.workItemId === "string" && message.workItemId) keep.add(message.id);
+  return keep;
+}
+
+// Move old messages out of rooms.projection into the messages table only. Keeps
+// the newest `keepNewest` messages and everything retainedByState. Needs a
+// certified messages table (parity at the room head). dryRun reports what
+// would move and changes nothing. Returns { ok, ... } and never throws for
+// "not ready" conditions.
+export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true } = {}) {
+  if (store?.readOnly) throw new Error("Read-only stores do not archive messages");
+  if (!Number.isInteger(keepNewest) || keepNewest < 1) throw new Error("keepNewest must be a positive integer");
+  return store.transaction(() => {
+    const db = store.db;
+    const head = db.prepare("SELECT sequence, projection FROM rooms WHERE id=?").get(roomId);
+    if (!head) return { ok: false, reason: "room_not_found" };
+    const cursor = db.prepare("SELECT applied_seq, parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+    if (!cursor || cursor.applied_seq !== head.sequence || cursor.parity_at_seq !== head.sequence) return { ok: false, reason: "messages_table_not_certified" };
+    const state = store.room(roomId).state;
+    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
+    const inProjection = state.messages ?? [];
+    if (inProjection.some(message => !seqs.has(message.id))) return { ok: false, reason: "message_missing_from_table" };
+    const ordered = [...inProjection].sort((a, b) => seqs.get(a.id) - seqs.get(b.id));
+    if (ordered.length <= keepNewest) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: archiveMarker(db, roomId).throughSeq };
+    const tail = ordered.slice(ordered.length - keepNewest);
+    const cutoff = seqs.get(tail[0].id);
+    const keep = retainedByState(state);
+    // Keep whole active threads and open questions: see closeKeepSet.
+    for (const message of tail) keep.add(message.id);
+    closeKeepSet(ordered, keep);
+    const marker = archiveMarker(db, roomId);
+    const moving = ordered.filter(message => seqs.get(message.id) < cutoff && !keep.has(message.id));
+    if (!moving.length) return { ok: true, dryRun, archived: 0, retained: 0, freedBytes: 0, throughSeq: marker.throughSeq };
+    // throughSeq only ever grows: the archived prefix is never shortened.
+    const throughSeq = Math.max(marker.throughSeq, seqs.get(moving[moving.length - 1].id));
+    const movingIds = new Set(moving.map(message => message.id));
+    const retainedIds = ordered.filter(message => seqs.get(message.id) <= throughSeq && !movingIds.has(message.id)).map(message => message.id);
+    // Every message at or below the cut that is not moving is explicitly retained.
+    const freedBytes = moving.reduce((sum, message) => sum + Buffer.byteLength(JSON.stringify(message)) + 1, 0);
+    const result = { ok: true, dryRun, archived: moving.length, retained: retainedIds.length, freedBytes, throughSeq };
+    // Spot-check before anything moves (dry run too): every moving message has a
+    // table row equal to its projection record, and a sample is tied back to its
+    // posting event in the log.
+    const rowFor = db.prepare("SELECT seq, body, record_json FROM messages WHERE room_id=? AND message_id=?");
+    const eventAt = db.prepare("SELECT body FROM events WHERE room_id=? AND sequence=?");
+    const step = Math.max(1, Math.floor(moving.length / 25));
+    for (const [index, message] of moving.entries()) {
+      const row = rowFor.get(roomId, message.id);
+      let record = null;
+      try { record = JSON.parse(row?.record_json); } catch { /* fails the check below */ }
+      let ok = Boolean(row) && isDeepStrictEqual(record, currentRecord(message)) && row.body === storedBody(message);
+      if (ok && index % step === 0) {
+        let posted = null;
+        try { posted = JSON.parse(eventAt.get(roomId, row.seq)?.body); } catch { /* fails below */ }
+        // An also-send-to-channel copy is posted by its thread reply's event as `<id>:channel`.
+        const postedId = posted?.data?.messageId || posted?.id;
+        ok = posted?.type === POSTED && (postedId === message.id || (Boolean(posted.data?.alsoSendToChannel) && `${postedId}:channel` === message.id));
+      }
+      if (!ok) return { ok: false, reason: "archive_spot_check_failed", messageId: message.id };
+    }
+    if (dryRun) return result;
+    const next = { ...state, messages: inProjection.filter(message => !movingIds.has(message.id)) };
+    // The marker must never claim a message that is still in the projection.
+    const priorArchived = archivedMessageIds(db, roomId);
+    if (next.messages.some(message => movingIds.has(message.id) || priorArchived.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
+    next.messagesArchive = { throughSeq, count: marker.count + moving.length, retainedIds };
+    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
+    return result;
+  });
+}
+
+// Apply a room's archive marker to a fully replayed state, so a replay can be
+// compared with the compacted stored projection. Messages at or below the
+// marker and not retained leave the state; the marker is rebuilt from the table.
+export function compactReplayLikeArchive(db, roomId, state) {
+  const marker = archiveMarker(db, roomId);
+  if (!marker.throughSeq) return state;
+  const archived = new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+    .all(roomId, marker.throughSeq, marker.retainedJson).map(row => row.message_id));
+  state.messages = (state.messages ?? []).filter(message => !archived.has(message.id));
+  state.messagesArchive = { throughSeq: marker.throughSeq, count: archived.size, retainedIds: marker.retainedIds };
+  return state;
+}
+
+// Rollback of the archive: put every archived message back into the stored
+// projection and drop the marker, so code that does not know the marker (a
+// flag-off deploy, the old recovery audit) sees the whole room again. The
+// archived records come from replaying the event log; nothing else in the
+// projection changes. Returns how many messages were restored.
+export function restoreArchivedMessages(store, roomId) {
+  if (store?.readOnly) throw new Error("Read-only stores do not restore archived messages");
+  return store.transaction(() => {
+    const db = store.db;
+    const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    if (!head) return 0;
+    const archived = archivedMessageIds(db, roomId);
+    const state = store.room(roomId).state;
+    if (!state.messagesArchive && !archived.size) return 0;
+    const present = new Set((state.messages ?? []).map(message => message.id));
+    const replayed = new Map((store._replayRoom(roomId, head.sequence).state.messages ?? []).map(message => [message.id, message]));
+    const missing = [...archived].filter(id => !present.has(id));
+    if (missing.some(id => !replayed.has(id))) throw new Error("Archived message could not be restored from the event log");
+    const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
+    const messages = [...(state.messages ?? []), ...missing.map(id => replayed.get(id))]
+      .sort((a, b) => (seqs.get(a.id) ?? Infinity) - (seqs.get(b.id) ?? Infinity));
+    const next = { ...state, messages };
+    delete next.messagesArchive;
+    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: false }), roomId);
+    store._projectionCache?.clear?.();
+    return missing.length;
+  });
+}
+
+// Bring one archived message back into the projection so the normal delete and
+// redaction path can act on it. The id joins the marker's retainedIds (it is at
+// or below throughSeq but no longer archived) and the archived count drops by
+// one, so the marker, the table and a marker-aware replay all agree. Returns
+// true when the message was restored. Runs inside the caller's command
+// transaction, so a delete the reducer then refuses rolls this back too.
+export function restoreArchivedMessage(store, roomId, messageId) {
+  const db = store.db;
+  const marker = archiveMarker(db, roomId);
+  if (!archivedMessageRow(db, roomId, messageId, marker)) return false;
+  const state = store.room(roomId).state;
+  if ((state.messages ?? []).some(message => message.id === messageId)) return false;
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+  const original = (store._replayRoom(roomId, head.sequence).state.messages ?? []).find(message => message.id === messageId);
+  if (!original) throw new Error("Archived message could not be restored from the event log");
+  const seqs = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId).map(row => [row.message_id, row.seq]));
+  const messages = [...(state.messages ?? []), original].sort((a, b) => (seqs.get(a.id) ?? Infinity) - (seqs.get(b.id) ?? Infinity));
+  const next = { ...state, messages, messagesArchive: { throughSeq: marker.throughSeq, count: Math.max(0, marker.count - 1), retainedIds: [...marker.retainedIds, messageId] } };
+  db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest }), roomId);
+  store._projectionCache?.clear?.();
+  return true;
 }

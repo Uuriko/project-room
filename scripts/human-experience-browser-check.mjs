@@ -368,7 +368,7 @@ test('human Advanced tools stay out of the door and preserve squad drafts and sa
   const page=await browser.newPage(), errors=[]; page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+'/#join-agent');
   await page.locator('#auth-panel').waitFor({state:'visible'});
-  assert.equal(await page.getByRole('button',{name:'Agent sign in',exact:true}).count(),1);
+  assert.equal(await page.getByRole('link',{name:'Agent sign in',exact:true}).count(),1);
   assert.equal(await page.locator('#static-hero').count(),0);
   assert.equal(await page.locator('#connect-guide-dialog').isVisible(),false);
   assert.equal(await page.locator('#connect-guide-open').isVisible(),false);
@@ -495,6 +495,70 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
   await status.getByText('Stopped',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>document.activeElement===document.body),false,'focus survives the Stop button disappearing');
 });
+for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts, authority and stale review on a phone (${theme})`, { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const api = async (actor, input) => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: input ? 'POST' : 'GET', headers: { authorization: `Bearer ${f.keys[actor]}`, ...(input ? { 'content-type': 'application/json' } : {}) }, ...(input ? { body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) } : {}) });
+    const value = await response.json(); assert.equal(response.status, 200, JSON.stringify(value)); return input ? value.result : value;
+  };
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'resolve-source', body: 'Choose a launch date.' } });
+  let run = await api('owner', { action: 'invoke', runId: 'resolve-run', sourceMessageId: 'resolve-source' });
+  run = await api('producer', { action: 'claim', runId: run.id, attemptId: 'resolve-host', expectedRevision: run.revision });
+  run = await api('producer', { action: 'report', runId: run.id, attemptId: 'resolve-host', expectedRevision: run.revision, state: 'needs_input', summary: 'Choose Friday or Monday.' });
+  const pages = [];
+  for (const actor of ['owner', 'guest']) {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.goto(origin); await signInFixture(page, f.keys[actor]);
+    await page.locator('#assistant-face .assistant-face-status').getByText('Needs a decision', { exact: true }).waitFor();
+    await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
+    pages.push(page);
+  }
+  const [owner, peer] = pages, control = owner.locator('#assistant-face').getByRole('button', { name: 'Resolve direction', exact: true });
+  assert.equal(await owner.locator('#assistant-activity').evaluate(node => node.open), false);
+  assert.equal(await peer.locator('#assistant-face [data-resolve]').count(), 0, 'another participant cannot resolve the owner’s ask');
+  f.store.command(f.keys.guest, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'unapproved-resolution', body: 'Choose my date.', replyToId: 'resolve-source' } });
+  const forbidden = await fetch(`${origin}/api/rooms/commons/assistant`, { method: 'POST', headers: { authorization: `Bearer ${f.keys.guest}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), action: 'resolve', runId: run.id, expectedRevision: run.revision, sourceMessageId: 'unapproved-resolution' }) });
+  assert.equal(forbidden.status, 403, 'hiding the control does not replace server authorization');
+  await control.waitFor({ state: 'visible' });
+  assert.ok((await control.boundingBox()).height >= 24, 'the inline action retains its accessible target');
+  mkdirSync('test-results', { recursive: true });
+  await owner.screenshot({ path: `test-results/visible-resolution-${theme}.png` });
+  await owner.locator('#message-input').fill('Keep my unrelated draft.');
+  await control.focus(); await owner.keyboard.press('Enter');
+  assert.equal(await owner.locator('#message-input').inputValue(), '');
+  assert.equal(await owner.locator('#ask-room').textContent(), 'Resolve direction');
+  assert.equal((await api('owner')).runs[0].inputs.length, 1, 'opening the composer sends nothing');
+  await owner.locator('#ask-room').click();
+  await owner.locator('#thread-back').click();
+  assert.equal(await owner.locator('#message-input').inputValue(), 'Keep my unrelated draft.');
+  await control.click();
+  await owner.locator('#message-input').fill('Choose Monday after the review.');
+  const observedRevision = run.revision;
+  run = await api('producer', { action: 'report', runId: run.id, attemptId: 'resolve-host', expectedRevision: run.revision, state: 'needs_input', summary: 'The review also needs an owner.' });
+  await owner.locator('#message-form button[type=submit]').click();
+  await owner.locator('#assistant-review').waitFor({ state: 'visible' });
+  assert.equal((await api('owner')).runs[0].inputs.length, 1, 'a stale resolution is not applied');
+  await owner.locator('#assistant-review').click();
+  assert.equal((await api('owner')).runs[0].status, 'needs_input', 'review requires a separate confirmation');
+  await owner.locator('#assistant-retry').click();
+  await owner.locator('#assistant-retry').waitFor({ state: 'hidden' });
+  run = (await api('owner')).runs[0];
+  assert.ok(run.revision > observedRevision);
+  assert.equal(run.status, 'pause_requested', 'the original host must pause before continuing with the resolution');
+  assert.equal(run.attemptId, 'resolve-host');
+  assert.equal(run.inputs.length, 2);
+  assert.equal(run.inputs[1].memberId, 'owner');
+  assert.equal(run.inputs[1].resolution, true);
+  assert.equal(await owner.locator('#assistant-activity').evaluate(node => node.open), false);
+  await owner.locator('#thread-back').click();
+  assert.equal(await owner.locator('#message-input').inputValue(), 'Keep my unrelated draft.');
+  assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+});
+
 test('@Room in the mention list is an Ask Room, not a plain mention', { timeout: 45000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -765,3 +829,118 @@ test('Add to this ask wires the composer into the run and names the ask', { time
   await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('keep it simple'));
   assert.deepEqual(errors,[]);
 });
+
+for (const width of [1280, 390]) {
+  test(`Stop rejected because the host claimed after the card rendered: Review then Retry stops the new attempt (${width}px)`, { timeout: 60000 }, async t => {
+    const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+    t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+    const api = async (actor, input) => {
+      const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: 'POST', headers: { authorization: `Bearer ${f.keys[actor]}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) });
+      const value = await response.json(); assert.equal(response.status, 200, JSON.stringify(value)); return value.result;
+    };
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: 'race-ask', body: 'Plan the offsite' } });
+    await api('owner', { action: 'invoke', runId: 'race-run', sourceMessageId: 'race-ask' });
+    const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 } });
+    await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor({ state: 'visible' });
+    await page.locator('#assistant-face [data-cancel]').waitFor();
+    // The human still sees the unclaimed card while the host claims it.
+    const snapshot = await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json();
+    let frozen = true; const stops = [];
+    await page.route('**/api/rooms/commons/assistant', async route => {
+      if (route.request().method() === 'GET' && frozen) { await route.fulfill({ json: snapshot }); return; }
+      if (route.request().method() === 'POST' && route.request().postDataJSON()?.action === 'cancel') stops.push(route.request().postDataJSON());
+      await route.continue();
+    });
+    await api('producer', { action: 'claim', runId: 'race-run', attemptId: 'race-host', expectedRevision: 0 });
+    await page.locator('#assistant-face [data-cancel]').click();
+    await page.locator('#assistant-review').waitFor({ state: 'visible' });
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0].expectedAttemptId, null, 'the first Stop carried the attempt the human saw');
+    frozen = false;
+    await page.locator('#assistant-review').click();
+    await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+    await page.locator('#assistant-retry').click();
+    await page.waitForFunction(() => document.querySelector('#assistant-error')?.textContent === '' );
+    assert.equal(stops.length, 2);
+    assert.equal(stops[1].expectedRevision, 1);
+    assert.equal(stops[1].expectedAttemptId, 'race-host', 'Review rebinds Stop to the attempt it just showed, still as an exact id');
+    const run = (await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json()).runs.find(r => r.id === 'race-run');
+    assert.equal(run.status, 'cancel_requested');
+    await page.screenshot({ path: `/tmp/probe/race-${width}.png` });
+  });
+}
+
+async function claimRaceFixture(t, width, ids) {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const api = async (actor, input) => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant`, { method: 'POST', headers: { authorization: `Bearer ${f.keys[actor]}`, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), ...input }) });
+    const value = await response.json(); assert.equal(response.status, 200, JSON.stringify(value)); return value.result;
+  };
+  const read = async () => (await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json()).runs.find(r => r.id === ids.run);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  f.store.command(f.keys.owner, 'commons', { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: ids.ask, body: 'Plan the offsite' } });
+  await api('owner', { action: 'invoke', runId: ids.run, sourceMessageId: ids.ask });
+  const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 } });
+  await page.goto(origin); await signInFixture(page, f.keys.owner); await page.locator('#main').waitFor({ state: 'visible' });
+  await page.locator('#assistant-face [data-cancel]').waitFor();
+  const snapshot = await (await fetch(`${origin}/api/rooms/commons/assistant`, { headers: { authorization: `Bearer ${f.keys.owner}` } })).json();
+  const state = { frozen: true, controls: [], failNext: false };
+  await page.route('**/api/rooms/commons/assistant', async route => {
+    const request = route.request();
+    if (request.method() === 'GET' && state.frozen) { await route.fulfill({ json: snapshot }); return; }
+    if (request.method() === 'POST' && ['cancel', 'pause'].includes(request.postDataJSON()?.action)) {
+      state.controls.push(request.postDataJSON());
+      if (state.failNext) { state.failNext = false; await route.fulfill({ status: 409, json: { error: { code: 'assistant_attempt_changed', message: 'The execution changed; read it before controlling it' } } }); return; }
+    }
+    await route.continue();
+  });
+  return { api, page, read, state };
+}
+
+for (const width of [1280, 390]) {
+  test(`a Stop rejected again after Review is not rebound or retried on its own, and the run keeps running (${width}px)`, { timeout: 60000 }, async t => {
+    const { api, page, read, state } = await claimRaceFixture(t, width, { run: 'again-run', ask: 'again-ask' });
+    await api('producer', { action: 'claim', runId: 'again-run', attemptId: 'again-host', expectedRevision: 0 });
+    await page.locator('#assistant-face [data-cancel]').click();
+    await page.locator('#assistant-review').waitFor({ state: 'visible' });
+    state.frozen = false;
+    await page.locator('#assistant-review').click();
+    await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+    // The execution changes again before the human presses Retry: the server rejects the exact attempt.
+    state.failNext = true;
+    await page.locator('#assistant-retry').click();
+    await page.locator('#assistant-review').waitFor({ state: 'visible' });
+    await page.waitForTimeout(1200);
+    assert.equal(state.controls.length, 2, 'first Stop, one Retry after Review, and nothing automatic after the second rejection');
+    assert.equal(state.controls[0].expectedAttemptId, null);
+    assert.equal(state.controls[1].expectedAttemptId, 'again-host');
+    assert.equal(await page.locator('#assistant-retry').isVisible(), false, 'no Retry is offered until a fresh Review');
+    assert.match(await page.locator('#assistant-error').textContent(), /rejected/);
+    assert.equal((await read()).status, 'working', 'a rejected Stop never cancels the newer execution');
+  });
+
+  test(`Pause rejected because the host claimed after the card rendered: Review then Retry pauses the new attempt (${width}px)`, { timeout: 60000 }, async t => {
+    const { api, page, read, state } = await claimRaceFixture(t, width, { run: 'pause-run', ask: 'pause-ask' });
+    await api('producer', { action: 'claim', runId: 'pause-run', attemptId: 'pause-host', expectedRevision: 0 });
+    const pause = page.locator('#assistant-runs [data-pause-run]:not([data-cancel]):not([data-resume])').first();
+    await page.locator('#assistant-activity summary').first().click().catch(() => {});
+    await pause.click();
+    await page.locator('#assistant-review').waitFor({ state: 'visible' });
+    assert.equal(state.controls[0].action, 'pause');
+    assert.equal(state.controls[0].expectedAttemptId, null);
+    state.frozen = false;
+    await page.locator('#assistant-review').click();
+    await page.locator('#assistant-retry').click();
+    await page.waitForFunction(() => document.querySelector('#assistant-error')?.textContent === '');
+    assert.equal(state.controls.length, 2);
+    assert.equal(state.controls[1].action, 'pause');
+    assert.equal(state.controls[1].expectedAttemptId, 'pause-host');
+    assert.equal((await read()).status, 'pause_requested');
+  });
+}

@@ -13,7 +13,12 @@ function indexMessages(messages) {
   for (const message of messages ?? []) {
     if (message && typeof message.id === "string") byId.set(message.id, message);
   }
-  return byId;
+  // Archived messages are no longer in the projection. A messages array may
+  // carry an `archivedLookup` so their log events are still redacted to the
+  // current record (a withdrawn archived message must not regain its body).
+  const archived = messages?.archivedLookup;
+  if (typeof archived !== "function") return byId;
+  return { get: id => byId.get(id) ?? archived(id) };
 }
 
 function messageIdOf(event) {

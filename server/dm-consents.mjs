@@ -306,7 +306,8 @@ export class DmConsents {
       requesterId: row.requester_id,
       targetId: row.target_id,
       status: row.status,
-      reason: row.reason,
+      // The owner's moderation view is metadata only: the requester's note is for the target.
+      reason: row.requester_id === viewerId || row.target_id === viewerId ? row.reason : null,
       createdAt: row.created_at,
       decidedAt: row.decided_at,
       outgoing: row.requester_id === viewerId

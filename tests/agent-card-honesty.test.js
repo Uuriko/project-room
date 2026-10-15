@@ -15,7 +15,7 @@
 // card ships — the fail-first proof runs against a mutated (lying) card.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentCard } from "../deploy/agent-discovery.mjs";
+import { agentCard } from "../server/agent-discovery.mjs";
 
 // The honest sentence, in any wording: reputation + receipts-only framing.
 const HONESTY_HINTS = [/reputation/i, /receipt/i, /not cash/i, /no real-value/i];

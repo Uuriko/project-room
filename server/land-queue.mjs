@@ -22,7 +22,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { event, EVENT_TYPES, applyEvent, isRoomArchived, ownMember, validId } from "../src/events.js";
-import { claimWork, createWork, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
+import { claimWork, createWork, reassignWork, isTerminalClaimState, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
 
 // Caller-supplied idempotency key, same shape as access-requests'
 // REQUEST_ID_PATTERN: retries with the same key replay the stored response.
@@ -33,6 +33,14 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // forever. Ten minutes is generous — the longest keyed call (add's GitHub
 // refresh) completes in seconds under normal conditions.
 const STALE_INFLIGHT_MS = 10 * 60 * 1000;
+// #3255: per-fetch bound for GitHub reads. A keyed mutating call chains at
+// most five fetches (PR + status + up to three check-run pages), so its
+// worst case stays near 2.5 minutes — comfortably below STALE_INFLIGHT_MS,
+// which is what makes "the first attempt is still alive when the staleness
+// window passes" unreachable through a merely hung forge read. The claim
+// nonce in #requestKey is the correctness fence; this timeout keeps the
+// window honest.
+const GITHUB_FETCH_TIMEOUT_MS = 30 * 1000;
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -92,6 +100,7 @@ export const landQueueSchema = `
     input_hash TEXT NOT NULL,
     status INTEGER NOT NULL DEFAULT 0,
     response TEXT,
+    claim_nonce TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (room_id, request_id)
@@ -111,6 +120,15 @@ export function migrateLandQueueColumns(db) {
   if (!columns.has("backoff_ms")) db.exec("ALTER TABLE land_queue ADD COLUMN backoff_ms INTEGER NOT NULL DEFAULT 60000");
   if (!columns.has("poll_etag")) db.exec("ALTER TABLE land_queue ADD COLUMN poll_etag TEXT");
   if (!columns.has("rate_limited_until")) db.exec("ALTER TABLE land_queue ADD COLUMN rate_limited_until INTEGER");
+  // #3255: claim_nonce fences a superseded attempt's commit/abort (see
+  // LandQueue#requestKey). Additive, same pattern as the columns above;
+  // rows claimed before this column existed carry NULL and are only ever
+  // removed by the staleness-predicated takeover DELETE.
+  const idemExists = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='land_queue_idempotency'").get();
+  if (idemExists) {
+    const idemColumns = new Set(db.prepare("SELECT name FROM pragma_table_info('land_queue_idempotency')").all().map(row => row.name));
+    if (!idemColumns.has("claim_nonce")) db.exec("ALTER TABLE land_queue_idempotency ADD COLUMN claim_nonce TEXT");
+  }
 }
 
 export function nextPollBackoff(currentMs) {
@@ -303,13 +321,16 @@ function isRateLimitResponse(response, message) {
   return /rate limit/i.test(message);
 }
 
-async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now() } = {}) {
+async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now(), timeoutMs = GITHUB_FETCH_TIMEOUT_MS } = {}) {
   const headers = githubHeaders(token);
   const cached = usableEtag(etag);
   if (cached) headers["If-None-Match"] = cached;
   let response;
   try {
-    response = await fetchImpl(url, { headers });
+    // #3255: every forge read is time-bounded (the claim-pr-sync
+    // AbortSignal.timeout pattern). Without a signal a hung read could
+    // keep an idempotency attempt alive past STALE_INFLIGHT_MS.
+    response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     fail(502, "github_unavailable", "GitHub could not be reached");
   }
@@ -370,7 +391,7 @@ function slimRuns(runs) {
 // Latest attempt of every check run on the head SHA. One page is 100; a
 // further page is only requested when the first page says there are more.
 // filter=latest is the rollup set: a rerun replaces the earlier attempt.
-async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
+async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now, timeoutMs = GITHUB_FETCH_TIMEOUT_MS) {
   const runs = [];
   let etag = null;
   for (let page = 1; page <= CHECK_RUN_PAGES; page += 1) {
@@ -378,7 +399,8 @@ async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
     const result = await githubFetch(fetchImpl, url, token, {
       etag: page === 1 ? cached?.etag ?? null : null,
       missingOk: true,
-      now
+      now,
+      timeoutMs
     });
     if (page === 1) etag = result.etag ?? null;
     if (page === 1 && result.notModified) {
@@ -395,12 +417,12 @@ async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
   return { notModified: false, etag, runs, incomplete: true };
 }
 
-export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now() } = {}) {
+export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now(), timeoutMs = GITHUB_FETCH_TIMEOUT_MS } = {}) {
   const [owner, name] = parseRepo(repo).split("/");
   const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   const cache = previous?.cache && typeof previous.cache === "object" ? previous.cache : null;
   const prResult = await githubFetch(fetchImpl, `${base}/pulls/${parsePrNumber(prNumber)}`, token, {
-    etag: cache?.etags?.pr ?? null, now
+    etag: cache?.etags?.pr ?? null, now, timeoutMs
   });
   let sha = null;
   let prFields = null;
@@ -421,12 +443,12 @@ export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImp
   if (sha) {
     const sameSha = cache?.sha === sha;
     const statusResult = await githubFetch(fetchImpl, `${base}/commits/${sha}/status`, token, {
-      etag: sameSha ? statusEtag : null, missingOk: true, now
+      etag: sameSha ? statusEtag : null, missingOk: true, now, timeoutMs
     });
     statusNotModified = statusResult.notModified === true;
     statusEtag = statusResult.etag ?? null;
     if (!statusNotModified) statusBody = statusResult.missing ? null : statusResult.body;
-    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now);
+    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now, timeoutMs);
     checksNotModified = checksResult.notModified === true;
     checksEtag = checksResult.etag ?? null;
     incomplete = checksResult.incomplete === true;
@@ -482,8 +504,45 @@ const viewFromClaim = (item, roomId) => {
   };
 };
 
+// Bring an existing mirrored claim's owner in line with the land_queue
+// row, which is the queue's source of truth for the claimant. Returns true
+// when the claim changed. A handoff consumes the new claimant's open-claim
+// slot just like the create mirror below, so an at-cap claimant fails here
+// (409 too_many_open_claims) — callers that must not commit a divergent row
+// run this inside the same transaction as the row write, and
+// migrateLandQueueClaims already swallows that code for its best-effort
+// pass. Terminal claims consume no slot and the state machine will not
+// reassign them, so only the mirrored owner field moves.
+function syncMirroredLandClaimOwner(store, row) {
+  if (!row.claimant_member_id || typeof store.workClaims.get !== "function") return false;
+  const existing = store.workClaims.get(row.room_id, row.item_id);
+  if (!existing || existing.owner === row.claimant_member_id) return false;
+  const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
+  const now = typeof store.now === "function" ? store.now() : row.updated_at ?? row.created_at;
+  let updated;
+  if (existing.state === "unclaimed") {
+    // Re-claim it the way the create mirror claims: no lease.
+    assertClaimantCap(store, row);
+    updated = claimWork(existing, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
+  } else if (isTerminalClaimState(existing.state)) {
+    updated = { ...existing, owner: row.claimant_member_id };
+  } else {
+    assertClaimantCap(store, row);
+    updated = reassignWork(existing, existing.owner ?? row.added_by_member_id, row.claimant_member_id,
+      { authority: true, now });
+  }
+  store.workClaims.set(row.room_id, updated);
+  return true;
+}
+
 function mirrorLandClaim(store, row) {
-  if (!row || !store?.workClaims || store.workClaims.has(row.room_id, row.item_id)) return false;
+  if (!row || !store?.workClaims) return false;
+  if (store.workClaims.has(row.room_id, row.item_id)) {
+    // The claim already exists: create nothing, but never leave its owner
+    // pointing at a previous claimant when the row has moved on.
+    syncMirroredLandClaimOwner(store, row);
+    return false;
+  }
   const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
   const revision = row.merged_sha || row.tip_source_revision || row.head_sha || null;
   const now = row.created_at;
@@ -581,12 +640,14 @@ export class LandQueue {
     this.db = store.db;
     this.token = null;
     this.fetchImpl = (...args) => fetch(...args);
+    this.fetchTimeoutMs = GITHUB_FETCH_TIMEOUT_MS;
   }
 
-  configure({ env = null, token = undefined, fetchImpl = undefined } = {}) {
+  configure({ env = null, token = undefined, fetchImpl = undefined, fetchTimeoutMs = undefined } = {}) {
     if (token !== undefined) this.token = token || null;
     else if (env) this.token = githubAccessToken(env);
     if (fetchImpl) this.fetchImpl = fetchImpl;
+    if (Number.isFinite(fetchTimeoutMs) && fetchTimeoutMs > 0) this.fetchTimeoutMs = fetchTimeoutMs;
     return this;
   }
 
@@ -621,6 +682,16 @@ export class LandQueue {
   // than replaying a stale error (e.g. a transient 503 github_unconfigured).
   // Without a requestId the returned gate is a no-op and behavior is
   // unchanged.
+  //
+  // #3255: every claim carries a fresh claim_nonce, and commit/abort are
+  // predicated on (status=0 AND claim_nonce = mine). The staleness
+  // takeover fences racing *reclaimers*, but before this fix it did not
+  // fence the original attempt: if attempt 1 was merely slow (a hung
+  // GitHub read — now also time-bounded, see GITHUB_FETCH_TIMEOUT_MS),
+  // its late commit overwrote the takeover's stored response and its late
+  // abort deleted the takeover's committed record. A superseded attempt's
+  // commit/abort now match nothing: the row belongs to its new owner, or
+  // is already committed and can no longer be aborted away.
   #requestKey(roomId, memberId, op, requestId, invalidCode, input) {
     const noop = { replay: false, commit() {}, abort() {} };
     if (requestId === undefined || requestId === null) return noop;
@@ -629,10 +700,11 @@ export class LandQueue {
     }
     const inputHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
     const now = this.store.now();
+    const claimNonce = randomBytes(16).toString("base64url");
     const claimed = this.db.prepare(`INSERT OR IGNORE INTO land_queue_idempotency
-      (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
-      VALUES (?,?,?,?,?,0,NULL,?,?)`)
-      .run(roomId, requestId, op, memberId, inputHash, now, now);
+      (room_id, request_id, op, actor_member_id, input_hash, status, response, claim_nonce, created_at, updated_at)
+      VALUES (?,?,?,?,?,0,NULL,?,?,?)`)
+      .run(roomId, requestId, op, memberId, inputHash, claimNonce, now, now);
     if (claimed.changes === 0) {
       const prior = this.db.prepare(`SELECT op, actor_member_id AS actor, input_hash AS inputHash,
         status, response, updated_at AS updatedAt FROM land_queue_idempotency WHERE room_id=? AND request_id=?`)
@@ -663,12 +735,20 @@ export class LandQueue {
     return {
       replay: false,
       commit(body) {
+        // #3255: only the claim's owner, while the claim is still
+        // in flight, may record the response. If a takeover superseded
+        // this attempt, the row carries the new owner's nonce (or is
+        // already committed) and this write lands nowhere.
         db.prepare(`UPDATE land_queue_idempotency SET status=1, response=?, updated_at=?
-          WHERE room_id=? AND request_id=?`)
-          .run(JSON.stringify(body), store.now(), roomId, requestId);
+          WHERE room_id=? AND request_id=? AND status=0 AND claim_nonce=?`)
+          .run(JSON.stringify(body), store.now(), roomId, requestId, claimNonce);
       },
       abort() {
-        db.prepare("DELETE FROM land_queue_idempotency WHERE room_id=? AND request_id=?").run(roomId, requestId);
+        // #3255: an abort may only remove its OWN in-flight placeholder —
+        // never a takeover's placeholder, and never a committed record.
+        db.prepare(`DELETE FROM land_queue_idempotency
+          WHERE room_id=? AND request_id=? AND status=0 AND claim_nonce=?`)
+          .run(roomId, requestId, claimNonce);
       }
     };
   }
@@ -707,17 +787,25 @@ export class LandQueue {
   async #addExecute(roomId, memberId, parsedRepo, parsedPr, claimant) {
     const existing = this.#byPr(roomId, parsedRepo, parsedPr);
     if (existing) {
-      if (claimant !== existing.claimant_member_id) {
-        this.store.transaction(() => {
+      // The mirror sync runs inside the same transaction as the row write:
+      // a mirror failure (e.g. the new claimant is at the open-claim cap)
+      // rolls the reassignment and its receipt back instead of reporting an
+      // error for a change that already committed, and a mirrored claim
+      // that already exists has its owner moved to the new claimant rather
+      // than keeping the old one.
+      this.store.transaction(() => {
+        if (claimant !== existing.claimant_member_id) {
           this.db.prepare("UPDATE land_queue SET claimant_member_id=?, updated_at=? WHERE room_id=? AND item_id=?")
             .run(claimant, this.store.now(), roomId, existing.item_id);
+        }
+        mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
+        if (claimant !== existing.claimant_member_id) {
           // The claimant reassignment is a board write: it commits its
           // land.updated receipt (changed ["reassigned"]) in the same
           // transaction as the row, so the handoff is observable.
           this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, existing.item_id)), ["reassigned"]);
-        });
-      }
-      mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
+        }
+      });
       const item = viewFromRow(this.#row(roomId, existing.item_id));
       return this.#refreshRow(item, { duplicate: true });
     }
@@ -888,6 +976,7 @@ export class LandQueue {
         prNumber: item.prNumber,
         token: this.token,
         fetchImpl: this.fetchImpl,
+        timeoutMs: this.fetchTimeoutMs,
         now,
         previous: row ? {
           title: row.title ?? null,
@@ -1109,6 +1198,12 @@ export class LandQueue {
     if (!status || status.status !== "offline") return null;
     this.store.agentHeartbeats.pushNotify({
       identityId, eventType: "land.updated", roomId, id: incoming.id, ts: this.store.now()
+    });
+    // #3257: the doorbell and the wake ping below are both fire-and-forget;
+    // enqueue the durable signal too, so the claimant's next heartbeat/poll
+    // carries the land update even when both misses. Coalesced per event id.
+    this.store.agentHeartbeats.enqueueWake({
+      agentId: identityId, kind: "land", roomId, messageId: incoming.id
     });
     const signal = {
       signalId: incoming.id,

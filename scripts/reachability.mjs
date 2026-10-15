@@ -47,6 +47,10 @@ export const KEEP = [
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",
   "src/seed.js",
+  // Build-time-only data module: imported by scripts/build-capabilities.mjs,
+  // whose generated inventory is what the runtime reads. It lived in deploy/
+  // (outside this checker's scope) until the 2026-10 move into server/.
+  "server/push-notifications-supported.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);

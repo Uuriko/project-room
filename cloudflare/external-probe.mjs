@@ -10,6 +10,10 @@
 //     ROOM_AGENT_ORIGIN, ROOM_AGENT_ROOM, and ROOM_AGENT_TOKEN are the
 //     existing connection names and are used when the PROBE_ROOM_* name is
 //     unset. The token and the webhook URL are never written into the notice.
+//     A getdasha door origin (https://www.getdasha.com, no /room path) is
+//     prefixed via edgeDoorApiPath: /api/* there is Webflow, not the Worker.
+
+import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
 
 export const FAILURES_BEFORE_ALERT = 2;
 export const DEFAULT_ORIGIN = "https://room.trydemigod.com";
@@ -140,11 +144,11 @@ async function readLimited(response) {
 }
 
 function pass(id, status) {
-  return { id, ok: true, status, reason: null };
+  return { id, ok: true, status, reason: null, detail: null };
 }
 
-function fail(id, status, reason) {
-  return { id, ok: false, status: Number.isInteger(status) ? status : null, reason };
+function fail(id, status, reason, detail = null) {
+  return { id, ok: false, status: Number.isInteger(status) ? status : null, reason, detail };
 }
 
 async function checkCall(id, run) {
@@ -199,14 +203,57 @@ async function runChecks(origin, fetchImpl, limitMs) {
     if (!type.includes("text/plain") || !body.includes(LLMS_HEADING)) return fail("llms", 200, "packet_missing");
     return pass("llms", 200);
   });
-  const checks = await Promise.all([ready, mcp, llms]);
+  // Background-job health (#3334's blind spot): the room can answer every
+  // request while its cron jobs wedge silently — job heartbeats live on the
+  // public /api/health/jobs view precisely so an outside watcher can see
+  // them. Failure and staleness are different alarms and stay distinct: a
+  // failing job names itself and its public error code; a stale job means
+  // the heartbeat itself stopped, which no in-room signal can report.
+  const jobs = checkCall("jobs", async () => {
+    const response = await fetchImpl(new URL("/api/health/jobs", origin), { method: "GET", headers, redirect: "manual", signal: signal() });
+    const body = await readLimited(response);
+    if (![200, 503].includes(response.status)) return fail("jobs", response.status, "http_status");
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { return fail("jobs", response.status, response.status === 503 ? "http_status" : "invalid_json"); }
+    // The real jobs route uses 503 for stale/failing heartbeats. Only its
+    // known diagnostic envelope may refine that HTTP failure; unavailable
+    // or unrelated upstream responses retain the generic, text-free fallback.
+    if (response.status === 503 && (parsed?.schema !== "room.job-health/1"
+      || !["stale", "failing"].includes(parsed.status) || !Array.isArray(parsed.jobs) || !parsed.jobs.length)) {
+      return fail("jobs", 503, "http_status");
+    }
+    if (!parsed || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return fail("jobs", 200, "jobs_missing");
+    const active = parsed.jobs.filter(job => job && typeof job === "object" && job.enabled !== false && job.status !== "disabled");
+    const nameOf = job => (typeof job.name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(job.name) ? job.name : "job");
+    const failing = active.filter(job => job.status === "failing" || Number(job.consecutiveFailures) > 0);
+    if (failing.length) {
+      const detail = failing.slice(0, 3).map(job => {
+        const code = typeof job.lastErrorCode === "string" && /^[a-z0-9_]{1,64}$/i.test(job.lastErrorCode) ? job.lastErrorCode : "unclassified";
+        return `${nameOf(job)} (${code})`;
+      }).join(", ");
+      return fail("jobs", response.status, "job_failing", detail);
+    }
+    const now = Date.now();
+    const stale = active.filter(job => {
+      if (job.stale === true || job.status === "stale") return true;
+      // Views without a stale flag: an enabled job whose last run is more
+      // than 2.5 periods old has missed whole ticks. A job that has never
+      // run cannot be judged from one snapshot and is not called stale.
+      const periodMs = Number(job.periodSeconds) * 1000;
+      const lastRun = Date.parse(job.lastRunAt ?? job.lastSuccessAt ?? "");
+      return Number.isFinite(periodMs) && periodMs > 0 && Number.isFinite(lastRun) && now - lastRun > periodMs * 2.5;
+    });
+    if (stale.length) return fail("jobs", response.status, "job_stale", stale.slice(0, 3).map(nameOf).join(", "));
+    return response.status === 200 ? pass("jobs", 200) : fail("jobs", 503, "http_status");
+  });
+  const checks = await Promise.all([ready, mcp, llms, jobs]);
   return checks;
 }
 
 function describe(check) {
   if (check.ok) return `${check.id} passed`;
-  if (check.status) return `${check.id} failed (HTTP ${check.status})`;
-  return `${check.id} failed (${check.reason})`;
+  const base = check.status ? `${check.id} failed (HTTP ${check.status})` : `${check.id} failed (${check.reason})`;
+  return check.detail ? `${base}: ${check.detail}` : base;
 }
 
 export function outageNotice(origin, checks, incidentId) {
@@ -219,7 +266,7 @@ export function outageNotice(origin, checks, incidentId) {
 }
 
 export function recoveryNotice(origin, incidentId) {
-  return `External probe: ${origin} is answering again. Incident ${incidentId}. ready, mcp, and llms passed.`;
+  return `External probe: ${origin} is answering again. Incident ${incidentId}. ready, mcp, llms, and jobs passed.`;
 }
 
 async function postJson(fetchImpl, url, body, headers, limitMs) {
@@ -254,7 +301,7 @@ function payload(kind, origin, state, checks, at) {
     incidentId: state.incidentId,
     origin,
     consecutiveFailures: state.consecutiveFailures,
-    checks: checks.map(check => ({ id: check.id, ok: check.ok, status: check.status, reason: check.reason })),
+    checks: checks.map(check => ({ id: check.id, ok: check.ok, status: check.status, reason: check.reason, detail: check.detail ?? null })),
     at
   };
 }
@@ -318,7 +365,7 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
     if (room.room) {
       const commandId = `probe-${state.incidentId}-${kind}`;
       const command = { id: commandId, type: "message.posted", data: { messageId: commandId, body: notice } };
-      jobs.push(postJson(fetchImpl, new URL(`/api/rooms/${encodeURIComponent(room.room.roomId)}/commands`, room.room.origin), command, {
+      jobs.push(postJson(fetchImpl, new URL(edgeDoorApiPath(room.room.origin, `/api/rooms/${encodeURIComponent(room.room.roomId)}/commands`), room.room.origin), command, {
         authorization: `Bearer ${room.room.credential}`
       }, limitMs).then(ok => {
         if (ok) state = { ...state, alertedRoom: page };

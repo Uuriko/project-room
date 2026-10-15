@@ -159,7 +159,8 @@ function checkBody(data) {
 function visibleSquad(store, roomId, viewer, row) {
   const view = squadView(row);
   if (view.channel) {
-    const message = store.room(roomId).state.messages.find(m => m.id === view.channel);
+    const message = store.room(roomId).state.messages.find(m => m.id === view.channel)
+      ?? store.archivedMessage(roomId, view.channel);
     if (message?.toMemberId || !messageVisibleToViewer(message, viewer, store.historyFloor(roomId, viewer))) view.channel = null;
   }
   return view;

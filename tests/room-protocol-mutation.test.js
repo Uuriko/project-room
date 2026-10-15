@@ -95,15 +95,13 @@ test("S3: future-dated strike-one stamp is clamped to the comment time", () => {
 });
 
 // S4 documents a REAL BUG found 2026-09-26 while writing this suite (not a
-// mutant): the "unparseable stamp refused" branch is unreachable because
+// mutant): the "unparseable stamp refused" branch was unreachable because
 // `def epoch($s): (($s | fromdate) // 0)` does not catch jq errors (`//`
 // only handles empty/false/null). A genuinely unparseable strike-one stamp
-// crashes the whole _state/rebuild/sweep pipeline (jq exit 5) instead of
-// being refused. Minimal fix: `def epoch($s): (try ($s | fromdate) catch 0)`.
-// Filed as a bug for the scripts/room-owning lane (this lane may not edit
-// scripts/room: live claims RC-2026-09-17-001/006, RC-2026-09-16-004,
-// RC-2026-09-26-969). Unskip when the owner repairs epoch().
-test("S4: unparseable strike-one stamp is refused, never recorded", { skip: "BUG-2026-09-26: unparseable stamp crashes _state (jq exit 5) instead of refusing; owner must make epoch() total" }, () => {
+// crashed the whole _state/rebuild/sweep pipeline (jq exit 5) instead of
+// being refused. Fixed (#2905) by making epoch() total in scripts/room:
+// `def epoch($s): (try ($s | fromdate) catch 0)`.
+test("S4: unparseable strike-one stamp is refused, never recorded", () => {
   const st = stateOf(
     [claimComment(1, "2026-09-26T20:00:00Z"),
      strikeOneComment(2, "2026-09-27T02:00:01Z", TID, "not-a-date")],

@@ -8,8 +8,14 @@
 // Allocation follows Node24 default test discovery; timing data never selects
 // membership: every Node-discovered test file is in exactly one shard.
 // Per-file durations live in scripts/unit-ci-durations.json (milliseconds,
-// measured on hosted CI, with documented local additions); files without a measurement get a conservative
-// default so a new test file lands in a shard instead of breaking the plan.
+// measured on hosted CI, with documented local additions). The table is
+// refreshed automatically from hosted shard receipts by
+// scripts/refresh-unit-ci-durations.mjs (see
+// .github/workflows/unit-durations-refresh.yml). Files without a measurement
+// get a conservative default — the median of the measured durations in the
+// committed table, floored at 5000ms — derived deterministically from the
+// committed table only, so a new test file lands in a shard at a realistic
+// weight instead of breaking the plan or silently skewing the balance.
 import { createHash } from "node:crypto";
 import { readFileSync, globSync } from "node:fs";
 
@@ -18,6 +24,18 @@ export const SHARD_COUNT = 3;
 const timings = JSON.parse(
   readFileSync(new URL("./unit-ci-durations.json", import.meta.url), "utf8")
 ).milliseconds;
+
+// Median of the finite, positive measured durations, floored at 5000ms.
+// Exported for tests; the planner's unmeasured estimate is exactly this value.
+export function unmeasuredDefaultMs(values = Object.values(timings ?? {})) {
+  const sorted = values.filter((ms) => Number.isFinite(ms) && ms > 0).sort((a, b) => a - b);
+  if (!sorted.length) return 5000;
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return Math.max(5000, median);
+}
+
+export const UNMEASURED_DEFAULT_MS = unmeasuredDefaultMs();
 
 export function parseShard(value) {
   const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(value ?? "");
@@ -49,7 +67,7 @@ export function unitPlan(testsDir = ".") {
   const shards = Array.from({ length: SHARD_COUNT }, (_, i) => ({ index: i + 1, files: [], estimatedMs: 0 }));
   const estimate = (file) => {
     const ms = timings[file];
-    return Number.isFinite(ms) && ms > 0 ? ms : 5000;
+    return Number.isFinite(ms) && ms > 0 ? ms : UNMEASURED_DEFAULT_MS;
   };
   const owner = new Map(); // file -> 0-based shard
   const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);

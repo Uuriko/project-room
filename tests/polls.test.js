@@ -9,7 +9,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, replay } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
-import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from "../src/polls.js";
+import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS, POLL_OPTION_EMOJIS } from "../src/polls.js";
+import { canonicalReaction } from "../src/emoji.js";
 
 const at = "2026-10-06T22:30:00.000Z";
 const fixed = (id, type, actorId, data) => ({ id, idempotencyKey: `key-${id}`, roomId: "room-project-room-v0", type, actorId, at, causationId: null, data });
@@ -59,6 +60,30 @@ test("poll validation rejects bad payloads", () => {
   // minimum boundary: exactly POLL_MIN_OPTIONS passes
   const ok = postPoll(base, "poll-1", "pv-a", { question: "q", options: Array.from({ length: POLL_MIN_OPTIONS }, (_, i) => `o${i}`) });
   assert.equal(ok.messages.find(m => m.id === "poll-1").poll.options.length, POLL_MIN_OPTIONS);
+});
+
+test("every option emoji at the maximum option count is a votable reaction, including the 10th", () => {
+  // Regression #2980: the 10th emoji was built as "10\uFE0F\u20E3", which
+  // segments into two graphemes, so canonicalReaction returned null and
+  // setMessageReaction threw 'Invalid reaction choice' for that option.
+  assert.equal(POLL_OPTION_EMOJIS.length, POLL_MAX_OPTIONS);
+  assert.equal(new Set(POLL_OPTION_EMOJIS).size, POLL_MAX_OPTIONS, "each option gets a distinct vote emoji");
+  for (const emoji of POLL_OPTION_EMOJIS) {
+    assert.equal(canonicalReaction(emoji), emoji, `option emoji ${JSON.stringify(emoji)} must be accepted as a reaction`);
+  }
+  assert.equal(POLL_OPTION_EMOJIS[9], "🔟");
+
+  let state = postPoll(twoMembers(), "poll-1", "pv-a", {
+    question: "Which option?",
+    options: Array.from({ length: POLL_MAX_OPTIONS }, (_, i) => `option ${i + 1}`)
+  });
+  const tenth = pollOf(state).poll.options[9];
+  assert.equal(tenth.label, "option 10");
+  state = vote(state, "v10", "pv-b", "poll-1", tenth.emoji);
+  const tally = pollTally(pollOf(state));
+  assert.equal(tally.results[9].votes, 1);
+  assert.deepEqual(tally.results[9].voters, ["pv-b"]);
+  assert.equal(tally.total, 1);
 });
 
 test("unknown message kinds are still rejected", () => {
