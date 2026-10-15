@@ -23,6 +23,381 @@ const BOND_DM_DATA_SHAPES = {
   "dm.posted": "{ to, body, messageId? }",
 };
 
+// ---------------------------------------------------------------------------
+// E4-REG (decision #19c): the single bidirectional error registry. A migrated
+// code's guidance — envelope status/reason, hint, next, AND the errors
+// catalog's declared HTTP/Retry/Recovery row — is declared HERE, once, and
+// agentErrorAx() resolves the code from this table alone (its old cascade
+// branch is deleted as it migrates). tests/errors-catalog-drift.test.js pins
+// shipped == registry == catalog for every entry, so the three cannot
+// diverge again. hint/next may be functions of the envelope context
+// ({ httpStatus, message, roomId, workItemId }) for message-shaped codes.
+// New codes must be born here (registry-born ratchet); the remaining estate
+// migrates surface by surface under the tracking issue filed with this PR.
+// ---------------------------------------------------------------------------
+export const ERROR_REGISTRY = {
+  // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
+  // of the dedicated branch #3026 landed for #3021.
+  agent_not_registered: {
+    status: "action_required",
+    hint: "No host has reported for this identity yet. POST /api/agent-heartbeats with your hostId first, then poll again.",
+    next: [path("/api/agent-heartbeats"), tool("heartbeat_set"), command("POST /api/agent-heartbeats with { hostId } for this identity (or call heartbeat_set), then re-poll GET /api/agent-wakes/poll")],
+    catalog: { http: 404, retry: "fix", recovery: "POST /api/agent-heartbeats first, then poll. The identity has no live host yet." },
+  },
+  // Wake surface: the two refused fields are hostId and waitMs; the hint
+  // names the refused one (the generic input copy named neither).
+  invalid_wake_poll: {
+    status: "action_required",
+    hint: ({ message }) => /waitMs/.test(String(message || ""))
+      ? "waitMs must be an integer from 0 to 55000 (milliseconds). Resend the poll with waitMs in range, or omit it for the default wait."
+      : "hostId is required or malformed: it must be 1-128 chars of [A-Za-z0-9._-] — one wake waiter per host. Pass the hostId you send heartbeats with.",
+    next: ({ message }) => [command(/waitMs/.test(String(message || ""))
+      ? "Resend GET /api/agent-wakes/poll with waitMs between 0 and 55000 (or omit waitMs), keeping your hostId."
+      : "Resend GET /api/agent-wakes/poll?hostId=<your hostId> — with several registered hosts, pass the hostId you heartbeat with; if no host has reported yet, POST /api/agent-heartbeats first, then poll.")],
+    catalog: { http: 422, retry: "fix+resend", recovery: "Fix hostId (1-128 chars, [A-Za-z0-9._-]; with several registered hosts, pass the hostId you heartbeat with) or waitMs (0..55000), then resend the poll." },
+  },
+  // Public-work surface (#3246 fix). The terms check runs before any write
+  // on claim/renew/release/finish, so a rejected action saved nothing. The
+  // recovery names the task read itself — the room work-claims copy
+  // (workContext / /api/session) this code used to inherit from the generic
+  // stale_* branch cannot converge for an identity-secret bearer.
+  stale_public_work: {
+    status: "action_required",
+    hint: "The task's terms changed since you read it — your expectedTermsVersion is stale. Re-read the task for the current termsVersion, then resend with it.",
+    next: ({ workItemId }) => {
+      const taskPath = workItemId ? `/api/public-work/tasks/${encodeURIComponent(workItemId)}` : "/api/public-work/tasks";
+      return [path(taskPath), command(`GET ${taskPath} to read the current termsVersion, then resend your action with expectedTermsVersion set to it. A rejected action saved nothing — if you were finishing, keep your artifact text and send it again.`)];
+    },
+    catalog: { http: 409, retry: "re-read", recovery: "Re-read the task (GET /api/public-work/tasks/<taskId>) for the current termsVersion, then resend with it. A rejected action saved nothing — keep your artifact and re-send it." },
+  },
+  // Public-work surface (#3249 fix). Mechanically executable: the named
+  // task read discloses claim.submittedReceiptId (the recorded receipt).
+  public_work_already_submitted: {
+    status: "action_required",
+    hint: "This task already has a submitted receipt. Read the task to see it — you cannot submit, renew, release, or re-claim it.",
+    next: ({ workItemId }) => {
+      const taskPath = workItemId ? `/api/public-work/tasks/${encodeURIComponent(workItemId)}` : "/api/public-work/tasks";
+      return [path(taskPath), command(`GET ${taskPath} to read the task — claim.submittedReceiptId names the recorded receipt. For other work, GET /api/public-work/tasks and claim a different task.`)];
+    },
+    catalog: { http: 409, retry: "no", recovery: "Do not submit again. Read the task (GET /api/public-work/tasks/<taskId>) — claim.submittedReceiptId names the recorded receipt; for other work, list GET /api/public-work/tasks." },
+  },
+  // Public-work surface. Verbatim port of the G4 branch (message-shaped:
+  // the message names the holder and the lease expiry).
+  public_work_claim_conflict: {
+    status: "action_required",
+    hint: ({ message }) => {
+      const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+      const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+      const hint = holder
+        ? self
+          ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
+          : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
+        : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+      return hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
+    },
+    next: ({ message }) => {
+      const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
+      const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
+      return [path("/api/public-work/tasks"), command(self
+        ? "Renew your claim to extend the lease instead of claiming again."
+        : holder
+          ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
+          : "Re-read the task to see who holds the claim; wait for release or pick another task.")];
+    },
+    catalog: { http: 409, retry: "wait", recovery: "Another member holds the claim: wait for release or lease expiry, or pick another item. If the holder is you, renew the claim instead of claiming again." },
+  },
+  // Public-work surface. Verbatim port of the G5 branch (message-shaped:
+  // the generation changed, or the lease lapsed/was released). The rejected
+  // artifact bytes were never stored — generation is checked before the
+  // receipt write — so the agent must keep them and re-submit.
+  stale_public_claim: {
+    status: "action_required",
+    hint: ({ message }) => {
+      const text = String(message || "");
+      const changed = /generation changed/i.test(text);
+      const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
+      const hint = changed
+        ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
+        : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
+      return hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.";
+    },
+    next: ({ message }) => {
+      const changed = /generation changed/i.test(String(message || ""));
+      return [path("/api/public-work/tasks"), command(changed
+        ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
+        : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")];
+    },
+    catalog: { http: 409, retry: "re-claim", recovery: "Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them." },
+  },
+  // Guest-join surface (#3381). A stale signed CARD is a freshness failure,
+  // not a stale revision: the generic stale() branch taught the
+  // workContext/expectedRevision recovery (and /api/session, unreachable
+  // pre-join). The only fix is a fresh signature over a current issuedAt.
+  stale_card: {
+    status: "action_required",
+    hint: "The signed joinRequest's issuedAt is outside the server's freshness window. Sign a fresh joinRequest with a current issuedAt and resend it — the same signed bytes will never be accepted.",
+    next: [command("Sign a fresh joinRequest with issuedAt set to the current time, then resend the join request. Do not retry the previous signed card.")],
+    catalog: { http: 422, retry: "no — re-sign fresh", recovery: "Sign a fresh joinRequest with a current issuedAt and resend; do not retry the same signed card." },
+  },
+  // Trial-seat ceiling (many emit sites, one meaning). Replaces the generic
+  // 403 branch for this code: the ceiling is the seat, and the path up is
+  // upgrading it — not minting a(nother) guest invite.
+  guest_scope_denied: {
+    status: "action_required",
+    hint: "Guest (trial-seat) members cannot do this — the action is reserved for full members. Run room_check_access to see what this identity can do.",
+    next: [tool("room_check_access"), command("Ask the room owner to upgrade this trial seat to a full membership (or Add agent as a full member). Do not retry this call with the guest credential.")],
+    catalog: { http: 403, retry: "no", recovery: "Guests (trial seats) cannot do this — it is reserved for full members. room_check_access to see what this identity can do; ask the owner to upgrade the seat to a full membership. Do not retry with the guest credential." },
+  },
+  // Referral surface (#3218 park, decision #8): minting is frozen at the
+  // HTTP door; preview and redeem of outstanding tokens are unaffected.
+  referral_invites_parked: {
+    status: "action_required",
+    hint: "Referral invites are parked: minting new referral tokens is frozen. Outstanding referral tokens still preview and redeem normally.",
+    next: [path("/api/referral-invites/preview"), command("Do not retry minting. For a new invite, ask the room owner for an agent invite code or a share link instead; an outstanding referral token can still be previewed and redeemed.")],
+    catalog: { http: 410, retry: "no", recovery: "Do not retry minting — referral invites are parked. Ask the room owner for an agent invite code or a share link instead; an outstanding referral token can still be previewed (POST /api/referral-invites/preview) and redeemed." },
+  },
+  // Mint surface (POST /api/agent-identities). Verbatim move of the
+  // dedicated #1547 branch.
+  proof_required: {
+    status: "action_required",
+    hint: "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.",
+    next: [
+      command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
+      command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
+    ],
+    catalog: { http: 428, retry: "fix", recovery: "Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code (no proof needed)." },
+  },
+};
+
+// Resolve a registry-owned code's envelope. Returns null for codes the
+// registry does not own yet (the cascade in agentErrorAx serves those).
+export function errorRegistryAx(code, { httpStatus = 0, message = "", roomId, workItemId } = {}) {
+  const entry = ERROR_REGISTRY[code];
+  if (!entry) return null;
+  const ctx = { httpStatus, message, roomId, workItemId };
+  const pick = value => typeof value === "function" ? value(ctx) : value;
+  return {
+    status: entry.status,
+    reason: entry.reason ?? code,
+    hint: pick(entry.hint),
+    next: pick(entry.next),
+  };
+}
+
+// #3055: named recoveries for server-emittable codes whose message (and the
+// errors catalog, skills/project-room/references/errors-catalog.md) names a
+// concrete recovery the old "Unknown error … no known recovery" fallthrough
+// contradicted. Each entry is [hint, next command]. Codes not named here are
+// covered by axFamilyRecovery() below; tests/errors-catalog-drift.test.js
+// fails if a catalogued code loses either kind of coverage.
+const AX_NAMED_RECOVERIES = {
+  aborted: ["The request ended early, so nothing was applied. Resend the request; if it repeats, check for a dropped connection or an oversized payload.", "Resend the request; if it repeats, check for a dropped connection or an oversized payload."],
+  access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
+  account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
+  active_members: ["The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner.", "Remove or transfer the active human members first."],
+  assign_conflict: ["The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly.", "Ask the current assignee to release the thread, or force the takeover if that is the intent."],
+  assign_not_assigned: ["Thread has no live assignment to release. Read the thread; there is nothing to release.", "Re-read the thread; no assignment exists to release."],
+  assistant_attempt_changed: ["The execution changed. Read the shared request before controlling it; do not control the old attempt.", "Re-read the shared request and control the current attempt."],
+  assistant_conversation_mismatch: ["Choose a message in the request conversation.", "Re-read the request conversation and choose a message in it."],
+  assistant_input_limit: ["This request reached 100 contributions. Start a new request.", "Start a new request for further contributions."],
+  assistant_inputs_pending: ["Read and account for every shared contribution before reporting done.", "Read every shared contribution, then report done."],
+  assistant_not_connected: ["Connect an authorized room assistant before asking for work.", "Connect an authorized room assistant first."],
+  assistant_result_missing: ["Publish a shared result message before reporting done.", "Publish the shared result message, then report done."],
+  assistant_revision_conflict: ["Assistant settings changed. Read them before retrying.", "Re-read the assistant settings, then retry."],
+  assistant_run_owned: ["This request already has an execution owner. Reconcile that attempt instead of starting your own.", "Reconcile the existing owner's attempt; do not start a parallel one."],
+  assistant_source_denied: ["Choose your own visible shared message as the source.", "Pick one of your own visible shared messages."],
+  assistant_stop_pending: ["A stop or scope decision must be acknowledged first.", "Acknowledge the pending stop or scope decision first."],
+  attachment_conflict: ["That attachment id is already stored for this identity. Use the existing attachment or upload under a new id.", "Use the existing attachment, or upload with a new attachment id."],
+  attachment_unavailable: ["That attachment is no longer available. Re-upload it or use a current attachment.", "Re-upload the attachment or reference a current one."],
+  bad_cursor: ["The cursor is not valid. Use the opaque nextCursor from a previous response, or restart without a cursor.", "Restart the list without a cursor, or pass the nextCursor from a previous response."],
+  bad_request: ["The request itself was refused — the message names the problem. Fix it and resend.", "Fix the problem named in the message and resend."],
+  board_v2_retired: ["Board v2 is retired. Use the work-claims board instead.", "Use the work-claims board; do not retry the retired board-v2 path."],
+  bond_active: ["This pair already has an active bond. Revoke it before proposing a new one.", "Revoke the active bond first, then propose the new one."],
+  card_owned_by_another_identity: ["That card belongs to another identity. Act with the owning identity, or use your own card.", "Use your own card, or act through the owning identity."],
+  channel_sync_unsupported: ["This channel sync mode is not supported here. Use a supported sync mode; do not retry this one.", "Use a supported channel sync mode."],
+  channel_webhook_backlog: ["The channel has a webhook backlog. Import the pending updates before sending more.", "Import pending updates first, then send."],
+  charter_integrity_error: ["The instructions history requires reconciliation before this can proceed. Report the code and full message to the room owner if it persists.", "Reconcile the instructions history; if it persists, report the code and full message to the room owner."],
+  claim_conflict: ["That scope is reserved by another work claim. Coordinate or release that reservation first; no new claim was saved.", "Coordinate with the holding claim or release the reservation, then claim again."],
+  collision_lock_expired: ["The draft lock expired. Acquire it again before editing.", "Acquire the draft lock again, then continue editing."],
+  collision_lock_held: ["Another member is already drafting on this thread. Wait for them to finish or release the lock.", "Wait for the current drafter to release the lock, then acquire it."],
+  confirm_used: ["This confirmation was already used — it cannot be used again. Start a fresh confirmation if the action is still needed.", "Start a fresh confirmation; do not reuse this one."],
+  conflicting_inbox_observation: ["A conflicting observation was already recorded for this item. Reconcile against the recorded state; do not overwrite it.", "Read the recorded observation and reconcile; do not submit a conflicting one."],
+  conflicting_reply_observation: ["A conflicting observation was already recorded for this item. Reconcile against the recorded state; do not overwrite it.", "Read the recorded observation and reconcile; do not submit a conflicting one."],
+  conflicting_reply_update_acknowledgment: ["A conflicting acknowledgment was already recorded for this update. Reconcile against the recorded state; do not overwrite it.", "Read the recorded acknowledgment and reconcile; do not submit a conflicting one."],
+  credential_still_live: ["Keep using the live credential. Rotate it only if it leaked.", "Keep using the live credential; do not rotate it unless it leaked."],
+  cursor_ahead: ["The cursor is ahead of room history. Fetch a fresh return brief without it.", "Fetch a fresh return brief without the cursor."],
+  cursor_changed: ["Your caught-up marker moved. Restart the return brief from a fresh read.", "Restart the return brief from a fresh read."],
+  cursor_not_found: ["No page exists at that cursor. Pass a messageId from a previous page, or restart without a cursor.", "Pass a messageId from a previous page as the cursor, or restart without one."],
+  cursor_stale: ["The cursor is stale. Start the list again without a cursor.", "Start the list again without a cursor."],
+  discussion_reset_required: ["Discussion changed. Discard all retained discussion text and the cursor or resume token; do not append a fresh read to stale cached text.", "Fetch the full scoped discussion with a fresh consistent read, without a cursor or resume token."],
+  direct_send_settled: ["This send attempt already settled. Read its outcome; do not send again under this attempt.", "Read the settled send's outcome; do not resend."],
+  dm_no_pending_request: ["There is no pending DM request in this direction. Nothing to approve; send a DM request first if you want consent.", "Send a DM consent request first, or post in the room."],
+  dm_not_blocked: ["This member is not blocked — there is no block to change. Read the current DM state.", "Re-read the DM state; no block exists."],
+  dm_nothing_to_revoke: ["There is no DM consent to revoke. Read the current DM state; nothing changed.", "Re-read the DM state; nothing to revoke."],
+  email_reply_unresolved: ["Resolve the existing mailbox draft attempt first.", "Resolve the existing draft attempt, then retry."],
+  email_source_collision: ["An existing source has a different origin. Use the existing source or choose a different origin.", "Use the existing source, or create the new one under a different origin."],
+  face_not_enabled: ["The public face is not enabled. Enable the public face before rotating its code.", "Enable the public face first, then rotate its code."],
+  follow_up_not_requested: ["An explicit revision request is required first.", "Request a revision explicitly, then follow up."],
+  grant_active: ["Membership administration is already granted to this identity — nothing to transfer.", "Treat it as done; the grant is already active."],
+  guest_session_ended: ["Your previous browser identity expired. Sign out before joining as a new guest.", "Sign out, then join again as a new guest."],
+  halt_active: ["A halt is active on this work. A steer/decide member must clear the exact halt before further work mutations.", "Ask a steer/decide member to clear the exact halt; do not mutate work until then."],
+  identity_conflict: ["That member id is already taken. Pick another member id.", "Pick a different member id and resend."],
+  inbox_send_started: ["The send may have started. Check its status instead of cancelling or resending.", "Check the send status; do not cancel or resend until it resolves."],
+  inbox_send_unresolved: ["Resolve the existing reply attempt first.", "Resolve the existing reply attempt, then act."],
+  inbox_source_origin_changed: ["A source cannot change its channel origin. Create a new source with the intended origin instead.", "Create a new source with the intended origin; do not change this one's."],
+  inbox_transport_mismatch: ["This reply belongs to a different provider. Send it through the provider it belongs to.", "Route the reply through its own provider."],
+  invalid_assistant_action: ["Choose an assistant action and a stable request ID, then resend.", "Resend with an assistant action and a stable request ID."],
+  invalid_assistant_config: ["Choose a name and an active room agent, or disconnect, then resend.", "Resend with a name and an active room agent, or disconnect."],
+  invalid_assistant_report: ["Report a short public activity summary and a supported state, then resend.", "Resend with a short public summary and a supported state."],
+  invalid_desktop_provider: ["Choose a supported sign-in provider and resend.", "Resend with a supported sign-in provider."],
+  invalid_referral: ["The referrer is not an active member. Use an active member as referrer.", "Resend with an active member as the referrer."],
+  invalid_reply_attempt: ["Choose an exact reply operation against current state, then resend.", "Re-read the reply state and choose the exact operation."],
+  invalid_reply_authority: ["Current account authority is required for this reply action. Re-authenticate with the current account, then retry.", "Re-authenticate with the current account authority, then retry."],
+  invalid_reply_review: ["Choose the exact observed draft, then resend.", "Re-read the drafts and choose the exact observed one."],
+  invalid_reply_time: ["The reply timestamp is unavailable. Re-read the reply and use a recorded timestamp.", "Re-read the reply for a recorded timestamp, then resend."],
+  invalid_reply_update: ["Choose the exact dispatched update, then resend.", "Re-read the updates and choose the exact dispatched one."],
+  invalid_request: ["The request could not be processed as sent — the message names why. Fix it and resend; for a stored access request, ask a room owner to review it.", "Fix the problem named in the message and resend."],
+  invalid_request_run: ["Choose one request, attempt, and supported action, then resend.", "Resend with one request, one attempt, and a supported action."],
+  invalid_url: ["The url must be a non-empty string up to 2048 characters. Fix it and resend.", "Fix the url (non-empty, up to 2048 characters) and resend."],
+  invitation_conflict: ["An active invitation already reserves that Room identity. Wait for it to resolve or ask an administrator to revoke it.", "Ask an administrator to revoke the active invitation, or wait for it to resolve."],
+  invitation_not_pending: ["Only a pending invitation can be revoked. Read the invitation's current state; nothing was revoked.", "Re-read the invitation; only a pending one can be revoked."],
+  invitation_rejected: ["The invitation was rejected — the message names why. Fix the named cause; do not retry unchanged.", "Fix the cause named in the message; do not retry unchanged."],
+  invitation_receipt_unavailable: ["The accepted invitation cannot be reconciled safely. Ask a room administrator to reconcile it; do not retry the redeem.", "Ask a room administrator to reconcile the accepted invitation."],
+  invitation_scope_invalid: ["The stored invitation's grants no longer match its role policy. Ask an administrator for a new invitation.", "Ask an administrator for a new invitation; do not retry this one."],
+  invite_ambiguous: ["More than one active invite matches this handle. Ask the room owner to revoke the duplicates; do not guess which to redeem.", "Ask the room owner to revoke the duplicate invites, then redeem the remaining one."],
+  invite_not_active: ["Only an unredeemed invite can be revoked. Read the invite's current state; nothing was revoked.", "Re-read the invite; only an unredeemed one can be revoked."],
+  invite_rejected: ["The invite was rejected — the message names why. Fix the named cause; do not retry unchanged.", "Fix the cause named in the message; do not retry unchanged."],
+  invite_unavailable: ["This invite code cannot be redeemed. Check for typos or ask the inviter for a fresh code.", "Check the code for typos, or ask the inviter for a fresh code."],
+  join_session_lost: ["Your earlier join used another browser session. Return to that session or sign in with the same account; agents should reuse their saved agent identity.", "Return to the original session or sign in with the same account; agents: reuse the saved agent identity."],
+  last_login_method: ["Keep at least one active sign-in method. Add another method before removing this one.", "Add another sign-in method first, then remove this one."],
+  last_unverified_email: ["Verify an email before removing your last email sign-in method.", "Verify an email first, then remove the unverified one."],
+  listener_fenced: ["A live listener lease holds this agent's wake queue. Ack with its fencing token, or wait for the lease to lapse.", "Ack with the fencing token from the claiming listener, or wait for its lease to lapse."],
+  login_method_exists: ["This account already has a password login. Change the password instead of adding a new login method.", "Change the existing password instead."],
+  magic_account_mismatch: ["This browser is signed in to a different account. Sign out before using a magic link for another email.", "Sign out, then use the magic link."],
+  managed_agent: ["Replace this agent's key through its room connection, not here.", "Rotate the key through the agent's room connection."],
+  member_inactive: ["This member's access has ended; its pause row is inert. Nothing to change here.", "Treat it as done; the member's access has ended."],
+  membership_conflict: ["That Room member already exists. Use the existing membership; do not create a duplicate.", "Use the existing membership; do not create a duplicate."],
+  message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
+  message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
+  ndjson_required: ["This route requires an NDJSON body. Resend with Content-Type application/x-ndjson.", "Resend the request as application/x-ndjson."],
+  nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
+  not_declared: ["Declare what you are looking for before asking for a match.", "Declare what you are looking for, then ask for a match."],
+  nothing_to_request: ["You already hold the permissions named in the message — nothing to request.", "Treat it as done; the permissions are already held."],
+  password_already_set: ["This account already has a password. Change it instead of setting a new one.", "Change the existing password instead."],
+  password_changed: ["The password changed. Retry with the current password.", "Retry with the current password."],
+  peer_not_found: ["That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members.", "Run get_room_context and address a linked room member."],
+  public_work_path_conflict: ["Another live claim holds these repository paths. Wait for its release or pick different paths.", "Wait for the holding claim to release, or choose different paths."],
+  push_not_configured: ["Push is not configured on this server. Ask the operator to configure it; do not retry.", "Ask the operator to configure push; do not retry until then."],
+  quarantine_source_missing: ["The quarantined message is no longer in the inbox. Read the quarantine's current state; there is nothing left to act on.", "Re-read the quarantine; its source message is gone."],
+  referral_depth_exceeded: ["This referral chain exceeds the verifiable depth cap. Shorten the chain or ask the owner to review it.", "Shorten the referral chain, or ask the owner to review it."],
+  referral_rejected: ["The referral was rejected — the message names why. Fix the named cause; do not retry unchanged.", "Fix the cause named in the message; do not retry unchanged."],
+  reminder_inactive: ["There is no active reminder to cancel. Nothing to do.", "Treat it as done; no active reminder exists."],
+  reply_creation_started: ["Creation may have started. Check the existing attempt before creating another.", "Check the existing attempt's state; do not create a duplicate."],
+  reply_draft_unconfirmed: ["A confirmed mailbox draft identity is required. Confirm the draft first, then retry.", "Confirm the mailbox draft identity, then retry."],
+  reply_update_not_needed: ["The text already matches — no update is needed.", "Treat it as done; the text already matches."],
+  reply_update_not_started: ["No update has started. Start the update first, then act on it.", "Start the update first."],
+  reply_update_started: ["The update may have started. Check this attempt before updating again.", "Check the existing update attempt; do not start another."],
+  reply_update_unresolved: ["Check the existing update first and resolve it before acting.", "Resolve the existing update, then act."],
+  reset_account_mismatch: ["This reset is for another account. Sign out before continuing.", "Sign out, then continue the reset."],
+  restore_refused_nonempty: ["Restore refuses a store that already holds rooms. Restore into an empty store instead.", "Restore into an empty store."],
+  review_final: ["The review decision is final. Do not review again; act on the decision.", "Act on the final decision; do not re-review."],
+  review_pass_required: ["Acceptance requires a current authorized independent PASS. Get that review first.", "Have a current authorized independent reviewer submit PASS, then accept."],
+  review_policy_changed: ["The linked work's review policy is unavailable. Re-read the work and its current policy before acting.", "Re-read the work and its current review policy, then act."],
+  room_archived: ["This room is archived; access cannot be upgraded. Ask the owner to unarchive it, or work in another room.", "Ask the owner to unarchive the room, or use another room."],
+  round_limit_exceeded: ["The round limit paused this session. The next mention or post resumes it; do not retry this action.", "Wait for the next mention or post to resume the session."],
+  seat_taken: ["This identity already holds a guest seat in this room. Use that seat; do not join again.", "Use the existing guest seat; do not join again."],
+  slot_not_authenticated: ["Only an authenticated session slot can rotate its token. Authenticate the slot first, then rotate.", "Authenticate the session slot, then rotate its token."],
+  squad_disbanded: ["A disbanded squad has no roster changes. Create a new squad if one is needed.", "Create a new squad instead of changing this one's roster."],
+  token_conflict: ["This key conflicts with an existing one. Generate a new key.", "Generate a new key and resend."],
+  transfer_ownership_required: ["You own shared rooms that must change hands first. Transfer ownership of each room named in the message to another member, then retry the account deletion.", "Transfer ownership of each listed room to another member, then retry the account deletion."],
+  too_many_open_claims: ["Release or finish one of your open claims before assigning another.", "Release or finish an open claim, then assign."],
+  unreadable_body: ["The restore body could not be read. Resend a complete, readable body.", "Resend the restore with a complete body."],
+  unsupported_content: ["Only HTML pages can be fetched. Do not retry this URL as-is.", "Fetch an HTML page instead; do not retry this content type."],
+  unsupported_reply_review: ["This draft needs a supported, complete mailbox preview. Provide one, then review.", "Provide a supported, complete mailbox preview, then review."],
+  wake_dead: ["This wake is parked as dead letters. Requeue it explicitly to try again.", "Requeue the wake explicitly; do not just re-poll."],
+  wake_not_dead: ["Only a dead-lettered wake can be requeued. Read the wake's current state; nothing was requeued.", "Re-read the wake; only a dead-lettered one can be requeued."],
+  wake_not_leased: ["Only the lease holder can complete a wake. Let the holder complete it, or wait for the lease to lapse.", "Wait for the lease holder to complete it, or for the lease to lapse."],
+  wake_signal_fenced: ["Signals are claimed by another listener. Claim them again, then ack with the claiming fencing token.", "Claim the signals again, then ack with the claiming fencing token."],
+  webhook_rotation_not_pending: ["No webhook rotation is pending — nothing to complete. Start a rotation first if one is needed.", "Start a webhook rotation first if one is needed."],
+  work_claim_terminal: ["This work claim is in a terminal state — the action cannot apply. Read the current item; do not retry the action.", "Re-read the work item; its claim is terminal."],
+  work_resolved: ["This work is resolved; no reminder was scheduled. Nothing to do.", "Treat it as done; the work is resolved."],
+};
+
+// #3055: idempotency-family codes whose correct handling mirrors
+// idempotency_conflict — reconcile the original outcome, never reuse the id
+// with new input — but which used to fall through to "no known recovery".
+const AX_IDEMPOTENCY_CODES = new Set([
+  "direct_send_idempotency_conflict", "idempotency_actor_mismatch", "idempotency_key_reused",
+  "invite_redeem_idempotency_conflict", "referral_mint_idempotency_conflict",
+  "request_conflict", "request_id_reused",
+]);
+
+// #3055: family patterns for the long tail, checked after the named table.
+// Each returns [hint, next command]. The families encode the recoveries the
+// errors catalog's family rules already prescribe (re-list for *_not_found /
+// unknown_*, reconcile for terminal states, re-read for *_changed, shrink for
+// *_too_large, free capacity for limits, fresh invite for expired/revoked).
+function axFamilyRecovery(code) {
+  if (/^assistant_/.test(code)) {
+    return ["The shared assistant state does not match this action. Re-read the shared request for the current attempt and state, then act on that; do not retry against the old state.",
+      "Re-read the shared request and act on the current attempt and state named in the message."];
+  }
+  if (/^request_run_/.test(code)) {
+    return ["Re-read the original request attempt and reconcile its current state; do not start a parallel run or report against a stale attempt.",
+      "Re-read the original request attempt and reconcile its current state."];
+  }
+  if (AX_IDEMPOTENCY_CODES.has(code)) {
+    return ["This id was already used with different input. Read the current state for the original outcome; never reuse the id with new input.",
+      "Read the current state for the original outcome; do not reuse this id with new input."];
+  }
+  if (/_authority_changed$/.test(code)) {
+    return ["The inviter's authority changed. Ask a current administrator or the inviter for a new invitation; do not retry this one.",
+      "Ask a current administrator or the inviter for a new invitation."];
+  }
+  if (/_changed$/.test(code)) {
+    return ["The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state.",
+      "Re-read the current state and retry against it."];
+  }
+  if (/_exists$/.test(code)) {
+    return ["That already exists — do not create a duplicate. Read the current state and use the existing record.",
+      "Read the current state and use the existing record; do not create a duplicate."];
+  }
+  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended") {
+    return ["This has expired, been revoked, or ended and will not work again. Start fresh — a new invite or a new request — rather than retrying this one.",
+      "Ask the owner or inviter for a fresh invite, or start a new request; do not retry this one."];
+  }
+  if (/_too_large$/.test(code)) {
+    return ["The payload exceeds the size limit named in the message. Send a smaller one; do not resend the same payload.",
+      "Shrink the payload under the limit named in the message and resend."];
+  }
+  if (/_limit$|_quota$|_exceeded$|_full$/.test(code) || code === "too_many_requests") {
+    return ["A capacity limit is reached. Release, finish, or cancel something to free capacity — or ask the owner to raise the limit. Do not retry unchanged.",
+      "Free capacity (release, finish, or cancel something) or ask the owner to raise the limit; do not retry unchanged."];
+  }
+  if (/_transition$/.test(code) || /^invalid_.*_status$/.test(code)) {
+    return ["That state cannot make this transition. Re-read the current state; the action is not valid from here, and retrying it unchanged will fail again.",
+      "Re-read the current state; do not retry this transition from it."];
+  }
+  // service_unavailable is NOT a capability code: it is the shared
+  // fetch-failure/503 code (client connectionDiagnostic maps a failed
+  // fetch to it at status 0), whose recovery is the shared guidance —
+  // the >=500 branch at 503, room_check_access at status 0 — not
+  // "ask the operator to enable this capability".
+  if (/_unavailable$/.test(code) && code !== "service_unavailable") {
+    return ["This capability is unavailable on this server or in this state. Do not retry unchanged; ask the operator if it should be enabled.",
+      "Ask the operator whether this capability should be enabled; do not retry unchanged."];
+  }
+  if (/^unsupported_|_unsupported$/.test(code)) {
+    return ["This is not supported here. Do not retry it; use a supported alternative named in the message or the docs.",
+      "Use a supported alternative; do not retry the unsupported form."];
+  }
+  if (/_not_found$/.test(code) || /^unknown_/.test(code)) {
+    return ["That resource or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
+      "Re-list the resource and retry with a current id; do not guess ids."];
+  }
+  return null;
+}
+
 function stale(code, message) {
   return /^stale_/.test(code) || /stale/i.test(String(message || ""));
 }
@@ -47,6 +422,12 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
   const readWork = workItemId ? tool("room_read_work", { workItemId }) : tool("room_read_work");
 
+  // E4-REG: registry-owned codes resolve from ERROR_REGISTRY alone; their
+  // cascade branches are deleted. Everything else flows through the cascade
+  // below unchanged.
+  const registeredAx = errorRegistryAx(reasonCode, { httpStatus, message, roomId, workItemId });
+  if (registeredAx) return registeredAx;
+
   if (reasonCode === "member_required") {
     return {
       status: "action_required", reason: "member_required",
@@ -65,12 +446,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Keep your saved connection. Check the service address and existing access before creating another identity.",
+      hint: "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
       next: [
         tool("room_check_access"),
         path("/api/agent-rooms"),
         path("/api/session"),
         command("Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host."),
+        command("Expired room token (rak_) from an invite join? Re-authenticate with the identitySecret shown once in your join response — it does not expire — or POST /api/join with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token; you keep the same membership and display name (duplicate: true). Never mint a replacement identity for an expired room token."),
         command("A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement."),
         command("If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.")
       ]
@@ -80,7 +462,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     return {
       status: "action_required", reason: "wrong_link_kind",
       hint: "That is a human invite link. Ask the owner for a guest invite or Add agent.",
-      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
+      next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
@@ -88,7 +470,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required",
       reason: reasonCode,
       hint: "This guest invite is not live. Ask the owner to mint a new one or Add agent.",
-      next: [path("/api/guest-agent-links"), command("Ask the owner to mint a guest invite or Add agent")]
+      next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
   // This mapper has no deployment origin. Use the configured service origin,
@@ -255,53 +637,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
-  // G4 (usage-burn): a raced public-work claim names its holder and lease
-  // expiry in the message — turn them into the hint/next the taxonomy
-  // promises, the way session_claimed names its holder.
-  if (reasonCode === "public_work_claim_conflict") {
-    const conflict = /^Task already claimed by (.+?) \(lease expires ([^)]+)\)$/.exec(String(message || ""));
-    const holder = conflict?.[1], expiry = conflict?.[2], self = holder === "you";
-    const hint = holder
-      ? self
-        ? `You already hold this claim until ${expiry}. Renew to extend the lease instead of claiming again.`
-        : `Held by ${holder} until ${expiry}. Wait for release or lease expiry, then claim again.`
-      : "This task is already claimed. Re-read the task, wait for release, or pick another task.";
-    return {
-      status: "action_required", reason: "public_work_claim_conflict",
-      hint: hint.length < 160 ? hint : "This task is already claimed. Re-read the task, wait for release, or pick another task.",
-      next: [
-        path("/api/public-work/tasks"),
-        command(self
-          ? "Renew your claim to extend the lease instead of claiming again."
-          : holder
-            ? `Wait for ${holder} to release, or for the lease to expire at ${expiry}, then claim the task again. Or claim a different task.`
-            : "Re-read the task to see who holds the claim; wait for release or pick another task.")
-      ]
-    };
-  }
-  // G5 (usage-burn): stale_public_claim must beat the generic stale_* branch
-  // below and say which — the generation changed, or the lease expired — with
-  // the re-read/re-claim recovery. The rejected artifact bytes were never
-  // stored (generation is checked before the receipt write), so the agent
-  // must keep them and re-submit.
-  if (reasonCode === "stale_public_claim") {
-    const text = String(message || "");
-    const changed = /generation changed/i.test(text);
-    const submitted = /submitted (\d+)/.exec(text)?.[1], current = /current (\d+)/.exec(text)?.[1];
-    const hint = changed
-      ? `The task moved to generation ${current ?? "?"} (you sent ${submitted ?? "?"}). Re-read the task and claim it again with the current generation.`
-      : "Your claim expired — the lease lapsed or it was released. Re-read the task and claim it again.";
-    return {
-      status: "action_required", reason: "stale_public_claim",
-      hint: hint.length < 160 ? hint : "Re-read the task and claim it again with the current generation.",
-      next: [
-        path("/api/public-work/tasks"),
-        command(changed
-          ? "Re-read the task for its current generation; claim it again if unclaimed, then re-submit your work. Your rejected artifact bytes were NOT saved — keep them and send them again."
-          : "Re-read the task; claim it again, then re-submit your work with the new generation. Your rejected artifact bytes were NOT saved — keep them and send them again.")
-      ]
-    };
-  }
+  // (public_work_claim_conflict and stale_public_claim are registry-owned —
+  // see ERROR_REGISTRY above; their G4/G5 branches moved there verbatim.)
   if (stale(reasonCode, message)) {
     return {
       status: "action_required", reason: "stale_revision",
@@ -535,7 +872,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // (2026-10-07 buildqa: identity_already_linked is the same family —
   // idempotent 409 success from the identity-link routes, not a failure —
   // but starts with identity_, not already_. It joins the family too.)
-  if (/^already_/.test(reasonCode) || reasonCode === "identity_already_linked") {
+  if (/^already_/.test(reasonCode) || /_already_/.test(reasonCode) || reasonCode === "identity_already_linked") {
     const alreadyHints = {
       identity_already_linked: "This identity is already linked to this room — the earlier link is live. Keep your saved connection; do not mint another identity or retry the link create.",
       already_member: /already linked/.test(String(message || ""))
@@ -547,6 +884,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       already_inactive: "The membership is already inactive — the desired state already holds. Treat it as done.",
       already_claimed: "This bounty is already claimed — pick another bounty, or wait for it to be released.",
       already_appealed: "One appeal per filing — this filing was already appealed. No further appeal is possible.",
+      // #3055: the *_already_* spellings of the same family (the action
+      // already happened; reconcile, never retry).
+      dm_already_approved: "DM consent is already approved for this direction — nothing to do. Send the DM.",
+      inbox_reply_already_sent: "This reply was already sent — do not send it again. Read the mailbox state to confirm.",
+      invite_already_used: "This invite was already used. Ask the inviter for a fresh code if another join is needed.",
+      invitation_already_used: "This invitation was already accepted through another request. Read its current state; do not accept it again.",
+      key_already_registered: "This public key is already registered for the identity. Use the existing registration; do not register it again.",
+      public_work_already_enabled: "Public claims are already enabled for this room — nothing to do.",
+      // (public_work_already_submitted is registry-owned — ERROR_REGISTRY.)
+      quarantine_already_reviewed: "This quarantine was already reviewed and reviews are final. Do not review it again.",
+      quarantine_already_split: "This quarantine is already split off its thread. Read its current state; do not split it again.",
     };
     return {
       status: "action_required", reason: reasonCode,
@@ -571,23 +919,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Retry after Retry-After")]
     };
   }
-  if (reasonCode === "proof_required") {
-    // #1547: a paste-only agent dead-ends on this 428 — "See proof" names no
-    // tool, no one-liner, and no manual alternative. The 428 body carries the
-    // machine-readable spec (proof.challenge, proof.acceptBuckets,
-    // proof.prefix, proof.nonce); the hint restates the recipe in words and
-    // names the no-computation escape hatch: redeeming a member-issued invite
-    // code via POST /api/agent-invites/redeem mints the identity without the
-    // anonymous proof-of-work gate.
-    return {
-      status: "action_required", reason: "proof_required",
-      hint: "Proof-of-work required: the SHA-256 hex of \"{bucket}:{trimmedDisplayName}:{nonce}\" must start with proof.prefix from this 428 body (bucket: one of proof.acceptBuckets; nonce must match proof.nonce). Resend displayName with proof set to the winning nonce. No code execution? Ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} instead -- redeeming mints the identity without this proof.",
-      next: [
-        command("Brute-force a nonce for the SHA-256 recipe in this 428's proof object, then resend displayName with proof"),
-        command("Or ask a room member for a one-time invite code and POST /api/agent-invites/redeem {\"code\",\"displayName\"} -- no proof needed")
-      ]
-    };
-  }
+  // (proof_required is registry-owned — see ERROR_REGISTRY above; its
+  // #1547 branch moved there verbatim.)
   // Lane 5 (docspolish-error-quality): the availability-503 family needs its
   // own recovery, not the generic 500 branch. storage_unavailable is the
   // Retry-After retry docs/ERROR-TAXONOMY.md promises; mail_not_configured
@@ -612,6 +945,56 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "failed", reason: reasonCode === "request_failed" ? "internal_error" : reasonCode,
       hint: "No success is claimed. Reconcile or retry the exact command.",
       next: [tool("room_check_access"), command("Retry the exact same command after checking access")]
+    };
+  }
+  // #3055: bond_proposed_by_peer's message names the pending bondId and the
+  // answer (bond.accept / bond.decline) — turn them into the hint/next the
+  // way the sibling conflict branches do, instead of "no known recovery".
+  if (reasonCode === "bond_proposed_by_peer") {
+    const bondId = /\(bondId ([^)]+)\)/.exec(String(message || ""))?.[1];
+    return {
+      status: "action_required", reason: "bond_proposed_by_peer",
+      hint: bondId
+        ? `That agent already proposed a bond to you (bondId ${bondId}). Answer it with bond.accept or bond.decline, then propose again if still needed.`
+        : "That agent already proposed a bond to you. Answer it with bond.accept or bond.decline, then propose again if still needed.",
+      next: [command(bondId
+        ? `Answer the existing proposal with bond.accept { bondId: "${bondId}" } or bond.decline { bondId: "${bondId}" }; do not propose a duplicate.`
+        : "Answer the existing proposal with bond.accept { bondId } or bond.decline { bondId }; do not propose a duplicate.")]
+    };
+  }
+  // #3055: file_lease_conflict's message names the holder, claim, and lease
+  // expiry — the same data the public_work_claim_conflict branch turns into
+  // a recovery — yet this code used to fall through to "no known recovery".
+  if (reasonCode === "file_lease_conflict") {
+    const conflict = /overlaps files leased to (.+?) \(([^)]+)\) until ([^:]+):/.exec(String(message || ""));
+    const holder = conflict?.[1], expiry = conflict?.[3];
+    const claimsPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "file_lease_conflict",
+      hint: holder
+        ? `Files you need are leased to ${holder} until ${expiry}. Wait for release or lease expiry, coordinate with the holder, or work on other files.`
+        : "Files you need are leased to another claim. Read the current claims to see the holder and lease expiry, then wait, coordinate, or work on other files.",
+      next: [path(claimsPath), command(holder
+        ? `Wait for ${holder} to release the files or for the lease to expire at ${expiry}, or coordinate with them; do not force the overlapping claim.`
+        : "Read the current claims for the holder and lease expiry, then wait, coordinate, or work on other files.")]
+    };
+  }
+  // #3055: named recoveries, then family patterns, for the rest of the long
+  // tail. tests/errors-catalog-drift.test.js guards this coverage.
+  const namedRecovery = AX_NAMED_RECOVERIES[reasonCode];
+  if (namedRecovery) {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: namedRecovery[0],
+      next: [command(namedRecovery[1])]
+    };
+  }
+  const familyRecovery = axFamilyRecovery(reasonCode);
+  if (familyRecovery) {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: familyRecovery[0],
+      next: [command(familyRecovery[1])]
     };
   }
   // 2026-10-07 buildqa (live fuzz): method_not_allowed 405 fell through to
@@ -647,6 +1030,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         tool("room_check_access")]
     };
   }
+  // (agent_not_registered is registry-owned — see ERROR_REGISTRY above.)
   // Unmapped code: name the code and the recovery (report code + message
   // to the room owner) instead of a bare "check access" pointer — the old
   // generic hint stranded every caller on a code with no known recovery.

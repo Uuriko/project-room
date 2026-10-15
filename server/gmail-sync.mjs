@@ -21,7 +21,13 @@ export class GmailSync {
     const tokens = await m.exchange({ refresh_token: record.refreshToken, grant_type: 'refresh_token' }); check();
     if (!tokens.access_token) fail('gmail_reconnect_required');
     const get = async path => { check(); const value = await m.json(api + path, { headers: { Authorization: 'Bearer ' + tokens.access_token } }); check(); return value; };
-    let reset = !initialHistory, historyId = initialHistory, ids = new Set(), nextPageToken = record.historyPage ?? null;
+    // A reset walk that spent its per-tick budget persists its list
+    // continuation in historyPage and the history anchor captured when the
+    // walk started in resetHistoryId. While the anchor is set the mailbox
+    // is mid-walk: resume the reset rather than feeding the list token to
+    // the history endpoint.
+    const walkAnchor = record.resetHistoryId ?? null;
+    let reset = !initialHistory || walkAnchor !== null, historyId = initialHistory, ids = new Set(), nextPageToken = record.historyPage ?? null;
     if (!reset) {
       try {
         const query = new URLSearchParams({ startHistoryId: initialHistory, maxResults: '50' });
@@ -35,22 +41,36 @@ export class GmailSync {
         if (ids.size > 200 || (this.store.connections.folder(accountId, mailboxId, 'INBOX')?.members.length ?? 0) > 900) reset = true;
       } catch (error) { if (error.code === 'gmail_not_found') reset = true; else throw error; }
     }
+    let listToken = null, listDone = false, resetAnchor = null;
     if (reset) {
       // Capture history before listing; later mutations are replayed on the next tick.
-      const profile = await get('/profile'); historyId = profile.historyId ?? null; nextPageToken = null;
+      // A resumed walk keeps the anchor captured when the walk started, so
+      // mutations during the walk are replayed too.
+      if (walkAnchor !== null) { resetAnchor = walkAnchor; listToken = nextPageToken; }
+      else { const profile = await get('/profile'); resetAnchor = profile.historyId ?? null; }
+      nextPageToken = null;
       // A reset must see the whole INBOX, not just the first 50 messages
       // (H-8): follow nextPageToken until the list is exhausted, bounded by
       // the same 200-id per-tick budget the detail fetch below enforces.
-      // The folder is marked complete only after this walk finishes.
+      // A page is consumed only when it fits the remaining budget whole:
+      // consuming part of a page would skip the ids past the cap, behind a
+      // page token that has already advanced. When the budget runs out
+      // first, the walk keeps its continuation in listToken and resumes on
+      // the next tick; the folder is marked complete only once the walk
+      // finishes (listDone), never at the budget boundary.
       ids = new Set();
-      let listToken = null;
-      do {
+      for (;;) {
         const listQuery = new URLSearchParams({ labelIds: 'INBOX', maxResults: '50' });
         if (listToken) listQuery.set('pageToken', listToken);
         const listPage = await get('/messages?' + listQuery);
-        for (const v of listPage.messages ?? []) if (ids.size < 200) ids.add(v.id);
+        const pageIds = (listPage.messages ?? []).map(v => v.id);
+        if (pageIds.length > 200) fail('gmail_invalid_response');
+        if (ids.size + pageIds.length > 200) break;
+        for (const id of pageIds) ids.add(id);
         listToken = listPage.nextPageToken ?? null;
-      } while (listToken && ids.size < 200);
+        if (!listToken) { listDone = true; break; }
+        if (ids.size >= 200) break;
+      }
     }
     if (ids.size > 200 || [...ids].some(id => typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id))) fail('gmail_invalid_response');
     const observations = [];
@@ -69,15 +89,23 @@ export class GmailSync {
       if ((latest.historyId ?? null) !== initialHistory || (latest.historyPage ?? null) !== (record.historyPage ?? null)) fail('gmail_sync_changed');
       // No-op history ticks create no immutable import-journal entry.
       if (observations.length || reset) {
+        // Only the first tick of a walk opens a fresh scan, and only the
+        // tick that finishes the walk completes it: a budget-boundary tick
+        // appends to the in-progress scan without touching membership.
+        const walkStart = reset && walkAnchor === null, scanDone = !reset || listDone;
         const batches = observations.length ? Array.from({ length: Math.ceil(observations.length / 50) }, (_, i) => observations.slice(i * 50, (i + 1) * 50)) : [[]];
         for (let i = 0; i < batches.length; i++) {
           for (const o of batches[i]) if (o.kind === 'message') o.expectedSourceRevision = this.store.db.prepare('SELECT revision FROM private_inbox_sources WHERE account_id=? AND id=?').get(accountId, o.envelope.sourceId)?.revision ?? 0;
           const folder = this.store.connections.folder(accountId, mailboxId, 'INBOX'), changed = !folder || folder.connectionRevision !== connection.profile.revision;
           this.store.connections.apply(token, { action: 'page.apply', requestId: randomUUID(), connectionId: mailboxId, connectionRevision: connection.profile.revision,
-            folderId: 'INBOX', expectedRevision: folder?.revision ?? 0, expectedCursor: changed ? null : folder.cursor, cursor: 'gmail-history:' + randomUUID(), complete: i === batches.length - 1, reset: i === 0 && (reset || changed), observations: batches[i] }, null);
+            folderId: 'INBOX', expectedRevision: folder?.revision ?? 0, expectedCursor: changed ? null : folder.cursor, cursor: 'gmail-history:' + randomUUID(), complete: i === batches.length - 1 && scanDone, reset: i === 0 && (walkStart || changed), observations: batches[i] }, null);
         }
       }
-      m.save(auth, { ...latest, usable: undefined, historyId, historyPage: nextPageToken, syncedAt: new Date(this.store.now()).toISOString(), syncError: null, nextSyncAt: this.store.now() + (nextPageToken ? 1000 : 60000), syncFailures: 0 });
+      m.save(auth, { ...latest, usable: undefined,
+        historyId: reset ? (listDone ? resetAnchor : null) : historyId,
+        historyPage: reset ? (listDone ? null : listToken) : nextPageToken,
+        resetHistoryId: reset && !listDone ? resetAnchor : null,
+        syncedAt: new Date(this.store.now()).toISOString(), syncError: null, nextSyncAt: this.store.now() + ((reset ? !listDone : nextPageToken) ? 1000 : 60000), syncFailures: 0 });
       return { imported: observations.filter(o => o.kind === 'message').length };
     });
   }

@@ -66,11 +66,15 @@ export function ensureShadowSchema(db) {
   db.exec(SHADOW_SCHEMA);
 }
 
-const entryId = (claimId, kind, roomSeq) => `shadow:${claimId}:${kind}:${roomSeq}`;
+// Claim ids are per-room (every agent-created room gets a claim literally
+// named 'starter'), so journal identity is scoped to (roomId, claimId):
+// without the room, two rooms' same-named claims mint the same entry id
+// and INSERT OR IGNORE silently drops one room's entries.
+const entryId = (roomId, claimId, kind, roomSeq) => `shadow:${roomId}:${claimId}:${kind}:${roomSeq}`;
 
 function draft(claimId, kind, row, { ownerId = null, reason = null, bondPosted = 0, amountMillis = 0 } = {}) {
   return {
-    id: entryId(claimId, kind, row.seq),
+    id: entryId(row.roomId, claimId, kind, row.seq),
     claimId,
     kind,
     ownerId,
@@ -89,9 +93,14 @@ function draft(claimId, kind, row, { ownerId = null, reason = null, bondPosted =
 // Entries are only ever emitted against a claim's observed lifecycle; a
 // release/forfeit is never written without an open shadow bond, so the
 // journal can never claim value moved that was never posted.
+// Open-bond state is keyed by (roomId, claimId) for the same reason as the
+// entry ids: claim ids repeat across rooms, and one room's release must
+// never close another room's bond.
+const bondKey = (roomId, claimId) => JSON.stringify([roomId ?? null, claimId]);
+
 export function deriveShadowEntries(rows) {
   const entries = [];
-  const open = new Map(); // claimId -> { ownerId, lockedAt, lockedSeq }
+  const open = new Map(); // bondKey(roomId, claimId) -> { ownerId, lockedAt, lockedSeq }
 
   for (const row of rows) {
     const data = row?.data;
@@ -99,12 +108,13 @@ export function deriveShadowEntries(rows) {
     const claimId = typeof data.workClaim === "string" ? data.workClaim : null;
     const action = typeof data.action === "string" ? data.action : null;
     if (!claimId || !action) continue;
-    const bond = open.get(claimId) ?? null;
+    const key = bondKey(row.roomId, claimId);
+    const bond = open.get(key) ?? null;
 
     switch (action) {
       case "claimed": {
         if (!bond && typeof data.ownerId === "string") {
-          open.set(claimId, { ownerId: data.ownerId, lockedAt: row.atMs, lockedSeq: row.seq });
+          open.set(key, { ownerId: data.ownerId, lockedAt: row.atMs, lockedSeq: row.seq });
           entries.push(draft(claimId, "bond-locked", row, {
             ownerId: data.ownerId, amountMillis: SHADOW_BOND_MILLIS, reason: "claimed"
           }));
@@ -116,13 +126,13 @@ export function deriveShadowEntries(rows) {
         if (state === "done") {
           if (bond) {
             entries.push(draft(claimId, "bond-released", row, { ownerId: bond.ownerId, reason: "done" }));
-            open.delete(claimId);
+            open.delete(key);
           }
         } else if ((state === "claimed" || state === "in_progress") && !bond && typeof data.ownerId === "string") {
           // The observer started mid-history (or the claimed action was
           // coalesced away): an owned, unfinished claim is treated as
           // bond-open from first sight, marked so the journal says so.
-          open.set(claimId, { ownerId: data.ownerId, lockedAt: row.atMs, lockedSeq: row.seq });
+          open.set(key, { ownerId: data.ownerId, lockedAt: row.atMs, lockedSeq: row.seq });
           entries.push(draft(claimId, "bond-locked", row, {
             ownerId: data.ownerId, amountMillis: SHADOW_BOND_MILLIS, reason: "observed_open"
           }));
@@ -133,7 +143,7 @@ export function deriveShadowEntries(rows) {
       case "released": {
         if (bond) {
           entries.push(draft(claimId, "bond-released", row, { ownerId: bond.ownerId, reason: "owner_released" }));
-          open.delete(claimId);
+          open.delete(key);
         }
         break;
       }
@@ -141,9 +151,9 @@ export function deriveShadowEntries(rows) {
         const next = typeof data.ownerId === "string" ? data.ownerId : null;
         if (bond && next && next !== bond.ownerId) {
           entries.push(draft(claimId, "bond-carried", row, { ownerId: next, reason: "carried" }));
-          open.set(claimId, { ...bond, ownerId: next });
+          open.set(key, { ...bond, ownerId: next });
         } else if (!bond && next) {
-          open.set(claimId, { ownerId: next, lockedAt: row.atMs, lockedSeq: row.seq });
+          open.set(key, { ownerId: next, lockedAt: row.atMs, lockedSeq: row.seq });
           entries.push(draft(claimId, "bond-locked", row, {
             ownerId: next, amountMillis: SHADOW_BOND_MILLIS, reason: "observed_open"
           }));
@@ -161,7 +171,7 @@ export function deriveShadowEntries(rows) {
         }));
         if (bond) {
           entries.push(draft(claimId, "bond-forfeited", row, { ownerId: bond.ownerId, reason: "lease_expired" }));
-          open.delete(claimId);
+          open.delete(key);
         }
         break;
       }
@@ -173,7 +183,7 @@ export function deriveShadowEntries(rows) {
           }));
           if (bond) {
             entries.push(draft(claimId, "bond-forfeited", row, { ownerId: bond.ownerId, reason: "judged_bad" }));
-            open.delete(claimId);
+            open.delete(key);
           }
         }
         // Any other verdict leaves the bond locked; a note is not a verdict.
@@ -207,11 +217,15 @@ function parseEventRow(row) {
 // into the shadow journal. Idempotent: re-running changes nothing.
 export function syncShadowJournal(db, { roomId = null } = {}) {
   ensureShadowSchema(db);
+  // sequence is per-room, so replay room-by-room: ORDER BY sequence alone
+  // interleaves rooms arbitrarily (harmless now that derivation state is
+  // room-keyed, but grouping keeps each room's lifecycle contiguous and
+  // the derived entry order deterministic).
   const rows = db.prepare(
     `SELECT room_id, sequence, body FROM events
      WHERE json_extract(body,'$.type')='work_claim.updated'
      ${roomId ? "AND room_id=?" : ""}
-     ORDER BY sequence`
+     ORDER BY room_id, sequence`
   ).all(...(roomId ? [roomId] : []));
   const parsed = [];
   for (const row of rows) {
@@ -270,7 +284,7 @@ export function shadowReport(db, { roomId = null } = {}) {
      WHERE j.kind IN ('bond-locked','bond-carried') ${roomId ? "AND j.room_id=?" : ""}
      AND j.room_seq = (
        SELECT MAX(j2.room_seq) FROM claim_bond_shadow j2
-       WHERE j2.claim_id = j.claim_id AND j2.kind IN ${bondKinds} ${roomId ? "AND j2.room_id=?" : ""}
+       WHERE j2.claim_id = j.claim_id AND j2.room_id IS j.room_id AND j2.kind IN ${bondKinds} ${roomId ? "AND j2.room_id=?" : ""}
      )`
   ).get(...args, ...args).c;
   return {

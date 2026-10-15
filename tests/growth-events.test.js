@@ -67,6 +67,23 @@ test("C1 missing required fields are rejected", () => {
   assert.throws(() => defineEvent("room.created", { ...base, fields: { roomId: "r1" } }), /missing required field "roomKind"/);
 });
 
+test("C1 required fields reject null and empty-string values", () => {
+  // Regression for #2973: presence via Object.hasOwn plus the scalar check
+  // admitted null and "" for required fields.
+  assert.throws(() => defineEvent("message.sent", { ...base, fields: { roomId: null, messageId: "m1" } }), /missing required field "roomId"/);
+  assert.throws(() => defineEvent("message.sent", { ...base, fields: { roomId: "", messageId: "" } }), /missing required field "roomId"/);
+  assert.throws(() => defineEvent("message.sent", { ...base, fields: { roomId: "r1", messageId: "" } }), /missing required field "messageId"/);
+  assert.throws(() => defineEvent("message.sent", { ...base, fields: { roomId: "   ", messageId: "m1" } }), /missing required field "roomId"/);
+  assert.throws(() => defineEvent("work.proposed", { ...base, fields: { roomId: "r1", workItemId: null } }), /missing required field "workItemId"/);
+  // validateEvent shares checkFields, so a read-back envelope is held to it too.
+  const event = defineEvent("message.sent", { ...base, fields: { roomId: "r1", messageId: "m1" } });
+  assert.throws(() => validateEvent({ ...event, fields: { roomId: null, messageId: "m1" } }), /missing required field "roomId"/);
+  assert.throws(() => validateEvent({ ...event, fields: { roomId: "r1", messageId: "" } }), /missing required field "messageId"/);
+  // Optional fields still admit null — only required fields are tightened.
+  const ok = defineEvent("message.sent", { ...base, fields: { roomId: "r1", messageId: "m1", threadId: null } });
+  assert.equal(ok.fields.threadId, null);
+});
+
 test("C1 actor, source and timestamp are enforced", () => {
   assert.throws(() => defineEvent("message.sent", { ...base, actor: { id: "zoe", kind: "robot" }, fields: { roomId: "r1", messageId: "m1" } }), /kind/);
   assert.throws(() => defineEvent("message.sent", { ...base, actor: { id: "", kind: "human" }, fields: { roomId: "r1", messageId: "m1" } }), /Actor id/);

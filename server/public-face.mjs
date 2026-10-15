@@ -21,6 +21,7 @@
 import { randomBytes } from "node:crypto";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
+import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -140,7 +141,16 @@ export class PublicFace {
       "SELECT * FROM room_public_settings WHERE public_code=? AND enabled=1"
     ).get(code);
     if (!row) fail(404, "face_not_found", "No such public face");
+    // Operator unpublish overrides the owner's decision to share via this code.
+    if (isUnpublished(this.db, "room", row.room_id)) fail(404, "face_not_found", "No such public face");
     return row;
+  }
+
+  // Public reads also stop at an archived room, like the other public doors.
+  _publicState(row) {
+    const state = this._roomState(row.room_id);
+    if (typeof state?.room?.archivedAt === "string" && state.room.archivedAt) fail(404, "face_not_found", "No such public face");
+    return state;
   }
 
   // Strict sanitizer: rebuilds the public snapshot field-by-field.
@@ -179,13 +189,13 @@ export class PublicFace {
 
   faceByCode(code) {
     const row = this._resolveCode(code);
-    const state = this._roomState(row.room_id);
+    const state = this._publicState(row);
     return this.sanitize(state);
   }
 
   feedByCode(code, { after = null, limit = 50 } = {}) {
     const row = this._resolveCode(code);
-    const state = this._roomState(row.room_id);
+    const state = this._publicState(row);
     if (after !== null && typeof after !== "string") fail(422, "invalid_feed_cursor", "after must be a message cursor");
     let n = Number(limit);
     if (!Number.isSafeInteger(n) || n < 1) n = 50;

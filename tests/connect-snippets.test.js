@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { connectSnippets, installLinkFor, renderedSnippet } from "../server/connect-snippets.mjs";
-import { agentPages } from "../scripts/build-agent-docs.mjs";
+import { writeAgentPages } from "../scripts/build-agent-docs.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -25,7 +25,9 @@ test("every connect snippet names the env var, has a docs page, and contains no 
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   assert.equal(connectSnippets.length, 9);
-  const pages = agentPages();
+  // Agent pages are generated build output (no longer committed): build them,
+  // then verify on-disk bytes == render == what the server serves below.
+  const pages = writeAgentPages();
   for (const [file, html] of pages) assert.equal(readFileSync(file, "utf8"), html, file);
   const index = await fetch(origin + "/docs/agents");
   assert.equal(index.status, 200);

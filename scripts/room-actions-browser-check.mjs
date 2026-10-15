@@ -8,8 +8,10 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
-async function setup(t, { mobile = false, role = "owner", expectedMessageWrites = 0 } = {}) {
+async function setup(t, { mobile = false, role = "owner", expectedMessageWrites = 0, theme = "dark", savedMessageId = null } = {}) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 50 });
+  if (savedMessageId) f.store.db.prepare("INSERT INTO saved_messages (room_id, member_id, message_id, saved_at) VALUES (?, ?, ?, ?)")
+    .run("commons", role, savedMessageId, Date.now());
   let browser;
   t.after(async () => {
     await browser?.close(); server.closeStreams(); server.closeAllConnections();
@@ -21,6 +23,7 @@ async function setup(t, { mobile = false, role = "owner", expectedMessageWrites 
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
   const page = await context.newPage(), external = [], errors = [], writes = [];
+  await page.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   page.setDefaultTimeout(8000);
   await context.route("**/*", route => {
     if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); }
@@ -44,6 +47,28 @@ async function setup(t, { mobile = false, role = "owner", expectedMessageWrites 
   };
   return { ...f, page, origin, open, action, capture };
 }
+
+for (const mobile of [false, true]) for (const theme of ["dark", "light"]) test(`saved navigation ${mobile ? "mobile" : "desktop"} ${theme}: palette and button open the same bookmarks`, { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile, theme, savedMessageId: "test-request" }), p = f.page;
+  const draft = "Keep this draft while I find my saved message";
+  await p.locator("#message-input").fill(draft);
+  await clickChrome(p, "#topbar-later");
+  await p.locator('#later-list [data-open-message="test-request"]').waitFor();
+  const bookmarked = await p.locator("#later-list").innerText();
+  await p.locator("#later-close").click();
+  await f.open();
+  await p.locator("#room-actions-query").fill("Saved for later");
+  await p.locator("#room-actions-query").press("Enter");
+  await p.locator("#later-dialog").waitFor({ state: "visible" });
+  await p.locator('#later-list [data-open-message="test-request"]').waitFor();
+  assert.equal(await p.locator("#later-list").innerText(), bookmarked);
+  assert.equal(await p.locator("#updates-dialog").isVisible(), false);
+  assert.equal(await p.locator("#message-input").inputValue(), draft);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(`saved-${mobile ? "mobile" : "desktop"}-${theme}`);
+  await p.keyboard.press("Escape");
+  assert.equal(await p.locator("#later-dialog").isVisible(), false);
+});
 
 for (const mobile of [false, true]) test(`room actions ${mobile ? "mobile" : "desktop"}: quiet entry, draft preservation, no implicit writes`, { timeout: 30000 }, async t => {
   const f = await setup(t, { mobile }), p = f.page, input = p.locator("#message-input");
@@ -161,6 +186,24 @@ test("room actions reach work, invitation, agent and instructions without creati
     await f.open(); await f.action(action).click(); await p.locator(dialog).waitFor();
     assert.equal(await p.locator("#room-actions-dialog").isVisible(), false);
     await p.locator(close).click();
+  }
+});
+
+// R27-2: on a phone the people list lives in the sidebar drawer. Choosing a
+// room action re-renders the menu, so by the time the click reaches the
+// document's outside-click handler its target is detached, reads as "outside"
+// and shuts the drawer that the action just opened. Focus then falls to <body>.
+test("room actions on a phone: People and How to add an agent leave the drawer open with focus inside it", { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile: true }), p = f.page;
+  for (const [id, focused] of [["people", "#people-panel > summary"], ["how-agent", "#connect-agent-button"]]) {
+    await f.open(); await f.action(id).click();
+    await p.waitForTimeout(100);
+    assert.equal(await p.locator("#main").evaluate(node => node.classList.contains("sidebar-open")), true, `${id}: the sidebar drawer stays open`);
+    assert.equal(await p.locator("#people-panel").evaluate(node => node.open), true, `${id}: people panel open`);
+    assert.equal(await p.locator(focused).isVisible(), true, `${id}: ${focused} is visible`);
+    assert.equal(await p.locator(focused).evaluate(node => node === document.activeElement), true, `${id}: focus lands on ${focused}, not <body>`);
+    await p.keyboard.press("Escape");
+    await p.waitForFunction(() => !document.querySelector("#main").classList.contains("sidebar-open"));
   }
 });
 
@@ -344,4 +387,47 @@ for (const mobile of [false, true]) test(`task finder ${mobile ? 'touch' : 'keyb
     assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await f.capture(`task-finder-${mobile ? 'mobile' : 'desktop'}-${theme}`);
   }
+});
+
+// R32-2 regression contributed by John's Tab.
+test("phone 390: tapping a person in People shows the composer with their mention", { timeout: 60000 }, async t => {
+  const f = createAcceptanceFixture();
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  const errors = [];
+  t.after(async () => {
+    await browser.close();
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+    assert.deepEqual(errors, []);
+  });
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" })).newPage();
+  page.setDefaultTimeout(10000);
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(origin); await page.locator("#auth-panel").waitFor({ state: "visible" });
+  await signInFixture(page, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#message-input").fill("Keep this draft. ");
+  const recipient = await page.locator("#message-to-select").inputValue();
+  await page.locator("#sidebar-toggle").click();
+  const panel = page.locator("#people-panel");
+  await panel.waitFor({ state: "visible" });
+  if (!(await panel.evaluate(node => node.open))) await page.locator("#people-panel > summary").click();
+  const row = page.locator('#people-panel [data-member-record-id="guest"] .member-handle');
+  await row.tap();
+  await assert.doesNotReject(page.waitForFunction(() => document.querySelector("#message-input").value.includes("@Test guest")));
+  assert.match(await page.locator("#message-input").inputValue(), /Keep this draft\./);
+  assert.equal(await page.locator("#message-to-select").inputValue(), recipient);
+  assert.equal(await page.locator("#message-input").evaluate(node => node === document.activeElement), true);
+  assert.equal(await page.locator("#sidebar-toggle").getAttribute("aria-expanded"), "false");
+  // The mention is only useful if the person can see where it went.
+  await page.waitForTimeout(400);
+  const composerOnTop = await page.locator("#message-input").evaluate(input => {
+    const r = input.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + Math.min(40, r.width / 2), r.top + r.height / 2);
+    return input === hit || input.contains(hit);
+  });
+  assert.equal(composerOnTop, true, "the composer holding the new mention is not covered by the People drawer");
 });

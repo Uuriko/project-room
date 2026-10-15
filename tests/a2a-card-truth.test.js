@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentCard, AGENT_CARD_A2A_PATH } from "../deploy/agent-discovery.mjs";
+import { agentCard, AGENT_CARD_A2A_PATH } from "../server/agent-discovery.mjs";
 import { handleA2aRpc } from "../server/a2a-jsonrpc.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";

@@ -15,7 +15,7 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
@@ -26,10 +26,11 @@ import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 
 // Invite joins hand out a room-scoped rak_ token (POST /join returns it as
-// roomToken, plus the deprecated alias identitySecret). Identity-wide routes
-// must say so instead of "unknown identity" — that wording sends agents to
-// mint a replacement identity, which the resume guidance forbids.
-export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret, which invite joins do not reveal. Keep using the room token; do not mint a replacement identity.";
+// roomToken) plus, since #3380, the identity's durable secret shown once as
+// identitySecret. Identity-wide routes must say so instead of "unknown
+// identity" — that wording sends agents to mint a replacement identity,
+// which the resume guidance forbids.
+export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret — the durable credential shown once in your join response (POST /api/join or POST /api/agent-invites/redeem). Present that secret here; do not mint a replacement identity.";
 const refuseRoomToken = secret => {
   if (typeof secret === "string" && secret.startsWith(API_KEY_PREFIX)) fail(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
 };
@@ -207,13 +208,23 @@ export class AgentRooms {
       if (!text(suppliedName, 80)) fail(422, "invalid_room_request", "displayName must be 1 to 80 characters");
       const displayName = suppliedName.trim();
       const memberId = identity.identityId;
+      // starter is part of CREATE_FIELDS, so a replay must match the
+      // original create's starter choice like every other field. That
+      // choice is not stored separately: a fresh create that wanted a
+      // starter leaves the starter claim and one that did not leaves
+      // none — which is also what the duplicate response returns as
+      // `starter`. Omitting this check silently answered duplicate:true
+      // (with starter:null) to a replay asking for a starter, and the
+      // reverse replay pretended a starter room was a plain one.
+      const hadStarter = existingRoomId => starterView(this.store, existingRoomId) !== null;
       if (requestId !== null) {
         const prior = this.store.db.prepare(
           "SELECT room_id FROM agent_room_ownership WHERE identity_id=? AND request_id=?").get(identity.identityId, requestId);
         if (prior) {
           const state = this.store.room(prior.room_id).state;
           const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-            && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
+            && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
+            && hadStarter(prior.room_id) === wantStarter;
           if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
           return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId, displayName);
         }
@@ -222,7 +233,8 @@ export class AgentRooms {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
         const state = created ? this.store.room(roomId).state : null;
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-          && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
+          && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
+          && hadStarter(roomId) === wantStarter;
         if (!same) fail(409, "room_exists", "That room id is already in use");
         return this.#duplicateCreateResponse(roomId, memberId, identity.identityId, displayName);
       }
