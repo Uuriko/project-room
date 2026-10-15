@@ -50,6 +50,11 @@ test("authenticated offers preserve receipts, identity and immutable scope throu
   f.send("producer", f.command("work.help_updated", { workItemId, expectedRevision: 1, expectedHelpRevision: 1, status: "withdrawn" }));
   assert.equal(helpOfferContext(f.store.room("commons").state, "offer", "guest", new Date(f.now).toISOString()).status, "selection_needs_review");
   const release = f.update("offer", "released"), released = f.send("guest", release);
+  // Decision #10: the workItems -> board-claims backfill runs at RoomStore
+  // open and writes the accepted item's board card once. Stage that one-time
+  // migration before the baseline so the restart below is a pure no-op,
+  // which is what this test pins.
+  f.store.backfillWorkItemClaims();
   const after = auditRecovery(f.store), current = new RoomStore(f.filename, { now: () => f.now });
   try {
     for (const [actor, c, receipt] of [["guest", open, opened], ["producer", select, selected], ["guest", release, released]]) {

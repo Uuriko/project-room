@@ -1,6 +1,6 @@
 # Assistant answers
 
-The weekly check asks ChatGPT, Claude, Perplexity, and Grok the same questions and records whether the answer names Project Room. The questions, model ids, and sampling settings live in [answer-engine-prompts.json](answer-engine-prompts.json) so a model change does not require a code change. One call is made per prompt per engine. There are eight prompts, so a week with every engine configured is 32 calls.
+The weekly check asks ChatGPT, Claude, Perplexity, and Grok the same questions and records whether the answer names Project Room. The questions, model ids, and sampling settings live in [answer-engine-prompts.json](../scripts/answer-engine-prompts.json) so a model change does not require a code change. One call is made per prompt per engine. There are eight prompts, so a week with every engine configured is 32 calls.
 
 ## What the score means
 

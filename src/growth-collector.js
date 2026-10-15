@@ -28,9 +28,38 @@ const filterTimestamp = (value, label) => {
 
 const reasonOf = err => (err instanceof Error ? err.message : String(err));
 
+const nonNegativeInt = (value, label) => {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${label} must be a non-negative integer`);
+  }
+  return value;
+};
+
+// Validate a { name: count } seed map and return a null-prototype copy plus
+// its total. Used only for the evicted-history seed below.
+const seedCounterMap = (value, label) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object mapping names to counts`);
+  }
+  const map = Object.create(null);
+  let sum = 0;
+  for (const [key, count] of Object.entries(value)) {
+    if (!key) throw new TypeError(`${label} keys must be non-empty strings`);
+    map[key] = nonNegativeInt(count, `${label}.${key}`);
+    sum += map[key];
+  }
+  return { map, sum };
+};
+
 // Create a bounded collector. maxEvents caps how many envelopes are kept;
 // counters are cumulative since creation, so recorded === stored + dropped.
-export function createCollector({ maxEvents = DEFAULT_MAX_EVENTS } = {}) {
+// `evictedHistory` ({ dropped, perType, perActor }) seeds the cumulative
+// counters with envelopes that were recorded and evicted before this
+// collector existed — growth-persistence uses it on restore so a snapshot
+// round-trip keeps the cumulative totals instead of restarting them from
+// the stored events alone. The per-type/per-actor totals must sum to
+// `dropped`, since every seeded envelope was evicted exactly once.
+export function createCollector({ maxEvents = DEFAULT_MAX_EVENTS, evictedHistory = null } = {}) {
   const capacity = positiveInt(maxEvents, "maxEvents");
   const slots = new Array(capacity);
   let head = 0; // index of the oldest stored entry
@@ -39,6 +68,20 @@ export function createCollector({ maxEvents = DEFAULT_MAX_EVENTS } = {}) {
   let dropped = 0; // evictions caused by overflow
   const perType = Object.create(null);
   const perActor = Object.create(null);
+  if (evictedHistory !== null) {
+    if (typeof evictedHistory !== "object" || Array.isArray(evictedHistory)) {
+      throw new TypeError("evictedHistory must be an object with dropped, perType and perActor");
+    }
+    dropped = nonNegativeInt(evictedHistory.dropped, "evictedHistory.dropped");
+    const typeSeed = seedCounterMap(evictedHistory.perType, "evictedHistory.perType");
+    const actorSeed = seedCounterMap(evictedHistory.perActor, "evictedHistory.perActor");
+    if (typeSeed.sum !== dropped || actorSeed.sum !== dropped) {
+      throw new TypeError("evictedHistory perType/perActor totals must equal evictedHistory.dropped");
+    }
+    recorded = dropped; // stored === 0 at creation, so recorded === stored + dropped
+    Object.assign(perType, typeSeed.map);
+    Object.assign(perActor, actorSeed.map);
+  }
 
   // Stored entry: { id, envelope, occurredMs }. Iterate oldest -> newest.
   const eachStored = fn => {

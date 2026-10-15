@@ -33,6 +33,7 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
@@ -204,6 +205,7 @@ const pullRequestOf = value => {
   let rateLimitedUntil = null;
   let pollBackoffMs = null;
   let ciCursor = null;
+  let ciStatus = null;
   if (value !== null && typeof value === "object") {
     if (value.outcome !== undefined && value.outcome !== null) {
       check(value.outcome === "merged" || value.outcome === "closed", "pullRequest outcome must be merged or closed");
@@ -233,10 +235,25 @@ const pullRequestOf = value => {
       check(value.ciCursor === "status" || value.ciCursor === "checks" || value.ciCursor === "done", "pullRequest ciCursor must be status, checks, or done");
       ciCursor = value.ciCursor;
     }
+    if (value.ciStatus !== undefined && value.ciStatus !== null) {
+      // The digest of a combined status fetched by a split CI read (#2841):
+      // it rides with ciCursor "checks" so the resumed read can roll it up.
+      // Without whitelisting it here, any state-machine write between the
+      // two ticks would drop it and resurrect the split-read bug.
+      check(value.ciStatus !== null && typeof value.ciStatus === "object" && !Array.isArray(value.ciStatus), "pullRequest ciStatus must be an object");
+      check(value.ciStatus.state === undefined || value.ciStatus.state === null || (typeof value.ciStatus.state === "string" && value.ciStatus.state.length <= 64), "pullRequest ciStatus state must be a short string");
+      check(typeof value.ciStatus.totalCount === "number" && Number.isFinite(value.ciStatus.totalCount) && value.ciStatus.totalCount >= 0, "pullRequest ciStatus totalCount must be a non-negative number");
+      check(value.ciStatus.targetUrl === undefined || value.ciStatus.targetUrl === null || (typeof value.ciStatus.targetUrl === "string" && value.ciStatus.targetUrl.startsWith("https://") && value.ciStatus.targetUrl.length <= 2048), "pullRequest ciStatus targetUrl must be an https URL");
+      ciStatus = Object.freeze({
+        state: typeof value.ciStatus.state === "string" ? value.ciStatus.state : null,
+        totalCount: value.ciStatus.totalCount,
+        targetUrl: typeof value.ciStatus.targetUrl === "string" ? value.ciStatus.targetUrl : null
+      });
+    }
   }
   return Object.freeze({
     url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
-    etag, rateLimitedUntil, pollBackoffMs, ciCursor
+    etag, rateLimitedUntil, pollBackoffMs, ciCursor, ciStatus
   });
 };
 const pullRequestsOf = value => {
@@ -415,6 +432,14 @@ const readingAcksOf = value => {
 // The map rides on the work item so it survives the durable registry
 // round-trip (restart/deploy); it is capped at MAX_REQUEST_OUTCOMES
 // entries, oldest first.
+//
+// #2965: each record also binds the requestId to a digest of the update
+// payload it carried. A retry re-sends the identical payload, so a seen
+// requestId whose digest differs is not a retry — it is a new update
+// riding an old id, and it is refused (work_claim_conflict) instead of
+// being silently swallowed behind a success response. Records written
+// before the binding existed are bare timestamp strings; their payload is
+// unknowable, so they keep replaying, but every new record is bound.
 export const MAX_REQUEST_OUTCOMES = 256;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 export const requestIdOf = value => {
@@ -422,17 +447,54 @@ export const requestIdOf = value => {
     "requestId must be 1..128 characters [A-Za-z0-9_-]");
   return value;
 };
+// Canonical serialization for the payload digest: object keys sorted and
+// undefined spelled out, so two sends of the same update digest alike
+// regardless of key order, while absent and null stay distinct (they mean
+// different things to updateWork for several fields).
+const canonicalPayload = value => {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(canonicalPayload).join(",")}]`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalPayload(value[key])}`).join(",")}}`;
+};
+// The digest binding a requestId to the update it carried: every field
+// updateWork can apply, and nothing else (now/requestId itself excluded —
+// a retry is stamped later and re-uses the id by definition).
+export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs } = {}) =>
+  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs }), "utf8").digest("hex");
+// How a stored replay record answers a new update under the same
+// requestId: "replay" when the record binds this payload (or predates the
+// binding), "conflict" when it binds a different payload, null when the
+// requestId has not landed on this claim.
+export const requestReplayVerdict = (outcomes, requestId, digest) => {
+  if (!outcomes || !Object.hasOwn(outcomes, requestId)) return null;
+  const record = outcomes[requestId];
+  if (typeof record === "string") return "replay";
+  return record.digest === digest ? "replay" : "conflict";
+};
+const requestOutcomeRecordOf = record => {
+  // Legacy records are bare ISO timestamps; bound records are { at, digest }.
+  if (typeof record === "string") return Number.isFinite(Date.parse(record)) ? record : undefined;
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
+  if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
+  if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
+  return Object.freeze({ at: record.at, digest: record.digest });
+};
 const requestOutcomesOf = value => {
   if (value === undefined || value === null) return null;
   check(typeof value === "object" && !Array.isArray(value), "requestOutcomes must be an object");
   const kept = Object.entries(value)
-    .filter(([key, at]) => REQUEST_ID_PATTERN.test(key)
-      && typeof at === "string" && Number.isFinite(Date.parse(at)));
+    .map(([key, record]) => [key, requestOutcomeRecordOf(record)])
+    .filter(([key, record]) => REQUEST_ID_PATTERN.test(key) && record !== undefined);
   // String-key insertion order is oldest-first: drop the oldest beyond the cap.
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
-const recordRequestOutcome = (current, key, at) => requestOutcomesOf({ ...(current ?? {}), [key]: at });
-const workOf = value => {
+const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({ ...(current ?? {}), [key]: { at, digest } });
+// Exported so writer paths that build claim rows outside the state machine
+// (the work-item-board backfill, #3465) validate a row BEFORE storing it:
+// the durable registry's codec decodes without validation, so a row stored
+// unvalidated is readable but throws on its first state-machine touch.
+export const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
@@ -780,8 +842,17 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
   // applied exactly once, so the identical retry appends nothing.
+  // #2965: the replay is bound to the payload digest — a seen requestId
+  // carrying a different update is refused, never silently swallowed.
   const key = requestId === undefined ? undefined : requestIdOf(requestId);
-  if (key !== undefined && Object.hasOwn(item.requestOutcomes ?? {}, key)) return item;
+  const digest = key === undefined ? undefined
+    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs });
+  if (key !== undefined) {
+    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest);
+    if (verdict === "replay") return item;
+    if (verdict === "conflict") fail("work_claim_conflict",
+      `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
+  }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
   if (state !== undefined) {
@@ -836,7 +907,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
     : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
-      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs)) });
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest) });
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
@@ -920,7 +991,7 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
   check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
@@ -935,9 +1006,42 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
     reviewUrl = url;
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
-  // Replaying the latest identical content never refreshes its old binding.
-  // A request ID is still needed to distinguish delayed retries after a newer verdict.
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) return Object.freeze(item);
+  // #2966, revised: an identical resubmission is ambiguous — it can be a
+  // blind retry of the request that already landed, or a deliberate
+  // re-review of changed context with the same wording ("LGTM" on a new CI
+  // head). The two must not be conflated: a blind retry never refreshes
+  // the old binding, or it would silently approve changed work (the
+  // approval-binding invariant), yet a reviewer must not be forced to
+  // invent new wording to re-approve a new head, or reviewed completion
+  // deadlocks. `expectedBasis` is the distinguishing signal: the caller
+  // names the current basis (owner, claimedAt, revision, ci.headSha) they
+  // actually reviewed, as read back from the claim. A supplied basis that
+  // no longer matches is a conflict, not a review of the current context.
+  const currentBasis = reviewBasisFor(item);
+  let namedBasis = null;
+  if (expectedBasis !== undefined && expectedBasis !== null) {
+    namedBasis = reviewBasisOf(expectedBasis);
+    if (!sameBasis(namedBasis, currentBasis)) {
+      fail("work_claim_conflict", `expected review basis does not match the current basis of work "${item.id}"`);
+    }
+  }
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) {
+    // A true replay on the still-current basis changes nothing.
+    if (currentReviewBasis(prior, item)) return Object.freeze(item);
+    // The prior basis is stale (or the record predates bases). Only a
+    // deliberate re-review — one naming the current basis — may refresh
+    // it, and only for the #2966 case: CI recorded a new head (headSha is
+    // the sole changed basis field and there is a current head to bind
+    // to), or the prior record is a legacy unbound review. A basis stale
+    // because the revision, owner or claim round changed, or because CI
+    // was cleared with no current head (a newly linked PR), still cannot
+    // be refreshed by identical content — that takes a fresh summary.
+    const soleHeadMove = prior.basis !== null && prior.basis !== undefined && currentBasis.headSha !== null
+      && prior.basis.headSha !== currentBasis.headSha
+      && ["version", "owner", "claimedAt", "revision"].every(key => prior.basis[key] === currentBasis[key]);
+    const deliberateRefresh = namedBasis !== null && (soleHeadMove || !prior.basis);
+    if (!deliberateRefresh) return Object.freeze(item);
+  }
   const at = isoOf(atMs);
   const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);

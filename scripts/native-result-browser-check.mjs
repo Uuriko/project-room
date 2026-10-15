@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
+import { clickChrome, messageAction } from "./room-chrome.mjs";
 
 async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
   const f = createAcceptanceFixture(), workItemId = "native-human";
@@ -36,11 +37,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
   const open = async () => {
     if (review) await page.locator(`[data-work-record-id='${workItemId}'] [data-action='verify']`).click();
     else {
-      // Per-message actions live in the "⋯" overflow menu (UI calming #2).
-      const draftRow = page.locator(`[data-message-record-id='native-draft']`);
-      const draftMenu = draftRow.locator('details.message-more');
-      if (!(await draftMenu.evaluate(node => node.open))) await draftMenu.locator('summary').click();
-      await page.locator("[data-message-id='native-draft'][data-message-action='result']").click();
+      await messageAction(page, "native-draft", "result");
     }
     await page.locator("#action-dialog").waitFor({ state: "visible" });
   };
@@ -67,7 +64,11 @@ for (const mobile of [false, true]) test(`native result ${mobile ? "mobile" : "d
   await f.page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.scrollWidth <= el.clientWidth), true);
   await f.page.locator("#close-result").focus(); await f.page.keyboard.press("Tab");
-  assert.equal(await f.page.locator("#close-result").evaluate(el => el === document.activeElement), true);
+  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
+  await f.page.keyboard.press("Tab");
+  assert.equal(await f.page.locator("#result-dialog").evaluate(el => el.contains(document.activeElement)), false, "inline reading does not trap keyboard navigation");
+  await f.page.keyboard.press("Shift+Tab");
+  assert.equal(await f.page.locator("#result-discuss").evaluate(el => el === document.activeElement), true);
   f.mutate(T.WORK_BLOCKED, { reason: "Synthetic follow-up", nextAction: "Revisit later" });
   await f.page.waitForFunction(id => document.querySelector(`[data-work-record-id='${id}']`).textContent.includes("Synthetic follow-up"), f.workItemId);
   await f.page.locator("#close-result").click(); assert.equal(await f.page.locator("#result-body").textContent(), "");
@@ -128,7 +129,7 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     }).observe(document.querySelector("#message-list"), { childList: true, subtree: true });
   });
   const trace = async () => page.evaluate(() => ({ trace: window.__focusTrace, active: document.activeElement?.outerHTML.slice(0, 140),
-    dialogOpen: document.querySelector("#result-dialog").open, hasFocus: document.hasFocus(), scrollY }));
+    readerVisible: !document.querySelector("#result-dialog").hidden, hasFocus: document.hasFocus(), scrollY }));
   await page.locator("#message-input").fill("Keep this reviewer's conversation draft.");
   const measure = async (stage, panelSelector = null, textSelector = null) => {
     const value = await page.evaluate(({ panelSelector, textSelector }) => {
@@ -178,11 +179,24 @@ for (const theme of ["dark", "light"]) test(`native result 320px ${theme}: read,
     await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
     assert.equal(await page.locator("#result-title").textContent(), "A quiet room");
     assert.match(await page.locator("#result-status").textContent(), /Submitted by Room owner.*exact stored text/);
-    assert.equal(await page.locator("#close-result").evaluate(node => node === document.activeElement), true);
+    assert.equal(await page.locator("#result-title").evaluate(node => node === document.activeElement), true);
     await measure(stage, "#result-dialog", "#result-body");
+    // Reading a result records the reader's basis, so the next snapshot can
+    // re-render this card (it gains "What changed since revision N") and
+    // replace the View result node; renderMessages then restores focus to the
+    // replacement by data-focus-key. Polling a locator across that swap races
+    // (it can resolve the detached node). Wait until focus settles on this
+    // work's View result control for two frames, then check that control.
+    const opener = await read.elementHandle();
     await page.keyboard.press("Escape"); await page.locator("#result-dialog").waitFor({ state: "hidden" });
-    assert.equal(await read.evaluate(node => node === document.activeElement), true,
-      `reader returns to this work's result control; ${JSON.stringify(await trace())}`);
+    const settled = await page.waitForFunction(({ id, key }) => new Promise(resolve => {
+      const ok = () => { const a = document.activeElement; return a?.dataset.focusKey === key && a.closest("[data-work-record-id]")?.dataset.workRecordId === id && a.isConnected; };
+      if (!ok()) return resolve(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(ok())));
+    }), { id: f.workItemId, key: `work-native-result:${f.workItemId}` }, { timeout: 5000 }).then(() => true, () => false);
+    const swap = await opener.evaluate(node => ({ sameNode: node === document.activeElement, openerConnected: node.isConnected }));
+    assert.ok(settled && (swap.sameNode || !swap.openerConnected),
+      `reader returns to this work's result control; ${JSON.stringify({ swap, ...(await trace()) })}`);
     assert.equal(page.url(), initialUrl);
   };
   await readExact("reader-before");
@@ -311,4 +325,62 @@ for (const boundary of ["close", "revoke"]) test(`native result: held retry cann
     assert.match(await f.page.locator("#result-status").textContent(), /unavailable/);
     assert.equal(await f.page.locator("#result-retry").isEnabled(), true);
   } else assert.equal(await f.page.locator("#result-dialog").isVisible(), false);
+});
+
+// A live update that re-renders the timeline while the member's focus is on a
+// work card's "View result" button must leave that button on screen.
+test("native result 320px: a live update keeps the focused View result control on screen", { timeout: 30000 }, async t => {
+  const f = await setup(t, { review: true, viewport: { width: 320, height: 900 } });
+  const { page } = f, read = page.locator(`[data-work-record-id="${f.workItemId}"] [data-read-result]`);
+  await read.waitFor();
+  await read.focus();
+  const where = () => page.evaluate(() => { const b = document.activeElement.getBoundingClientRect(); return { tag: document.activeElement.dataset.readResult ?? document.activeElement.tagName, top: Math.round(b.top), bottom: Math.round(b.bottom), h: innerHeight, scrollY: Math.round(scrollY) }; });
+  const before = await where();
+  for (let i = 0; i < 3; i++) { f.send(T.MESSAGE_POSTED, { body: `Live update ${i}`, replyToId: "test-welcome" }); await page.waitForTimeout(250); }
+  const mid = await where();
+  f.send(T.MESSAGE_POSTED, { messageId: "native-follow", workItemId: f.workItemId, packetId: "human-packet", basisRevision: f.item().revision, body: "Follow-up on the same work" });
+  await page.waitForTimeout(500);
+  const after = await where();
+  assert.ok(after.top >= 0 && after.bottom <= after.h, `focused control on screen after live updates: ${JSON.stringify({ before, mid, after })}`);
+});
+
+// A room credential that dies while the account is still signed in used to drop
+// the member to the room list with no explanation.
+test("a room session that ends under a live account says so and points back to the room list", { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture();
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "admin", displayName: "Test admin", kind: "human", permissions: ["manage_members"] } });
+  f.store.createAccount("admin-account"); f.store.completeOnboarding("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(8000);
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.goto(`${origin}/?account=1`);
+  await signInFixture(page, f.store.issueAccountAccessKey("admin-account"), { returnTo: `${origin}/?account=1` });
+  await page.locator("#inbox-panel").waitFor();
+  await clickChrome(page, "#nav-rooms");
+  await page.locator('[data-account-room="commons"]').click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#message-input").fill("A draft that must survive.");
+  let dead = false;
+  await page.route(url => /\/api\/rooms\/commons(\?|$)/.test(new URL(url).pathname + new URL(url).search), route =>
+    dead && route.request().method() === "GET"
+      ? route.fulfill({ status: 401, json: { error: { code: "unauthenticated", message: "Session or key expired or revoked" } } })
+      : route.continue());
+  dead = true;
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { body: "Trigger a refresh", replyToId: "test-welcome" } });
+  const notice = page.locator("#account-status");
+  await notice.waitFor({ state: "visible" });
+  assert.match(await notice.textContent(), /Your session in that room ended\. Open the room again from your room list/);
+  assert.equal(await page.locator("#main").isHidden(), true, "the room is closed");
+  // E-H2: the credential died, the member did not leave. Reopening from the room list
+  // (which ends access with no room open) must bring the unsent draft back.
+  dead = false;
+  await clickChrome(page, "#nav-rooms");
+  await page.locator('[data-account-room="commons"]').click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.querySelector("#message-input").value === "A draft that must survive.");
+  assert.deepEqual(errors, []);
 });

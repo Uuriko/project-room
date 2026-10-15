@@ -87,17 +87,22 @@ export class ChannelWebhookInbox {
   #match(connectionId, secret) {
     if (!validId(connectionId) || !validateWebhookSecret(secret)) return null;
     const presented = ChannelWebhookInbox.hash(secret);
-    let found = null;
+    let found = null, ambiguous = false;
     // Connection IDs are only unique per account; compare every candidate in constant time.
     // The account's current auth epoch decides the state (connectionState): a
     // connection whose owner must reconnect refuses deliveries like a disconnected one.
     // While a secret rotation is pending, the previous digest verifies too.
+    // If the same (connectionId, secret) verifies for more than one account,
+    // the delivery cannot be attributed: fail closed instead of letting a
+    // later row silently overwrite an earlier match.
     for (const row of this.#store.db.prepare("SELECT c.account_id,c.data_json,a.auth_epoch FROM private_email_connections c JOIN accounts a ON a.id=c.account_id WHERE c.id=?").all(connectionId)) {
       const connection = JSON.parse(row.data_json);
       const ok = webhookAcceptsHash(connection.webhook, presented, this.#store.now());
-      if (ok && connectionState(connection, row.auth_epoch) === "active" && profileChannel(connection.profile) === "telegram") found = { accountId: row.account_id, connectionId, profile: connection.profile };
+      if (ok && connectionState(connection, row.auth_epoch) === "active" && profileChannel(connection.profile) === "telegram") {
+        if (found) ambiguous = true; else found = { accountId: row.account_id, connectionId, profile: connection.profile };
+      }
     }
-    return found;
+    return ambiguous ? null : found;
   }
   // A message-kind update the Telegram adapter cannot normalize is journaled
   // straight into 'failed' with the contract code, never 'pending': it must not
@@ -222,10 +227,14 @@ export async function syncTelegramConnection({ store, token, binding, connection
   try {
     // The page and its acknowledgement commit together: exactly the slice rows
     // this page consumed (cursor is the next update id) turn imported, never
-    // updates still waiting behind the reader's page.
+    // updates still waiting behind the reader's page. The reader started at
+    // the page's starting cursor and dropped every update below it, so an
+    // update below that cursor was never in the page and must stay pending
+    // rather than be acknowledged as imported without ever being imported.
     result = store.transaction(() => {
       const applied = store.email.apply(token, request, binding);
-      const consumed = updates.filter(update => update.update_id < Number(request.cursor)).map(update => update.update_id);
+      const pageStart = request.reset || request.expectedCursor === null ? 0 : Number(request.expectedCursor);
+      const consumed = updates.filter(update => update.update_id >= pageStart && update.update_id < Number(request.cursor)).map(update => update.update_id);
       if (source === "webhook" && consumed.length) webhooks.acknowledge(accountId, connectionId, consumed);
       return applied;
     });
