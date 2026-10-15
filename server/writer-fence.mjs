@@ -405,12 +405,6 @@ export const unfencedAdditiveTables = Object.freeze([
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
-  // integrity_failures (integrity batch isolation, #3334): durable
-  // per-record failure rows the integrity cron writes when it isolates a
-  // poisoned record instead of wedging the whole batch. Purely additive
-  // and intentionally NOT fenced — older writers have no code path to it,
-  // and a missing row only means no isolated failure is outstanding.
-  "integrity_failures",
   // messages_backfill_cursor (MSG-2): per-room replay cursor for events that
   // landed before the messages table, plus importEvents and initialize.
   // The integrity cron writes it. Older writers have no path to it. A missing
@@ -507,7 +501,14 @@ const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);
 // decision #10): purely additive, created lazily on first backfill pass;
 // older writers have no code path to it.
 const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES]);
+// integrity_failures (integrity batch isolation, #3334, server/store.mjs):
+// durable per-record failure rows the integrity job writes when it isolates
+// a poisoned record instead of wedging the whole batch. Purely additive,
+// created lazily on first record/read — a store that never ran the
+// integrity job has no table, so it is allowed by the recovery audit but
+// never required.
+const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
