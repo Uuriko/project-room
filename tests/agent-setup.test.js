@@ -201,6 +201,23 @@ test("failure to save a room config preserves enrollment; retry recovers without
   assert.equal(f.store.invites.preview(another.code).roomId, "commons", "an existing membership does not burn a second invite");
 });
 
+test("a conflicting saved connection fails before minting a new agent key", async t => {
+  const f = await fixture(t), invite = f.invite();
+  const result = await f.connect({ target: invite.code });
+  assert.equal(result.status, "connected");
+  const keyCount = () => f.store.db.prepare("SELECT count(*) n FROM agent_api_keys").get().n;
+  assert.equal(keyCount(), 1);
+  // A saved config in another accepted token format (a bare 43-char token)
+  // reads back fine but is not the rak_ connection this run would write, so
+  // a retry must refuse — and must not mint a server-side key it would only
+  // orphan on the way to failing.
+  const config = readAgentConnection(result.configDirectory);
+  writeFileSync(join(result.configDirectory, "connection.json"), JSON.stringify({ ...config, token: "a".repeat(43) }));
+  await assert.rejects(f.connect({ target: invite.code }), /Existing connection differs; nothing was replaced/);
+  await assert.rejects(f.connect({ target: invite.code }), /Existing connection differs; nothing was replaced/);
+  assert.equal(keyCount(), 1, "no agent key was minted for a connection that cannot be saved");
+});
+
 test("expired invites and denied admission remain recoverable states without enrollment duplication", async t => {
   const f = await fixture(t), invite = f.invite();
   f.store.db.prepare("UPDATE agent_invite_codes SET expires_at=0").run();

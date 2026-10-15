@@ -82,7 +82,7 @@ test("playbook states the real status/code pairings, not pinned singles", () => 
     text.includes("`identity_revoked` (403 or 409)"),
     "playbook states both statuses for identity_revoked",
   );
-  // Expired v0 credential on ordinary endpoints: 401 unauthenticated via store.authenticate.
+  // Expired guest credential on ordinary endpoints: 401 unauthenticated via store.authenticate.
   const store = readFileSync(path.join(ROOT, "server", "store.mjs"), "utf8");
   assert.ok(
     store.includes('fail(401, "unauthenticated", "Session or key expired or revoked")'),
@@ -106,14 +106,16 @@ test("playbook's load-bearing facts match the product", () => {
   assert.ok(text.includes('"bits": 12'), "playbook states the real 12-bit difficulty");
   assert.ok(identities.includes("^[A-Za-z0-9_-]{1,43}$"), "nonce shape is pinned in code");
   assert.ok(text.includes("^[A-Za-z0-9_-]{1,43}$"), "playbook states the real nonce shape");
-  // The v0 refresh endpoint the playbook documents.
+  // The guest recovery endpoints the playbook documents (GX- flow; the v0
+  // link exchange and its refresh route were removed in #3216).
   const http = readFileSync(path.join(ROOT, "server", "http.mjs"), "utf8");
-  assert.ok(http.includes("/api/guest-agent-links/refresh"), "refresh endpoint exists in server/http.mjs");
-  assert.ok(text.includes("/api/guest-agent-links/refresh"), "playbook documents the refresh endpoint path");
-  // TTL and grace window numbers the playbook states.
-  const links = readFileSync(path.join(ROOT, "server", "guest-agent-links.mjs"), "utf8");
-  assert.ok(links.includes("2 * 60 * 60 * 1000"), "v0 credential TTL is 2h in code");
-  assert.ok(links.includes("7 * 24 * 60 * 60 * 1000"), "refresh grace window is 7d in code");
+  assert.ok(http.includes("/api/guest-invites/rotate"), "rotate endpoint exists in server/http.mjs");
+  assert.ok(text.includes("/api/guest-invites/rotate"), "playbook documents the rotate endpoint path");
+  assert.ok(!http.includes("/api/guest-agent-links"), "the v0 guest-agent-links routes stay removed");
+  // Credential TTL numbers the playbook states.
+  const invites = readFileSync(path.join(ROOT, "server", "guest-invites.mjs"), "utf8");
+  assert.ok(invites.includes("72 * 60 * 60 * 1000"), "GX credential TTL default is 72h in code");
+  assert.ok(invites.includes("14 * 24 * 60 * 60 * 1000"), "GX credential TTL max is 14d in code");
   // The errorId format the playbook promises.
   const traceTest = readFileSync(path.join(ROOT, "tests", "mcp-500-error-trace.test.js"), "utf8");
   assert.ok(traceTest.includes("eid_"), "the eid_ errorId format is pinned by tests/mcp-500-error-trace.test.js");

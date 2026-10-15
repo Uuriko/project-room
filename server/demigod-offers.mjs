@@ -61,6 +61,15 @@ export const DEFAULT_FEE_POLICY_REF = 'demigod:placement-10pct/v1';
 export const PRICE_TYPES = ['fixed', 'hourly', 'trial_management_fee'];
 const DELIVERABLE_SHAPES = ['code-pr', 'markdown-report', 'design-mock', 'data-set', 'automation-run', 'other'];
 
+const maxScoreOf = value => {
+  // Contract completion (demigod-contracts) derives rubric weights from
+  // maxScore and hard-requires this exact numeric shape; accepting anything
+  // else here would mint offers whose contracts can never complete.
+  const maxScore = text(value, 16);
+  check(/^[0-9]+(\.[0-9]{1,2})?$/.test(maxScore), 'vettingRubric maxScore must be a number with at most two decimal places');
+  return maxScore;
+};
+
 function rubricOf(value) {
   check(Array.isArray(value) && value.length >= 1 && value.length <= 50, 'vettingRubric needs 1-50 criteria');
   return value.map(criterion => {
@@ -68,7 +77,7 @@ function rubricOf(value) {
     return {
       criterionId: identifier(criterion.criterionId),
       description: text(criterion.description, 1000),
-      maxScore: text(criterion.maxScore, 16),
+      maxScore: maxScoreOf(criterion.maxScore),
     };
   });
 }

@@ -44,7 +44,7 @@ async function admit(origin, roomId, ownerSecret, identity, label) {
   const reqRes = await post(origin, "/api/access-requests", {
     roomId, identityId: identity.identityId, displayName: label,
     requestedPermissions: ["accept_work"], note: null, requestId
-  });
+  }, identity.secret);
   assert.equal(reqRes.status, 201, label);
   const decide = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, {
     decision: "approve", permissions: ["accept_work"], note: null
@@ -289,7 +289,10 @@ test("peer DM queues directed wakes for fresh and offline wakeable recipients wi
     to: friend.identityId, messageId, body: "you are here"
   }));
   assert.equal(online.status, 201);
-  assert.deepEqual(fixture.store.agentHeartbeats.pendingWakes(friend.identityId).map(row => row.messageId), [messageId]);
+  const pendingAfterOnline = fixture.store.agentHeartbeats.pendingWakes(friend.identityId);
+  assert.deepEqual(pendingAfterOnline.filter(row => row.kind === "dm").map(row => row.messageId), [messageId]);
+  // #3257: the bond proposal itself also left a durable wake for the friend.
+  assert.deepEqual(pendingAfterOnline.filter(row => row.kind === "bond").map(row => row.messageId), [bondId]);
 
   at += HEARTBEAT_STALE_AFTER_MS + 1000;
   const offlineId = randomUUID();
@@ -297,7 +300,8 @@ test("peer DM queues directed wakes for fresh and offline wakeable recipients wi
     to: friend.identityId, messageId: offlineId, body: "you stepped away"
   }));
   assert.equal(offline.status, 201);
-  const wakes = fixture.store.agentHeartbeats.pendingWakes(friend.identityId);
+  const wakes = fixture.store.agentHeartbeats.pendingWakes(friend.identityId)
+    .filter(row => row.kind === "dm");
   assert.equal(wakes.length, 2);
   assert.ok(wakes.every(row => row.kind === "dm"));
   assert.deepEqual(wakes.map(row => row.messageId), [messageId, offlineId]);

@@ -1,4 +1,4 @@
-// HP-04 (PRODUCT-200 client craft, honest product): docs/BUG-BOUNTY.md must not
+// HP-04 (PRODUCT-200 client craft, honest product): archive/docs/plans/BUG-BOUNTY.md must not
 // promise a live paying program. The doc's own header says it is "not
 // activated or funded" — the body (Rollout: "starts on merge of this
 // document") contradicts that. This test pins the honest copy.
@@ -9,10 +9,10 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const docPath = join(root, "docs", "BUG-BOUNTY.md");
+const docPath = join(root, "archive", "docs", "plans", "BUG-BOUNTY.md");
 
 test("BUG-BOUNTY.md exists", () => {
-  assert.ok(existsSync(docPath), "docs/BUG-BOUNTY.md should exist");
+  assert.ok(existsSync(docPath), "archive/docs/plans/BUG-BOUNTY.md should exist");
 });
 
 test("BUG-BOUNTY.md never promises activation-on-merge", () => {

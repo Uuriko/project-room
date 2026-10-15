@@ -84,6 +84,11 @@ test("help revisions never masquerade as work revisions when reading or adopting
   assert.equal(result.result.text.body, posted.event.data.body);
   f.mutate(T.WORK_COMPLETED, f.input(posted));
   assert.equal((await f.client.workResult(f.workItemId)).result.kind, "room_text");
+  // Decision #10: the workItems -> board-claims backfill runs at RoomStore
+  // open and writes the item's board card once. Stage that one-time
+  // migration before the baseline so the restart below is a pure no-op,
+  // which is what this test pins.
+  f.store.backfillWorkItemClaims();
   const audit = auditRecovery(f.store), reopened = new RoomStore(join(f.directory, "room.sqlite"));
   try { assert.deepEqual(auditRecovery(reopened), audit); }
   finally { reopened.close(); }

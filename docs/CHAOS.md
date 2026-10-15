@@ -65,10 +65,12 @@ await runProperty({
   build: (seed, rng) => ({ /* db handles, mock clock, op pools */ }),
 
   // One random op. Return a short log label ("fund CHAOSROOM-3").
-  // May throw an error with a string `.code` (ServiceError/EscrowError):
-  // that is an EXPECTED domain rejection (illegal transition in a random
-  // sequence) — counted, logged as `(rejected <code>)`, run continues.
-  // Any other throw is a real bug and fails the property.
+  // May throw a genuine domain error (ServiceError with a 4xx status,
+  // EscrowError, DisputeError): that is an EXPECTED domain rejection
+  // (illegal transition in a random sequence) — counted, logged as
+  // `(rejected <code>)`, run continues. Any other throw — including
+  // infrastructure errors that merely carry a string `.code` such as
+  // ERR_SQLITE_ERROR or ENOENT — is a real bug and fails the property.
   perform: (ctx, rng, opIndex) => { /* ... */ return "did the thing"; },
 
   // Invariants, read from the source of truth (the DB), after every op —
@@ -126,8 +128,9 @@ CHAOS FAILURE — property "escrow-transitions"
   reproduce:   CHAOS_SEED=15057416 CHAOS_OPS=35 node --test tests/chaos/escrow-transitions.test.js
 ```
 
-- **phase `perform`**: the op itself threw something unexpected (no string
-  `.code`) — a crash, not a domain rejection. The bug is in the op path.
+- **phase `perform`**: the op itself threw something unexpected (not a
+  typed domain error) — a crash, not a domain rejection. The bug is in
+  the op path.
 - **phase `check`**: an invariant broke after the op. The bug is whatever the
   op (or an earlier op in the log) did to the state.
 - **shrunk to**: the runner bisected the op log to the minimal failing

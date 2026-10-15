@@ -112,6 +112,21 @@ test("G16b: legacy duplicate display names notify all non-sender candidates", ()
   assert.deepEqual(resolveMentionTargetsInText(prefixMembers, {}, "@Alice can you check?", "alice"), []);
 });
 
+test("a non-ascii suffix is not a mention of the shorter display name", () => {
+  const members = { "mem-grok": { displayName: "Grok", active: true } };
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Groké please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Groḱ please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Grok中 please", "me"), []);
+  assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Grok please", "me"), ["mem-grok"]);
+  assert.deepEqual(
+    resolveMentionTargetsInText(members, {}, "ping @Groké and @Grok please", "me"),
+    ["mem-grok"]
+  );
+  const warnings = mentionTargetWarnings(members, {}, "ping @Groké please", "me");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].reason, "not_member");
+});
+
 test("a hyphen suffix is not a mention of the shorter display name", () => {
   const members = { instinct1: { displayName: "Instinct", active: true } };
   assert.deepEqual(resolveMentionTargetsInText(members, {}, "ping @Instinct-3 please", "me"), []);

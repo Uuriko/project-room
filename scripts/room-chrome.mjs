@@ -168,3 +168,21 @@ export async function enableHumanAdvanced(page) {
   await page.locator("#human-advanced").check();
   await closeSettings(page);
 }
+
+// Per-message actions live in the "⋯" overflow menu. The timeline can re-render
+// between opening the menu and clicking the action, which replaces the row or
+// closes the menu, so wait for the row and retry open-then-click with short
+// per-attempt timeouts.
+export async function messageAction(page, id, action, { attempts = 5 } = {}) {
+  const row = page.locator(`[data-message-record-id="${id}"]`);
+  const target = page.locator(`[data-message-id="${id}"][data-message-action="${action}"]`);
+  await row.waitFor({ state: "attached", timeout: 30000 });
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const menu = row.locator("details.message-more");
+      if (!(await menu.evaluate(node => node.open, null, { timeout: 3000 }))) await menu.locator("summary").click({ timeout: 3000 });
+      await target.click({ timeout: 3000 });
+      return;
+    } catch (failure) { if (attempt >= attempts) throw failure; }
+  }
+}

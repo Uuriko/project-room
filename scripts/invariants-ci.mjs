@@ -14,10 +14,13 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
 
-const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "..");
+// fileURLToPath (not new URL(...).pathname, which stays percent-encoded) so
+// paths containing spaces or other URL-escaped characters decode correctly.
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const RESULTS_FILE =
   process.env.INVARIANTS_RESULTS_FILE || resolve(REPO_ROOT, "results/invariants.jsonl");
 const MARKER = "<!-- invariants-ci -->";
@@ -258,5 +261,16 @@ function runGate() {
   process.exit(runEnd.status === "pass" ? 0 : 1);
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname;
-if (isMain) runGate();
+// Compare real filesystem paths on both sides: fileURLToPath decodes the
+// percent-encoded module URL, so a checkout path containing spaces (or other
+// escaped characters) still matches argv[1] and the gate actually runs.
+export function isMainModule(argv1, moduleUrl = import.meta.url) {
+  if (!argv1) return false;
+  try {
+    return resolve(argv1) === fileURLToPath(moduleUrl);
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule(process.argv[1])) runGate();

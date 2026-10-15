@@ -1,7 +1,7 @@
 // Connect-your-agent table for docs pages and the room CLI.
 // The connect sheet UI and llms.txt import this module; they do not copy it.
 // Snippets name the env var. They never contain an identity secret.
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 
 export const SECRET_ENV = "PROJECT_ROOM_SECRET";
 export const SERVER_NAME = "project-room";

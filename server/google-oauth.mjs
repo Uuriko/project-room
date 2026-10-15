@@ -7,6 +7,11 @@ export const GOOGLE_SCOPES = 'openid email profile';
 const tokenEndpoint = 'https://oauth2.googleapis.com/token';
 const jwksEndpoint = 'https://www.googleapis.com/oauth2/v3/certs';
 const clientIdPattern = /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
+// Loopback hostnames (as URL.hostname reports them) may use plain http:
+// they are the local-dev origins googleConfig accepts, and GoogleSignIn
+// must accept the redirect URIs googleConfig mints for them.
+const loopbackHostnames = ['localhost', '127.0.0.1', '[::1]'];
+const isLoopbackHostname = hostname => loopbackHostnames.includes(hostname);
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const opaque = value => typeof value === 'string' && value.length > 0 && value.length <= 8192 && !/[\s\x00-\x1f\x7f]/.test(value);
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -38,8 +43,7 @@ export function googleConfig(env = {}, origin) {
   let appUrl;
   try { appUrl = new URL(origin); } catch { invalid(); }
   if (appUrl.origin !== origin || !['http:', 'https:'].includes(appUrl.protocol)) invalid();
-  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(appUrl.hostname);
-  if (!loopback && appUrl.protocol !== 'https:') invalid();
+  if (!isLoopbackHostname(appUrl.hostname) && appUrl.protocol !== 'https:') invalid();
   const redirectUri = origin + GOOGLE_CALLBACK_PATH;
   return { clientId, clientSecret, redirectUri, issuer: GOOGLE_ISSUER };
 }
@@ -59,7 +63,7 @@ export class GoogleSignIn {
     try { redirect = new URL(redirectUri); } catch { fail('google_configuration_invalid'); }
     if (!clientIdPattern.test(clientId || '') || !opaque(clientSecret) || redirect.pathname !== GOOGLE_CALLBACK_PATH
       || redirect.search || redirect.hash || redirect.username || redirect.password
-      || !(redirect.protocol === 'https:' || redirect.protocol === 'http:' && redirect.hostname === '127.0.0.1'))
+      || !(redirect.protocol === 'https:' || redirect.protocol === 'http:' && isLoopbackHostname(redirect.hostname)))
       fail('google_configuration_invalid');
     this.#clientId = clientId;
     this.#clientSecret = clientSecret;

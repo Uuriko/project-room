@@ -14,7 +14,7 @@
 // which fails closed without the signing key unless --allow-unsigned.
 //
 // `cardSignature` is agentCardSignatureState() from
-// deploy/agent-discovery.mjs: { signed, signedRevision, unsignedReason }.
+// server/agent-discovery.mjs: { signed, signedRevision, unsignedReason }.
 // `unsignedReason` is non-null only when scripts/sign-agent-card.mjs
 // --allow-unsigned explicitly recorded the degraded choice at build time.
 //

@@ -304,6 +304,56 @@ test("balances: undecodable percent-encoding → 404, not a 500", async () => {
   assert.equal(res.statusCode, 404);
 });
 
+// --- credit-ledger reads are self/owner scoped (#3281) ------------------------
+// The MCP door only ever reads the caller's own lane; the REST doors must not
+// hand any other member (guests included) a lane's balances or its bilateral
+// history (both legs of every movement the lane touched).
+
+const GUEST = "id:agent/guestie"; // weakest member class in the room
+
+test("ledger reads: a non-party member is refused another lane's balances and history → 403 not_authorized", async () => {
+  const { store } = makeStore();
+  for (const route of ["balances", "history"]) {
+    const res = await call(store, { method: "GET", route, identity: encodeURIComponent(JILL), authId: GROK });
+    assert.equal(res.statusCode, 403, `${route} must refuse a non-party member`);
+    assert.equal(res.body.code, "not_authorized");
+    assert.equal(res.body.balances, undefined);
+    assert.equal(res.body.receipts, undefined);
+  }
+});
+
+test("ledger reads: a guest member is refused another lane's balances and history → 403 not_authorized", async () => {
+  const { store } = makeStore({ members: {
+    [JILL]: { kind: "agent", active: true },
+    [GUEST]: { kind: "agent", active: true },
+    [OWNER]: { kind: "human", active: true },
+  } });
+  for (const route of ["balances", "history"]) {
+    const res = await call(store, { method: "GET", route, identity: encodeURIComponent(JILL), authId: GUEST });
+    assert.equal(res.statusCode, 403, `${route} must refuse a guest member`);
+    assert.equal(res.body.code, "not_authorized");
+    assert.equal(res.body.receipts, undefined);
+  }
+});
+
+test("ledger reads: the lane itself succeeds, including the legacy colon lane form", async () => {
+  const { store } = makeStore();
+  for (const route of ["balances", "history"]) {
+    const own = await call(store, { method: "GET", route, identity: encodeURIComponent(JILL), authId: JILL });
+    assert.equal(own.statusCode, 200, `${route} must serve the lane itself`);
+    const colon = await call(store, { method: "GET", route, identity: encodeURIComponent("id:agent:jill"), authId: JILL });
+    assert.equal(colon.statusCode, 200, `${route} must treat id:agent:jill and id:agent/jill as the same lane`);
+  }
+});
+
+test("ledger reads: the room owner succeeds for another lane", async () => {
+  const { store } = makeStore();
+  for (const route of ["balances", "history"]) {
+    const res = await call(store, { method: "GET", route, identity: encodeURIComponent(JILL), authId: OWNER });
+    assert.equal(res.statusCode, 200, `${route} must serve the room owner`);
+  }
+});
+
 // --- lifecycle smoke through the handler -------------------------------------
 
 test("create → fund → claim moves PROPOSED → FUNDED → CLAIMED", async () => {
