@@ -79,7 +79,7 @@ test("drift refuses malformed manifests without reading sections", () => {
 });
 
 test("frozen deployment manifest pins the recovery helper and production workflow bytes", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../docs/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
+  const manifest = JSON.parse(readFileSync(new URL("../scripts/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
   const root = new URL("..", import.meta.url).pathname;
   const files = ["scripts/deploy-recovery.mjs", ".github/workflows/deploy-prod.yml"];
   const actual = pinFiles(root, files);

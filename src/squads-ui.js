@@ -34,10 +34,19 @@ export function squadsHtml(squads, members, me = null) {
   return form + squads.map(squad => squadHtml(squad, members, me)).join("");
 }
 
+// Squads live in a server side table with no event-log entry, so unlike the
+// board there is no state mark that can invalidate this panel's cache. A
+// cached load is therefore only trusted for this long: sync() is called on
+// every render, so the window keeps renders from hammering GET /squads,
+// while a later sync (render, reopen) after it refetches and picks up
+// squads created, updated, or disbanded by other members.
+export const SQUADS_REFRESH_MS = 30_000;
+
 export function installSquadsPanel({ client, getState, getSession }) {
   const root = document.querySelector("#squads-list");
   if (!root) return { sync() {}, reset() {} };
   let squads = [], error = "", loadedRoom = null, flight = null, mutating = false;
+  let loadedAt = 0;
   let epoch = 0, boundary = null, painted = null;
   const boundaryKey = () => JSON.stringify([getSession()?.roomId, getSession()?.member?.id, client.generation]);
   const current = (ticket, key) => ticket === epoch && key === boundaryKey();
@@ -69,11 +78,11 @@ export function installSquadsPanel({ client, getState, getSession }) {
     const roomId = session?.roomId;
     const key = boundaryKey();
     if (boundary !== key) {
-      epoch++; boundary = key; squads = []; error = ""; loadedRoom = null; flight = null; mutating = false; painted = null; root.replaceChildren();
+      epoch++; boundary = key; squads = []; error = ""; loadedRoom = null; flight = null; mutating = false; painted = null; loadedAt = 0; root.replaceChildren();
     }
     const ticket = epoch;
     if (!roomId) return;
-    if (!force && loadedRoom === roomId && flight === "done") { paint(); return; }
+    if (!force && loadedRoom === roomId && flight === "done" && Date.now() - loadedAt < SQUADS_REFRESH_MS) { paint(); return; }
     if (flight && flight !== "done") return;
     flight = "loading";
     try {
@@ -88,6 +97,7 @@ export function installSquadsPanel({ client, getState, getSession }) {
       squads = [];
     }
     if (!current(ticket, key)) return;
+    loadedAt = Date.now();
     flight = "done";
     paint();
   }
@@ -136,6 +146,6 @@ export function installSquadsPanel({ client, getState, getSession }) {
 
   return {
     sync: () => load(),
-    reset() { epoch++; boundary = null; mutating = false; squads = []; error = ""; loadedRoom = null; flight = null; painted = null; root.replaceChildren(); },
+    reset() { epoch++; boundary = null; mutating = false; squads = []; error = ""; loadedRoom = null; flight = null; painted = null; loadedAt = 0; root.replaceChildren(); },
   };
 }

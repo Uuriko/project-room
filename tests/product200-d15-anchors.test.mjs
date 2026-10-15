@@ -15,8 +15,9 @@
 //      rejected and never applied.
 // D4 — board write paths emit work_claim.updated events (QA-200's "zero
 //      events" P1 narrowed: the route paths DO emit — Dot's refutation,
-//      now pinned — while the projection mirror's create leg bypassed
-//      emission; anchor+fix).
+//      now pinned — while the projection claim path's create leg bypassed
+//      emission; anchor+fix. The projection leg is now the decision #10
+//      command-layer sync; D4b is pinned against it.)
 // D5 (concurrent identical keyless updates apply once) is not part of this
 // change: main's opt-in requestId (A4) is the idempotency mechanism and its
 // invariant pins that keyless updates are each a distinct write.
@@ -26,7 +27,6 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
 import { claimHistoryLength, releaseWork, ClaimError } from "../server/work-claims.mjs";
-import { mirrorProjectionClaim } from "../server/work-claim-mirror.mjs";
 
 const helpers = {
   json: (_res, status, value) => ({ status, value }),
@@ -207,20 +207,32 @@ test("D4a: every route board mutation appends a work_claim.updated room event", 
   assert.ok(f.events() > start, "the event stream must grow with board mutations");
 });
 
-// ── D4b: the projection mirror's create leg wrote the board with ZERO
-// events (direct store.write bypassing emission). Fail-first: the create
-// mutation must emit its own event at the mutation site. ────────────────
-test("D4b: projection-mirror claim.acquired emits a created event for the new board item", async t => {
+// ── D4b: the projection claim path's create leg once wrote the board
+// with ZERO events (direct registry write bypassing emission).
+// Fail-first: the create mutation must emit its own event at the
+// mutation site. Re-pinned for decision #10's write-path cutover: the
+// command-layer sync (server/work-item-board.mjs) creates the card at
+// work.accepted and claims it at claim.acquired — the totals across the
+// two commands are the same events the mirror emitted at claim time. ──
+test("D4b: projection claim flow emits a created event for the new board item and a claimed event at claim time", async t => {
   const f = roomFixture(t);
-  const at = new Date().toISOString();
-  const before = f.events();
-  const item = mirrorProjectionClaim(f.store, "commons", "holder", {
-    type: "claim.acquired", at, data: { workItemId: "proj-acquire-1" },
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const holderKey = f.store.issueAccessKey("commons", "holder");
+  f.store.command(ownerKey, "commons", {
+    id: "propose-1", type: "work.proposed",
+    data: { workItemId: "proj-acquire-1", title: "Projection acquire", definitionOfDone: "Claimed on the board", accountableMemberId: "holder", mode: "write" },
   });
-  assert.ok(item, "mirror must return the board item");
+  const revision = () => f.store.room("commons").state.workItems["proj-acquire-1"].revision;
+  f.store.command(holderKey, "commons", {
+    id: "accept-1", type: "work.accepted", data: { workItemId: "proj-acquire-1", expectedRevision: revision() },
+  });
+  f.store.command(holderKey, "commons", {
+    id: "claim-1", type: "claim.acquired",
+    data: { workItemId: "proj-acquire-1", expectedRevision: revision(), repository: "Uuriko/project-room", ref: "main", paths: ["server/**"], expiresAt: new Date(Date.now() + 2 * 3600e3).toISOString() },
+  });
+  const item = f.store.workClaims.get("commons", "proj-acquire-1");
+  assert.ok(item, "the sync must write the board item");
   assert.equal(item.state, "claimed");
-  const created = f.events("created");
-  const claimed = f.events("claimed");
-  assert.equal(created, 1, `mirror create leg: expected 1 'created' event, got ${created} (total ${f.events() - before})`);
-  assert.equal(claimed, 1, `mirror claim leg: expected 1 'claimed' event, got ${claimed}`);
+  assert.equal(f.events("created"), 1, `sync create leg: expected 1 'created' event, got ${f.events("created")}`);
+  assert.equal(f.events("claimed"), 1, `sync claim leg: expected 1 'claimed' event, got ${f.events("claimed")}`);
 });

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { JOBS, startNodeScheduler, wireNodeJobs } from "../server/jobs.mjs";
+import { HOUR_MS, JOBS, startNodeScheduler, wireNodeJobs } from "../server/jobs.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 function storeFor(t) {
@@ -39,6 +39,39 @@ test("scheduler jobHealth lists every registry job and records runs", async t =>
   }
   for (const row of after.filter(j => !j.enabled)) assert.equal(row.lastRunAt, null, `${row.name} is disabled and never ran`);
   assert.equal(JSON.stringify(after).match(/token|secret|password/i), null);
+});
+
+test("node scheduler retention job rotates to the next table on each tick", async t => {
+  const store = storeFor(t);
+  let clock = Date.now();
+  const day = 86400000;
+  // One expired row in each disposable log table. Retention prunes exactly
+  // one table per tick, rotating through RETENTION_TABLES.
+  store.db.prepare("INSERT INTO web_fetch_log(request_id,room_id,member_id,credential_hash,host,cache_status,bytes,tags_json,created_at) VALUES('fetch-old','commons','owner',NULL,'example.com','hit',2,'[]',?)")
+    .run(clock - 35 * day);
+  store.db.prepare("INSERT INTO web_research_log(request_id,room_id,member_id,credential_hash,question_hash,sources_json,evidence_count,plan_only,created_at) VALUES('research-old','commons','owner',NULL,'hash','[]',0,1,?)")
+    .run(clock - 35 * day);
+  const count = table => store.db.prepare(`SELECT count(*) n FROM ${table}`).get().n;
+  const scheduler = startNodeScheduler({ store, env: { GROWTH_WATCH_INTERVAL_MS: "0" }, tickMs: 0, now: () => clock });
+  t.after(() => scheduler.stop());
+  const retentionRun = async () => {
+    const outcome = (await scheduler.runOnce()).find(o => o.job === "retention");
+    assert.ok(outcome?.ok, "retention tick succeeds");
+    return outcome.result;
+  };
+  const first = await retentionRun();
+  assert.equal(first.table, "web_fetch_log");
+  assert.equal(first.deleted, 1);
+  assert.equal(count("web_fetch_log"), 0);
+  assert.equal(count("web_research_log"), 1, "the second table waits for the next tick");
+  clock += HOUR_MS;
+  const second = await retentionRun();
+  assert.equal(second.table, "web_research_log", "the rotated index survives to the next tick");
+  assert.equal(second.deleted, 1);
+  assert.equal(count("web_research_log"), 0);
+  clock += HOUR_MS;
+  const third = await retentionRun();
+  assert.equal(third.table, "web_fetch_log", "the rotation wraps around");
 });
 
 test("GET /api/health/jobs on Node includes the jobs list once the scheduler is wired", async t => {

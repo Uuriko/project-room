@@ -8,7 +8,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry } from "../deploy/room-entry.mjs";
+import { roomEntry } from "../server/room-entry.mjs";
 import { MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
 import {
@@ -64,7 +64,7 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   assert.equal(card.description.length <= 100, true);
   assert.equal(registry.description.length <= 100, true);
   assert.equal(card.version, ROOM_MCP_SERVER_VERSION);
-  assert.equal(card.url, "https://www.getdasha.com/room/mcp");
+  assert.equal(card.url, "https://room.trydemigod.com/mcp");
   assert.equal(card.remotes[0].url, card.url);
   assert.equal(card.remotes[0].type, "streamable-http");
   assert.equal(card.oauth, false);

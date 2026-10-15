@@ -28,13 +28,13 @@ test("access-request poll returns status-aware next hints", async t => {
     displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"],
     requestId: "ar_next_pending"
-  });
+  }, identity.secret);
   requests.request("commons", {
     identityId: identity.identityId,
     displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"],
     requestId: "ar_next_denied"
-  });
+  }, identity.secret);
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

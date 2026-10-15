@@ -385,3 +385,31 @@ test("stdio Board cancellation closes the canonical HTTP read and emits no late 
   assert.deepEqual((await h.rpc("ping")).result, {});
   assert.equal(h.replies.some(reply => reply.id === "cancel-board"), false);
 });
+
+
+test('work selection rejects malformed batches before any reads and reuses the existing tool', async t => {
+  let reads = 0;
+  const h = harness(t, { async workContext(id) { reads++; return { roomId: 'commons', work: { id } }; } });
+  await h.ready();
+  for (const args of [{}, { workItemIds: [] }, { workItemIds: ['a', 'a'] }, { workItemIds: ['a', 'b', 'c', 'd', 'e'] },
+    { workItemIds: ['../private'] }, { workItemId: 'a', workItemIds: ['b'] }, { workItemIds: ['a'], discussionSince: 1, includeDiscussion: true },
+    { workItemIds: ['a'], brief: 'yes' }]) {
+    assert.equal((await h.rpc('tools/call', { name: 'room_read_work', arguments: args })).error.code, -32602);
+  }
+  assert.equal(reads, 0);
+  const response = await h.rpc('tools/call', { name: 'room_read_work', arguments: { workItemIds: ['a', 'b'], brief: false } });
+  assert.deepEqual(response.result.structuredContent.items.map(item => item.work.id), ['a', 'b']);
+  assert.equal(response.result.structuredContent.atomicSnapshot, false);
+  assert.equal(reads, 2);
+});
+
+
+test('oversized batch returns an actionable refusal without task content', async t => {
+  const h = harness(t, { async workContext(id) { return { roomId: 'commons', work: { id }, source: 'private'.repeat(30000) }; } });
+  await h.ready();
+  const response = (await h.rpc('tools/call', { name: 'room_read_work', arguments: { workItemIds: ['a'], brief: false } })).result;
+  assert.equal(response.isError, true);
+  assert.equal(response.structuredContent.code, 'batch_too_large');
+  assert.match(response.structuredContent.message, /fewer tasks/);
+  assert.equal(JSON.stringify(response).includes('private'), false);
+});

@@ -20,12 +20,12 @@ const PASSWORD = "synthetic-email-password";
 const DESK = { viewport: { width: 1280, height: 860 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-async function setup(t) {
+async function setup(t, { mailConfigured = true } = {}) {
   const f = createAcceptanceFixture();
   const sent = [];
   let mailer = null;
   const server = createRoomServer({ store: f.store, streamInterval: 40,
-    magicLinkMailer: { isConfigured: () => true, sendMagicLink: p => mailer.sendMagicLink(p), sendPasswordResetNotice: p => mailer.sendPasswordResetNotice(p) } });
+    magicLinkMailer: { isConfigured: () => mailConfigured, sendMagicLink: p => mailer.sendMagicLink(p), sendPasswordResetNotice: p => mailer.sendPasswordResetNotice(p) } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   mailer = createMagicLinkMailer({ baseUrl: origin, send: async payload => { sent.push(payload); } });
@@ -152,4 +152,129 @@ test("on a phone, a wrong password says so and the right one signs in", { timeou
 test("TODO: a reused magic link's refusal is shown once, not twice", { todo: "auth-signin-ui shows it in two alerts (Codex)" }, async t => {
   const again = await magicLinkReuse(t);
   assert.equal(await visibleCount(again, "not valid"), 1);
+});
+
+for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`fresh sign-in stays independent of workspace modules: ${theme}, ${kind.viewport.width}px`, async t => {
+  const f = await setup(t), page = await f.open(kind), requests = [];
+  await page.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  await page.goto(f.origin);
+  const form = page.locator('[data-signin-form="password"]');
+  await form.waitFor({ state: "visible" });
+  await page.waitForLoadState("networkidle");
+  assert.equal(requests.includes("/src/app.js"), false, "workspace stays unloaded at first paint and idle");
+  for (const path of ["/src/client.js", "/src/events.js", "/src/emoji-catalog.js", "/src/inbox-ui.js", "/src/request-access.js"])
+    assert.equal(requests.includes(path), false, path);
+  // Agent sign-in is the standalone /agent-signin page on current main
+  // (decision #37): the wall button is a link there, and the page's own
+  // "Back to log in" link returns. (Integration: the PR's original leg used
+  // the pre-#3445 in-page panel's #agent-auth-back.)
+  await page.locator("#agent-signin-button").click();
+  await page.locator("#agent-signin-ui input").first().waitFor({ state: "visible" });
+  await page.locator("#agent-signin-home").click();
+  await form.waitFor({ state: "visible" });
+  await form.locator('[name="email"]').fill("entry-draft@example.invalid");
+  await page.locator("[data-forgot-password]").click();
+  await page.evaluate(() => history.back());
+  await form.waitFor({ state: "visible" });
+  assert.equal(await form.locator('[name="email"]').inputValue(), "entry-draft@example.invalid");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(requests.includes("/src/app.js"), false, "account and agent controls do not import workspace code");
+  await page.screenshot({ path: `test-results/signin-entry-${theme}-${kind.viewport.width}.png` });
+});
+
+// Regression (Codex review of the #3068 integration, 2026-10-14): the lazy
+// entry must learn the deployment's sign-in capabilities like the workspace
+// app does (GET /api/auth/signin-options). Without the loader the entry's
+// auth UI defaults to mail-configured and offers an email sign-in link on
+// deployments that cannot send mail. Fresh query-free / only — the
+// /?room=… workspace path never had the gap.
+async function freshEntryRecoveryOffers(t, mailConfigured) {
+  const f = await setup(t, { mailConfigured });
+  const page = await f.open(DESK);
+  const requests = [];
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  const optionsReply = page.waitForResponse(r => new URL(r.url()).pathname === "/api/auth/signin-options");
+  await page.goto(f.origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  await optionsReply;
+  await page.locator("[data-forgot-password]").click();
+  await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
+  return { page, requests };
+}
+
+test("fresh / with mail unconfigured: the entry loads signin-options and offers no email link", async t => {
+  const { page, requests } = await freshEntryRecoveryOffers(t, false);
+  assert.ok(requests.includes("/api/auth/signin-options"), "the lazy entry requests the deployment's sign-in options");
+  assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 0, "no email-link offer when the deployment cannot send mail");
+});
+
+test("fresh / with mail configured: the entry still offers the email link", async t => {
+  const { page, requests } = await freshEntryRecoveryOffers(t, true);
+  assert.ok(requests.includes("/api/auth/signin-options"), "the lazy entry requests the deployment's sign-in options");
+  assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 1, "the email-link offer stays when mail is configured");
+});
+
+test("a failed workspace download after signup resumes the same account without repeating signup", { timeout: 45000 }, async t => {
+  const f = await setup(t), page = await f.open(PHONE), writes = [];
+  page.on("request", request => { if (request.method() === "POST") writes.push(new URL(request.url()).pathname); });
+  await page.route("**/src/app.js", route => route.abort());
+  const email = "entry-recovery@example.invalid";
+  assert.equal(await signUp(page, f.origin, email), 202);
+  await page.locator("#entry-retry").waitFor({ state: "visible" });
+  const account = (await f.session(page)).account.id;
+  await page.unroute("**/src/app.js");
+  await page.locator("#entry-retry").click();
+  await page.locator("#main").waitFor({ state: "visible" });
+  assert.equal((await f.session(page)).account.id, account);
+  assert.equal(writes.filter(path => path === "/api/auth/password/signup").length, 1);
+  assert.equal(await page.locator("#auth-signin-ui").count(), 1);
+  await page.locator("#message-input").fill("A draft after entering the room");
+  await page.locator('#message-form button[type="submit"]').click();
+  await page.locator("#message-list").getByText("A draft after entering the room", { exact: true }).waitFor();
+  assert.equal(writes.filter(path => /\/commands$/.test(path)).length, 1, "one composer handler after the handoff");
+});
+
+test("a failed sign-in module download offers reload without losing the URL", async t => {
+  const f = await setup(t), page = await f.open(PHONE);
+  await page.route("**/src/signin-entry.js", route => route.abort());
+  await page.goto(f.origin);
+  await page.locator("#entry-retry").waitFor({ state: "visible" });
+  assert.equal(page.url(), f.origin + "/");
+  await page.unroute("**/src/signin-entry.js");
+  await page.locator("#entry-retry").click();
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+});
+
+test("cached HTML that names app.js directly still starts the existing workspace", async t => {
+  const f = await setup(t), page = await f.open();
+  await page.route(f.origin + "/", async route => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace('src="./src/entry.js"', 'src="./src/app.js"');
+    await route.fulfill({ response, body });
+  });
+  await page.goto(f.origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  assert.equal(await page.locator("#auth-signin-ui").count(), 1);
+});
+
+test("an incoming room link owns navigation while its workspace module downloads", async t => {
+  const f = await setup(t), page = await f.open(), requests = [];
+  await page.goto(f.origin);
+  await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route("**/src/app.js", route => release(route));
+  page.on("request", request => requests.push(new URL(request.url()).pathname));
+  await page.evaluate(() => { location.hash = "#room/commons"; });
+  const route = await held;
+  assert.equal(await page.locator("#auth-panel").evaluate(node => node.inert), true);
+  assert.equal(await page.locator("#session-menu-button").isDisabled(), true, "account controls wait for their handlers");
+  const button = await page.locator("#google-signin").boundingBox();
+  await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2);
+  assert.equal(requests.includes("/api/auth/google/start"), false, "old sign-in cannot replace pending entry");
+  await route.continue();
+  await page.waitForFunction(() => !document.querySelector("#auth-panel").inert);
+  assert.equal(await page.locator("#session-menu-button").isEnabled(), true);
+  assert.match(page.url(), /#room\/commons$/);
 });

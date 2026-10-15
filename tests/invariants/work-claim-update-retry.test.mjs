@@ -9,6 +9,11 @@
 // another history entry. requestId is opt-in; updates without one keep the
 // legacy append behavior. The replay record rides on the work item itself,
 // so it survives the durable SQLite registry round-trip (restart/deploy).
+//
+// #2965: the replay record is bound to the update payload (a digest of the
+// state/note/delivery fields). Reusing a requestId with a DIFFERENT payload
+// is not a retry — it is refused with 409 work_claim_conflict and applies
+// nothing, instead of silently swallowing the second update with a 200.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -178,6 +183,69 @@ invariantSuite([
     })
     .build(),
 
+  invariant("update-retry-requestid-different-state-conflicts",
+    "reusing a requestId for a different state update is refused 409, not silently swallowed")
+    .given(async (f, ctx) => {
+      ctx.registry = createWorkClaimRegistry();
+      ctx.before = await seedClaim(ctx.registry);
+      return ctx;
+    })
+    .when(async (f, ctx) => {
+      ctx.first = await call(ctx.registry, "worker", "update", "task", { state: "blocked", requestId: "req-bind" });
+      // Same requestId, different payload: NOT a retry. Must be refused.
+      await call(ctx.registry, "worker", "update", "task", { state: "in_progress", requestId: "req-bind" });
+    })
+    .then((f, ctx) => {
+      assert.equal(ctx.first.status, 200);
+      assert.equal(ctx.error?.status, 409, "a reused requestId with a different payload must be refused");
+      assert.equal(ctx.error?.code, "work_claim_conflict");
+      const stored = ctx.registry.get("room1", "task");
+      assert.equal(stored.state, "blocked", "the first update stands; the second applied nothing");
+      assert.equal(stored.history.length, ctx.before + 1, "the refused reuse appends no history entry");
+    })
+    .build(),
+
+  invariant("update-retry-requestid-different-note-conflicts",
+    "reusing a requestId with a different note is refused 409 and the new note is not applied")
+    .given(async (f, ctx) => {
+      ctx.registry = createWorkClaimRegistry();
+      ctx.before = await seedClaim(ctx.registry);
+      return ctx;
+    })
+    .when(async (f, ctx) => {
+      ctx.first = await call(ctx.registry, "worker", "update", "task", { note: "alpha", requestId: "req-note" });
+      await call(ctx.registry, "worker", "update", "task", { note: "beta", requestId: "req-note" });
+    })
+    .then((f, ctx) => {
+      assert.equal(ctx.first.status, 200);
+      assert.equal(ctx.error?.status, 409);
+      assert.equal(ctx.error?.code, "work_claim_conflict");
+      const stored = ctx.registry.get("room1", "task");
+      assert.equal(stored.history.length, ctx.before + 1);
+      assert.equal(stored.history[stored.history.length - 1].note, "alpha",
+        "the second payload was not applied under the first request's id");
+    })
+    .build(),
+
+  invariant("update-retry-pure-payload-binding",
+    "the pure machine replays an identical payload but refuses a different one under the same requestId")
+    .given((f, ctx) => {
+      ctx.item = claimWork(createWork({ id: "task", title: "task" }, { now: 1000 }), "worker", { now: 1001 });
+      return ctx;
+    })
+    .when((f, ctx) => {
+      ctx.first = updateWork(ctx.item, "worker", { state: "blocked", requestId: "req-p", now: 2000 });
+      ctx.replay = updateWork(ctx.first, "worker", { state: "blocked", requestId: "req-p", now: 3000 });
+      updateWork(ctx.first, "worker", { state: "in_progress", requestId: "req-p", now: 4000 });
+    })
+    .then((f, ctx) => {
+      assert.deepEqual(ctx.replay.history, ctx.first.history, "the identical retry still replays");
+      assert.equal(ctx.replay.state, "blocked");
+      assert.equal(ctx.error?.code, "work_claim_conflict",
+        "a different payload under a seen requestId must be refused by the pure machine");
+    })
+    .build(),
+
   invariant("update-retry-survives-durable-roundtrip",
     "the requestId replay record survives a durable registry rebuild (restart/deploy)")
     .given(async (f, ctx) => {
@@ -204,6 +272,39 @@ invariantSuite([
         const stored = ctx.rebuilt.get("room1", "task");
         assert.equal(stored.history.length, ctx.before + 1,
           "the retry against the rebuilt registry must not append a duplicate entry");
+      } finally {
+        ctx.db.close();
+        rmSync(ctx.dir, { recursive: true, force: true });
+      }
+    })
+    .build(),
+
+  invariant("update-retry-payload-binding-survives-durable-roundtrip",
+    "after a durable rebuild, a different payload under a seen requestId is still refused 409")
+    .given(async (f, ctx) => {
+      ctx.dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "a4-updatebind-"));
+      ctx.db = new DatabaseSync(join(ctx.dir, "claims.db"));
+      ctx.db.exec(workClaimSchema);
+      ctx.registry = createDurableWorkClaimRegistry(ctx.db, {});
+      await seedClaim(ctx.registry);
+      ctx.before = ctx.registry.get("room1", "task").history.length;
+      return ctx;
+    })
+    .when(async (f, ctx) => {
+      ctx.first = await call(ctx.registry, "worker", "update", "task", { note: "progress", requestId: "req-1" });
+      // Rebuild the registry on the same database, as after a restart.
+      const rebuilt = createDurableWorkClaimRegistry(ctx.db, {});
+      ctx.rebuilt = rebuilt;
+      await call(rebuilt, "worker", "update", "task", { note: "different", requestId: "req-1" });
+    })
+    .then((f, ctx) => {
+      try {
+        assert.equal(ctx.first.status, 200);
+        assert.equal(ctx.error?.status, 409, "the payload binding must survive the durable round-trip");
+        assert.equal(ctx.error?.code, "work_claim_conflict");
+        const stored = ctx.rebuilt.get("room1", "task");
+        assert.equal(stored.history.length, ctx.before + 1, "the refused reuse appends nothing");
+        assert.equal(stored.history[stored.history.length - 1].note, "progress");
       } finally {
         ctx.db.close();
         rmSync(ctx.dir, { recursive: true, force: true });

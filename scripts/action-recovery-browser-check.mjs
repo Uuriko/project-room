@@ -117,7 +117,7 @@ for (const outcome of ["committed-empty", "uncommitted-empty", "committed-lost",
     await f.unknown(); assert.equal(await f.input("summary").inputValue(), attempts[0].data.summary);
     await f.input("summary").evaluate(node => { node.value = "Changed DOM cannot replace a pending save"; });
     await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
-    assert.deepEqual(attempts[0], attempts[1]); assert.equal(f.snapshot().sequence, before + 1);
+    assert.deepEqual(attempts[0], attempts[1]); assert.equal(f.snapshot().sequence, before + 2); // the one completion + its board state_changed event (decision #10 cutover); the exact retry added neither
     assert.equal(f.item().receipt.summary, attempts[0].data.summary); assert.equal(f.item().verification, null); assert.equal(f.item().decision, null);
     assert.equal(await page.locator("#resume-action").isVisible(), false);
     assert.equal(f.snapshot().cursor, 0);
@@ -364,7 +364,7 @@ for(const outcome of ['normal','rationale-lost','rationale-uncommitted','decisio
   const decision=f.item().decision,rationale=f.snapshot().state.messages.find(m=>m.id===decision.sourceMessageId);
   assert.equal(rationale.body,'Accept the checked result with café and 🪷.');assert.equal(rationale.authorId,'owner');assert.equal(rationale.toMemberId,null);
   assert.equal(decision.reason,rationale.body);assert.equal(decision.completionEventId,pinned.completionEventId);assert.equal(decision.evidenceVersion,pinned.evidenceVersion);
-  assert.equal(f.snapshot().sequence,before+2,'exact retries produce one ordinary rationale and one decision');
+  assert.equal(f.snapshot().sequence,before+3,'exact retries produce one ordinary rationale, one decision and its board event (decision #10 cutover)');
   assert.equal(await page.locator('#resume-action').isVisible(),false);
 });
 

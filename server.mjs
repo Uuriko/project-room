@@ -15,7 +15,7 @@ import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
 import { validateCriticalConfig } from "./server/boot-config.mjs";
-import { agentCardSignatureState } from "./deploy/agent-discovery.mjs";
+import { agentCardSignatureState } from "./server/agent-discovery.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
