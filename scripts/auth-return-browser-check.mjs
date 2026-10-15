@@ -1,4 +1,4 @@
-import { openMagicSignin, backToPasswordSignin } from "./signin-browser-journey.mjs";
+import { openMagicSignin } from "./signin-browser-journey.mjs";
 // Welcome, sign-out, and return-to-room checks for a new human account.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -49,7 +49,9 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   page.on("pageerror", error => errors.push(error.stack || error.message));
   page.on("dialog", dialog => dialog.accept());
   const email = `return-${Date.now()}@example.invalid`;
-  const form = () => page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
+  // #3341: the email-link request leaves from the one merged form
+  // (email filled, password blank).
+  const form = () => page.locator('#auth-signin-ui [data-signin-form="password"]');
   const redeemDeliveredLink = async () => {
     await page.locator("#email-auth-panel").getByText(/Check .* for your sign-in link/).waitFor();
     const delivery = sent.at(-1);
@@ -77,28 +79,34 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await form().locator('[name=email]').fill(email);
   await form().locator('button[type=submit]').click();
   const magicRoute = await magicPending;
-  assert.equal(await page.locator("#auth-signin-ui [data-signin-back]").isDisabled(), true);
+  // Merged form (#3341): the request leaves from the sign-in form
+  // itself — busy disables it in place; there is no separate email
+  // step whose visibility could hide the pending status.
+  assert.equal(await form().locator('button[type=submit]').isDisabled(), true);
   await page.keyboard.press("Escape");
-  assert.equal(await page.locator("#email-auth-step").isVisible(), true, "pending request cannot hide its status");
-  assert.equal(await page.locator("#signin-methods").isVisible(), false);
+  assert.equal(await page.locator("#auth-panel").isVisible(), true, "pending request cannot hide its status");
+  assert.equal(await form().isVisible(), true);
   await magicRoute.fulfill({ status: 200, json: { status: "unavailable", message: "Synthetic mail outage. Try again." } });
   await page.locator('#auth-signin-ui [data-signin-status]').filter({ hasText: 'Synthetic mail outage.' }).waitFor();
   await page.unroute("**/api/auth/magic/request");
-  await backToPasswordSignin(page);
-  assert.equal(await page.locator('#auth-signin-ui [name=email]').evaluate(node => node === document.activeElement), true);
-  await openMagicSignin(page);
+  // The merged form never left (#3341): the failed request's status is
+  // showing on the sign-in form itself, the typed email is intact, and
+  // the password field is ready for the other way in. (Pre-merge this
+  // navigated Back from a separate email step, which also restored
+  // focus to the email field; there is no step to return from now.)
   assert.equal(await form().locator('[name=email]').inputValue(), email);
+  assert.equal(await form().locator('[name=password]').isEnabled(), true);
   assert.equal(await page.locator('#email-auth-panel input[type=password]').count(), 0);
-  const assertCompactHeading = async () => {
-    const back = await page.locator("#auth-signin-ui [data-signin-back]").boundingBox();
-    assert.ok(back.width >= 44 && back.height >= 44, "Back retains a usable target");
+  // The merged form is the email-link surface at both widths: it must
+  // stay within the viewport with its submit visible.
+  const assertCompactForm = async () => {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.equal(await form().locator('button[type=submit]').isVisible(), true);
   };
-  await assertCompactHeading();
+  await assertCompactForm();
   await page.screenshot({ path: "test-results/signin-email-link.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await assertCompactHeading();
-  assert.equal(await form().locator('button[type=submit]').isVisible(), true);
+  await assertCompactForm();
   await page.screenshot({ path: "test-results/signin-email-link-mobile.png", fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
   await form().locator('button[type=submit]').click();

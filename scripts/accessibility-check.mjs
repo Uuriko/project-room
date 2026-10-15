@@ -2,7 +2,6 @@ import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { emailContractFixture } from "./email-contract-fixture.mjs";
 import { normalizeGraphEmail } from "../server/graph-email.mjs";
-import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
@@ -76,13 +75,17 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.keyboard.press("Enter");
   assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
-  // Email delivery failure has one local announcement owner through the
-  // actual email sign-in screen; this local fixture has no mail provider.
-  await openMagicSignin(page);
-  await page.locator('#auth-signin-ui [name=email]').fill("a11y@example.test");
-  await page.locator('#auth-signin-ui button[type=submit]').click();
+  // A sign-in failure has one local announcement owner. This used the
+  // email sign-in screen's delivery failure, but since #3430 a deployment
+  // with no mail provider (this fixture) no longer offers email sign-in at
+  // all — the password screen, present in every deployment, carries the
+  // same single-owner property.
+  const passwordForm = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  await passwordForm.locator('[name="email"]').fill("a11y@example.test");
+  await passwordForm.locator('[name="password"]').fill("not-the-password");
+  await passwordForm.locator('button[type="submit"]').click();
   const emailError = page.locator('#auth-signin-ui [data-signin-status]');
-  await emailError.filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  await emailError.filter({ hasText: /Invalid email or password/i }).waitFor();
   assert.equal(await emailError.getAttribute("role"), "alert");
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
   assert.equal(await page.locator("#auth-panel").isVisible(), true);

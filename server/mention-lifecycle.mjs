@@ -171,7 +171,9 @@ export function identityNamesForRoom(db, roomId) {
 }
 
 // A hyphen continues the handle. "@Instinct-3" is not a mention of "Instinct".
-const handleContinues = (text, end) => end < text.length && /[A-Za-z0-9_-]/.test(text[end]);
+// A unicode letter, number, or mark continues the token too: "@Groké" is not a
+// mention of Grok (parity with tokenContinues in inbox-agent-routing.mjs).
+const handleContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}_-]/u.test(text[end]);
 
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous

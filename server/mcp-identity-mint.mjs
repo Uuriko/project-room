@@ -72,14 +72,13 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
   if (!selected) return mcpCallError(requestId, { reason: 'unknown_tool', tool: name });
   const problems = diagnoseArguments(selected.inputSchema, args);
   if (problems) return mcpCallError(requestId, { reason: 'invalid_arguments', tool: name, ...problems });
+  let created;
   try {
     // Same anonymous mint as POST /api/agent-identities: per-address,
     // per-network, and daily budgets plus proof-of-work live inside create.
-    const created = store.identities.create(args.displayName, {
+    created = store.identities.create(args.displayName, {
       anonymous: { address: String(remoteAddress ?? ''), proof: args.proof }
     });
-    noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ''), session: null, accountId: null });
-    return result(requestId, created);
   } catch (error) {
     if (error instanceof ServiceError) {
       // 428 proof_required carries the proof recipe in detail so the client
@@ -91,4 +90,14 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
     }
     return result(requestId, { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
   }
+  // create() has already committed the identity, and `created` carries the
+  // one-time secret and privateKey that are never shown again. The growth
+  // bookkeeping is post-mint and best-effort: if it throws, it must not mask
+  // the successful mint or permanently lose those one-time values.
+  try {
+    noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ''), session: null, accountId: null });
+  } catch (error) {
+    console.error('identity mint bookkeeping failed:', error?.message ?? error);
+  }
+  return result(requestId, created);
 }

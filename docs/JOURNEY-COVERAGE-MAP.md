@@ -33,7 +33,7 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/guest-upgrade-browser-check.mjs"
         ],
         "agent": [
-          "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
+          "archive/docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
         ],
         "hosted": [
           "cloudflare/README.md"
@@ -76,7 +76,7 @@ carry the claim, and the remaining tiers stay visibly open.
           "scripts/assisted-work-browser-check.mjs"
         ],
         "agent": [
-          "docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
+          "archive/docs/history/AGENT-ONBOARDING-TESTING-2026-09-07.md"
         ],
         "hosted": []
       }

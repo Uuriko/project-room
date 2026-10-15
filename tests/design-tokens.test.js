@@ -7,12 +7,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
-import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../deploy/room-entry.mjs";
+import { ROOM_ENTRY_HTML, publicRoomDoorHtml } from "../server/room-entry.mjs";
 import { renderReceiptsHtml } from "../server/receipts-page.mjs";
 import { renderRoomExportHtml } from "../server/room-export-html.mjs";
 import { PublicFace, roomPublicFaceSchema } from "../server/public-face.mjs";
 import { roomDirectorySchema } from "../server/room-directory.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
+import { publicUnpublishSchema } from "../server/legal-store.mjs";
 import { HEALTH_PAGE_STYLE } from "../scripts/room-health.mjs";
 
 const RETIRED = /#dfff00|#0B120F|#070608|#fafaf7|#205bb0|#dc673e/i;
@@ -22,6 +23,7 @@ function faceHtml() {
   db.exec(roomPublicFaceSchema);
   db.exec(roomDirectorySchema);
   db.exec(PUBLIC_READ_MODEL_SCHEMA);
+  db.exec(publicUnpublishSchema);
   const store = {
     db,
     transaction(fn) {
@@ -57,7 +59,9 @@ const surfaces = {
   "public face": faceHtml(),
   receipts,
   "room export": renderRoomExportHtml([]),
-  "room health": readFileSync(new URL("../docs/room-health.html", import.meta.url), "utf8")
+  // docs/room-health.html is a generated artifact and no longer committed; the
+  // fixture preserves a real generated page shell (style block verbatim).
+  "room health": readFileSync(new URL("fixtures/room-health.html", import.meta.url), "utf8")
 };
 
 test("every surface embeds the same dark and light tokens", () => {

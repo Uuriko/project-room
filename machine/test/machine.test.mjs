@@ -2,12 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../../server/store.mjs";
 import { createRoomServer } from "../../server/http.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../../server/spend-grants.mjs";
 import { initialRoom } from "../../server/bootstrap.mjs";
 import { spawnContext } from "../lib/spawn.mjs";
 import { saveConfig, defaultConfig } from "../lib/config.mjs";
@@ -19,7 +21,7 @@ import { applySystemChanges, revertSystemChanges } from "../lib/system.mjs";
 import { startGuest, prepareGolden } from "../lib/vms.mjs";
 import { saveSecret } from "../lib/secrets.mjs";
 import { requestApproval, takeApproval } from "../lib/approvals.mjs";
-import { readManifest } from "../lib/recording.mjs";
+import { manifestBytes, readManifest } from "../lib/recording.mjs";
 import { startFakeRelay } from "./fake-relay.mjs";
 
 const fakes = fileURLToPath(new URL("../fakes/", import.meta.url));
@@ -76,7 +78,7 @@ async function serve(t) {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  return { origin, ownerKey };
+  return { origin, ownerKey, store };
 }
 
 async function post(origin, path, body, token) {
@@ -239,6 +241,26 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
   });
 
+  test("manifestBytes returns an empty manifest for a lease that never ran a mutating desktop tool", async () => {
+    const home = homeDir();
+    try {
+      // No recordings/<claimId> dir exists yet: appendManifest and
+      // captureConsoleFrame (which create it) only run for mutating
+      // desktop tools, so a lease doing only e.g. shell.vm /
+      // machine.status reaches closeReceipt -> manifestBytes with no dir.
+      // Regression for #2872: this used to throw ENOENT, so
+      // machine.release threw, the slot stayed held, and no result was sent.
+      const bytes = manifestBytes(home, "fresh-claim");
+      assert.equal(bytes.length, 0);
+      assert.equal(existsSync(join(home, "recordings", "fresh-claim", "manifest.jsonl")), true);
+      assert.deepEqual(readManifest(home, "fresh-claim"), []);
+      // A second call (dir now exists) keeps returning the empty manifest.
+      assert.equal(manifestBytes(home, "fresh-claim").length, 0);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("a mutating desktop call records a frame hash and does not capture the host screen", async () => {
     const home = homeDir();
     const relay = await startFakeRelay();
@@ -338,6 +360,78 @@ test.describe("room-machine", { concurrency: false }, () => {
     rmSync(home, { recursive: true, force: true });
   });
 
+  test("a failed pf wiring persists the pmset and anchor changes already applied, so uninstall can revert them", async () => {
+    const home = homeDir();
+    const pfConf = join(home, "pf.conf");
+    const before = "scrub-anchor \"com.apple/*\"\n";
+    writeFileSync(pfConf, before);
+    writeFileSync(join(home, "pfctl-fail-f"), "");
+    const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
+    await spawnContext.run({ env }, async () => {
+      const applied = await applySystemChanges(home);
+      assert.equal(applied.ok, false);
+      // Regression for #2876: the pmset changes (and the loaded anchor)
+      // were already live when wiring failed, so the change record must
+      // exist on disk even though apply did not fully succeed.
+      const recordPath = join(home, "system-changes.json");
+      assert.equal(existsSync(recordPath), true);
+      const recorded = JSON.parse(readFileSync(recordPath, "utf8"));
+      assert.deepEqual(recorded.map(change => change.id), [
+        "pmset.disablesleep",
+        "pmset.autorestart",
+        "pf.anchor",
+      ]);
+      // And uninstall can actually replay that record.
+      const reverted = await revertSystemChanges(home);
+      assert.equal(reverted.ok, true, JSON.stringify(reverted));
+      assert.equal(existsSync(recordPath), false);
+    });
+    const log = readFileSync(join(home, "argv-log"), "utf8");
+    assert.match(log, /pmset "-a" "disablesleep" "0"/);
+    assert.match(log, /pmset "-a" "autorestart" "0"/);
+    assert.match(log, /pfctl "-a" "room\.machine" "-F" "all"/);
+    // The wiring failure itself still rolled its pf.conf edit back.
+    assert.equal(readFileSync(pfConf, "utf8"), before);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  test("a failed second defaults write persists the earlier changes, so uninstall reverts them all", async () => {
+    const home = homeDir();
+    const pfConf = join(home, "pf.conf");
+    writeFileSync(pfConf, "scrub-anchor \"com.apple/*\"\n");
+    // Only the second defaults write fails: pmset, the pf anchor, and the
+    // first defaults write have already been applied live by then.
+    writeFileSync(join(home, "defaults-fail-AllowedWiFiLocalNetworkAddresses"), "");
+    const env = machineEnv(home, { ROOM_MACHINE_PF_CONF: pfConf });
+    await spawnContext.run({ env }, async () => {
+      const applied = await applySystemChanges(home);
+      assert.equal(applied.ok, false);
+      assert.match(applied.error, /defaults AllowedWiFiLocalNetworkAddresses failed/);
+      // Regression for #2876: everything applied before the failure must
+      // be in the persisted record, not only in the returned object.
+      const recordPath = join(home, "system-changes.json");
+      assert.equal(existsSync(recordPath), true);
+      const recorded = JSON.parse(readFileSync(recordPath, "utf8"));
+      assert.deepEqual(recorded.map(change => change.id), [
+        "pmset.disablesleep",
+        "pmset.autorestart",
+        "pf.anchor",
+        "defaults.AllowedEthernetLocalNetworkAddresses",
+      ]);
+      const reverted = await revertSystemChanges(home);
+      assert.equal(reverted.ok, true, JSON.stringify(reverted));
+      assert.equal(existsSync(recordPath), false);
+    });
+    const log = readFileSync(join(home, "argv-log"), "utf8");
+    assert.match(log, /pmset "-a" "disablesleep" "0"/);
+    assert.match(log, /pmset "-a" "autorestart" "0"/);
+    assert.match(log, /pfctl "-a" "room\.machine" "-F" "all"/);
+    assert.match(log, /defaults "delete" "com.apple.network.local-network" "AllowedEthernetLocalNetworkAddresses"/);
+    // The revert also removed the anchor reference wiring added to pf.conf.
+    assert.doesNotMatch(readFileSync(pfConf, "utf8"), /^anchor "room\.machine"$/m);
+    rmSync(home, { recursive: true, force: true });
+  });
+
   test("the machine token stays off argv, the child environment, and the hello body", async () => {
     const home = homeDir();
     const env = machineEnv(home);
@@ -423,8 +517,64 @@ test.describe("room-machine", { concurrency: false }, () => {
     assert.equal(expired.reason, "approval_denied");
   });
 
+  test("enroll resumes after a late failure instead of stranding the spent code", async (t) => {
+    const home = homeDir();
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const relay = await startFakeRelay();
+    t.after(() => relay.close());
+    // Stub room: identity mint and invite redeem succeed; the first
+    // heartbeat fails and later heartbeats pass.
+    let mints = 0;
+    let redeems = 0;
+    let heartbeats = 0;
+    const room = createServer((req, res) => {
+      const chunks = [];
+      req.on("data", chunk => chunks.push(chunk));
+      req.on("end", () => {
+        const send = (status, value) => {
+          res.writeHead(status, { "content-type": "application/json" });
+          res.end(JSON.stringify(value));
+        };
+        if (req.url === "/api/agent-identities") { mints += 1; return send(201, { identityId: "ai_machine", ["sec" + "ret"]: "sec" + "ret-machine" }); }
+        if (req.url === "/api/agent-invites/redeem") { redeems += 1; return send(201, { roomId: "commons", memberId: "ai_machine" }); }
+        if (req.url === "/api/agent-heartbeats") { heartbeats += 1; return heartbeats === 1 ? send(500, { error: "boom" }) : send(200, { ok: true }); }
+        return send(404, { error: "not_found" });
+      });
+    });
+    await new Promise(resolve => room.listen(0, "127.0.0.1", resolve));
+    t.after(() => room.close());
+    const origin = `http://127.0.0.1:${room.address().port}`;
+    relay.mint("resume-code", {
+      machineToken: "tok-resume",
+      machineId: "mac-1",
+      label: "spare",
+      roomId: "commons",
+      ownerMemberId: "owner",
+      inviteCode: "invite-resume",
+      displayName: "Room machine",
+      relayUrl: relay.ws,
+      roomOrigin: origin,
+    });
+    const env = machineEnv(home, { ROOM_MACHINE_RELAY_URL: relay.http, ROOM_ORIGIN: origin });
+    const attempt = () => spawnContext.run({ env }, () => enroll({ code: "resume-code", home, env, relayHttp: relay.http, insecure: true }));
+    const first = await attempt();
+    assert.equal(first.ok, false);
+    assert.equal(first.error, "heartbeat_failed", JSON.stringify(first));
+    // The single-use code is now spent at the relay. A retry with the same
+    // code must resume the durable pending enrollment, not spend it again.
+    const second = await attempt();
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.roomId, "commons");
+    assert.equal(mints, 1, "resume must reuse the minted identity, not orphan a fresh one");
+    assert.equal(redeems, 1, "resume must not redeem the invite twice");
+    assert.equal(existsSync(join(home, "enroll-pending.json")), false);
+    const config = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+    assert.equal(config.machineId, "mac-1");
+    assert.equal(config.roomId, "commons");
+  });
+
   test("doctor posts measured facts, and release closes the claim with at most ten blobs", async (t) => {
-    const { origin, ownerKey } = await serve(t);
+    const { origin, ownerKey, store } = await serve(t);
     const home = homeDir();
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const relay = await startFakeRelay();
@@ -449,6 +599,16 @@ test.describe("room-machine", { concurrency: false }, () => {
     });
     const enrolled = await spawnContext.run({ env }, () => enroll({ code: "desk-code", home, env, relayHttp: relay.http, insecure: true }));
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
+    // #3269: the machine stages its receipt files over REST and room_put_file
+    // is priced at every door — provision its member with a spend grant,
+    // the way a room owner provisions any working agent.
+    const machineLink = store.db.prepare(
+      "SELECT member_id FROM identity_links WHERE room_id = ? AND identity_id = ?").get("commons", enrolled.identityId);
+    assert.ok(machineLink?.member_id, "machine member link missing after enroll");
+    ensureSpendGrantsSchema(store.db);
+    issueSpendGrant(store.db, "commons", machineLink.member_id, {
+      grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now(),
+    });
     const secret = await spawnContext.run({ env }, () => readSecret("identity", home));
     const presence = await get(origin, "/api/agent-heartbeats", secret);
     assert.equal(presence.status, 200, JSON.stringify(presence.json));

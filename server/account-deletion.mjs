@@ -260,6 +260,10 @@ function applyEventOnRoom(state, incoming) {
 function redactRoomMessages(store, roomId, actorId) {
   const room = store.room(roomId);
   const messages = room.state.messages ?? [];
+  // Archived messages live only in the messages table, so list those ids too.
+  const known = new Set(messages.map(message => message.id));
+  const archived = store.db.prepare("SELECT message_id AS id FROM messages WHERE room_id=?").all(roomId)
+    .filter(row => !known.has(row.id));
   const ids = [];
   for (const message of messages) {
     if (typeof message.id !== "string") continue;
@@ -278,6 +282,13 @@ function redactRoomMessages(store, roomId, actorId) {
     removed += result.rewritten;
   }
   removed += redactRemainingMessageBodies(store.db, roomId);
+  // An archived message is not in the projection, so the reducer cannot redact
+  // it; its event bodies are cleared above, clear its table row here.
+  if (archived.length) {
+    const archivedAt = at;
+    const clear = store.db.prepare("UPDATE messages SET body=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
+    for (const row of archived) removed += clear.run(archivedAt, roomId, row.id).changes;
+  }
   let files = 0;
   try {
     files = store.db.prepare(
@@ -476,7 +487,7 @@ const EXECUTORS = {
   sessions: (store, accountId) => {
     const db = store.db, now = typeof store.now === "function" ? store.now() : Date.now();
     const kept = db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-      parent_credential_hash=NULL,authenticated_until=NULL,expires_at=?
+      parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL,expires_at=?
       WHERE account_id=? AND EXISTS (SELECT 1 FROM share_link_joins WHERE slot_hash=account_session_slots.hash)`).run(now, accountId).changes;
     return kept + db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes;
   },

@@ -29,6 +29,54 @@ test("vendor token prefixes are redacted", () => {
   }
 });
 
+test("every secret in a string is redacted, not just the first", () => {
+  // Regression: the scrub regexes were non-global, so replace() stopped
+  // after the first match and later secrets reached storage verbatim.
+  const jwtA = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const jwtB = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJiIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+  const outJwt = scrubString(`one ${jwtA} two ${jwtB}`);
+  assert.ok(!outJwt.includes(jwtA) && !outJwt.includes(jwtB), "both JWTs must be redacted");
+  assert.equal(outJwt.match(/\[REDACTED:jwt\]/g).length, 2);
+
+  const outTok = scrubString("first ghp_abcdefghijklmnop second sk-abcdefghijklmnop");
+  assert.ok(!outTok.includes("ghp_abcdefghijklmnop"), "first token must not survive");
+  assert.ok(!outTok.includes("sk-abcdefghijklmnop"), "second token must not survive");
+  assert.equal(outTok.match(/\[REDACTED:token\]/g).length, 2);
+
+  const pemA = "-----BEGIN PRIVATE KEY-----\nAAAAB3NzaC1yc2EAAAADAQABAAABAQ\n-----END PRIVATE KEY-----"; // secrets-allowlist (fixture value, not a credential)
+  const pemB = "-----BEGIN RSA PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n-----END RSA PRIVATE KEY-----"; // secrets-allowlist (fixture value, not a credential)
+  const outPem = scrubString(`a ${pemA} b ${pemB}`);
+  assert.ok(!outPem.includes("AAAAB3NzaC1yc2E"), "first PEM block must not survive");
+  assert.ok(!outPem.includes("MIIEvQIBADAN"), "second PEM block must not survive");
+  assert.equal(outPem.match(/\[REDACTED:private-key\]/g).length, 2);
+});
+
+test("#3011: tokens and JWTs whose final segment is exactly 8 chars ending in '-' are redacted", () => {
+  // The pre-fix defect: TOKEN_PREFIX_RE and JWT_RE ended with
+  // [A-Za-z0-9_-]{8,}\b. The class includes '-' (a non-word char), so when
+  // the final segment is exactly the 8-char minimum and ends in '-', the
+  // trailing \b cannot be satisfied and backtracking cannot go below
+  // {8,} — the pattern missed entirely and the secret survived verbatim.
+  for (const token of ["ghp_aaaaaaa-", "sk-aaaaaaa-", "AKIAaaaaaaa-"]) {
+    const out = scrubString(`x ${token} y`);
+    assert.ok(!out.includes(token), `raw token ${token} must not survive`);
+    assert.equal(out, "x [REDACTED:token] y");
+  }
+  const jwt = "eyJaaaaaaaa.bbbbbbbb.ccccccc-";
+  const jwtOut = scrubString(`x ${jwt} y`);
+  assert.ok(!jwtOut.includes(jwt), "raw jwt must not survive");
+  assert.equal(jwtOut, "x [REDACTED:jwt] y");
+
+  // Controls: the same shapes without the trailing '-' already redacted
+  // before the fix and must keep redacting.
+  assert.equal(scrubString("x ghp_aaaaaaaa y"), "x [REDACTED:token] y");
+  assert.equal(scrubString("x sk-aaaaaaaa y"), "x [REDACTED:token] y");
+  assert.equal(scrubString("x AKIAaaaaaaaa y"), "x [REDACTED:token] y");
+  assert.equal(
+    scrubString("x eyJaaaaaaaa.bbbbbbbb.cccccccc y"),
+    "x [REDACTED:jwt] y");
+});
+
 test("secret key names redact any value", () => {
   assert.equal(scrubValue("hunter2", "password"), "[REDACTED:credential]");
   assert.equal(scrubValue("Bearer abc", "authorization"), "[REDACTED:credential]");

@@ -156,6 +156,30 @@ test("passkey credential store round-trips through the passkey-store adapter", (
   assert.equal(logins.listMethods("acct-1").filter(m => m.type === "passkey").length, 0);
 });
 
+test("disabling a passkey login method stops passkey credential lookups", () => {
+  const { store, logins } = makeStore();
+  store.createAccount("acct-1", "test");
+  // A second active method is required: disabling the last one is refused.
+  logins.linkPasswordMethod("acct-1", { email: "ada@example.com", verifier: "scrypt$..." });
+  const record = {
+    id: "cred-1", rpId: "room.example", publicKeyCose: "cose-bytes",
+    publicKeyJwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+    signCount: 3, aaguid: "aaguid", fmt: "none", transports: ["internal"]
+  };
+  const registered = logins.registerPasskeyCredential("acct-1", record, { label: "My key" });
+  const adapter = logins.passkeyStore();
+  assert.equal(adapter.getCredential("cred-1").accountId, "acct-1");
+  // setMethodDisabled flips only account_login_methods.disabled; the
+  // credential row keeps disabled=0, yet the adapter — the lookup both
+  // assertion verification and finishAuthentication resolve through —
+  // must stop returning the credential.
+  assert.equal(logins.setMethodDisabled("acct-1", registered.id, true).disabled, true);
+  assert.equal(adapter.getCredential("cred-1"), undefined);
+  // Re-enabling the method restores the credential.
+  assert.equal(logins.setMethodDisabled("acct-1", registered.id, false).disabled, false);
+  assert.equal(adapter.getCredential("cred-1").accountId, "acct-1");
+});
+
 test("M-2: removePasskeyCredential refuses to remove the last active sign-in method", () => {
   const { store, logins } = makeStore();
   store.createAccount("acct-1", "test");

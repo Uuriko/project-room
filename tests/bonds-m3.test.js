@@ -35,7 +35,7 @@ async function admit(origin, roomId, ownerSecret, identity, label) {
   const reqRes = await post(origin, "/api/access-requests", {
     roomId, identityId: identity.identityId, displayName: label,
     requestedPermissions: ["accept_work"], note: null, requestId
-  });
+  }, identity.secret);
   assert.equal(reqRes.status, 201, label);
   const decide = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, {
     decision: "approve", permissions: ["accept_work"], note: null
