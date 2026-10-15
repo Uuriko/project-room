@@ -999,6 +999,33 @@ export class AgentPluginStore {
   // stays outside the transaction.
   subscribeWebhook({ identityId, url, events, secret = null }) {
     return this.mutate(() => {
+      // R277-1: a dropped 201 makes the client retry the same subscribe,
+      // which used to leave a second subscription and double every
+      // delivery. A subscribe for the same (identity, url, event set)
+      // returns the existing subscription instead; a retry that also
+      // re-enables a subscription the agent had disabled. Both HTTP and
+      // MCP call this one path, so they dedupe identically.
+      const wantedEvents = [...new Set(events)].sort().join("\u0000");
+      for (const existing of this.subs.values()) {
+        if (existing.agentId !== identityId || existing.url !== url) continue;
+        if ([...existing.events].sort().join("\u0000") !== wantedEvents) continue;
+        if (!existing.enabled) {
+          this.webhooks.setEnabled(existing.subscriptionId, { agentId: identityId, enabled: true });
+          this.db.prepare("UPDATE agent_webhook_subs SET enabled=1 WHERE subscription_id=?").run(existing.subscriptionId);
+          existing.enabled = true;
+        }
+        this.hydrateDeliveries(existing.subscriptionId);
+        return { subscription: Object.freeze({
+          subscriptionId: existing.subscriptionId,
+          agentId: existing.agentId,
+          secretRef: this.webhooks.sentinelFor(existing.subscriptionId),
+          url: existing.url,
+          events: Object.freeze([...existing.events]),
+          enabled: existing.enabled,
+          createdAt: existing.createdAt,
+          deliveries: existing.deliveries.length,
+        }) };
+      }
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
       const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
       const sub = this.subs.get(view.subscriptionId);
