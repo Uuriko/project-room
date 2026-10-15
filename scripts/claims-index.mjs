@@ -371,12 +371,45 @@ function reduce(events) {
           break;
         }
         case "reclaim": {
+          // Strike lifecycle, mirroring the canonical reducer in scripts/room:
+          // stamps bite only claims still held (working/submitted, lane set);
+          // strike-one is set-once and records its stamp time; strike-two
+          // releases only with a recorded strike-one, the full 4h grace
+          // elapsed since it, and no heartbeat after it. Ignored stamps stay
+          // visible under `unregistered` — never silently dropped.
+          const ignoreStrike = (label, tid, reason) => unregistered.push({
+            comment_id: e.id, at: e.at, url: e.url, lane: e.lane,
+            kind: "ignored-strike", task_hint: tid, errors: [], reason,
+          });
           for (const s of [e.strike_one, e.strike_two]) {
             if (!s) continue;
             const t = claims.get(s.task);
             if (!t) continue;
-            if (s === e.strike_one) t.strike_one_at = e.at;
-            else { t.state = "submitted"; t.lane = null; t.released_at = e.at; t.strike_one_at = null; t.last_at = e.at; }
+            const isOne = s === e.strike_one;
+            const label = isOne ? "strike-one" : "strike-two";
+            const word = (t.state || "").match(STATE_WORD_RE)?.[0] || t.state;
+            if (!t.lane || (word !== "working" && word !== "submitted")) {
+              ignoreStrike(label, s.task, `${label} ignored — claim not held (working/submitted)`);
+            } else if (isOne) {
+              if (t.strike_one_at) {
+                ignoreStrike(label, s.task,
+                  `strike-one replay ignored — strike already recorded at ${t.strike_one_at}`);
+              } else if (Number.isNaN(Date.parse(s.at))) {
+                ignoreStrike(label, s.task, `strike-one ignored — unparseable stamp ${s.at}`);
+              } else {
+                // Record the stamp, clamped to the comment time (a
+                // future-dated stamp is inherently forged).
+                t.strike_one_at = new Date(Math.min(Date.parse(s.at), Date.parse(e.at))).toISOString();
+              }
+            } else if (!t.strike_one_at) {
+              ignoreStrike(label, s.task, "strike-two ignored — no prior strike-one");
+            } else if (Date.parse(e.at) - Date.parse(t.strike_one_at) <= 14400_000) {
+              ignoreStrike(label, s.task, "strike-two ignored — 4h grace since strike-one has not elapsed");
+            } else if (t.heartbeat_at && Date.parse(t.heartbeat_at) > Date.parse(t.strike_one_at)) {
+              ignoreStrike(label, s.task, "strike-two ignored — heartbeat after strike-one");
+            } else {
+              t.state = "submitted"; t.lane = null; t.released_at = e.at; t.strike_one_at = null; t.last_at = e.at;
+            }
           }
           break;
         }

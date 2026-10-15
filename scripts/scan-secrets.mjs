@@ -141,17 +141,31 @@ function main() {
   const findings = [];
   let file = null;
   let newLine = 0;
+  let inHunk = false;
   for (const raw of diffText.split("\n")) {
     if (raw.startsWith("diff --git ")) {
       file = fileFromDiffGitLine(raw);
+      inHunk = false;
       continue;
     }
     const hunk = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
     if (hunk) {
       newLine = Number(hunk[1]);
+      inHunk = true;
       continue;
     }
-    if (!raw.startsWith("+") || raw.startsWith("+++")) continue;
+    // File headers (`---`, `+++ b/path`, `index`, ...) precede the first
+    // hunk and are not file content. Inside a hunk, a line starting with
+    // `+++` is an added line whose content starts with `++` (pre-increment,
+    // markdown, ...), not a header — it must be scanned like any other
+    // added line, mirroring scripts/secret-scan-diff.mjs.
+    if (!inHunk) continue;
+    if (raw.startsWith("-")) continue; // removed line: new side does not advance
+    if (raw.startsWith("\\")) continue; // "\ No newline at end of file"
+    if (!raw.startsWith("+")) {
+      newLine += 1; // context line
+      continue;
+    }
     const line = raw.slice(1);
     const at = `${file}:${newLine}`;
     newLine += 1;

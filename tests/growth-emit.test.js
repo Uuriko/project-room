@@ -7,6 +7,7 @@ import {
   ROOM_TO_GROWTH,
   growthTypeFor,
   growthCollector,
+  getGrowthFanout,
   getGrowthEmissionFailures,
   buildGrowthEvent,
   applyEventWithGrowth
@@ -219,4 +220,53 @@ test("C3 room apply failures still throw before any emission", () => {
     roomEvent("ev-bad", EVENT_TYPES.MESSAGE_POSTED, "stranger", { body: "nope" }, 17), collector),
     /Unknown member/);
   assert.equal(collector.stats().total, 0);
+});
+
+test("C3 duplicate room events are not re-recorded, re-notified, or re-projected", () => {
+  const { state, collector } = fresh();
+  const notified = [];
+  const subId = getGrowthFanout().subscribe(() => true, envelope => notified.push(envelope.type));
+  try {
+    const posted = roomEvent("ev-dup", EVENT_TYPES.MESSAGE_POSTED, "maya",
+      { messageId: "m-dup", body: "hey @Codex look" }, 18);
+    const first = applyEventWithGrowth(state, posted, collector);
+    assert.equal(first.growthOk, true);
+    assert.deepEqual(collector.query({}).map(e => e.type), ["agent.mentioned", "message.sent"]);
+    assert.deepEqual(notified, ["message.sent", "agent.mentioned"]);
+
+    // Replaying the identical event is a room-level no-op: applyEvent
+    // returns the projection unchanged, and no growth side effect may fire
+    // a second time (no record, no fan-out, no mention projection).
+    const replayed = applyEventWithGrowth(first.state, posted, collector);
+    assert.equal(replayed.growthOk, false);
+    assert.equal(replayed.growthReason, "duplicate-event");
+    assert.deepEqual(replayed.state, first.state);
+    assert.equal(collector.stats().total, 2);
+    assert.deepEqual(notified, ["message.sent", "agent.mentioned"]);
+  } finally {
+    getGrowthFanout().unsubscribe(subId);
+  }
+});
+
+test("C3 reaction removals (active:false) do not emit reaction.added", () => {
+  const { state, collector } = fresh();
+  let res = applyEventWithGrowth(state,
+    roomEvent("ev-post-rem", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "m-rem", body: "react then unreact" }, 19), collector);
+  res = applyEventWithGrowth(res.state,
+    roomEvent("ev-add-rem", EVENT_TYPES.MESSAGE_REACTION_SET, "codex",
+      { messageId: "m-rem", reaction: "like", active: true }, 20), collector);
+  assert.equal(res.growthOk, true);
+  assert.equal(collector.query({}).filter(e => e.type === "reaction.added").length, 1);
+
+  // active:false removes the member's reaction in the room core; it is not
+  // an addition and must neither build nor record a reaction.added envelope.
+  const removal = roomEvent("ev-del-rem", EVENT_TYPES.MESSAGE_REACTION_SET, "codex",
+    { messageId: "m-rem", reaction: "like", active: false }, 21);
+  assert.equal(buildGrowthEvent(removal, res.state), null);
+  res = applyEventWithGrowth(res.state, removal, collector);
+  assert.equal(res.growthOk, false);
+  assert.equal(collector.query({}).filter(e => e.type === "reaction.added").length, 1);
+  // The room state did apply the removal.
+  const message = res.state.messages.find(m => m.id === "m-rem");
+  assert.equal(Object.values(message.reactions ?? {}).flat().includes("codex"), false);
 });

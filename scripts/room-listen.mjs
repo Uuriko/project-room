@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { agentConnectionFromEnvironment, ConnectionError, connectionDiagnostic } from '../client/agent-connection.mjs';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { isTransientWakeError, wakeRetryDelayMs } from '../client/wake-retry.mjs';
 import { roomEventPointer, serveClaudeRoomChannel } from '../client/claude-channel.mjs';
 
 const MODES = new Set(['channel', 'poll', 'webhook']);
@@ -76,8 +77,25 @@ export async function listen(argv = process.argv.slice(2), io = {}) {
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
   try {
     let started = false;
+    let failures = 0;
     while (!controller.signal.aborted) {
-      const result = await wake.wait({ hostId: host, cadenceSeconds, waitMs: started ? 25000 : 0 });
+      let result;
+      try {
+        result = await wake.wait({ hostId: host, cadenceSeconds, waitMs: started ? 25000 : 0 });
+        failures = 0;
+      } catch (error) {
+        if (controller.signal.aborted) break;
+        // A transient failure (network blip, 429, 5xx during a redeploy)
+        // backs off and retries: an always-on listener that exits on the
+        // first blip is not always on. Fatal errors (bad config, rejected
+        // credentials) keep the stop-and-report behavior via the outer catch.
+        if (!isTransientWakeError(error)) throw error;
+        const backoff = wakeRetryDelayMs(failures, error);
+        failures += 1;
+        try { await pause(backoff, undefined, { signal: controller.signal }); }
+        catch { break; }
+        continue;
+      }
       started = true;
       // Remember only the current pending page. The durable Room queue and
       // consumer journal own handling and replay; previously seen pointers

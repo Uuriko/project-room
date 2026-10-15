@@ -245,6 +245,34 @@ test("HTTP: guest issue refused; guest self-read shows no edges", async t => {
   assert.deepEqual(caps.json.grants, []);
 });
 
+test("HTTP: prototype-named phantom members are not room members (#3007)", async t => {
+  const f = await serve(t);
+  // These ids satisfy MEMBER_ID_PATTERN but are not members; a raw
+  // members[memberId] index resolves them to inherited Object.prototype
+  // values (truthy), so requireRoomMember must resolve via own keys only.
+  for (const phantom of ["toString", "constructor", "valueOf", "hasOwnProperty"]) {
+    const issued = await f.request("/api/rooms/commons/agent-grants", {
+      method: "POST", token: f.keys.owner, data: { agentId: phantom, capability: "grants:issue" },
+    });
+    assert.equal(issued.status, 404, `issue for phantom ${phantom}`);
+    assert.equal(issued.json.error.code, "member_not_found");
+    const revoked = await f.request(`/api/rooms/commons/agent-grants/${phantom}/grants:issue`, {
+      method: "DELETE", token: f.keys.owner,
+    });
+    assert.equal(revoked.status, 404, `revoke for phantom ${phantom}`);
+    // "constructor" is rejected earlier by the route's pathId/validId
+    // blocklist (generic not_found); the rest reach requireRoomMember.
+    assert.equal(revoked.json.error.code, phantom === "constructor" ? "not_found" : "member_not_found");
+  }
+  // No grant edge was minted for any phantom.
+  assert.equal(f.db().prepare("SELECT COUNT(*) AS n FROM agent_capability_grants").get().n, 0);
+  // Positive control: a real own member still passes requireRoomMember.
+  const real = await f.request("/api/rooms/commons/agent-grants", {
+    method: "POST", token: f.keys.owner, data: { agentId: "agent", capability: "grants:issue" },
+  });
+  assert.equal(real.status, 201);
+});
+
 test("schema boot: ensureGrantsSchema is idempotent and store boot creates the table", async t => {
   const f = await serve(t);
   ensureGrantsSchema(f.db());

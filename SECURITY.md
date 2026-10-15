@@ -32,5 +32,5 @@ keeps the report visible only to the reporter and the maintainers. Do not
 email plaintext exploit details, tokens, or private data anywhere.
 
 For architecture and isolation boundaries, see [SECURITY-MODEL.md](docs/SECURITY-MODEL.md)
-and [DATA-BOUNDARIES.md](docs/history/DATA-BOUNDARIES.md). The [self-host guide](docs/SELF-HOSTING.md)
+and [DATA-BOUNDARIES.md](docs/DATA-BOUNDARIES.md). The [self-host guide](docs/SELF-HOSTING.md)
 explains the supported single-node shape and recovery limitations.

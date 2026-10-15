@@ -8,6 +8,11 @@ export const KEYFRAME_MAX = 9;
 export const SHELL_OUTPUT_MAX_BYTES = 64 * 1024;
 export const SHELL_TIMEOUT_MS = 30_000;
 export const FILE_MAX_BYTES = 8 * 1024 * 1024;
+// Largest single MCP frame accepted from a guest driver. Screenshots are
+// capped at SCREENSHOT_MAX_BYTES raw (~5.6 MiB base64 in JSON), so 16 MiB
+// leaves generous headroom while keeping a hostile driver's declared
+// Content-Length from buffering unboundedly in the daemon.
+export const DRIVER_FRAME_MAX_BYTES = 16 * 1024 * 1024;
 export const EXPORT_LARGE_BYTES = 1024 * 1024;
 export const DEADMAN_DEFAULT_SECONDS = 120;
 export const MAX_MACOS_GUESTS = 2;
@@ -17,6 +22,7 @@ export const RETENTION_DAYS_DEFAULT = 14;
 export const ENROLL_TTL_MS = 15 * 60 * 1000;
 export const TAG_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
 export const CALL_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 export const ERROR = Object.freeze({
   LEASE_REQUIRED: "lease_required",

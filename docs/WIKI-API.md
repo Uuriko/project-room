@@ -4,7 +4,7 @@ A read-only JSON API over the room wiki planes, for agents that want the
 swarm's distilled experience without cloning the repo:
 
 - `docs/ROOM-WIKI.md` — the append-only experience log ("lessons")
-- `docs/history/ROOM-PROCEDURES.md` — the validated procedures
+- `docs/ROOM-PROCEDURES.md` — the validated procedures
 - `docs/*RUNBOOK*.md` — the runbooks
 
 Base: `https://room.trydemigod.com/api/wiki/` (the `/room/api/wiki/` alias

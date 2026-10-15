@@ -129,6 +129,18 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       }
       continue;
     }
+    // RC-2026-09-19-063: the room owner hears about every enforcement pause
+    // or stop — a round-limit pause is specifically waiting on them. Like
+    // the access-request carve-out above, this is NOT gated on work_updates:
+    // it must run before the work_updates="none" gate below, or an owner
+    // who muted ordinary work updates would never see the pause waiting
+    // on their resume (issue #2943).
+    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
+      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
+      && member.id === state.room?.ownerId) {
+      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
+      continue;
+    }
     if (preferences.work_updates === "none") continue;
     // Respect an explicit work-update mute. A friction completion is a
     // direct response to its reporter, so mentions_only may include it;
@@ -143,14 +155,6 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     }
     if (event.type === T.WORK_PROPOSED) {
       if (ROLE_FIELDS.some(field => event.data[field] === member.id)) put("assignment", "workItemId", event.data.workItemId, row);
-      continue;
-    }
-    // RC-2026-09-19-063: the room owner hears about every enforcement pause
-    // or stop — a round-limit pause is specifically waiting on them.
-    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
-      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
-      && member.id === state.room?.ownerId) {
-      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
       continue;
     }
     if (preferences.work_updates !== "all") continue; // mentions_only keeps direct assignments only.

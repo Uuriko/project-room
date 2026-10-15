@@ -14,13 +14,13 @@ Precedence, highest first:
 4. The room-antislop filter.
 
 The Sep 20 public-face and DM-consent engineering design that used to live at
-this path is now [archived in docs/history](docs/history/DESIGN-2026-09-20.md).
+this path is now [archived](archive/docs/history/DESIGN-2026-09-20.md).
 
 ## Where this comes from
 
 This file carries forward the direction we already had. It doesn't replace
 it.
-- [docs/HUMAN-EXPERIENCE-PLAN-20261006.txt](docs/HUMAN-EXPERIENCE-PLAN-20261006.txt):
+- [archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt](archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt):
   "A conversation with your friends and one helpful assistant, where projects
   get done without everyone having to manage the machinery behind the
   assistant." Its five design rules still hold:

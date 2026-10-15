@@ -1,4 +1,4 @@
-// PRODUCT-200 docs slice A1: the served /SKILL.md (deploy/agent-discovery.mjs
+// PRODUCT-200 docs slice A1: the served /SKILL.md (server/agent-discovery.mjs
 // skillMd()) is the recovery contract a stranger reads after a mint 429.
 // QA-200 found four drift points here: the minute tier was undocumented, the
 // doc said Retry-After: 3600 was always sent (the outer per-address endpoint
@@ -10,7 +10,7 @@
 // docs/COLD-AGENT-WALKTHROUGH.md — a different boundary.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillMd } from "../deploy/agent-discovery.mjs";
+import { skillMd } from "../server/agent-discovery.mjs";
 import {
   ANONYMOUS_ADDRESS_MINUTE_LIMIT,
   ANONYMOUS_ADDRESS_DAILY_LIMIT,

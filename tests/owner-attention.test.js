@@ -65,7 +65,7 @@ test("pending access request carries inline approve/deny actions", t => {
   const f = setup(t);
   const identity = f.store.identities.create("Joiner");
   const created = f.accessRequests.request("commons", { identityId: identity.identityId, displayName: "Joiner",
-    requestedPermissions: ["accept_work", "complete_work"], requestId: "ar_one" });
+    requestedPermissions: ["accept_work", "complete_work"], requestId: "ar_one" }, identity.secret);
   const report = f.report();
   assert.equal(report.itemCount, 1);
   const [item] = report.items;
@@ -86,7 +86,7 @@ test("deny action refuses through the same contract", t => {
   const f = setup(t);
   const identity = f.store.identities.create("Joiner Two");
   const created = f.accessRequests.request("commons", { identityId: identity.identityId, displayName: "Joiner Two",
-    requestedPermissions: ["accept_work"], requestId: "ar_two" });
+    requestedPermissions: ["accept_work"], requestId: "ar_two" }, identity.secret);
   const deny = f.report().items[0].actions[1];
   assert.equal(deny.body.decision, "deny");
   const decided = f.accessRequests.decide(f.keys.owner, "commons", created.requestId, deny.body);
@@ -207,7 +207,7 @@ test("attention pages reach every request and reset stale continuations", t => {
   const add = n => {
     const identity = f.store.identities.create(`Page joiner ${n}`);
     f.accessRequests.request("commons", { identityId: identity.identityId, displayName: `Page joiner ${n}`,
-      requestedPermissions: ["accept_work"], requestId: `page-${String(n).padStart(3, "0")}` });
+      requestedPermissions: ["accept_work"], requestId: `page-${String(n).padStart(3, "0")}` }, identity.secret);
   };
   for (let n = 1; n <= 60; n++) add(n);
   const page = cursor => attentionReport({ store: f.store, accessRequests: f.accessRequests }, f.keys.owner, "commons", null, f.clock.now, { cursor });

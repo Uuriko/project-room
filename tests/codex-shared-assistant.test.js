@@ -129,7 +129,10 @@ test("completed continuation recovers without rerunning either turn", async t =>
     if (context.turnNumber === 1) { await appendLate(context, "late-recovery"); context.finish("completed"); }
     else complete = context.finish;
   });
-  await assert.rejects(f.run({ timeoutMs: 60 }), /uncertain/);
+  // The budget has to cover the whole first turn (a late-input write over HTTP)
+  // even on a loaded runner, so only the held second turn is what times out.
+  await assert.rejects(f.run({ timeoutMs: 1000 }), /uncertain/);
+  assert.equal(typeof complete, "function", "the continuation turn was held open when the run timed out");
   complete("completed");
   const result = await f.run(); assert.equal(result.result.status, "done");
   assert.equal(f.calls.filter(x => x.method === "turn/start").length, 2);
@@ -233,6 +236,92 @@ test("same-ID amendments also invalidate public preview text", async () => {
   const sink = assistantDraftSink({ read: async () => run, act: async value => sent.push(value), attemptId: "a", requestKey: "k", inputIds: ["m"], isCurrent: async () => false });
   sink.emit({ type: "answer_delta", attemptId: "a", itemId: "final", delta: "Old answer" }); await sink.close();
   assert.equal(sent.length, 0);
+});
+
+function draftClock(t) {
+  let now = 0;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(performance, "now", () => now);
+  const settle = async () => { for (let turn = 0; turn < 12; turn++) await Promise.resolve(); };
+  return { settle, async tick(ms) { now += ms; t.mock.timers.tick(ms); await settle(); } };
+}
+const publicDelta = delta => ({ type: "answer_delta", attemptId: "a", itemId: "final", phase: "final_answer", delta });
+const draftRun = () => ({ attemptId: "a", status: "working", revision: 4, inputs: [{ sourceMessageId: "m" }] });
+
+test("first public draft starts immediately and later tokens respect the minimum cadence", async t => {
+  const clock = draftClock(t), sent = []; let reads = 0;
+  const sink = assistantDraftSink({ read: async () => { reads++; return draftRun(); }, act: async value => sent.push(value), attemptId: "a", requestKey: "k", inputIds: ["m"] });
+  sink.emit(publicDelta("Hello ")); sink.emit(publicDelta("world"));
+  assert.equal(reads, 1, "first public delta starts authority validation without a timer");
+  await clock.settle();
+  assert.deepEqual(sent.map(row => row.body), ["Hello world"]);
+  sink.emit(publicDelta("!")); await clock.tick(499);
+  assert.equal(reads, 1);
+  await clock.tick(1);
+  assert.deepEqual(sent.map(row => row.body), ["Hello world", "Hello world!"]);
+  await sink.close();
+  assert.equal(sent.length, 2);
+});
+
+test("tokens arriving during a slow draft write get one trailing delivery without overlapping writes", async t => {
+  const clock = draftClock(t), blocked = Promise.withResolvers(), sent = []; let active = 0, maximum = 0;
+  const sink = assistantDraftSink({ read: async () => draftRun(), act: async value => {
+    active++; maximum = Math.max(maximum, active); sent.push(value.body);
+    if (sent.length === 1) await blocked.promise;
+    active--;
+  }, attemptId: "a", requestKey: "k", inputIds: ["m"] });
+  sink.emit(publicDelta("First")); await clock.settle();
+  sink.emit(publicDelta(" and last")); await clock.tick(1000);
+  assert.deepEqual(sent, ["First"]);
+  blocked.resolve(); await clock.settle(); await clock.tick(499);
+  assert.equal(sent.length, 1);
+  await clock.tick(1);
+  assert.deepEqual(sent, ["First", "First and last"]);
+  assert.equal(maximum, 1);
+  await clock.tick(10000); assert.equal(sent.length, 2);
+  await sink.close();
+});
+
+test("closing drains an in-flight draft but never waits for or bypasses its cooldown", async t => {
+  const clock = draftClock(t), blocked = Promise.withResolvers(), sent = []; let closed = false;
+  const sink = assistantDraftSink({ read: async () => draftRun(), act: async value => { sent.push(value.body); await blocked.promise; }, attemptId: "a", requestKey: "k", inputIds: ["m"] });
+  sink.emit(publicDelta("Preview")); await clock.settle(); sink.emit(publicDelta("; complete answer"));
+  const closing = sink.close().then(() => { closed = true; });
+  await clock.settle(); assert.equal(closed, false);
+  blocked.resolve(); await closing;
+  assert.deepEqual(sent, ["Preview"]);
+  await clock.tick(1000); assert.equal(sent.length, 1);
+});
+
+test("rate-limited previews cool down without autonomous retries or delaying close", async t => {
+  const clock = draftClock(t); let attempts = 0;
+  const sink = assistantDraftSink({ read: async () => draftRun(), act: async () => {
+    attempts++; throw Object.assign(new Error("limited"), { status: 429, retryAfterMs: 70000 });
+  }, attemptId: "a", requestKey: "k", inputIds: ["m"] });
+  sink.emit(publicDelta("One")); await clock.settle(); sink.emit(publicDelta(" two"));
+  await clock.tick(69999); assert.equal(attempts, 1);
+  await clock.tick(1); assert.equal(attempts, 2);
+  await clock.tick(140000); assert.equal(attempts, 2, "failure alone cannot schedule another preview");
+  await sink.close(); assert.equal(attempts, 2);
+});
+
+test("draft cadence cannot be configured below the server preview budget", () => {
+  assert.throws(() => assistantDraftSink({ intervalMs: 499 }), /at least 500ms/);
+  assert.throws(() => assistantDraftSink({ intervalMs: NaN }), /at least 500ms/);
+  assert.throws(() => assistantDraftSink({ intervalMs: 2147483648 }), /fit a timer/);
+});
+
+test("continuous public tokens produce at most 120 previews in the first minute", async t => {
+  const clock = draftClock(t); let attempts = 0;
+  const sink = assistantDraftSink({ read: async () => draftRun(), act: async () => { attempts++; }, attemptId: "a", requestKey: "k", inputIds: ["m"] });
+  sink.emit(publicDelta("a")); await clock.settle();
+  for (let index = 1; index < 120; index++) {
+    sink.emit(publicDelta("a")); await clock.tick(500);
+  }
+  assert.equal(attempts, 120);
+  sink.emit(publicDelta("a")); await clock.tick(499);
+  assert.equal(attempts, 120);
+  await sink.close(); assert.equal(attempts, 120);
 });
 
 test("contribution racing atomic publication recovers without replaying completed work", async t => {

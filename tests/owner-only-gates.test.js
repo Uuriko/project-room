@@ -11,7 +11,6 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), "owner-gates-"));
@@ -38,11 +37,10 @@ function refuses(fn, status, code) {
 test("a non-owner member is refused by each owner-only store gate", t => {
   const f = setup(t);
   const keyHash = createHash("sha256").update(randomBytes(32)).digest("hex");
-  const linkToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
   refuses(() => f.store.identities.link(f.plainKey, "commons", { identityId: f.identity.identityId, permissions: ["accept_work"] }), 403, "access_denied");
   refuses(() => f.store.agentConnections.apply(f.plainSession.token, "commons", { action: "create", requestId: randomUUID(), memberId: "agent-x",
     displayName: "X", access: "contribute", keyHash, expiresAt: Date.now() + 86400000, expectedOwnerRevision: 0 }, f.plainSession.session.sessionBinding), 403, "owner_required");
-  refuses(() => f.store.guestAgentLinks.mint(f.plainKey, "commons", { requestId: randomUUID(), linkToken: linkToken(), expectedOwnerRevision: 0, displayName: "S" }, null), 403, "owner_required");
+  refuses(() => f.store.guestAgentLinks.owner(f.plainKey, "commons", null), 403, "owner_required");
   refuses(() => f.store.invites.create(f.plainKey, "commons", { profile: "chat", expiresInMinutes: 60, displayName: "Scribe" }, null), 403, "access_denied");
   refuses(() => f.store.wakeQueue.pause(f.plainKey, "commons", { requestId: randomUUID(), reason: null }, null, { memberId: "victim" }), 403, "wake_pause_not_permitted");
   refuses(() => f.store.guestInvites.revokeAll(f.plainKey, "commons", null), 403, "owner_required");
