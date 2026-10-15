@@ -18,16 +18,7 @@ export function askFaceStatus(run, now = Date.now()) {
   const textKey = ({ asked: 'asked', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
   return { key, text: textKey ? uiText(`human.face.${textKey}`) : run.status };
 }
-// A plain message in a one-person room goes to the Room assistant only when it
-// is addressed to no one else: no @-mention of another active member and no reply
-// to a message written by someone other than the sender or the assistant.
-export function soloUnaddressed({ body, replyToId, members, messages, selfId, assistantId }) {
-  const others = Object.values(members ?? {}).filter(m => m.active !== false && m.id !== selfId && m.id !== assistantId);
-  if (others.some(m => m.displayName && new RegExp(`@${m.displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(body ?? ''))) return false;
-  const source = replyToId ? (messages ?? []).find(m => m.id === replyToId) : null;
-  return !source || source.authorId === selfId || source.authorId === assistantId;
-}
-export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript }) {
+export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, getPendingMessage }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
@@ -56,7 +47,46 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); ask.title = uiText("human.copy.002");
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
   composerActions.append($('#composer-options'), ask); $('.composer-row').append(composerActions);
-  ask.addEventListener('click', () => { selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); $('#message-input').focus(); });
+  const intentCue = document.createElement('p'); intentCue.id = 'composer-intent'; intentCue.className = 'form-hint';
+  $('#composer-hint').before(intentCue);
+  $('#message-input').setAttribute('aria-describedby', `${$('#message-input').getAttribute('aria-describedby') || ''} composer-intent`.trim());
+  let intentRevision = 0, preflightBusy = false, dispatchReserved = false, setupFromDraft = false, composerScope = {};
+  function dispatchBlocked() {
+    if (!preflightBusy && !dispatchReserved) return false;
+    notice(uiText('human.intent.checking'), true); return true;
+  }
+  function reserveDispatch(intent) {
+    dispatchReserved = {};
+    return { ok: true, intent, reservation: dispatchReserved };
+  }
+  const composerContent = () => ({ ...composerScope, body: $('#message-input').value, toMemberId: $('#message-to-select').value || null });
+  function syncIntent(content = composerContent()) {
+    composerScope = content;
+    intentCue.hidden = !human() || !$('#request-mode-bar').hidden;
+    if (intentCue.hidden) return;
+    const pending = getPendingMessage?.(), original = pending?.command?.data;
+    const retry = original && Object.hasOwn(pending, 'assistantIntent') && original.body === content.body.trim()
+      && (original.toMemberId || null) === (content.toMemberId || null) && (original.replyToId || null) === (content.replyToId || null)
+      && (original.channelId || 'general') === (content.channelId || 'general')
+      && Boolean(original.alsoSendToChannel) === Boolean(content.alsoSendToChannel);
+    if (retry) {
+      intentCue.textContent = content.toMemberId
+        ? uiText('human.intent.retryPrivate', { name: getState()?.members?.[content.toMemberId]?.displayName || uiText('human.intent.recipient') })
+        : uiText(pending.assistantIntent ? 'human.intent.retryAsk' : 'human.intent.retryChat');
+      return;
+    }
+    const coordinator = getState()?.members?.[projection?.assistant.coordinatorMemberId];
+    const name = coordinator?.displayName;
+    intentCue.textContent = content.toMemberId
+      ? uiText('human.intent.private', { name: getState()?.members?.[content.toMemberId]?.displayName || uiText('human.intent.recipient') })
+      : contribution ? uiText('human.intent.continue')
+        : selected || /^@Room\b/i.test(content.body.trim())
+          ? name ? uiText('human.intent.ask', { name }) : uiText('human.intent.connect')
+          : uiText('human.intent.chat');
+  }
+  $('#message-input').addEventListener('input', () => { intentRevision++; syncIntent(); });
+  $('#message-to-select').addEventListener('change', () => { intentRevision++; syncIntent(); });
+  ask.addEventListener('click', () => { intentRevision++; selected = !selected; if (!selected) { contribution = null; endContribution?.(); ask.textContent = 'Ask Room'; } ask.setAttribute('aria-pressed', String(selected)); syncIntent(); $('#message-input').focus(); });
   const advanced = document.createElement('label'); advanced.className = 'check';
   advanced.innerHTML = uiText("human.copy.003");
   $('#settings-dialog').append(advanced);
@@ -81,6 +111,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
   const setup = document.createElement('dialog'); setup.id = 'room-assistant-setup'; setup.setAttribute('aria-labelledby', 'assistant-setup-title');
   setup.innerHTML = uiText("human.copy.007");
   document.body.append(setup); setup.querySelector('[data-close-setup]').onclick = () => setup.close();
+  setup.addEventListener('close', () => { if (setupFromDraft) { setupFromDraft = false; $('#message-input').focus({ preventScroll: true }); } });
   setup.querySelector('#assistant-enroll').onclick = () => { setup.close(); $('#connect-agent-button').click(); };
   $('#assistant-setup').onclick = () => {
     const state = getState();
@@ -90,15 +121,16 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     $('#assistant-setup-error').textContent = ''; setup.showModal();
   };
   setup.querySelector('form').onsubmit = async event => {
-    event.preventDefault(); const stamp = key(); const button = setup.querySelector('[type=submit]'); button.disabled = true;
+    event.preventDefault(); if (dispatchBlocked()) return; const stamp = key(); const button = setup.querySelector('[type=submit]'); button.disabled = true;
     try {
       configureOperation ??= { action: 'configure', requestId: crypto.randomUUID(), expectedRevision: projection?.assistant.revision ?? 0, name: 'Room', coordinatorMemberId: setup.querySelector('select').value };
       await client.request(path(), { method: 'POST', data: configureOperation });
-      if (stamp !== key()) return; configureOperation = null; setup.close(); lastRead = 0; await refresh();
+      if (stamp !== key()) return; configureOperation = null; if (setupFromDraft) error = ''; setup.close(); lastRead = 0; await refresh();
     } catch (failure) { if (stamp === key()) { $('#assistant-setup-error').textContent = failure.message; if (failure.status >= 400 && failure.status < 500) { configureOperation = null; lastRead = 0; await refresh(); } else setup.querySelector('select').disabled = true; } }
     finally { button.disabled = false; }
   };
   function paint() {
+    syncIntent();
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     section.querySelector('strong').textContent = assistant.name || 'Room';
@@ -180,6 +212,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     $('#assistant-error').textContent = error; $('#assistant-retry').hidden = !operation; $('#assistant-review').hidden = !rejectedOperation; $('#assistant-discard').hidden = !operation && !rejectedOperation; ask.disabled = Boolean(operation);
   }
   function syncContribution() {
+    const previous = JSON.stringify(contribution);
     const scoped = getContribution?.();
     if (scoped) {
       contribution = { action: scoped.action, runId: scoped.runId, expectedRevision: scoped.expectedRevision, ...(scoped.action === 'resolve' ? {} : { conflict: scoped.conflict }) };
@@ -188,6 +221,8 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     } else if (contribution) {
       contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
     }
+    if (previous !== JSON.stringify(contribution)) intentRevision++;
+    syncIntent();
   }
   async function refresh() {
     if (!human() || !getState() || reading || document.hidden || Date.now() - lastRead < (projection?.runs?.some(run => run.status === 'working') ? 500 : 3000)) return;
@@ -207,12 +242,13 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       paint();
     } }
   }
-  $('#assistant-retry').onclick = invoke;
-  $('#assistant-discard').onclick = () => { operation = null; rejectedOperation = null; persistOperation(); error = ''; contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed','false'); paint(); };
+  $('#assistant-retry').onclick = () => { if (!dispatchBlocked()) return invoke(); };
+  $('#assistant-discard').onclick = () => { if (dispatchBlocked()) return; operation = null; rejectedOperation = null; persistOperation(); error = ''; contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed','false'); paint(); };
   $('#assistant-review').onclick = async () => {
+    if (dispatchBlocked()) return;
     const original = rejectedOperation, stamp = key(); if (!original) return;
     try {
-      const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation) return;
+      const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation || dispatchBlocked()) return;
       const run = latest.runs.find(r => r.id === original.runId);
       if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
       operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in original ? { expectedAttemptId: run.attemptId || null } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
@@ -232,7 +268,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       syncContribution(); $('#message-input').focus(); return;
     }
     const button = event.target.closest('[data-pause-run]'); if (!button) return;
-    if (operation) return;
+    if (operation || dispatchBlocked()) return;
     operation = { action: button.dataset.cancel ? 'cancel' : button.dataset.resume ? 'resume' : 'pause', requestId: crypto.randomUUID(), runId: button.dataset.pauseRun, expectedRevision: Number(button.dataset.revision), ...(button.dataset.resume ? {} : { expectedAttemptId: button.closest('[data-attempt-id]')?.dataset.attemptId || null }) };
     // Save the exact operation before dispatch; a lost response cannot create a second stop/resume.
     persistOperation(); button.setAttribute('aria-disabled', 'true'); await invoke(); // aria-disabled keeps focus (R5-1); `if (operation)` already blocks a second submit
@@ -287,11 +323,12 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     // Ask Room from the @ list: same state the Ask Room button toggles on.
     selectAsk() {
       if (!human() || document.body.classList.contains('human-advanced') || !projection?.assistant.coordinatorMemberId) return false;
-      selected = true; ask.setAttribute('aria-pressed', 'true'); return true;
+      intentRevision++; selected = true; ask.setAttribute('aria-pressed', 'true'); syncIntent(); return true;
     },
     assistantName(id) { return human() && !document.body.classList.contains('human-advanced') && projection?.assistant.coordinatorMemberId === id ? projection.assistant.name : null; },
     sync() {
       const active = human() && Boolean(getState()); document.body.classList.toggle('human-experience', active);
+      if (!active || boundary !== key()) dispatchReserved = false;
       document.body.classList.toggle('human-single-conversation', active && Object.values(getState()?.channels ?? {}).filter(c => !c.archivedAt).length <= 1);
       section.hidden = !active; ask.hidden = !active; advanced.hidden = !active;
       if (active) {
@@ -316,6 +353,8 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       paint(); void refresh();
     },
     syncContribution,
+    syncIntent,
+    releaseDispatch(reservation) { if (reservation && reservation === dispatchReserved) dispatchReserved = false; },
     intent(content) {
       syncContribution();
       if (contribution) {
@@ -326,7 +365,56 @@ export function installHumanExperience({ getState, getSession, client, notice, o
           return null;
         }
       }
-      const solo = Object.values(getState()?.members ?? {}).filter(m => m.active !== false && m.kind === 'human').length === 1 && projection?.assistant.coordinatorMemberId && soloUnaddressed({ ...content, members: getState().members, messages: getState().messages, selfId: getSession().member.id, assistantId: projection.assistant.coordinatorMemberId }); return !operation && human() && !content.toMemberId && (contribution || selected || /^@Room\b/i.test(content.body) || solo) ? { ...(contribution || { action: 'invoke' }) } : null; },
+      return human() && !content.toMemberId && (contribution || selected || /^@Room\b/i.test(content.body)) ? { ...(contribution || { action: 'invoke' }) } : null; },
+    async preflight(content, retry = null) {
+      const wanted = retry ? retry.intent : this.intent(content);
+      if (!wanted) return { ok: true, intent: null };
+      if (operation || configureOperation || preflightBusy || dispatchReserved) {
+        notice(uiText('human.intent.pending'), true);
+        return { ok: false, intent: null };
+      }
+      if (retry) return reserveDispatch(wanted);
+      const stamp = key(), revision = intentRevision, displayedCoordinator = projection?.assistant.coordinatorMemberId;
+      preflightBusy = true;
+      intentCue.textContent = uiText('human.intent.checking');
+      try {
+        const next = await client.request(path());
+        if (stamp !== key()) return { ok: false, intent: null };
+        if (revision !== intentRevision || JSON.stringify(this.intent(content)) !== JSON.stringify(wanted)) {
+          notice(uiText('human.intent.changed'), true);
+          return { ok: false, intent: null };
+        }
+        projection = next; paint();
+        if (operation || wanted.action === 'invoke' && displayedCoordinator && displayedCoordinator !== next.assistant.coordinatorMemberId) {
+          notice(uiText(operation ? 'human.intent.pending' : 'human.intent.changed'), true);
+          return { ok: false, intent: null };
+        }
+        if (wanted.action !== 'invoke') {
+          const run = next.runs.find(candidate => candidate.id === wanted.runId);
+          if (!run || run.sourceDeleted || run.sourceMessageId !== content.replyToId || run.revision !== wanted.expectedRevision
+            || CLOSED.includes(run.status) || run.status === 'cancel_requested'
+            || wanted.action === 'resolve' && (run.status !== 'needs_input'
+              || getSession().member.id !== run.initiatorId && getSession().member.id !== getState().room.ownerId)) {
+            notice(uiText('human.intent.reviewCurrent'), true);
+            return { ok: false, intent: null };
+          }
+          return reserveDispatch(wanted);
+        }
+        const coordinator = getState()?.members?.[next.assistant.coordinatorMemberId];
+        if (!coordinator || coordinator.active === false || coordinator.kind !== 'agent' || !coordinator.permissions?.includes('accept_work') || next.assistant.availability === 'not_connected') {
+          const owner = getState().room.ownerId === getSession().member.id;
+          error = uiText(owner ? 'human.intent.ownerSetup' : 'human.intent.memberSetup');
+          paint(); notice(error, true);
+          if (owner) { setupFromDraft = true; $('#assistant-setup').click(); }
+          else $('#message-input').focus({ preventScroll: true });
+          return { ok: false, intent: null };
+        }
+        return reserveDispatch(wanted);
+      } catch {
+        if (stamp === key()) notice(uiText('human.intent.checkFailed'), true);
+        return { ok: false, intent: null };
+      } finally { preflightBusy = false; if (stamp === key()) syncIntent(); }
+    },
     shareResult(item) {
       if (!human() || document.body.classList.contains('human-advanced')) return false;
       if (!resultEntry?.command || resultEntry.workId !== item.id || resultEntry.boundary !== key()) {
@@ -340,7 +428,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     },
     async posted(messageId, wanted) {
       if (!wanted || !human()) return;
-      operation = { ...wanted, requestId: `ask-${messageId}`, ...(wanted.action === 'invoke' ? { runId: `run-${messageId}` } : {}), sourceMessageId: messageId }; persistOperation(); await invoke();
+      operation = { ...wanted, requestId: `ask-${messageId}`, ...(wanted.action === 'invoke' ? { runId: `run-${messageId}` } : {}), sourceMessageId: messageId }; persistOperation(); dispatchReserved = false; await invoke();
     }
   };
 }

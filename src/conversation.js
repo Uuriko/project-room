@@ -477,6 +477,16 @@ export function draftRecoveryScope(identity) {
 // now save for this tab until the 12-hour expiry or sign-out. Read only after
 // an authenticated room snapshot.
 // No credentials or server receipts are stored. Browser storage is untrusted.
+function recoveredAssistantIntent(value, data, assistantDraft) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || data.toMemberId) return null;
+  if (value.action === 'invoke') return Object.keys(value).length === 1 ? { action: 'invoke' } : null;
+  if (!assistantDraft || !['contribute', 'resolve'].includes(value.action)) return null;
+  const expected = { action: assistantDraft.action, runId: assistantDraft.runId, expectedRevision: assistantDraft.expectedRevision,
+    ...(assistantDraft.action === 'contribute' ? { conflict: assistantDraft.conflict } : {}) };
+  return Object.keys(value).length === Object.keys(expected).length && Object.entries(expected).every(([key, item]) => value[key] === item) ? expected : null;
+}
+
 export class DraftRecovery {
   constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
   clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
@@ -486,9 +496,12 @@ export class DraftRecovery {
       const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
+          ...(Object.hasOwn(d, 'alsoSendToChannel') ? { alsoSendToChannel: d.alsoSendToChannel }
+            : d.pending && Object.hasOwn(d.pending.command.data, 'alsoSendToChannel') ? { alsoSendToChannel: d.pending.command.data.alsoSendToChannel } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
-          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
+          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents,
+            ...(Object.hasOwn(d.pending, 'assistantIntent') ? { assistantIntent: recoveredAssistantIntent(d.pending.assistantIntent, d.pending.command.data, d.assistantDraft) } : {}) } : null }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -563,12 +576,25 @@ export class DraftRecovery {
         // Older saved commands without a messageId keep their original payload.
         const messageId = d.pending?.messageId;
         const messageIdValid = messageId === undefined || (typeof messageId === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(messageId));
+        let alsoSendToChannel = d.alsoSendToChannel;
+        if (alsoSendToChannel !== undefined && typeof alsoSendToChannel !== 'boolean') continue;
+        if (d.pending?.contents) {
+          try {
+            const original = JSON.parse(d.pending.contents).data?.alsoSendToChannel;
+            // The checkbox can be false while the original command omitted it.
+            // Preserve payload presence, not just its equivalent UI value.
+            if (!Object.hasOwn(d, 'alsoSendToChannel') || Boolean(original) === alsoSendToChannel) alsoSendToChannel = original;
+          } catch { /* Payload validation below rejects malformed retries. */ }
+        }
+        if (alsoSendToChannel !== undefined && (typeof alsoSendToChannel !== 'boolean'
+          || alsoSendToChannel && (d.toMemberId || !d.replyToId || index.byId.get(d.replyToId)?.toMemberId))) continue;
         const data = { ...(messageId === undefined ? {} : { messageId }), body: d.body.trim(), toMemberId: d.toMemberId || null, replyToId: d.replyToId,
-          ...(channelId ? { channelId } : {}) };
+          ...(channelId ? { channelId } : {}), ...(alsoSendToChannel === undefined ? {} : { alsoSendToChannel }) };
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, ...(assistantDraft ? { assistantDraft } : {}) });
+        if (pending && Object.hasOwn(d.pending, 'assistantIntent')) pending.assistantIntent = recoveredAssistantIntent(d.pending.assistantIntent, data, assistantDraft);
+        drafts.save(draftId, { ...data, ...(Object.hasOwn(d, 'alsoSendToChannel') ? { alsoSendToChannel: d.alsoSendToChannel } : {}), body: d.body, toMemberId: d.toMemberId, pending, ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)

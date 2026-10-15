@@ -1,3 +1,4 @@
+import './predictable-request-browser-check.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, mkdirSync } from 'node:fs';
@@ -179,16 +180,19 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#assistant-retry').waitFor({state:'hidden'});
   assert.equal((await api('owner')).runs.length,2);
   // Select context at revision N; the host claims N+1 before the human sends.
-  // A rejected stale write needs review and a new explicit confirmation, not an endless retry.
+  // Preflight rejects stale context before posting; the human selects the current request again.
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Recover this request exactly once.'));
   let recovery = (await api('producer')).runs.find(r=>r.id!==run.id);
   await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).click(); // the newest open ask is on the card face
   recovery = (await api('producer',{action:'claim',runId:recovery.id,attemptId:'recovery-host',expectedRevision:recovery.revision})).result;
-  await send(peer,'Please include our latest constraint.');
-  await peer.locator('#assistant-review').waitFor({state:'visible'});
+  await peer.locator('#message-input').fill('Please include our latest constraint.');
+  await peer.locator('#message-form button[type=submit]').click();
+  await peer.waitForFunction(()=>!document.querySelector('#message-form button[type=submit]').disabled);
+  assert.equal(await peer.locator('#message-input').inputValue(),'Please include our latest constraint.');
+  assert.equal(f.store.room('commons').state.messages.filter(m=>m.body==='Please include our latest constraint.').length,0);
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,1);
-  await peer.locator('#assistant-review').click(); await peer.locator('#assistant-retry').click();
-  await peer.locator('#assistant-retry').waitFor({state:'hidden'});
+  await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).first().click();
+  await send(peer,'Please include our latest constraint.');
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,2);
   // Stop is available for ordinary requests, without deleting the prompt.
   // Losing the committed response must preserve one exact cancellation for retry.

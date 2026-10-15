@@ -10,6 +10,7 @@
 .human-composer-actions { display: contents; }
 .human-experience .human-composer-actions { display: flex; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
 #ask-room { font-size: var(--text-sm); white-space: nowrap; }
+#composer-intent { margin: var(--space-1) 0; overflow-wrap: anywhere; color: var(--muted); }
 #room-assistant { margin: .5rem 1rem; padding: .6rem .9rem; border-radius: .8rem; border: 1px solid var(--border); }
 .assistant-heading { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; }
 #room-assistant-status { flex: 1; font-size: var(--text-sm); color: var(--muted); }

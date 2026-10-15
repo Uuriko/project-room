@@ -403,6 +403,81 @@ test("assistant drafts recover independently of the destination thread and rejec
   }
 });
 
+test("draft reload preserves exact message retry identity and only validated assistant intent", () => {
+  const state = { members: { peer: {} }, messages: [] };
+  for (const [intent, recipient, expected] of [
+    [{ action: 'invoke' }, '', { action: 'invoke' }], [null, '', null],
+    [undefined, '', undefined], [{ action: 'invoke' }, 'peer', null],
+    [{ action: 'invoke', runId: 'injected' }, '', null], [{ action: 'resolve' }, '', null]
+  ]) {
+    const memory = new Map(), storage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) };
+    const recovery = new DraftRecovery(storage, () => 1000), drafts = new ConversationDrafts();
+    const data = { messageId: 'original-message', body: 'Keep my request', toMemberId: recipient || null, replyToId: null, channelId: 'general' };
+    const pending = draftCommand(null, 'message.posted', data);
+    if (intent !== undefined) pending.assistantIntent = intent;
+    drafts.save(null, { ...data, toMemberId: recipient, pending });
+    recovery.write('scope', drafts, null);
+    const restored = new DraftRecovery(storage, () => 1000).read('scope', state).drafts.get(null).pending;
+    assert.equal(restored.command.id, pending.command.id);
+    assert.equal(restored.command.data.messageId, data.messageId);
+    assert.equal(restored.contents, pending.contents);
+    assert.deepEqual(restored.assistantIntent, expected);
+    assert.equal(Object.hasOwn(restored, 'assistantIntent'), intent !== undefined);
+    if (!recipient) {
+      const corrupted = JSON.parse(memory.get(recovery.key));
+      corrupted.entries[0][1].pending.assistantIntent = { action: 'invoke', permissions: ['owner'] };
+      memory.set(recovery.key, JSON.stringify(corrupted));
+      assert.equal(recovery.read('scope', state).drafts.get(null).pending.assistantIntent, null);
+    }
+  }
+});
+
+test("recovered continuation intent must match its separately validated draft", () => {
+  const state = { members: {}, messages: [{ id: 'ask', replyToId: null, toMemberId: null, body: 'Original ask', channelId: 'general' }] };
+  for (const action of ['contribute', 'resolve']) {
+    const memory = new Map(), recovery = new DraftRecovery({ getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) }, () => 1000);
+    const drafts = new ConversationDrafts(), key = 'assistant:run';
+    const intent = { action, runId: 'run', expectedRevision: 4, ...(action === 'contribute' ? { conflict: false } : {}) };
+    const data = { messageId: 'addition', body: 'Additional context', toMemberId: null, replyToId: 'ask', channelId: 'general' };
+    const pending = draftCommand(null, 'message.posted', data); pending.assistantIntent = intent;
+    drafts.save(key, { ...data, toMemberId: '', assistantDraft: { ...intent, sourceMessageId: 'ask' }, pending });
+    recovery.write('scope', drafts, 'ask', key);
+    assert.deepEqual(recovery.read('scope', state).drafts.get(key).pending, pending);
+    const corrupted = JSON.parse(memory.get(recovery.key));
+    corrupted.entries[0][1].pending.assistantIntent.expectedRevision++;
+    memory.set(recovery.key, JSON.stringify(corrupted));
+    const restored = recovery.read('scope', state).drafts.get(key).pending;
+    assert.equal(restored.assistantIntent, null);
+    assert.equal(restored.command.id, pending.command.id);
+  }
+});
+
+test("thread broadcast retry retains its exact flag and identities across reload", () => {
+  const state = { members: { peer: {} }, messages: [{ id: 'thread', body: 'Topic', replyToId: null, toMemberId: null }] };
+  for (const flag of [true, false, undefined]) {
+    const memory = new Map(), recovery = new DraftRecovery({ getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) }, () => 1000);
+    const drafts = new ConversationDrafts();
+    const data = { messageId: 'reply', body: 'Update', toMemberId: null, replyToId: 'thread', channelId: 'general', ...(flag === undefined ? {} : { alsoSendToChannel: flag }) };
+    const pending = draftCommand(null, 'message.posted', data); pending.assistantIntent = { action: 'invoke' };
+    drafts.save('thread', { ...data, alsoSendToChannel: Boolean(flag), toMemberId: '', pending });
+    recovery.write('scope', drafts, 'thread');
+    assert.deepEqual(recovery.read('scope', state).drafts.get('thread').pending, pending);
+    const saved = JSON.parse(memory.get(recovery.key));
+    delete saved.entries[0][1].alsoSendToChannel;
+    memory.set(recovery.key, JSON.stringify(saved));
+    assert.deepEqual(recovery.read('scope', state).drafts.get('thread').pending, pending, 'older pending payload recovers the flag without changing retry identity');
+    saved.entries[0][1].alsoSendToChannel = 'true';
+    memory.set(recovery.key, JSON.stringify(saved));
+    assert.equal(recovery.read('scope', state).drafts.entries.has('thread'), false);
+    if (flag === true) {
+      delete saved.entries[0][1].alsoSendToChannel;
+      memory.set(recovery.key, JSON.stringify(saved));
+      const privateState = { ...state, messages: [{ ...state.messages[0], toMemberId: 'peer' }] };
+      assert.equal(recovery.read('scope', privateState).drafts.entries.has('thread'), false, 'private thread cannot become a broadcast');
+    }
+  }
+});
+
 test("a message overflow menu opens upward only when it does not fit below and fits better above", () => {
   const box = { limitTop: 0, limitBottom: 600, menuHeight: 213 };
   assert.equal(menuOpensUp({ ...box, triggerTop: 100, triggerBottom: 120 }), false, "room below keeps it downward");

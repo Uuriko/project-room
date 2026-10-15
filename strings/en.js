@@ -409,5 +409,21 @@ export default {
   "entry.signedOut": "Not signed in",
   "entry.connection": "Not connected · sign in required",
   "entry.refresh": "Refresh connection",
-  "result.discuss": "Discuss result"
+  "result.discuss": "Discuss result",
+  "human.intent.chat": "Post a message in this channel.",
+  "human.intent.retryAsk": "Retry the original Room request. Visible in this channel.",
+  "human.intent.retryChat": "Retry the original message in this channel.",
+  "human.intent.retryPrivate": "Retry the original private message to {name}.",
+  "human.intent.ask": "Ask Room, handled by {name}. Visible in this channel.",
+  "human.intent.continue": "Add to this Room request. Visible in this channel.",
+  "human.intent.connect": "Ask Room. Connect an agent before sending.",
+  "human.intent.private": "Private message to {name}.",
+  "human.intent.recipient": "the selected person",
+  "human.intent.pending": "Your earlier Room request is not confirmed. Retry or dismiss it before asking again.",
+  "human.intent.checking": "Checking the Room connection before sending.",
+  "human.intent.changed": "Your request changed. Review it and send again.",
+  "human.intent.reviewCurrent": "This Room request changed. Review the current request before adding to it. Your draft is kept.",
+  "human.intent.ownerSetup": "Connect an agent for Room, then send your request. Your draft is kept.",
+  "human.intent.memberSetup": "Ask the room owner to connect an agent, then send your request. Your draft is kept.",
+  "human.intent.checkFailed": "Could not check the Room connection. Your draft is kept. Try sending again."
 };
