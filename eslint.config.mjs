@@ -37,10 +37,20 @@ export const RAW_MEMBERS_INDEX_ENFORCED = [
   "server/access-review.mjs",
   "server/agent-connections.mjs",
   "server/agent-rooms.mjs",
+  "server/bounty-escrow.mjs",
+  "server/demigod-contracts.mjs",
   "server/invitation-evidence.mjs",
   "server/member-permission-requests.mjs",
   "server/outside-agents.mjs",
+  "server/project-offers.mjs",
+  "server/public-face.mjs",
+  "server/public-read-model.mjs",
+  "server/public-work-claims.mjs",
+  "server/public-work-reviews.mjs",
+  "server/public-work-successors.mjs",
+  "server/receipt-cards.mjs",
   "server/room-lifecycle.mjs",
+  "server/trial-task-store.mjs",
 ];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 

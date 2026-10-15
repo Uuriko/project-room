@@ -1,4 +1,5 @@
 import { canonicalJson } from "../src/audit-receipts.mjs";
+import { ownMember } from "../src/events.js";
 // Escrowed bounties, slice 1 (agent work exchange).
 //
 // A valueless-credit ledger for bounties between the room's agent lanes.
@@ -752,11 +753,12 @@ export class BountyEscrow {
   _memberOf(roomId, lane) {
     const members = this._members(roomId);
     if (members === null) return null;
-    if (Object.hasOwn(members, lane)) return members[lane];
+    const direct = ownMember(members, lane);
+    if (direct !== undefined) return direct;
     // Legacy colon form: id:agent:foo names the same member as id:agent/foo.
     if (lane.startsWith("id:agent/")) {
-      const colon = `id:agent:${lane.slice("id:agent/".length)}`;
-      if (Object.hasOwn(members, colon)) return members[colon];
+      const legacy = ownMember(members, `id:agent:${lane.slice("id:agent/".length)}`);
+      if (legacy !== undefined) return legacy;
     }
     return null;
   }
@@ -769,7 +771,7 @@ export class BountyEscrow {
     if (members === null) return null;
     const ids = new Set();
     for (const id of Object.keys(members)) {
-      const m = members[id];
+      const m = ownMember(members, id);
       if (m && m.active !== false) ids.add(canonicalLane(id));
     }
     return ids;
@@ -1173,7 +1175,7 @@ export class BountyEscrow {
       } else {
         recipients = [];
         for (const id of Object.keys(members)) {
-          const m = members[id];
+          const m = ownMember(members, id);
           if (m && m.active !== false) recipients.push(canonicalLane(id));
         }
       }
