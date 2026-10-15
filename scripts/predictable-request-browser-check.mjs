@@ -90,7 +90,7 @@ test('missing coordinator keeps owner draft and posts nothing; setup requires a 
   await f.page.locator('#room-assistant-setup select').selectOption('producer');
   await f.page.locator('#room-assistant-setup button[type=submit]').click();
   await f.page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
-  assert.equal(await f.page.locator('#message-input').evaluate(node => node === document.activeElement), true, 'setup returns focus to the retained draft');
+  await f.page.waitForFunction(() => document.activeElement === document.querySelector('#message-input')); // dialog close dispatches its focus restoration asynchronously.
   assert.equal(await f.page.locator('#message-input').inputValue(), text);
   assert.equal(f.state().messages.filter(m => m.body === text).length, 0, 'configuration does not send the draft');
   await f.page.locator('#message-form button[type=submit]').click();

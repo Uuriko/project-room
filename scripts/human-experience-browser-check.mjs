@@ -499,7 +499,7 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
   await status.getByText('Stopped',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>document.activeElement===document.body),false,'focus survives the Stop button disappearing');
 });
-for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts, authority and stale review on a phone (${theme})`, { timeout: 60000 }, async t => {
+for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts, authority and stale preflight on a phone (${theme})`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
@@ -544,12 +544,14 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
   const observedRevision = run.revision;
   run = await api('producer', { action: 'report', runId: run.id, attemptId: 'resolve-host', expectedRevision: run.revision, state: 'needs_input', summary: 'The review also needs an owner.' });
   await owner.locator('#message-form button[type=submit]').click();
-  await owner.locator('#assistant-review').waitFor({ state: 'visible' });
+  await owner.waitForFunction(() => !document.querySelector('#message-form button[type=submit]').disabled);
+  assert.equal(await owner.locator('#message-input').inputValue(), 'Choose Monday after the review.');
+  assert.equal(f.store.room('commons').state.messages.filter(message => message.body === 'Choose Monday after the review.').length, 0, 'stale resolution preflight posts nothing');
   assert.equal((await api('owner')).runs[0].inputs.length, 1, 'a stale resolution is not applied');
-  await owner.locator('#assistant-review').click();
-  assert.equal((await api('owner')).runs[0].status, 'needs_input', 'review requires a separate confirmation');
-  await owner.locator('#assistant-retry').click();
-  await owner.locator('#assistant-retry').waitFor({ state: 'hidden' });
+  assert.equal((await api('owner')).runs[0].status, 'needs_input');
+  await control.click();
+  await owner.locator('#message-form button[type=submit]').click();
+  await owner.waitForFunction(() => document.querySelector('#message-input').value === '');
   run = (await api('owner')).runs[0];
   assert.ok(run.revision > observedRevision);
   assert.equal(run.status, 'pause_requested', 'the original host must pause before continuing with the resolution');
