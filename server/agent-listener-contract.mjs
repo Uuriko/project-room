@@ -8,7 +8,7 @@ export function validListenerLease(value) {
   return value === undefined || value === true || Boolean(value && typeof value === "object" && !Array.isArray(value)
     && Object.keys(value).length === 1 && typeof value.roomId === "string" && value.roomId.length > 0);
 }
-export function heartbeatWithListener(store, auth, data, { roomKey = false } = {}) {
+export function heartbeatWithListener(store, auth, data, { roomKey = false, door = "heartbeat" } = {}) {
   let hostId = data.hostId;
   if (roomKey) {
     assertRoomKeyPullOnly(store, auth.identityId, data);
@@ -28,7 +28,10 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false } = {
     agentId: auth.identityId, hostId, mode: data.mode,
     wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
     pushNotification: data.pushNotification ?? null, workWakes: data.workWakes,
-    workScopeRoomId: scopedNow ? auth.roomId : null, activityRoomId: scopedNow ? auth.roomId : null });
+    workScopeRoomId: scopedNow ? auth.roomId : null, activityRoomId: scopedNow ? auth.roomId : null,
+    // #3345: delivery accounting attributes the page to its door (the
+    // REST heartbeat route and the MCP heartbeat_set tool share this path).
+    door });
   // CX5-FIX: lease acquisition rides the same transaction as the
   // heartbeat, keyed by the queue the listener drains — the store's
   // leases are per-room scopes ('' for the roomless identity queue),

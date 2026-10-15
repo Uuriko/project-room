@@ -418,6 +418,29 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_wake_counters",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_failures",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "subject_id"
+      ]
+    }
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",

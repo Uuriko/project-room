@@ -11154,7 +11154,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '200': { description: "{ agentId, hostId, pendingWakes, more, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
@@ -11227,6 +11227,7 @@ paths:
         '200': { description: "{ acknowledged: [signalId] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+        '404': { description: 'agent_not_registered — no host has reported for this identity yet; the registration gate poll enforces applies at ack too (#3266)' }
         '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
         '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
