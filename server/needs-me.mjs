@@ -18,6 +18,7 @@ import { ServiceError } from "./store.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 
@@ -173,29 +174,52 @@ function handoffsOf(store, roomId, memberId, after, state) {
   return items.sort((a, b) => a.seq - b.seq).slice(0, MAX_PER_KIND + 1);
 }
 
-function roomDmsOf(store, roomId, memberId, after) {
-  const rows = store.db.prepare(
-    `SELECT sequence, body FROM events
-     WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted'
-       AND json_extract(body,'$.data.toMemberId')=?
-     ORDER BY sequence ASC LIMIT ?`
-  ).all(roomId, after, memberId, MAX_PER_KIND + 1);
-  return rows.map(row => {
-    const event = JSON.parse(row.body);
-    const messageId = event.data?.messageId ?? event.id;
-    return {
-      kind: "dm",
-      roomId,
-      seq: row.sequence,
-      id: messageId,
-      channel: "room",
-      summary: clip(event.data?.body),
-      next: {
-        tool: "room_reply",
-        arguments: { roomId, requestId: `needs-me-${roomId}-${messageId}`, replyToId: messageId, ...(event.actorId ? { toMemberId: event.actorId } : {}) }
-      }
-    };
-  });
+function roomDmsOf(store, roomId, memberId, after, state) {
+  // The event log holds the body as originally posted; the live projection
+  // (state.messages) is the current state. A DM deleted after posting must
+  // not surface at all (its logged body is already scrubbed, so it showed
+  // as an empty item inviting a reply to a tombstone), and an edited DM
+  // must show its current body, not the pre-edit text. Messages missing
+  // from the projection (e.g. archived out of it) fall back to the logged
+  // body, as deriveNotifications does.
+  const currentById = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  const items = [];
+  // Scan in batches: a deleted DM must not consume one of the
+  // MAX_PER_KIND + 1 slots, or the caller's overflow check (kind length >
+  // MAX_PER_KIND lowers the cursor horizon) would advance the cursor past
+  // live DMs that were never returned.
+  let cursor = after;
+  while (items.length <= MAX_PER_KIND) {
+    const rows = store.db.prepare(
+      `SELECT sequence, body FROM events
+       WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted'
+         AND json_extract(body,'$.data.toMemberId')=?
+       ORDER BY sequence ASC LIMIT ?`
+    ).all(roomId, cursor, memberId, MAX_PER_KIND + 1);
+    if (!rows.length) break;
+    for (const row of rows) {
+      cursor = row.sequence;
+      const event = JSON.parse(row.body);
+      const messageId = event.data?.messageId ?? event.id;
+      const current = currentById.get(messageId);
+      if (current?.deletedAt) continue;
+      items.push({
+        kind: "dm",
+        roomId,
+        seq: row.sequence,
+        id: messageId,
+        channel: "room",
+        summary: clip(current ? current.body : event.data?.body),
+        next: {
+          tool: "room_reply",
+          arguments: { roomId, requestId: `needs-me-${roomId}-${messageId}`, replyToId: messageId, ...(event.actorId ? { toMemberId: event.actorId } : {}) }
+        }
+      });
+      if (items.length > MAX_PER_KIND) break;
+    }
+    if (rows.length < MAX_PER_KIND + 1) break;
+  }
+  return items;
 }
 
 function peerDmsOf(store, roomId, identityId, after) {
@@ -306,10 +330,12 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
   if (!member || !mayWriteWorkClaims({ member: { ...member, id: memberId }, ownerId })) return null;
   const list = claims ?? claimBoardOf(store, roomId);
   if (!list) return null;
-  // Invalidated work keeps its original state for the audit trail. Neither
-  // that state nor a retired scope proves a usable dependency or ready work.
-  const usable = item => item && !item.premiseFlag && !item.supersededBy;
-  const done = new Set(list.filter(item => usable(item) && item.state === "done").map(item => item.id));
+  // Ready = the AvailableWork projection's board rule (available-work.mjs):
+  // usable (not invalidated — invalidated work keeps its original state for
+  // the audit trail, and neither that state nor a retired scope proves a
+  // usable dependency), unclaimed, kind "work", every dependency done.
+  // This section used to keep a private copy of that filter; it now
+  // consumes the one definition the pack/orient/public surfaces share.
   const updatedMs = item => {
     const ms = Date.parse(claimUpdatedAt(item));
     return Number.isFinite(ms) ? ms : null;
@@ -317,8 +343,7 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
   // Sort on the exact timestamp; round to minutes only for display.
   const minutesSince = ms => (ms === null ? null : Math.max(0, Math.round((nowMs - ms) / 60000)));
   // Board order (updatedAt desc, then id) within each group, as the Board shows.
-  const ready = list.filter(item => usable(item) && item.state === "unclaimed" && (item.kind ?? "work") === "work"
-    && (item.dependsOn ?? []).every(dep => done.has(dep)))
+  const ready = availableBoardRows(list)
     .map(item => ({ item, at: updatedMs(item), released: (item.history ?? []).some(entry => entry?.action === "claimed"),
       hard: isHardWork(item) }))
     // Hard items (tag hard / hard-problem) first: they are the ones that stall
@@ -453,7 +478,10 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (asks) reviewAsks.push(asks);
     const mine = myWorkOf(store, link.roomId, link.memberId, claims);
     if (mine) myWork.push(mine);
-    const after = roomWatermark(parsed, link.roomId);
+    // A watermark above the room head (a numeric since taken from another
+    // room's seq, or a cursor saved before a restore) can never be passed
+    // legitimately; keeping it would hide this room's next events.
+    const after = Math.min(roomWatermark(parsed, link.roomId), authority.sequence);
     const landAfter = landWatermark(parsed, link.roomId);
     let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
     let candidates = [];
@@ -461,7 +489,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
       const state = store.room(link.roomId).state;
       const kinds = [
         mentionsOf(store, link.roomId, link.memberId, after, through),
-        roomDmsOf(store, link.roomId, link.memberId, after),
+        roomDmsOf(store, link.roomId, link.memberId, after, state),
         peerDmsOf(store, link.roomId, identity.identityId, after),
         bondRequestsOf(store, link.roomId, pendingBonds, after),
         directAsksOf(store, link.roomId, link.memberId, after, state),
@@ -497,7 +525,12 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (items.length === MAX_ITEMS && link !== links.at(-1)) { hasMore = true; break; }
   }
   // Retain the old rooms/land shape and extend it only for continuation/ties.
-  const cursor = { rooms, land, landIds, ...(parsed.number !== null ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
+  // r216 (John's Tab QA): a legacy numeric floor must ride only while the read
+  // is still paginating (hasMore). Once a pass records every linked room, the
+  // floor would follow the agent into a room it joins later and hide that
+  // room's first mentions forever; without it, cursor.rooms/landIds keep the
+  // delivered state exact and nothing replays.
+  const cursor = { rooms, land, landIds, ...(parsed.number !== null && hasMore ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
   return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
 }

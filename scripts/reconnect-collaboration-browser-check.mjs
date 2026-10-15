@@ -254,6 +254,11 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   await page.screenshot({ path: `${prefix}-answered.png` });
   await page.close();
 
+  // Decision #10: the workItems -> board-claims backfill runs at RoomStore
+  // open and writes the accepted items' board cards once. Stage that
+  // one-time migration before the baseline so the restart below is a pure
+  // no-op, which is what this check pins.
+  f.store.backfillWorkItemClaims();
   const beforeRestart = auditRecovery(f.store);
   await stopServer(); f.store.close(); f.store = new RoomStore(join(f.directory, 'room.sqlite'));
   server = createRoomServer({ store: f.store, streamInterval: 50 }); await listen(port);

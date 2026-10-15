@@ -3,7 +3,7 @@ import { RoomAgentClient, RoomClientError } from './room-agent.mjs';
 import { connectionDiagnostic } from './agent-connection.mjs';
 import { parseNeedsMeBody } from './grok-host.mjs';
 import { validId } from '../src/events.js';
-import { edgeDoorApiPath } from '../deploy/agent-discovery.mjs';
+import { edgeDoorApiPath } from '../server/agent-discovery.mjs';
 
 const invalid = () => new RoomClientError(200, 'invalid_response', 'Unsupported resume response');
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -75,7 +75,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     incompleteSources: [], nextReads: [], metrics };
   if (focus === 'replies') Object.assign(out, { focus, openRequests: [], optionalConversations: [] });
   const safe = () => { if (JSON.stringify(out).includes(connection.token)) throw invalid(); return out; };
-  const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error) });
+  const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error), httpStatus: error instanceof RoomClientError ? error.status : 0 });
   const contextRead = async version => {
     const value = await client.roomContext({ sinceVersion: version, signal: stop });
     if (!value?.not_modified && value?.contractVersion !== 1 || !count(value?.evaluatedThrough) || !/^[a-f0-9]{64}$/.test(value.context_version)

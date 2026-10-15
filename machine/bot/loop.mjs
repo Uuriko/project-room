@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { machineEnabled } from "../lib/flags.mjs";
 import { configHome, loadConfig } from "../lib/config.mjs";
@@ -81,7 +81,9 @@ export class MachineBot {
       active: this.active ? { ...this.active, observations: undefined } : null,
     };
     mkdirSync(this.home, { recursive: true, mode: 0o700 });
-    writeFileSync(this.statePath(), `${redact(JSON.stringify(payload), secrets)}\n`, { mode: 0o600 });
+    const temporary = `${this.statePath()}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, `${redact(JSON.stringify(payload), secrets)}\n`, { mode: 0o600 });
+    renameSync(temporary, this.statePath());
   }
 
   async secrets() {
@@ -103,13 +105,13 @@ export class MachineBot {
 
   async run() {
     while (!this.stopped) {
-      let result = null;
-      try { result = await this.once(); } catch { /* a failed poll retries */ }
+      let result = null, failed = false;
+      try { result = await this.once(); } catch { failed = true; }
       if (this.stopped) return;
       // A halted or paused machine leaves its wakes unacked, so the next
       // heartbeat hands them straight back; wait instead of spinning on them.
       const held = (result?.results ?? []).some(item => item?.halted || item?.paused);
-      if ((this.pending && !this.active) || held) await this.sleep(1000);
+      if (failed || result?.deliveryPending || result?.polled === false || (this.pending && !this.active) || held) await this.sleep(1000);
     }
   }
 
@@ -208,6 +210,23 @@ export class MachineBot {
     // the board and consumed the wake, so nobody picked it up after resume.
     if (this.isHalted()) return { signalId, halted: true };
     if (await this.isPaused(roomId)) return { signalId, paused: true };
+    // An implicitly addressed public reply is a notification, not a new task.
+    // tryGo alone admits approval replies after checking sender and plan.
+    // Consume the observed notification without replying: two bots sending
+    // automatic plans/refusals back to each other would create endless wakes.
+    // Explicit mentions (including replies), directed messages and board work retain their
+    // existing admission paths; other clients still receive the reply wake.
+    if (source.replyToId && !source.toMemberId && source.explicitlyMentioned === false) {
+      if (source.updateId) {
+        const marked = await this.api.markUpdate(roomId, source.updateId, "done", source.basisToken);
+        if (!marked.ok) return { signalId, ignored: "unread" };
+      }
+      await this.api.ack([signalId]);
+      return { signalId, ignored: "reply_notification" };
+    }
+    // Keep unrelated work durable until this approval is resolved. This also
+    // prevents a second wake in the same page from overwriting the saved plan.
+    if (this.pending) return { signalId, deferred: "pending_approval" };
     const provider = await this.resolveProvider();
     if (provider.name === "none" || provider.missingKey === true) {
       await this.reply(roomId, provider.message, source.messageId, source.updateId, source.basisToken);
@@ -303,6 +322,9 @@ export class MachineBot {
       kind,
       roomId,
       messageId: message.id ?? messageId,
+      replyToId: message.replyToId ?? null,
+      toMemberId: message.toMemberId ?? null,
+      explicitlyMentioned: page.value?.addressing?.explicitlyMentioned,
       updateId: queued.updateId ?? null,
       basisToken: queued.basisToken ?? null,
       text: message.body,
@@ -349,6 +371,13 @@ export class MachineBot {
       return;
     }
     this.provider = await this.resolveProvider();
+    // Every task that reaches begin() is a new task, so reset the cached
+    // provider here: it otherwise keeps the previous task's conversation
+    // and never seeds the new task text (#2869). Resetting in begin() —
+    // not just on a provider-side task-text change — also covers a new
+    // task whose text is identical to the previous one. Providers without
+    // conversation state may omit reset().
+    this.provider?.reset?.();
     this.active = {
       roomId: source.roomId,
       messageId: source.messageId,
@@ -428,11 +457,18 @@ export class MachineBot {
   // and stop before the next step. The halted state persists across restarts
   // until the operator resumes, so the bot must not pick the work back up.
   async haltActive() {
+    if (this.active?.completion) return { halted: true, deliveryPending: true };
     if (!this.active) return { stopped: true };
     return this.stopEarly("Halted by the operator. I stopped before the next step.");
   }
 
   async continueActive() {
+    // Finished execution resumes delivery, never another model/tool turn.
+    if (this.active?.completion) {
+      if (this.stopped || this.isHalted()) return { halted: true, deliveryPending: true };
+      if (await this.isPaused(this.active.roomId)) return { paused: true, deliveryPending: true };
+      return this.finish();
+    }
     // A persisted task loaded while already halted must be stopped and
     // cleared via stopEarly — not silently left active by the loop guard.
     if (this.isHalted()) return this.stopEarly("Halted by the operator. I stopped before the next step.");
@@ -629,7 +665,7 @@ export class MachineBot {
 
   clearSlot(active) {
     const state = this.daemon?.state ?? this.toolRuntime;
-    if (state?.slots) state.slots[active.slot] = null;
+    if (state?.slots?.[active.slot]?.claimId === active.leaseId) state.slots[active.slot] = null;
     if (active.slot === "scratch" && state) {
       deleteGuest(state, guestName("scratch", active.leaseId)).catch(() => {});
     }
@@ -637,29 +673,53 @@ export class MachineBot {
 
   async finish(text) {
     const active = this.active;
-    const receipt = await stageReceipt({
-      origin: this.config.roomOrigin,
-      roomId: active.roomId,
-      secret: this.secret,
-      home: this.home,
-      claimId: active.leaseId,
-      label: this.config.label,
-      slot: active.slot,
-    });
-    const note = text.slice(0, 400);
-    const lease = await closeClaim(this.config.roomOrigin, active.roomId, this.secret, active.leaseId, {
-      blobs: receipt.blobs, tags: receipt.tags, note,
-    });
-    await closeClaim(this.config.roomOrigin, active.roomId, this.secret, active.workId, {
-      blobs: receipt.blobs, tags: receipt.tags, note,
-    });
-    const lines = [text];
-    if (receipt.blobs.length) lines.push(`Receipt ${receipt.blobs.join(" ")}`);
-    await this.reply(active.roomId, lines.join("\n"), active.messageId, active.updateId, active.basisToken);
+    if (!active.completion) {
+      active.completion = { text: redact(text, await this.secrets()), messageId: randomUUID(), updateRequestId: randomUUID() };
+      await this.saveState();
+    }
+    const completion = active.completion;
+    const held = () => this.stopped || this.isHalted();
+    if (held()) return { halted: true, deliveryPending: true };
+    if (!completion.receipt) {
+      const receipt = await stageReceipt({
+        origin: this.config.roomOrigin, roomId: active.roomId, secret: this.secret,
+        home: this.home, claimId: active.leaseId, label: this.config.label, slot: active.slot, isStopped: held,
+      });
+      if (!receipt.ok) return { deliveryPending: true, stage: "receipt", status: receipt.status };
+      completion.receipt = receipt;
+      await this.saveState();
+    }
+    const receipt = completion.receipt, note = completion.text.slice(0, 400);
+    for (const field of ['leaseId', 'workId']) {
+      if (completion[field]) continue;
+      if (held()) return { halted: true, deliveryPending: true };
+      const closed = await closeClaim(this.config.roomOrigin, active.roomId, this.secret, active[field], {
+        blobs: receipt.blobs, tags: receipt.tags, note, requestId: `${completion.messageId}-${field}`, isStopped: held,
+      });
+      if (!closed.ok && !closed.awaitingReview) return { deliveryPending: true, stage: field, status: closed.status };
+      // Review blocks acceptance, not delivery of the evidence a reviewer needs.
+      completion[field] = closed.awaitingReview ? "awaiting_review" : true;
+      await this.saveState();
+    }
+    if (!completion.posted) {
+      if (held()) return { halted: true, deliveryPending: true };
+      const body = [completion.text, ...([completion.workId, completion.leaseId].includes("awaiting_review") ? ["Awaiting review."] : []), ...(receipt.blobs.length ? [`Receipt ${receipt.blobs.join(" ")}`] : [])].join("\n");
+      const posted = await this.api.post(active.roomId, body, { replyToId: active.messageId, messageId: completion.messageId });
+      if (!posted.ok) return { deliveryPending: true, stage: 'message', status: posted.status };
+      completion.posted = true;
+      await this.saveState();
+    }
+    if (held()) return { halted: true, deliveryPending: true };
+    if (active.updateId && active.basisToken) {
+      const marked = await this.api.markUpdate(active.roomId, active.updateId, 'done', active.basisToken, completion.updateRequestId);
+      // A newer update must remain actionable; never fetch a new basis just to clear it.
+      if (!marked.ok && !['update_changed', 'update_not_found'].includes(marked.value?.error?.code)) return { deliveryPending: true, stage: 'update', status: marked.status };
+    }
     this.clearSlot(active);
     this.active = null;
     await this.saveState();
-    return { done: true, closed: lease.ok, blobs: receipt.blobs, workId: active.workId, leaseId: active.leaseId };
+    const awaitingReview = [completion.workId, completion.leaseId].includes("awaiting_review");
+    return { done: true, closed: !awaitingReview, awaitingReview, blobs: receipt.blobs, workId: active.workId, leaseId: active.leaseId };
   }
 }
 

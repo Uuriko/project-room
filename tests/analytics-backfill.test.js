@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { FIXED_MS, openRoom } from "./analytics-fixture.mjs";
 import { backfillFile } from "../scripts/analytics-backfill.mjs";
-import { baselineReport } from "../server/analytics/metrics.mjs";
+import { baselineReport, weeklyProductiveRooms } from "../server/analytics/metrics.mjs";
 import { runAnalyticsTail } from "../server/analytics/tail.mjs";
 
 function hashFile(path) {
@@ -63,6 +63,42 @@ test("an excluded room is counted beside productive rooms, including an env id a
   assert.equal(hiddenWeek.excludedProductiveRooms, 1);
   const flagged = live.db.prepare("SELECT props FROM analytics_events WHERE room_id='alpha'").all();
   assert.equal(flagged.some(row => JSON.parse(row.props).excluded === true), false);
+});
+
+test("weeklyProductiveRooms resolves exclusion in one pass, not by re-filtering per event (#2918)", () => {
+  let roomIdReads = 0;
+  const tracked = (roomId, fields) => {
+    const event = { props: {}, ...fields };
+    Object.defineProperty(event, "roomId", {
+      enumerable: true,
+      get() { roomIdReads += 1; return roomId; }
+    });
+    return event;
+  };
+  const events = [];
+  const ROOMS = 120;
+  for (let i = 0; i < ROOMS; i += 1) {
+    const roomId = `room-${i}`;
+    events.push(tracked(roomId, { name: "room_created", at: FIXED_MS, actorKind: "human" }));
+    events.push(tracked(roomId, { name: "agent_first_post", at: FIXED_MS, actorKind: "agent" }));
+    events.push(tracked(roomId, { name: "pr_merged", at: FIXED_MS, actorKind: "agent" }));
+  }
+  // A room whose only excluded flag sits on a timestamp-less event was still
+  // excluded by the old per-room filter (it filtered regardless of `at`);
+  // the one-pass rewrite must preserve that.
+  events.push(tracked("flagged-room", { name: "room_created", at: FIXED_MS, actorKind: "human" }));
+  events.push(tracked("flagged-room", { name: "agent_first_post", at: FIXED_MS, actorKind: "agent" }));
+  events.push(tracked("flagged-room", { name: "pr_merged", at: FIXED_MS, actorKind: "agent" }));
+  events.push(tracked("flagged-room", { name: "room_created", at: Number.NaN, actorKind: "human", props: { excluded: true } }));
+
+  const weeks = weeklyProductiveRooms({ events, now: FIXED_MS });
+  const week = weeks.at(-1);
+  assert.equal(week.week, "2026-09-28");
+  assert.equal(week.productiveRooms, ROOMS);
+  assert.equal(week.excludedProductiveRooms, 1);
+  // Old code: events.filter(...) per event = O(n^2) roomId reads
+  // (364 events -> >130k reads). One pass must stay linear.
+  assert.ok(roomIdReads < events.length * 20, `expected linear roomId reads, got ${roomIdReads} for ${events.length} events`);
 });
 
 test("the backfill command requires a database path", () => {

@@ -4,6 +4,7 @@ import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { validId, roomPolicy } from '../src/events.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
+import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_project_offer', message); };
@@ -182,13 +183,16 @@ export class ProjectOffers {
     const size = Number(limit);
     check(Number.isInteger(size) && size > 0 && size <= 100, 'limit must be 1 through 100');
     if (after != null) identifier(after);
-    const rows = this.db.prepare("SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.status='published' AND r.archived_at IS NULL AND o.offer_id>? ORDER BY o.offer_id LIMIT ?").all(after ?? '', size + 1);
+    // The unpublish predicate sits in the query (the HIDDEN_RECEIPT form used
+    // by public-read-model) so a taken-down room's offers never consume a page slot.
+    const rows = this.db.prepare(`SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.status='published' AND r.archived_at IS NULL AND o.offer_id>?
+      AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id) ORDER BY o.offer_id LIMIT ?`).all(after ?? '', size + 1);
     return { offers: rows.slice(0, size).map(row => this.record(row)), nextCursor: rows.length > size ? rows[size - 1].offer_id : null };
   }
   read(id) {
     identifier(id);
     const row = this.db.prepare("SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.offer_id=? AND o.status='published' AND r.archived_at IS NULL").get(id);
-    if (!row) fail(404, 'offer_not_found', 'Offer not found');
+    if (!row || isUnpublished(this.db, 'room', row.room_id)) fail(404, 'offer_not_found', 'Offer not found');
     return this.record(row);
   }
   brief(id) {

@@ -11,6 +11,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { sessionRecord } from "../src/work-item-session.js";
 import {
   getTier, setTier, demoteToReadonly, enforceAutonomyTiers, autonomyTierReport,
+  getAgentAutonomyTier, setAgentAutonomyTier,
   AUTONOMY_TIERS, DEFAULT_AUTONOMY_TIER, ENROLLMENT_TIER,
 } from "../server/autonomy-tiers.mjs";
 
@@ -210,6 +211,37 @@ test("API: owner can set and read; non-owner gets 403; shape is complete", async
   assert.equal(demoted.status, 200);
   assert.equal(demoted.json.status.autonomyTier, "t1_readonly");
   assert.throws(() => f.send("agent", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "x" }), { status: 403, code: "agent_readonly" });
+});
+
+// #3009: member projections are plain objects, so a raw members[memberId]
+// index resolves inherited Object.prototype names ("toString", ...) as
+// truthy — prototype-named phantom members must fail requireMember's
+// member_not_found gate on both the read and write tier paths, and the
+// write must leave no tier row. Exercised at the handler level (the HTTP
+// layer's pathId/validId already rejects "constructor" with a generic 404
+// before the handler runs); one HTTP check below covers the route end to end.
+test("API: prototype names are not room members (#3009)", async t => {
+  const f = await serve(t);
+  for (const phantom of ["toString", "constructor", "valueOf", "hasOwnProperty", "toLocaleString"]) {
+    const getErr = capture(() => getAgentAutonomyTier(f.store, f.keys.owner, "commons", phantom));
+    assert.equal(getErr.status, 404, `get ${phantom}`);
+    assert.equal(getErr.code, "member_not_found");
+    const putErr = capture(() => setAgentAutonomyTier(f.store, f.keys.owner, "commons", phantom, { autonomyTier: "t1_readonly" }));
+    assert.equal(putErr.status, 404, `set ${phantom}`);
+    assert.equal(putErr.code, "member_not_found");
+    assert.equal(getTier(f.db(), "commons", phantom), null, `no tier row was written for phantom member ${phantom}`);
+  }
+  // End to end over HTTP for a name that reaches the handler.
+  const httpGet = await f.request("/api/rooms/commons/operator/agents/toString", { method: "GET", token: f.keys.owner });
+  assert.equal(httpGet.status, 404);
+  assert.equal(httpGet.json.error.code, "member_not_found");
+  const httpPut = await f.request("/api/rooms/commons/operator/agents/valueOf", { method: "PUT", token: f.keys.owner, data: { autonomyTier: "t1_readonly" } });
+  assert.equal(httpPut.status, 404);
+  assert.equal(httpPut.json.error.code, "member_not_found");
+  // A real member still passes the gate on both routes.
+  const real = await f.request("/api/rooms/commons/operator/agents/agent", { method: "GET", token: f.keys.owner });
+  assert.equal(real.status, 200);
+  assert.equal(real.json.memberId, "agent");
 });
 
 test("API: an agent room owner can restrict another agent", async t => {

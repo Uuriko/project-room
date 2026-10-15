@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentPages, PASTE_PAGE } from "../scripts/build-agent-docs.mjs";
-import { publicAssetPaths } from "../deploy/public-assets.mjs";
-import { publicSearchAssets, reviewedPublicSearchPaths } from "../deploy/public-search.mjs";
+import { agentPages, writeAgentPages, PASTE_PAGE } from "../scripts/build-agent-docs.mjs";
+import { publicAssetPaths } from "../server/public-assets.mjs";
+import { publicSearchAssets, reviewedPublicSearchPaths } from "../server/public-search.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -20,9 +20,12 @@ const blocks = html => [...html.matchAll(/<pre tabindex="0" role="region" aria-l
   .map(match => ({ label: unescape(match[1]), text: unescape(match[2]) }));
 
 test("one paste block per runtime, each carrying the whole connect loop and no credential", () => {
-  const html = agentPages().get(PASTE_PAGE.htmlFile);
+  // Pages are generated build output (no longer committed): build first,
+  // then verify on-disk bytes match the generator (same pattern as
+  // tests/connect-snippets.test.js).
+  const html = writeAgentPages().get(PASTE_PAGE.htmlFile);
   assert.ok(html, "paste page is generated");
-  assert.equal(readFileSync(PASTE_PAGE.htmlFile, "utf8"), html, "checked-in page matches the generator");
+  assert.equal(readFileSync(PASTE_PAGE.htmlFile, "utf8"), html, "built page matches the generator");
   const found = blocks(html);
   assert.equal(found.length, RUNTIMES.length, found.map(block => block.label).join(" | "));
   for (const [index, runtime] of RUNTIMES.entries()) {
