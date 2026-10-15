@@ -5910,7 +5910,14 @@ $("#new-work-form").addEventListener("change", syncWorkForm);
 // visible, name what is missing next to the select, and focus it. Defaults
 // are unchanged and no verifier is picked for the user.
 $("#create-work-button").addEventListener("click", e => {
-  if (!$("#require-verification").checked || $("#verifier-select").value) return;
+  const verifier = $("#verifier-select");
+  if (!$("#require-verification").checked || verifier.value) return;
+  // Respond only when the verifier is the form's first invalid control. If
+  // another required field is also unmet (title, done-when, assignee), let
+  // native validation run so it focuses that field instead of the verifier.
+  const firstInvalid = [...$("#new-work-form").querySelectorAll("input,select,textarea")]
+    .find(el => !el.disabled && typeof el.checkValidity === "function" && !el.checkValidity());
+  if (firstInvalid && firstInvalid !== verifier) return;
   e.preventDefault();
   $("#work-options").open = true;
   $("#verifier-hint").textContent = uiText("human.workChooseVerifier");
