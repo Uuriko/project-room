@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { JOBS } from "../server/jobs.mjs";
+import { EVENT_TYPES as T, event } from "../src/events.js";
 
 const integrityJob = JOBS.find(job => job.name === "integrity");
 const tick = store => store.verifyRoomIntegrity({ yieldBetween: async () => {} });
@@ -163,6 +164,32 @@ test("backfill poison: a room whose log cannot replay is skipped while other roo
     store.room("alpha").sequence,
     "alpha still certifies at its head"
   );
+});
+
+test("backfill interruption is control flow, not a room failure: a throwing yield hook still propagates", async t => {
+  const store = openStore(t);
+  const roomId = "bulk";
+  const events = initialRoom(roomId);
+  for (let i = 0; i < 30; i += 1) {
+    events.push(event({
+      type: T.MESSAGE_POSTED, actorId: "owner", roomId, id: `ev-${i}`,
+      idempotencyKey: `ev-${i}-key`, at: new Date(Date.UTC(2026, 9, 2) + i * 1000).toISOString(),
+      data: { messageId: `m${i}`, body: `line ${i}` }
+    }));
+  }
+  store.initialize(events);
+  // The caller's stop signal must not be swallowed as a "failed room":
+  // it propagates, the committed prefix stays on the cursor, and a plain
+  // call afterwards finishes the room with no failure recorded.
+  assert.throws(
+    () => store.backfillMessages({ limit: 400, yieldBetween: () => { throw new Error("interrupted"); } }),
+    /interrupted/
+  );
+  const cursor = store.db.prepare("SELECT applied_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  assert.ok(cursor.applied_seq > 0 && cursor.applied_seq < store.room(roomId).sequence, "the committed prefix survives the interruption");
+  const result = store.backfillMessages({ limit: 400 });
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.done, true);
 });
 
 test("step isolation: a poisoned step does not stop the steps behind it in the rotation", async t => {

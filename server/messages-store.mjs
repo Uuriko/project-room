@@ -427,6 +427,16 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : MESSAGES_BACKFILL_BATCH;
   const failed = [];
   const failedIds = [];
+  // The caller's yield hook is control flow, not room data: tag anything it
+  // throws so the per-room isolation below always lets it propagate. An
+  // interruption mid-batch keeps the committed prefix on the cursor and the
+  // next call resumes — isolating it as a "failed room" would silently
+  // swallow the caller's stop signal.
+  let yieldError = null;
+  const guardedYield = () => {
+    try { yieldBetween(); }
+    catch (error) { yieldError = error; throw error; }
+  };
   if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, failed };
   let events = 0;
   let rooms = 0;
@@ -442,8 +452,9 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     rooms += 1;
     let wrote;
     try {
-      wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, yieldBetween);
+      wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, guardedYield);
     } catch (error) {
+      if (yieldError) throw yieldError;
       if (!isRoomDataError(error)) throw error;
       failed.push({ roomId: room.id, error });
       failedIds.push(room.id);
