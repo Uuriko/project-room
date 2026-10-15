@@ -145,8 +145,17 @@ test("join next follows one same-origin relative path", () => {
 });
 
 test("permission labels are human-readable", () => {
-  assert.equal(permissionLabel("invite_member"), "Invite members");
-  assert.equal(permissionLabel("steer"), "Steer work (claim and direct tasks)");
+  // Terse forms (Grok P5 Intent 1): the consent screen's "What you can do"
+  // list stays short enough to scan; the long glosses stay gone.
+  assert.equal(permissionLabel("steer"), "Claim work");
+  assert.equal(permissionLabel("accept_work"), "Accept work");
+  assert.equal(permissionLabel("complete_work"), "Finish work");
+  assert.equal(permissionLabel("verify"), "Verify work");
+  assert.equal(permissionLabel("write_external"), "Post outside");
+  assert.equal(permissionLabel("manage_members"), "Manage members");
+  assert.equal(permissionLabel("decide"), "Decide");
+  assert.equal(permissionLabel("invite_member"), "Invite");
+  assert.equal(permissionLabel("manage_claims"), "Claims");
   assert.equal(permissionLabel("mystery_perm"), "mystery perm");
 });
 

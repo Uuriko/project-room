@@ -38,6 +38,48 @@ test("join page is public: GET /join and /join/:code serve the page without auth
   }
 });
 
+test("join page consent and success screens stay short: form first, key behind a disclosure, no lecture", async t => {
+  // Grok P5 regression net (join-copy Intents 1, 2, 6). Asserted on the
+  // served doors only: /join.html is the unsubstituted asset, so the
+  // lecture/details assertions live here with the pages members open.
+  const { origin } = await serve(t);
+  for (const path of ["/join", "/join/RM-EXAMPLE", "/room/join", "/room/join/RM-EXAMPLE"]) {
+    const html = await (await fetch(`${origin}${path}`)).text();
+
+    const consent = html.match(/<section id="join-consent"[\s\S]*?<\/section>/)?.[0];
+    assert.ok(consent, `${path} has the consent screen`);
+    // Intent 6: name + Join come first; the permissions move after the
+    // form, inside their disclosure; the identity-disclosure paragraph
+    // (joining-program copy, not Grok's) stays above the form.
+    const disclosureAt = consent.indexOf("Joining creates your Project Room identity");
+    const formAt = consent.indexOf('id="join-form"');
+    assert.ok(disclosureAt !== -1 && disclosureAt < formAt, `${path} keeps the identity disclosure above the form`);
+    const perms = consent.match(/<details class="join-permissions-details">[\s\S]*?<\/details>/)?.[0];
+    assert.ok(perms, `${path} wraps the permissions in a disclosure`);
+    assert.match(perms, /<summary>What you can do<\/summary>/, `${path} names the permissions disclosure`);
+    assert.ok(perms.includes('id="join-permissions"'), `${path} keeps the permission list inside the disclosure`);
+    assert.ok(formAt < consent.indexOf('id="join-permissions"'), `${path} puts the join form before the permissions`);
+    assert.ok(!consent.includes("As a member you"), `${path} drops the long permission lead-in`);
+
+    const success = html.match(/<section id="join-success"[\s\S]*?<\/section>/)?.[0];
+    assert.ok(success, `${path} has the success screen`);
+    // Intent 1: short heading, room demoted to a quiet hint line.
+    assert.match(success, /You&rsquo;re in, <span id="join-success-name">/, `${path} leads with the short success heading`);
+    assert.match(success, /<p id="join-success-room-line" class="form-hint"><span id="join-success-room">/, `${path} demotes the room name to a hint line`);
+    assert.ok(!success.includes("Welcome to"), `${path} drops the long welcome heading`);
+    // Intent 2: the one-time key sits inside its disclosure; the lecture
+    // paragraphs stay gone and the hint is one line.
+    const key = success.match(/<details class="join-key-details">[\s\S]*?<\/details>/)?.[0];
+    assert.ok(key, `${path} wraps the agent key in a disclosure`);
+    assert.match(key, /<summary>Agent key \(once\)<\/summary>/, `${path} names the key disclosure`);
+    assert.ok(key.includes('id="join-secret"'), `${path} keeps the key field inside the disclosure`);
+    assert.ok(key.includes('id="join-copy-secret"'), `${path} keeps the copy button inside the disclosure`);
+    assert.match(key, /Keep it like a password\./, `${path} keeps the one-line key hint`);
+    assert.ok(!success.includes("Save your access key too"), `${path} drops the save-your-key lecture`);
+    assert.ok(!success.includes("Anyone holding it"), `${path} drops the key-warning lecture`);
+  }
+});
+
 test("join page asset base follows the door", async t => {
   const { origin } = await serve(t);
   const root = await (await fetch(`${origin}/join/RM-EXAMPLE`)).text();

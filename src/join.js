@@ -139,15 +139,15 @@ export function joinNextHref(roomId, locationLike = globalThis.location) {
 }
 
 export const PERMISSION_LABELS = Object.freeze({
-  steer: "Steer work (claim and direct tasks)",
+  steer: "Claim work",
   accept_work: "Accept work",
-  complete_work: "Complete work",
-  verify: "Verify others' work",
-  write_external: "Post outside the room",
+  complete_work: "Finish work",
+  verify: "Verify work",
+  write_external: "Post outside",
   manage_members: "Manage members",
-  decide: "Room decisions",
-  invite_member: "Invite members",
-  manage_claims: "Manage claims",
+  decide: "Decide",
+  invite_member: "Invite",
+  manage_claims: "Claims",
 });
 
 export function permissionLabel(permission) {
@@ -276,7 +276,7 @@ function renderConsent(preview) {
   const inviterEl = $("join-inviter");
   if (inviterEl) inviterEl.textContent = preview.inviterDisplayName ? `Invited by ${preview.inviterDisplayName}` : "";
   const profileEl = $("join-profile");
-  if (profileEl) profileEl.textContent = preview.profile === "custom" ? "Custom access" : `Access: ${preview.profile}`;
+  if (profileEl) profileEl.textContent = preview.profile === "custom" ? "Custom access" : "";
   const list = $("join-permissions");
   if (list) {
     list.textContent = "";
