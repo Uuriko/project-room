@@ -5,6 +5,7 @@ import { workOffersContext } from "../src/help-offers.js";
 import { sessionRecord, budgetCard, presentedSessionStatus } from "../src/work-item-session.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
+import { ownMember } from "../src/events.js";
 
 // The exact omissions every selected read reports; the access summary repeats the same list.
 export const WORK_CONTEXT_OMISSIONS = Object.freeze(["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"]);
@@ -87,7 +88,7 @@ export function accessSummary({ item, linked, participantIds }) {
 // All input comes from one committed Room projection and one service clock.
 export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
-  const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
+  const item = state.workItems[workItemId], member = ownMember(state.members, viewerId), work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
   // same participant boundary to delivered source, preview and inferred people.
   const linked = item.sourceMessageId ? state.messages.find(message => message.id === item.sourceMessageId
@@ -102,8 +103,8 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,
     item.proposedById, item.claim?.holderId, item.receipt?.producerId, item.receipt?.reportedById, message?.authorId, state.room.ownerId].filter(Boolean));
   for (const entry of offers?.offers ?? []) participantIds.add(entry.offer.offererId);
-  const participants = [...participantIds].map(id => state.members[id]
-    ? pick(state.members[id], "id displayName kind active revision permissions") : { id, unavailable: true });
+  const participants = [...participantIds].map(id => { const member = ownMember(state.members, id);
+    return member ? pick(member, "id displayName kind active revision permissions") : { id, unavailable: true }; });
   const value = {
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,

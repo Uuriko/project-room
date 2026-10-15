@@ -10,7 +10,7 @@
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived, ownMember } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
@@ -172,7 +172,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   // the receipt so the claim write still commits; an archived room has no
   // live timeline to update.
   if (isRoomArchived(room.state)) return null;
-  const actor = room.state.members?.[actorId];
+  const actor = ownMember(room.state.members, actorId);
   const incoming = event({
     id: randomUUID(),
     idempotencyKey: randomUUID(),

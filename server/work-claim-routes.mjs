@@ -62,7 +62,7 @@ import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived } from "../src/events.js";
+import { isRoomArchived, ownMember } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -169,7 +169,7 @@ function resolveWorkClaimAccess(store, roomId, auth) {
   const members = authority?.members;
   const memberId = auth?.member?.id;
   const listed = members && typeof members === "object" && typeof memberId === "string"
-    && Object.hasOwn(members, memberId) && members[memberId];
+    && ownMember(members, memberId);
   const member = listed && typeof listed === "object"
     ? {
       ...auth.member,
@@ -816,7 +816,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // authenticated non-members get 403 not_member. Reads stay open to
     // guest agents, like every other GET on this family.
     const members = store.roomAuthority(roomId).members ?? {};
-    const member = members[caller];
+    const member = ownMember(members, caller);
     if (!member || member.active === false) {
       reject(403, "not_member", `Member "${caller}" is not a member of room "${roomId}"`);
     }
@@ -921,7 +921,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const assignee = data.assignee;
     if (assignee !== undefined) {
       const members = store.roomAuthority(roomId).members ?? {};
-      const member = typeof assignee === "string" ? members[assignee] : null;
+      const member = typeof assignee === "string" ? ownMember(members, assignee) ?? null : null;
       if (!member || member.active === false) {
         reject(422, "work_assignee_unknown_member",
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
@@ -1282,7 +1282,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // room membership: the new owner must be a current, active member.
     const members = store.roomAuthority(roomId).members ?? {};
     const target = data.newOwner;
-    const targetMember = typeof target === "string" ? members[target] : null;
+    const targetMember = typeof target === "string" ? ownMember(members, target) ?? null : null;
     if (!targetMember || targetMember.active === false) {
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);

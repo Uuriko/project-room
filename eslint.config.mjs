@@ -39,8 +39,19 @@ export const RAW_MEMBERS_INDEX_ENFORCED = [
   "server/agent-rooms.mjs",
   "server/invitation-evidence.mjs",
   "server/member-permission-requests.mjs",
+  "server/open-questions.mjs",
   "server/outside-agents.mjs",
+  "server/reply-requests.mjs",
+  "server/request-runs.mjs",
   "server/room-lifecycle.mjs",
+  "server/routes/work-claims.mjs",
+  "server/work-claim-events.mjs",
+  "server/work-claim-routes.mjs",
+  "server/work-context.mjs",
+  "server/work-discussion.mjs",
+  "server/work-help.mjs",
+  "server/work-wakes.mjs",
+  "server/work-wants.mjs",
 ];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
