@@ -118,8 +118,6 @@ export function replayNdjsonInto(ndjson, store) {
   const { watermark, byTable, trailer, skippedTables, tableDigests } = parseNdjsonExport(ndjson);
   // Torn export (a write landed mid-stream): refuse before touching the store.
   if (trailer) verifyTrailer(trailer, byTable);
-  // #3325: a tampered non-event row must refuse just as early.
-  const contentVerification = contentVerificationLevel(trailer, tableDigests);
   const db = store.db;
   if (db.prepare("SELECT 1 FROM rooms LIMIT 1").get()) throw new Error("Refusing to replay into a non-empty store");
   const existing = new Set(tableNames(db));
@@ -174,6 +172,11 @@ export function replayNdjsonInto(ndjson, store) {
           if (actual !== expected) throw new Error(`Export watermark does not match the restored table ${table}: expected ${expected} rows, got ${actual}`);
         }
       }
+      // #3325: the digest pin is verified inside the transaction, after
+      // the load — the load's per-cell refusals are the more specific
+      // errors and fire first; a well-formed tamper (the #3325 probe) is
+      // refused here and the whole replay rolls back.
+      const contentVerification = contentVerificationLevel(trailer, tableDigests);
       const recovery = auditRecovery(store);
       const audit = store.verifyInvitationAudit();
       return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };

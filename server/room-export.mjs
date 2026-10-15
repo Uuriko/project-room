@@ -413,11 +413,12 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
   if (!filename) throw new Error("Missing replay paths");
   const { watermark, byTable, trailer } = parseExport(ndjson);
   // Fail fast on a torn export, before any store is created: a mid-stream
-  // write the watermark could not see must never verify. #3325: the same
-  // fail-fast applies to the trailer's per-table content digests, computed
-  // over the complete parsed stream (before any table is skipped below).
+  // write the watermark could not see must never verify. #3325: the
+  // trailer's per-table content digests are computed over the complete
+  // parsed stream (before any table is skipped below) and verified with
+  // the other post-load checks.
   const trailerState = trailer ? (verifyTrailer(trailer, byTable), "verified") : "absent";
-  const contentVerification = contentVerificationLevel(trailer, tableDigestsOf(byTable));
+  const computedDigests = tableDigestsOf(byTable);
   const directory = dirname(filename);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
@@ -466,6 +467,13 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
     if (store.db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new Error("Restored store failed quick_check");
     const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
     if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
+    // #3325: the digest pin is verified after the load, not before it —
+    // the load's own per-cell refusals (a non-BLOB object cell, a BLOB
+    // whose bytes fail their stored sha256) are the more specific errors
+    // and must fire first. A tampered row whose cells are all well-formed
+    // (the #3325 probe) loads cleanly and is refused here, before the
+    // audits and before verified is ever returned.
+    const contentVerification = contentVerificationLevel(trailer, computedDigests);
     let recovery = null, invitations = {}, auditResult = { ok: true };
     try {
       recovery = auditRecovery(store);
