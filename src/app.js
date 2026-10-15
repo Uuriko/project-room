@@ -5,7 +5,7 @@ import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
 import { AccountClient } from "./account-client.js";
-import { RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
+import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
@@ -4111,10 +4111,9 @@ function submitRequest(form) {
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
     } catch (error) {
       if (generation !== client.generation || session !== identity || !state) return;
-      // command_rejected is issued after exact-operation lookup. Transport and
-      // pre-ledger size/rate errors cannot unlock an earlier uncertain operation.
-      if ((!hadPending && [400, 404, 409, 413, 422].includes(error.status))
-        || error.code === "command_rejected" && [409, 422].includes(error.status)) pendingMessage = null;
+      // draftRefused: only a refusal issued after the exact-operation lookup
+      // (command_rejected, channel_archived) unlocks an earlier uncertain send.
+      if (draftRefused(error, hadPending)) pendingMessage = null;
       saveComposer();
       // A DM refused by the consent gate names the recipient and the next
       // step, instead of surfacing the raw gate message.
