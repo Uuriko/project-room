@@ -2173,9 +2173,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         const auth = store.authenticateAccountSession(token, null, binding);
         protectWrite(req, auth, false); rate(`account-default-room:${auth.account.id}`, 10);
-        const existing = store.db.prepare(
-          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1").get(auth.account.id);
-        if (existing) return json(res, 200, { room: { id: existing.room_id }, created: false });
+        // R266-n1: read the default room the way /api/account-rooms lists
+        // rooms. Iterate the account's membership rows, keep only rooms where
+        // the account still holds an active human membership (same 403
+        // filter), and prefer kind=personal. A former member with only
+        // inactive rows falls through to the no-resurrect rule below instead
+        // of landing on a room the server would 403.
+        let activeRoom = null, activePersonal = null;
+        const membershipRows = store.db.prepare(
+          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(auth.account.id);
+        for (const { room_id: candidateId } of membershipRows) {
+          try { store.authenticateAccountSession(token, candidateId, binding); }
+          catch (error) { if (error.status !== 403) throw error; continue; }
+          if (activeRoom === null) activeRoom = candidateId;
+          const kind = store.db.prepare(
+            "SELECT json_extract(projection,'$.room.kind') AS kind FROM rooms WHERE id=?").get(candidateId)?.kind;
+          if (kind === "personal" && activePersonal === null) activePersonal = candidateId;
+        }
+        if (activeRoom) return json(res, 200, { room: { id: activePersonal ?? activeRoom }, created: false });
         // An account that has ever held a room but holds none now deliberately
         // left (or was removed from) all of them — never resurrect a room.
         const row = store.db.prepare("SELECT ever_had_room, display_name FROM accounts WHERE id=?").get(auth.account.id);
