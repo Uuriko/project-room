@@ -63,6 +63,7 @@ import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
 import { issueBountyReceipt } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
+import { ASK_AGING } from "./attention-aging.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
 // Fields mirror the dispute record shape built by createDisputes in
@@ -96,9 +97,12 @@ export const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
-export const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
-export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
-export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
+// The challenge/dispute clocks are the attention-aging doctrine's
+// bounty families (server/attention-aging.mjs, charter B-3 step 2):
+// challenge expiry auto-approves, dispute expiry defaults to RELEASE.
+export const CHALLENGE_WINDOW_SMALL_MS = ASK_AGING.bounty_challenge_small.ttlMs; // micro-bounties (< 1 credit)
+export const CHALLENGE_WINDOW_MS = ASK_AGING.bounty_challenge.ttlMs;
+export const DISPUTE_TIMEOUT_MS = ASK_AGING.bounty_dispute.ttlMs; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
 export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
 export const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions

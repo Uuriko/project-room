@@ -42,6 +42,7 @@ import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember } from ".
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
+import { ASK_AGING } from "./attention-aging.mjs";
 
 // Local ServiceError (mirrors server/store.mjs). We avoid importing from
 // store.mjs here to break the circular dependency for the Workers bundle:
@@ -103,8 +104,11 @@ const DECISIONS = ["approve", "deny"];
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // An identity may hold at most this many pending requests per room.
 export const MAX_PENDING_PER_IDENTITY_ROOM = 5;
-// Requests expire after this long without a decision.
-export const REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Requests expire after this long without a decision. The value is the
+// attention-aging doctrine's access_request TTL (server/attention-aging.mjs,
+// charter B-3 step 2) — one constant for the lazy read path here, the
+// expiry job, and every surface that quotes the decision window.
+export const REQUEST_TTL_MS = ASK_AGING.access_request.ttlMs;
 
 // Legacy admission rows contain a permission array. Upgrade intent lives in
 // the request row, not only in the replaceable event journal: restoring room
@@ -814,6 +818,9 @@ export class AccessRequests {
     return row;
   }
 
+  // Lazy backstop on read. The attention-aging job
+  // (server/attention-aging.mjs expireAccessRequests) flips the same rows
+  // on a schedule so expiry no longer depends on anyone reading the room.
   expireOld(roomId) {
     const cutoff = this.store.now() - REQUEST_TTL_MS;
     this.db.prepare("UPDATE access_requests SET status='expired' WHERE room_id=? AND status IN ('pending', 'pending_upgrade') AND created_at<?")
