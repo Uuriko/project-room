@@ -243,6 +243,20 @@ const pushNotificationField = {
   }
 };
 const modeField = { type: "string", enum: ["wakeable", "pull-only"] };
+// MCP parity for the REST listener lease (#3481): same shape as the
+// OpenAPI listenerLease (oneOf boolean true / { roomId }); the heartbeat
+// acquires or renews the durable listener lease for that queue and the
+// response gains a listener block. Contention is reported, never an error.
+const listenerLeaseField = {
+  oneOf: [
+    { type: "boolean", enum: [true] },
+    {
+      type: "object", additionalProperties: false, required: ["roomId"],
+      properties: { roomId: { type: "string", minLength: 1, maxLength: 128 } }
+    }
+  ],
+  description: "Optional listener-lease request, same as POST /api/agent-heartbeats: true leases the credential's own scope (a room-scoped key's bound room, else the roomless identity queue); { roomId } leases that room's queue (an identity credential must be a live agent member of it; a room-scoped key leases only its bound room). The response listener block reports the fencingToken on acquisition."
+};
 const webhookEventsField = {
   type: "array", minItems: 1, maxItems: EVENT_CATALOG.length + 1,
   items: { type: "string", minLength: 1, maxLength: 128 },
@@ -250,26 +264,30 @@ const webhookEventsField = {
 };
 
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds stores null. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds stores null. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue. Optional listenerLease (true or { roomId }) also acquires or renews the durable listener lease, reported in the response listener block.", schema({
     hostId: hostIdField,
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
-    pushNotification: pushNotificationField
+    pushNotification: pushNotificationField,
+    listenerLease: listenerLeaseField
   }, ["hostId", "wakeUrl"]), false),
-  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared because this body omits cadenceSeconds, matching that route. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
-    hostId: hostIdField
+  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared because this body omits cadenceSeconds, matching that route. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals. Optional listenerLease (true or { roomId }) also acquires or renews the durable listener lease, reported in the response listener block.", schema({
+    hostId: hostIdField,
+    listenerLease: listenerLeaseField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds stores null. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds stores null. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials. Optional listenerLease (true or { roomId }) also acquires or renews the durable listener lease in the same write, reported in the response listener block: acquired with its fencingToken, or not acquired with the active listener named — contention never fails the heartbeat.", schema({
     hostId: hostIdField,
     mode: modeField,
     workWakes: { type: "boolean", description: "Opt this host into pointer-only work signals on heartbeat reads. Default false; omitted retains the setting. No outbound push or execution permission." },
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
-    pushNotification: pushNotificationField
+    pushNotification: pushNotificationField,
+    listenerLease: listenerLeaseField
   }, ["hostId", "mode"]), false),
   tool("heartbeat_get", "Read this identity's host presence. Same read as GET /api/agent-heartbeats: status online, offline, or unregistered, plus each host's mode, wakeUrl, and last-seen time. No roomId. Does not return push tokens or signing secrets.", schema({})),
-  tool("heartbeat_ack", "Acknowledge pending wake signals for this identity. Same call as POST /api/agent-heartbeats/ack. signalIds is a non-empty string array. Unknown or already-delivered ids are reported and not applied again.", schema({
-    signalIds: { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 128 } }
+  tool("heartbeat_ack", "Acknowledge pending wake signals for this identity. Same call as POST /api/agent-heartbeats/ack. signalIds is a non-empty string array. Unknown or already-delivered ids are reported and not applied again. Optional fencingToken carries the live listener lease's token: while a lease is live for a signal's room, acks for that signal require it and tokenless or wrong-token acks are refused 409 listener_fenced.", schema({
+    signalIds: { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 128 } },
+    fencingToken: { type: "string", minLength: 1, maxLength: 128, description: "The live listener lease's fencing token, from a listenerLease heartbeat's listener block. Required to ack signals fenced by that lease; omit for lease-free queues." }
   }, ["signalIds"]), false),
   tool("wake_pause", "Pause this member's queued wakes so new attempts do not start. Same call as POST /api/rooms/:roomId/agent-pause with action pause. An attempt already running finishes. requestId is the receipt key and is optional: the server mints one when it is omitted and returns it. memberId defaults to this identity's own member. reason is optional and may be null. An identity secret pauses its own member row. Pausing another member stays on the signed-in room-owner path, which this bearer is not.", schema({
     roomId: roomIdField,

@@ -51,6 +51,8 @@ import { stampEvents, stampWorkListing } from "./content-trust.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { ownMember } from "../src/events.js";
+import { scopedKeyRoomBinding, scopedKeyHostId, assertScopedKeyListener } from "./room-key-presence.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -304,6 +306,22 @@ function validSignalIds(signalIds) {
     && signalIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 128);
 }
 
+// Same shape as the REST heartbeat route: listenerLease is true or an
+// exact { roomId } object with a non-empty roomId.
+function validListenerLease(listenerLease) {
+  if (listenerLease === undefined || listenerLease === true) return true;
+  if (!object(listenerLease)) return false;
+  const keys = Object.keys(listenerLease);
+  return keys.length === 1 && keys[0] === "roomId"
+    && typeof listenerLease.roomId === "string"
+    && listenerLease.roomId.length > 0 && listenerLease.roomId.length <= 128;
+}
+
+function validFencingToken(fencingToken) {
+  return fencingToken === undefined
+    || (typeof fencingToken === "string" && fencingToken.length > 0 && fencingToken.length <= 128);
+}
+
 function validWakeArgs(name, args) {
   const selected = WAKE_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
@@ -311,17 +329,19 @@ function validWakeArgs(name, args) {
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
       && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
-      && (args.pushNotification === undefined || validPush(args.pushNotification));
+      && (args.pushNotification === undefined || validPush(args.pushNotification))
+      && validListenerLease(args.listenerLease);
   }
-  if (name === "wake_clear") return validHostId(args.hostId);
+  if (name === "wake_clear") return validHostId(args.hostId) && validListenerLease(args.listenerLease);
   if (name === "heartbeat_set") {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
       && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
-      && (args.workWakes === undefined || typeof args.workWakes === "boolean");
+      && (args.workWakes === undefined || typeof args.workWakes === "boolean")
+      && validListenerLease(args.listenerLease);
   }
-  if (name === "heartbeat_ack") return validSignalIds(args.signalIds);
+  if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && validFencingToken(args.fencingToken);
   if (name === "wake_pause" || name === "wake_resume") {
     const reasonOk = args.reason === undefined || args.reason === null || typeof args.reason === "string" && args.reason.length <= 200;
     const memberOk = args.memberId === undefined || validId(args.memberId);
@@ -640,7 +660,7 @@ function listPeerDms(store, secret, args) {
   return store.bonds.readThread(args.roomId, auth.member.id, args.threadId);
 }
 
-function heartbeatReceipt(identityId, result) {
+function heartbeatReceipt(identityId, result, listener = null) {
   const next = [];
   if (result.pendingWakes.length > 0) {
     next.push({
@@ -656,8 +676,62 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
-    next, pushConfigured: result.pushConfigured, reachability: result.reachability
+    next, pushConfigured: result.pushConfigured, reachability: result.reachability,
+    ...(listener ? { listener } : {})
   };
+}
+
+// MCP listener-lease parity (#3481): the hosted wake tools compose the
+// same store calls as POST /api/agent-heartbeats (+ /ack), so a lease
+// request derives its binding exactly like the REST heartbeat actor:
+//  - a rak_ key with exactly one mcp:room: scope is a room-scoped
+//    listener credential; scopedKeyRoomBinding re-derives the binding
+//    from the key's stored scopes and re-verifies the identity's live
+//    membership in the bound room on EVERY call (several room scopes or
+//    a dead membership refuse with scoped_key_room_refused);
+//  - any other caller (pri_ secret, or a key with no room scope) is an
+//    identity credential: binding null.
+// The binding is derived only for lease-bearing calls (a heartbeat with
+// listenerLease, and every heartbeat_ack, whose REST counterpart
+// re-resolves its actor the same way); plain MCP heartbeats keep their
+// existing behavior untouched.
+function wakeLeaseBinding(store, secret, identityId) {
+  if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return null;
+  const record = store.agentPlugin.verifyPresentedApiKey(secret);
+  if (!record) return null;
+  return scopedKeyRoomBinding(store, { identityId, keyId: record.keyId, scopes: record.scopes });
+}
+
+// Acquire/renew the durable listener lease for a heartbeat, mirroring
+// the REST route's lease derivation (agent-plugin-routes reportHeartbeat):
+// a scoped key leases only its bound room and reads listener ids in its
+// own host namespace; an identity credential naming { roomId } must hold
+// the live active agent member row for that room — the identity_links
+// row alone is not enough, because links survive suspension (#3501).
+// Contention is data ({ acquired: false, activeListenerId }), never an
+// error. Runs inside the caller's heartbeat transaction, as on REST.
+function acquireWakeLease(store, binding, agentId, hostId, listenerLease) {
+  const requestedRoom = listenerLease === true ? null : listenerLease.roomId;
+  let leaseRoomId, listenerId = hostId;
+  if (binding) {
+    if (requestedRoom !== null && requestedRoom !== binding.roomId)
+      throw new ServiceError(403, "room_mismatch", "A room-scoped credential leases only its bound room");
+    leaseRoomId = binding.roomId;
+    listenerId = scopedKeyHostId({ hostPrefix: binding.hostPrefix }, hostId);
+  } else if (requestedRoom !== null) {
+    const link = store.db.prepare(
+      "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=? LIMIT 1").get(requestedRoom, agentId);
+    const member = link ? ownMember(store.room(requestedRoom).state.members, link.memberId) : null;
+    if (!member || member.active === false || member.kind !== "agent" || member.identityId !== agentId)
+      throw new ServiceError(403, "room_mismatch", "The identity is not a member of the requested listener room");
+    leaseRoomId = requestedRoom;
+  } else leaseRoomId = null;
+  const lease = store.agentHeartbeats.acquireListenerLease({ agentId, roomId: leaseRoomId, listenerId });
+  const presentListenerId = id => (binding && typeof id === "string" && id.startsWith(binding.hostPrefix))
+    ? id.slice(binding.hostPrefix.length) : id;
+  return lease.acquired
+    ? { acquired: true, fencingToken: lease.fencingToken, leaseExpiresAt: lease.leaseExpiresAt, renewed: lease.renewed === true }
+    : { acquired: false, activeListenerId: presentListenerId(lease.activeListenerId), leaseExpiresAt: lease.leaseExpiresAt };
 }
 
 function webhookListBody(subscriptions) {
@@ -710,13 +784,38 @@ async function callWakeTool(store, secret, identity, name, args) {
     const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
     if (pushNotification) await store.agentHeartbeats.assertPushDns(pushNotification.url);
-    const result = store.agentHeartbeats.heartbeat({
-      agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification, workWakes: args.workWakes
+    const wantsLease = args.listenerLease !== undefined;
+    let binding = null;
+    if (wantsLease) {
+      binding = wakeLeaseBinding(store, secret, agentId);
+      // A lease request from a room-scoped key runs the REST scoped
+      // listener contract for this heartbeat (no wake URL or push, and
+      // never replacing a host the identity secret registered as
+      // wakeable) — the lease must not become a side door around it.
+      if (binding) assertScopedKeyListener(store, agentId, { hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification });
+    }
+    // Lease acquisition rides the same transaction as the heartbeat,
+    // exactly as on the REST route: a refused lease derivation records
+    // no heartbeat either.
+    const outcome = store.transaction(() => {
+      const result = store.agentHeartbeats.heartbeat({
+        agentId, hostId: args.hostId, mode, wakeUrl, cadenceSeconds, pushNotification, workWakes: args.workWakes
+      });
+      const listener = wantsLease ? acquireWakeLease(store, binding, agentId, args.hostId, args.listenerLease) : null;
+      return { result, listener };
     });
-    return heartbeatReceipt(agentId, result);
+    return heartbeatReceipt(agentId, outcome.result, outcome.listener);
   }
   if (name === "heartbeat_get") return store.agentHeartbeats.statusOf(agentId);
-  if (name === "heartbeat_ack") return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds });
+  if (name === "heartbeat_ack") {
+    // REST parity: the ack re-derives the caller's binding on every call
+    // (a room-scoped key's membership is re-verified, and its ack is
+    // confined to the bound room, like the REST ack's roomId), and the
+    // fencing token passes through to the store's per-signal-room fence.
+    const binding = wakeLeaseBinding(store, secret, agentId);
+    return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds,
+      roomId: binding?.roomId ?? null, fencingToken: args.fencingToken ?? null });
+  }
   if (name === "wake_pause") {
     const requestId = args.requestId ?? randomUUID();
     return store.wakeQueue.pause(secret, args.roomId, { requestId, reason: args.reason ?? null }, null, { memberId: args.memberId ?? null });
