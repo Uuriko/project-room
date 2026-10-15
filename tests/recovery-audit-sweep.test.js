@@ -165,7 +165,7 @@ function sweep() {
     new AccessRequests(fixture.store).request("commons", {
       identityId: identity.identityId, displayName: "Sweep asker",
       requestedPermissions: ["steer"], note: "let me in", requestId: "sweep-access-request"
-    });
+    }, identity.secret);
     exercised.add(T.ACCESS_REQUESTED);
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.ACCESS_REQUESTED}: ${error.message}`); }

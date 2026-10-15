@@ -87,11 +87,16 @@ test("mcp-registry-publish fetches mcp-publisher from a pinned release with chec
   }
 
   // The version variable itself is a pinned literal: MCP_PUB_VERSION="latest"
-  // passed the old substring test and must fail here.
-  const version = active.match(/^\s*MCP_PUB_VERSION="([^"]+)"\s*$/m)?.[1];
-  assert.ok(version, "mcp-registry-publish.yml: MCP_PUB_VERSION assignment not found");
-  assert.ok(PINNED_VERSION.test(version),
-    `MCP_PUB_VERSION is not pinned to an exact release version: ${version}`);
+  // passed the old substring test and must fail here. Every assignment is
+  // checked, so a later re-assignment to a floating ref cannot hide behind
+  // an earlier pinned one (shell keeps the last value).
+  const versions = [...active.matchAll(/^\s*MCP_PUB_VERSION=["']([^"']+)["']\s*$/gm)]
+    .map((m) => m[1]);
+  assert.ok(versions.length > 0, "mcp-registry-publish.yml: MCP_PUB_VERSION assignment not found");
+  for (const version of versions) {
+    assert.ok(PINNED_VERSION.test(version),
+      `MCP_PUB_VERSION is not pinned to an exact release version: ${version}`);
+  }
 
   // The checksum check must live in the install step itself (not a comment
   // or a different step) and must apply to the downloaded tarball.
@@ -100,12 +105,18 @@ test("mcp-registry-publish fetches mcp-publisher from a pinned release with chec
   const code = activeLines(step).join("\n");
   assert.ok(/curl\b[^\n]*\$\{?TARBALL\}?/.test(code),
     "install step must download the mcp-publisher tarball");
-  assert.ok(/curl\b[^\n]*(\$\{BASE\}|releases\/download\/)[^\n]*checksums/.test(code),
+  const checksumsCurl = code.split("\n")
+    .find((line) => /curl\b/.test(line) && /(\$\{BASE\}|releases\/download\/)/.test(line) && line.includes("checksums"));
+  assert.ok(checksumsCurl,
     "install step must download the checksums file from the same pinned release");
-  // Binding forms: grep the tarball's own entry out of the checksums file and
-  // pipe it to `sha256sum -c`, or run `sha256sum -c` on that checksums file.
+  const checksumsFile = checksumsCurl.match(/(?:-o\s+|>\s*)"?([^\s"]+)/)?.[1];
+  assert.ok(checksumsFile, "install step must save the downloaded checksums to a file");
+  // Binding forms: grep the tarball's own entry out of the downloaded
+  // checksums file and pipe it to `sha256sum -c`, or run `sha256sum -c`
+  // directly on that same downloaded file. Checking some other file whose
+  // name merely contains "checksums" does not verify the tarball.
   const verify = code.match(/grep\b[\s\S]*?\$\{?TARBALL\}?[\s\S]*?checksums[\s\S]*?\|\s*sha256sum\s+-c\b/)
-    ?? code.match(/sha256sum\s+-c\s+[^\s]*checksums/);
+    ?? code.match(new RegExp(`sha256sum\\s+-c\\s+["']?${checksumsFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:["'\\s]|$)`));
   assert.ok(verify,
     "install step must checksum-verify the downloaded tarball: 'sha256sum -c' must consume the checksums entry for ${TARBALL} (a stray occurrence in a comment or another step does not count)");
   const extractAt = code.search(/\btar\b[^\n]*\$\{?TARBALL\}?/);

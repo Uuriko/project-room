@@ -1,7 +1,7 @@
 import { spawnContext } from "./spawn.mjs";
 import { machineEnabled, DAEMON_VERSION } from "./flags.mjs";
 import {
-  APPROVAL_TTL_MS, DEADMAN_DEFAULT_SECONDS, ERROR, MUTATING_DESKTOP, PROTOCOL_VERSION,
+  APPROVAL_TTL_MS, CALL_ID_PATTERN, CLAIM_ID_PATTERN, DEADMAN_DEFAULT_SECONDS, ERROR, MUTATING_DESKTOP, PROTOCOL_VERSION,
   RECEIPT_BLOB_MAX, SCREENSHOT_MAX_BYTES, SLOTS, TAG_PATTERN, errorResult, okResult,
   pauseUntilFromMinutes,
 } from "./protocol.mjs";
@@ -52,6 +52,21 @@ export class MachineDaemon {
     this.control = Promise.resolve();
     this.frameStops = new Map();
     this.connections = 0;
+  }
+
+  // The daemon is long-lived, and other writers (CLI `provider set` /
+  // `bot enable` / `bot disable`, `enroll`, `prepare-golden`) update
+  // config.json while it runs, each reloading first. This daemon owns only
+  // halted / pausedUntil / haltEpoch, so persisting those fields must reload
+  // the on-disk config and apply just them: saving the construction-time
+  // snapshot would revert everyone else's changes (#3030, the same
+  // stale-snapshot class as #2836). Adopting the fresh config also means
+  // later reads in this process see the concurrent changes.
+  persistControlFields(fields) {
+    const fresh = loadConfig(this.home);
+    Object.assign(fresh, fields);
+    this.config = fresh;
+    saveConfig(this.config, this.home);
   }
 
   featureOn() {
@@ -149,9 +164,10 @@ export class MachineDaemon {
     if (message.type === "halt") {
       this.state.halted = true;
       this.state.deadman = false;
-      this.config.halted = true;
-      this.config.haltEpoch = Number(message.epoch) || this.config.haltEpoch + 1;
-      saveConfig(this.config, this.home);
+      this.persistControlFields({
+        halted: true,
+        haltEpoch: Number(message.epoch) || this.config.haltEpoch + 1,
+      });
       await stopAllGuests(this.state);
       // The autonomous bot must stop too: its active execution is released
       // and it will not pick the work back up while halted.
@@ -168,14 +184,20 @@ export class MachineDaemon {
     if (message.type === "resume") {
       this.state.halted = false;
       this.state.pausedUntil = null;
-      this.config.halted = false;
-      this.config.pausedUntil = null;
-      saveConfig(this.config, this.home);
+      this.persistControlFields({ halted: false, pausedUntil: null });
       return;
     }
     if (message.type === "bye") return;
     if (message.type !== "call") return;
-    const result = await this.call(message);
+    // A call must always answer: receive() swallows handler errors, so an
+    // exception escaping call() (recording, approval, receipt, ...) would
+    // leave the relay caller hanging with no result frame at all (#2873).
+    let result;
+    try {
+      result = await this.call(message);
+    } catch {
+      result = errorResult(message.id, ERROR.UNAVAILABLE, "The machine call failed");
+    }
     const encoded = JSON.stringify(result);
     if (Buffer.byteLength(encoded) > SCREENSHOT_MAX_BYTES) {
       this.socket?.send(JSON.stringify(errorResult(message.id, ERROR.TOO_LARGE, "Result exceeds 4 MiB.")));
@@ -193,12 +215,20 @@ export class MachineDaemon {
 
   async call(message) {
     const id = message.id;
+    // PROTOCOL.md: call ids match CALL_ID_PATTERN. Enforce it here — a
+    // result framed under any other id can never be correlated by the relay.
+    if (typeof id !== "string" || !CALL_ID_PATTERN.test(id)) {
+      return errorResult(typeof id === "string" ? id : null, ERROR.INVALID, "Call id must match [A-Za-z0-9_-]{1,64}");
+    }
     if (!this.featureOn()) return errorResult(id, ERROR.DISABLED, "room-machine is off");
     const refused = this.refusal(id);
     if (refused) return refused;
     const caller = message.caller;
+    // claimId reaches the recordings filesystem (claimDir throws on any
+    // other shape), so refuse it here, before the slot is taken or any
+    // tool runs — not after dispatch, when the throw would strand the call.
     if (!caller || caller.verified !== true || typeof caller.identityId !== "string"
-      || typeof caller.claimId !== "string" || !SLOTS.includes(caller.slot)) {
+      || typeof caller.claimId !== "string" || !CLAIM_ID_PATTERN.test(caller.claimId) || !SLOTS.includes(caller.slot)) {
       return errorResult(id, ERROR.LEASE_REQUIRED, "A verified lease is required");
     }
     const held = this.state.slots[caller.slot];
@@ -308,16 +338,13 @@ export class MachineDaemon {
   // (crash, reboot) mid-pause comes back paused instead of quietly resuming.
   holdPause(until) {
     this.state.pausedUntil = until;
-    this.config.pausedUntil = until;
-    saveConfig(this.config, this.home);
+    this.persistControlFields({ pausedUntil: until });
   }
 
   async resume() {
     this.state.halted = false;
     this.state.pausedUntil = null;
-    this.config.halted = false;
-    this.config.pausedUntil = null;
-    saveConfig(this.config, this.home);
+    this.persistControlFields({ halted: false, pausedUntil: null });
     return { halted: false };
   }
 

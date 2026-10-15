@@ -1,9 +1,11 @@
 import { uiText } from "./strings.js";
+import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
 import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
-import { AccountClient, RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
+import { AccountClient } from "./account-client.js";
+import { RoomClient, draftCommand, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
@@ -32,8 +34,7 @@ import { installInbox } from "./inbox-ui.js";
 import { nameBeforeFirstRoom } from "./account-setup-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
-import { createAgentSigninUI } from "./agent-signin-ui.js";
-import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, defaultRequestPermissions, validateAccessRequestForm, newAccessRequestId, stashAccessRequest, readAccessRequest, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
+import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, AGENT_INVITE_CODE_PATTERN, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
@@ -45,6 +46,7 @@ import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
+export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
 // Keep a connector/native consent journey through password or provider login.
@@ -251,6 +253,9 @@ function readAcquisition() {
 function clearAcquisition() {
   try { window.sessionStorage.removeItem(ACQUISITION_KEY); } catch { /* storage may be blocked */ }
 }
+function clearTemplateRoom() {
+  try { window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY); } catch { /* storage may be blocked */ }
+}
 // --- end GR2 ---
 function consumeStartRoomIntent() {
   const wanted = startRoomIntent;
@@ -283,10 +288,13 @@ function stashInviteForOAuth() {
   if (typeof pendingJoin === "string" && pendingJoin.startsWith("#join/")) stashPendingJoin(window.sessionStorage, pendingJoin);
   else clearPendingJoin(window.sessionStorage);
 }
-// The Google entry point is a plain anchor: stash a live invitation before
-// the navigation, since the OAuth round-trip drops the #invite/ fragment.
+// The Google and GitHub entry points are plain anchors: stash a live
+// invitation before the navigation, since the OAuth round-trip drops the
+// #invite/ fragment.
 { const googleButton = $("#google-signin");
   if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+{ const githubButton = $("#github-signin");
+  if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
 let briefReconcileNote = ""; // Catch-up reconciliation failure, shown in the brief while the dialog is open.
 let portableWorkUI = null;
@@ -345,11 +353,10 @@ let roomActionsContext = null;
 let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
-  opener: null, openerSelection: null, requestAccess: null
+  opener: null, openerSelection: null
 };
 const invitationIsCommitting = () => ["authenticating", "accepting", "opening"].includes(invitation.phase)
   || (humanAuthBusy && Boolean(invitation.secret));
-const accountClient = new AccountClient();
 document.addEventListener("focusin", event => {
   if (!$("#invitation-dialog").contains(event.target)
     && event.target.matches?.("button, input, textarea, select, a[href], [tabindex]")) lastInvitationOpener = event.target;
@@ -548,7 +555,6 @@ const client = new RoomClient({
     }
     if (!humanAuthBusy) signinUI?.clear();
     showSigninMethods();
-    agentSigninUI?.clear();
     clearStoredPasswords();
     composerFiles = [];
     roomFilesByMessage = new Map();
@@ -716,7 +722,8 @@ let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
 // user was left on the welcome screen.
 let accountRestoreFlight = null;
 let humanAuthBusy = false;
-let signinView = "password-login", signinHistoryReplay = false, resetJourneyPending = false;
+let resetJourneyPending = false;
+const signinNavigation = createSigninNavigation({ getUI: () => signinUI, active: mainSigninHost });
 let resumeResetJourney = false;
 function ensureAccountSession() {
   if (accountClient.session) return Promise.resolve(accountClient.session);
@@ -745,6 +752,7 @@ $("#account-profile-close").textContent = uiText("profile.close");
 const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
+  loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
   onViewChange: syncSigninView,
   onBack: handleSigninBack,
   onPasswordResetComplete: async () => {
@@ -837,30 +845,10 @@ const initialPasswordReset = initialAuthLink.kind === "reset";
 if (initialAuthLink.kind === "none" && !initialGoogleFailed) signinUI.showPassword();
 const initialSignin = signinUI.mount($("#auth-signin-ui"));
 
-// Agent sign-in (RC-2026-09-23): agents choose their own account (identity
-// ID + secret) or fall back to human account sign-in. On success the room
-// cookie is set, so restore the client session for that room.
-const agentSigninUI = createAgentSigninUI({
-  onSignedIn: async (session) => {
-    const roomId = session?.roomId;
-    if (!roomId) return;
-    // Agent sign-in creates a room cookie, not a human account session.
-    const identity = await client.restore();
-    if (!identity || identity.roomId !== roomId || !state) return;
-    $("#message-input").focus();
-    if (state) revealLocationHash();
-  },
-  // Agent first-run orientation (2026-09-24): the card mounts itself after
-  // an agent browser sign-in and only when the browser hasn't seen it.
-  // greet focuses the composer so the agent can introduce itself; discover
-  // opens the People panel; the card's skill step links /agents.json.
-  firstRunActions: {
-    greet: () => $("#message-input")?.focus(),
-    discover: () => { const panel = $("#people-panel"); if (panel) panel.open = true; },
-    baseUrl: location.origin
-  }
-});
-agentSigninUI.mount($("#agent-signin-ui"));
+// Agent sign-in (RC-2026-09-23) moved off the wall to its own page
+// (GET /agent-signin, decision #37): src/agent-signin-page.js hosts
+// the same component and endpoints; the wall keeps only the labeled
+// link (#agent-signin-button).
 function openAccountSettings() {
   setSessionMenuOpen(false);
   if (!accountClient.session?.authenticated) return;
@@ -1092,11 +1080,16 @@ async function ensureDefaultRoom() {
   if (!owned?.authenticated) return null;
   defaultRoomFlight = (async () => {
     try {
+      const statusBeforeSetup = $("#account-rooms-status").textContent;
       $("#account-rooms-status").textContent = "Setting up your first room…";
       const body = await accountClient.request("/api/account/ensure-default-room", { method: "POST", data: {}, session: owned });
       if (accountClient.session !== owned) return null;
       // Refresh the list to show the new room (or the existing one).
       if (body?.room?.id) await loadAccountRooms();
+      // { room: null } is the server's deliberate no-resurrect answer for an
+      // account that left every room (R266-1 / #3508): put back the empty
+      // state the room list showed, never the setup-failure copy.
+      else if (body && body.room === null) $("#account-rooms-status").textContent = statusBeforeSetup;
       else $("#account-rooms-status").textContent = FIRST_ROOM_SETUP_FAILURE;
       return body;
     } catch {
@@ -1569,7 +1562,7 @@ function closeInvitation({ returnFocus = true } = {}) {
   const opener = invitation.opener;
   invitation.version += 1;
   const selection = invitation.openerSelection;
-  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null, requestAccess: null });
+  Object.assign(invitation, { phase: "idle", secret: null, preview: null, redemptionId: null, opener: null, openerSelection: null });
   resetRequestAccessDoor();
   clearPendingInvite(window.sessionStorage);
   setInvitationFeedback("");
@@ -1613,8 +1606,7 @@ async function openInvitation(fragment) {
     preview: null,
     redemptionId: null,
     opener,
-    openerSelection,
-    requestAccess: null
+    openerSelection
   });
   setInvitationFeedback(fragment.valid ? "Checking the invitation without joining the Room…" : "This invitation link is unavailable.", !fragment.valid);
   renderInvitation();
@@ -1663,112 +1655,37 @@ async function previewCurrentInvitation() {
     renderInvitation();
   }
 }
-// RC-2026-09-19-071 (QAJ-001): the request-access door. When the invitation
-// dialog lands terminal on a preview that still names the room, the stranger
-// gets a way in: file a self-serve access request against that room. The
-// pure policy (which previews qualify, form validation, stash keys) lives in
-// src/invite-context.js; this is the dialog wiring.
+// RC-2026-09-19-071 (QAJ-001) origin; #3293 step 3: the request-access
+// link-out. When the invitation dialog lands terminal on a preview that
+// still names the room, the stranger gets a way in: a link to the join
+// page at the room's own address, which carries the one request-access
+// door (human-map §8.1). The inline form that used to live here filed
+// through a hand-rolled copy of the general flow and had drifted from
+// it (a fresh requestId per submit, where the consolidated flow reuses
+// the stashed one). The dead invite's own permissions are NOT carried
+// across: a dead grant is not a live intent — the consolidated door
+// files the minimal ask and the owner approves the real grant. The
+// receipt referrer still rides along (?ref=, GR1). The pure policy
+// (which previews qualify) stays in src/invite-context.js.
 function requestAccessDoor() {
   return invitation.phase === "terminal" ? inviteRequestDoor(invitation.preview) : null;
 }
 function resetRequestAccessDoor() {
-  invitation.requestAccess = null;
   $("#invitation-request-door").hidden = true;
-  $("#invitation-request-access").hidden = false;
-  $("#invitation-request-access").disabled = false;
-  $("#invitation-request-form").hidden = true;
-  $("#invitation-request-form").reset();
-  $("#invitation-request-status").textContent = "";
+  $("#invitation-request-access").removeAttribute("href");
 }
 function syncRequestAccessDoor() {
   const door = requestAccessDoor();
   const block = $("#invitation-request-door");
   if (!door) { block.hidden = true; return; }
-  // A fresh terminal preview resets the door; an in-flight submit keeps its
-  // state across renderInvitation calls (phase does not change mid-submit).
-  if (!invitation.requestAccess) resetRequestAccessDoor();
+  const mount = location.pathname.startsWith("/room/") ? "/room" : "";
+  const query = new URLSearchParams();
+  const ref = receiptReferrer();
+  if (ref) query.set("ref", ref);
+  const qs = query.toString();
+  $("#invitation-request-access").href = `${mount}/rooms/${encodeURIComponent(door.roomId)}${qs ? `?${qs}` : ""}`;
   block.hidden = false;
 }
-function openRequestAccessForm() {
-  const door = requestAccessDoor();
-  if (!door || invitation.requestAccess) return;
-  invitation.requestAccess = { phase: "form", roomId: door.roomId };
-  $("#invitation-request-access").hidden = true;
-  const stashed = readAccessRequest(window.sessionStorage, door.roomId);
-  if (stashed?.displayName) $("#invitation-request-name").value = stashed.displayName;
-  // GR1: prefill the receipt footer referrer when the field is still empty.
-  const referred = $("#invitation-request-referred");
-  const fromReceipt = receiptReferrer();
-  if (referred && !referred.value && fromReceipt) referred.value = fromReceipt;
-  $("#invitation-request-form").hidden = false;
-  $("#invitation-request-status").textContent = stashed
-    ? `You already asked to join “${door.roomTitle}” from this browser. Sending again files a second request for the owner.`
-    : "";
-  queueMicrotask(() => $("#invitation-request-name").focus({ preventScroll: true }));
-}
-function setRequestAccessStatus(text, error = false) {
-  const node = $("#invitation-request-status");
-  node.textContent = text;
-  node.classList.toggle("error", error);
-}
-async function submitRequestAccessForm(event) {
-  event.preventDefault();
-  const flow = invitation.requestAccess;
-  const door = requestAccessDoor();
-  if (!door || !flow || flow.phase !== "form") return;
-  const checked = validateAccessRequestForm({
-    displayName: $("#invitation-request-name").value,
-    note: $("#invitation-request-note").value,
-    referredBy: $("#invitation-request-referred")?.value,
-  });
-  if (!checked.ok) { setRequestAccessStatus(checked.error, true); return; }
-  const submit = $("#invitation-request-submit");
-  submit.disabled = true;
-  flow.phase = "sending";
-  setRequestAccessStatus("Sending your request…");
-  try {
-    // Reuse this browser's identity for the room so a retry does not mint
-    // (and rate-limit-burn) a fresh identity per click.
-    let stashed = readAccessRequest(window.sessionStorage, door.roomId);
-    let identityId = stashed?.identityId ?? null, secret = stashed?.secret ?? null;
-    if (!identityId) {
-      const minted = await accountClient.mintAccessIdentity(checked.displayName);
-      identityId = minted?.identityId; secret = minted?.secret ?? null;
-      if (!identityId) throw new Error("The identity service did not return an identity.");
-    }
-    const requestId = newAccessRequestId();
-    // Stash BEFORE the submit (M-37): a failed submit must not orphan the
-    // freshly minted identity — the record stays stashed so the retry reuses
-    // it instead of burning another mint.
-    stashAccessRequest(window.sessionStorage, door.roomId, { identityId, secret, requestId, displayName: checked.displayName });
-    await accountClient.submitAccessRequest({
-      roomId: door.roomId,
-      identityId,
-      displayName: checked.displayName,
-      requestedPermissions: defaultRequestPermissions(invitation.preview),
-      note: checked.note,
-      referredBy: checked.referredBy,
-      requestId,
-    });
-    flow.phase = "sent";
-    $("#invitation-request-form").hidden = true;
-    setRequestAccessStatus(`Request sent — the owner of “${door.roomTitle}” has been notified and will review it. Your request ID is ${requestId}.`);
-  } catch (error) {
-    flow.phase = "form";
-    submit.disabled = false;
-    const message = error?.code === "rate_limited" || error?.status === 429
-      ? "Too many requests from this browser — wait a little and try again."
-      : error?.code === "already_member"
-        ? "This identity is already in the room — ask the owner directly if you need anything."
-        : typeof error?.message === "string" && error.message
-          ? error.message
-          : "Could not send the request. Check your connection and try again.";
-    setRequestAccessStatus(message, true);
-    queueMicrotask(() => $("#invitation-request-name").focus({ preventScroll: true }));
-  }
-}
-$("#invitation-request-access").addEventListener("click", openRequestAccessForm);
-$("#invitation-request-form").addEventListener("submit", submitRequestAccessForm);
 async function openAcceptedRoom(roomId, message, { acceptanceConfirmed = true } = {}) {
   invitation.phase = "opening";
   invitation.secret = null;
@@ -1835,6 +1752,7 @@ function syncWorkForm() {
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
   $("#verifier-select").required = reviewing;
+  if ($("#verifier-select").value) $("#verifier-hint").hidden = true;
   const checks = [reviewing && "Review", $("#require-decision").checked && "approval"].filter(Boolean);
   $("#work-options-summary").textContent = !reviewing && active.length === 1 && active[0].kind === "human" && active[0].id === session.member.id
     ? uiText("human.workNoReview") : `${checks.join(" + ") || "Evidence only"} · ${writing ? "external write" : "read only"}`;
@@ -3154,7 +3072,14 @@ function navigateWorkRecord(kind, id, extra = {}) {
   const entry = history.state && typeof history.state === "object" ? history.state : {};
   history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
   history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
-  activeWorkNavigation = ticket; workHistoryReplayKey = null;
+  activeWorkNavigation = ticket;
+  // Pre-seed the replay key so a late hashchange/popstate for this navigation
+  // dedupes instead of reprocessing stale state (which would close a board
+  // dialog the user reopened after navigating). The navigation itself is
+  // processed synchronously by showWorkDestination below; the event is only
+  // its echo. Key format matches replayWorkNavigation's computed key, with
+  // an empty back segment (the pushed entry carries no roomWorkOrigin).
+  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
   showWorkDestination(kind, id, presentation);
   return true;
 }
@@ -3588,7 +3513,7 @@ function makeTimelineWorkNode(entry) {
 function setTimelineWorkNode(wnode, html) {
   if (wnode._content === html) return;
   const saved = captureDisclosures(wnode);
-  wnode.innerHTML = html; wnode._content = html;
+  preserveResultFocus(wnode, () => { wnode.innerHTML = html; wnode._content = html; });
   restoreDisclosures(wnode, saved);
 }
 // Use the same interleave for background card refreshes and message arrivals.
@@ -3668,7 +3593,7 @@ $("#invitation-signin-back").addEventListener("click", () => {
 });
 $("#invitation-dismiss").addEventListener("click", () => closeInvitation());
 $("#invitation-retry").addEventListener("click", () => { if (invitation.phase === "preview-failed") previewCurrentInvitation(); });
-for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "result-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
+for (const id of ["invitation-dialog", "work-dialog", "action-dialog", "room-actions-dialog", "decision-dialog", "board-dialog", "catchup-dialog", "settings-dialog"]) $(`#${id}`).addEventListener("keydown", e => {
   if (e.key !== "Tab") return;
   const controls = [...e.currentTarget.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, a[href], [tabindex]:not([tabindex='-1'])")]
     .filter(element => element.getClientRects().length > 0);
@@ -3781,72 +3706,18 @@ function mainSigninHost() {
 function focusSignin() {
   signinUI.focus();
 }
-function syncSigninView(view) {
-  const previous = signinView;
-  signinView = view;
-  if (!mainSigninHost()) return;
-  const auxiliary = view !== "welcome" && !view.startsWith("password-");
-  if (!signinHistoryReplay && (auxiliary || previous === "welcome" && view.startsWith("password-")) && previous !== view) {
-    if (previous.startsWith("password-")) {
-      const base = { ...history.state };
-      base.roomSigninView = previous; delete base.roomSigninStep;
-      history.replaceState(base, "", location.href);
-    }
-    const sameFlow = previous.startsWith("magic-") && view.startsWith("magic-")
-      || previous.startsWith("reset-") && view.startsWith("reset-");
-    history[sameFlow ? "replaceState" : "pushState"]({ ...history.state, roomSigninView: view }, "", location.href);
-  }
-  $(auxiliary ? "#email-auth-panel" : "#signin-controller").prepend($("#auth-signin-ui"));
-  $("#email-auth-panel").hidden = !auxiliary;
-  $("#email-auth-step").hidden = !auxiliary;
-  $("#signin-methods").hidden = auxiliary;
-  $("#signin-entry-routes").hidden = auxiliary;
-  $("#google-signin").hidden = view === "welcome";
-  $("#terms-notice").hidden = view === "welcome";
-}
+function syncSigninView(view) { signinNavigation.sync(view); }
 function showSigninMethods() {
-  $("#agent-auth-step").hidden = true;
-  $("#agent-signin-button").setAttribute("aria-expanded", "false");
   $("#signin-controller").prepend($("#auth-signin-ui"));
   signinUI.showPassword();
   syncSigninView("password-login");
 }
 function openEmailAuth(mode, { recordHistory = true } = {}) {
-  if (!agentSigninUI.canLeave() || !signinUI.canLeave()) return;
-  signinHistoryReplay = !recordHistory;
-  try { mode === "password" ? signinUI.showPassword() : signinUI.showMagic(); }
-  finally { signinHistoryReplay = false; }
-  focusSignin();
-}
-function openAgentSignin() {
   if (!signinUI.canLeave()) return;
-  showSigninMethods();
-  $("#signin-methods").hidden = true;
-  $("#signin-entry-routes").hidden = true;
-  $("#agent-auth-step").hidden = false;
-  $("#agent-signin-button").setAttribute("aria-expanded", "true");
-  ($("#agent-signin-ui input:not([type=hidden])") || $("#agent-auth-back"))?.focus();
-}
-$("#agent-signin-button").addEventListener("click", openAgentSignin);
-$("#agent-auth-back").addEventListener("click", () => {
-  if (!agentSigninUI.leave()) return;
-  showSigninMethods();
-  $("#agent-signin-button").focus();
-});
-function handleSigninBack() {
-  if (mainSigninHost() && history.state?.roomSigninView) {
-    history.back(); return false;
-  }
-  return true;
-}
-window.addEventListener("popstate", event => {
-  if ($("#auth-panel").hidden || !mainSigninHost()) return;
-  if (!signinUI.canLeave()) { history.forward(); return; }
-  signinHistoryReplay = true;
-  try { signinUI.showView(event.state?.roomSigninView || "password-login"); }
-  finally { signinHistoryReplay = false; }
+  signinNavigation.withReplay(!recordHistory, () => mode === "password" ? signinUI.showPassword() : signinUI.showMagic());
   focusSignin();
-});
+}
+function handleSigninBack() { return signinNavigation.back(); }
 // Preserve guide deep links through sign-in, then open the Advanced guide.
 $("#connect-guide-copy").innerHTML = uiText("guide.instructions");
 let pendingAgentGuide = location.hash === "#join-agent";
@@ -3919,6 +3790,7 @@ const setSessionMenuOpen = open => {
   sessionMenuButton.setAttribute("aria-expanded", String(open));
 };
 sessionMenuButton.addEventListener("click", () => setSessionMenuOpen(!sessionMenu.classList.contains("open")));
+sessionMenuButton.disabled = false;
 $("#clear-session-menu")?.addEventListener("click", () => { setSessionMenuOpen(false); void clearSavedBrowserSession(); });
 $("#create-account-button")?.addEventListener("click", () => {
   setSessionMenuOpen(false);
@@ -4043,6 +3915,7 @@ $("#refresh-button").addEventListener("click", async () => {
     handleFailureNotice(error);
   }
 });
+$("#refresh-button").disabled = false;
 // A DM refused by the explicit-denial gate (blocked/rejected/revoked) names
 // the recipient and the next step, instead of surfacing the raw gate
 // message. Returns null when the error is not a DM denial.
@@ -5836,7 +5709,7 @@ async function startRoomFromTemplate(slug) {
   });
   if (accountClient.session !== owned) return;
   await openAccountRoom(result.room.id);
-  window.sessionStorage.removeItem(TEMPLATE_ROOM_KEY);
+  clearTemplateRoom();
 }
 async function showAgentInvitePicker(agentId) {
   inboxUI.showRoomList();
@@ -5886,15 +5759,19 @@ async function runAcquisitionIntent() {
   if (!intent || state || !accountClient.session?.authenticated) return;
   try {
     if (intent.kind === "request") {
+      // #3293 step 2: the account-panel request door is gone — the join
+      // page carries the one request-access door (human-map §8.1). The
+      // intent re-homes there: ?room= prefills the door's room field and
+      // ?ref= carries the stashed receipt referrer to its referrer field.
       clearAcquisition();
-      inboxUI.showRoomList();
-      const input = $("#account-request-room");
-      if (input && intent.roomId) input.value = intent.roomId;
-      const details = $("#account-request-access");
-      if (details) details.open = true;
-      const referred = $("#account-request-referred");
+      const query = new URLSearchParams();
+      const roomId = typeof intent.roomId === "string" ? intent.roomId.trim() : "";
+      if (roomId) query.set("room", roomId);
       const ref = receiptReferrer();
-      if (referred && !referred.value && ref) referred.value = ref;
+      if (ref) query.set("ref", ref);
+      const qs = query.toString();
+      const door = location.pathname.startsWith("/room/") ? "/room" : "";
+      location.assign(`${door}/join${qs ? `?${qs}` : ""}`);
       return;
     }
     if (intent.kind === "template") {
@@ -5904,6 +5781,17 @@ async function runAcquisitionIntent() {
     }
     if (intent.kind === "invite-agent") await showAgentInvitePicker(intent.agent);
   } catch {
+    if (intent.kind === "template") {
+      // #2971: a template intent is one attempt, not a standing order. It used
+      // to survive every failure, so each account-home render retried the same
+      // failing room-creation POST forever. Consume the intent and drop the
+      // stashed room id with it: that id was minted for this attempt, and a
+      // definitive failure (e.g. a 4xx for that id/payload) would poison every
+      // later attempt that reused it. A fresh start from the template gallery
+      // mints a fresh id.
+      clearAcquisition();
+      clearTemplateRoom();
+    }
     $("#account-rooms-status").textContent = "Couldn’t finish that. Refresh and try again.";
   }
 }
@@ -5939,7 +5827,7 @@ function openWork(sourceId = null, reuseId = null) {
   workFormEpoch++; setWorkRetry(false);
   $("#new-work-form").reset();
   $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
-  $("#work-options").open = false;
+  $("#work-options").open = false; $("#verifier-hint").hidden = true;
   $("#work-dialog").showModal();
   $("#source-message-id").value = sourceId || "";
   if (sourceId) $("#work-title-input").value = (state.messages.find(m => m.id === sourceId)?.body || "").trim().replace(/\s+/g, " ").slice(0, 100).replace(/[\uD800-\uDBFF]$/, "");
@@ -6020,6 +5908,27 @@ $("#review-settings-button").addEventListener("click", () => {
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
 $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
 $("#new-work-form").addEventListener("change", syncWorkForm);
+// Create-work trap guard: verification is required by default but the verifier
+// select starts empty, so native validation swallowed the Create click with
+// no surfaced error (the requirement controls sit in the collapsed Options
+// group). Respond instead of ignoring: open Options so the requirement is
+// visible, name what is missing next to the select, and focus it. Defaults
+// are unchanged and no verifier is picked for the user.
+$("#create-work-button").addEventListener("click", e => {
+  const verifier = $("#verifier-select");
+  if (!$("#require-verification").checked || verifier.value) return;
+  // Respond only when the verifier is the form's first invalid control. If
+  // another required field is also unmet (title, done-when, assignee), let
+  // native validation run so it focuses that field instead of the verifier.
+  const firstInvalid = [...$("#new-work-form").querySelectorAll("input,select,textarea")]
+    .find(el => !el.disabled && typeof el.checkValidity === "function" && !el.checkValidity());
+  if (firstInvalid && firstInvalid !== verifier) return;
+  e.preventDefault();
+  $("#work-options").open = true;
+  $("#verifier-hint").textContent = uiText("human.workChooseVerifier");
+  $("#verifier-hint").hidden = false;
+  $("#verifier-select").focus();
+});
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
 $("#message-list").addEventListener("click", e => {
@@ -6115,6 +6024,21 @@ const actionSpecs = {
   decide: [T.OWNER_DECISION_RECORDED, "Record your decision", '<label>Decision<select name="decision" required><option value="">Choose</option><option value="approved">Approve</option><option value="changes_requested">Request changes</option><option value="rejected">Reject</option></select></label>' + area("reason", "Reason") + field("sourceMessageId", "Source message id — post your rationale in the room first, then paste its message id") + "<p>Approval does not merge, deploy, or spend money.</p>" ]
 };
 let resultView = null;
+const resultReader = $("#result-dialog"), resultParking = resultReader.parentElement;
+const resultElement = id => id === "result-dialog" ? resultReader : resultReader.querySelector(`#${id}`);
+function mountResultReader() {
+  if (!resultView) return;
+  const host = resultView.fromResults
+    ? [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === resultView.workItemId) ?? $("#results-panel")
+    : workRecord(resultView.workItemId);
+  if (host && resultReader.parentElement !== host) host.append(resultReader);
+}
+function preserveResultFocus(container, render) {
+  const focus = resultView && container.contains(resultReader) && resultReader.contains(document.activeElement) ? document.activeElement : null;
+  render();
+  if (resultView) mountResultReader();
+  if (focus?.isConnected) focus.focus({ preventScroll: true });
+}
 // Work and results now live in the single timeline (work) and the settings
 // dialog (results); the old Work/Results tab toggle is gone. selectWorkView
 // stays as a seam for callers: "results" opens Settings at Results.
@@ -6135,7 +6059,7 @@ function renderRoomOverview() {
     + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
     + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
     + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
-    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet."));
+    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here."));
 }
 $("#room-overview-open").addEventListener("click", () => {
   if (!state || busy) return;
@@ -6226,24 +6150,36 @@ function loadResultComparison(workItemId, previousId, text, box, owns) {
     box.hidden = false;
   });
 }
+function resultDiscussionMessage(view) {
+  if (!view?.loaded || view.withdrawn || view.error || !sameSession(view.generation, view.roomId, view.memberId)
+    || isRoomArchived(state)) return null;
+  // The ordinary thread composer does not inherit a DM audience.
+  return state.messages.find(message => !message.toMemberId && message.id === view.discussionId && message.workItemId === view.workItemId
+    && !message.deletedAt && message.body === view.body && !state.channels?.[messageChannelId(message)]?.archivedAt);
+}
 function resultStatus() {
+  mountResultReader();
   const view = resultView;
   if (!view || !sameSession(view.generation, view.roomId, view.memberId)) return;
   const item = state.workItems[view.workItemId];
   const earlier = !matchesReceipt(view.receipt, item?.receipt) || item?.state !== S.COMPLETED || Boolean(item?.supersededBy);
-  $("#result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
+  resultElement("result-status").textContent = (earlier ? "Earlier result · " : "") + (view.error ? "Exact text unavailable. Retry this result or close."
     : view.withdrawn ? `Text withdrawn by ${memberLabel(view.withdrawn.by)} · reported by ${memberLabel(view.reportedById)}`
     : view.loaded ? `Submitted by ${memberLabel(view.reportedById)} · exact stored text` : "Loading exact text…");
-  const retry = $("#result-retry");
+  const retry = resultElement("result-retry");
+  resultElement("result-discuss").hidden = !resultDiscussionMessage(view);
+  resultElement("result-discuss").disabled = busy || requestReading || composerFiles.some(file => file.status === "uploading");
   retry.hidden = !view.error && !view.retrying;
   retry.disabled = !view.error;
+  if (resultReader.contains(document.activeElement)) document.activeElement.scrollIntoView({ block: "nearest" });
 }
 function closeResult(restore = true) {
   const view = resultView;
-  resultView = null; $("#result-dialog").close(); $("#result-title").textContent = "Result";
-  $("#result-status").textContent = ""; $("#result-body").textContent = ""; $("#result-body").hidden = false;
-  $("#result-original").hidden = true; $("#result-retry").hidden = true; $("#result-retry").disabled = true;
-  clearResultComparison($("#result-diff"));
+  resultView = null; resultReader.hidden = true; resultParking.append(resultReader); resultElement("result-title").textContent = "Result";
+  resultElement("result-status").textContent = ""; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
+  resultElement("result-original").hidden = true; resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
+  resultElement("result-discuss").hidden = true;
+  clearResultComparison(resultElement("result-diff"));
   if (restore && view && sameSession(view.generation, view.roomId, view.memberId)) {
     if (view.fromResults) {
       const row = [...$("#room-results-list").querySelectorAll("[data-result-work-id]")].find(node => node.dataset.resultWorkId === view.workItemId);
@@ -6253,15 +6189,28 @@ function closeResult(restore = true) {
     const card = workRecord(view.workItemId); focusRecord(card?.querySelector("[data-read-result]") || card);
   }
 }
-$("#close-result").addEventListener("click", () => closeResult());
-$("#result-original").addEventListener("click", () => {
+resultElement("close-result").addEventListener("click", () => closeResult());
+resultElement("result-discuss").textContent = uiText("result.discuss");
+resultElement("result-discuss").addEventListener("click", () => {
+  const message = resultDiscussionMessage(resultView);
+  if (!message || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  closeResult(false);
+  revealMessage(message.id);
+  switchThread(conversation.rootById.get(message.id), true);
+  // An uncertain send already owns its exact reply target until it is resolved.
+  if (!pendingMessage) replyToId = message.id;
+  updateReply(); saveComposer(); persistDrafts();
+});
+resultElement("result-original").addEventListener("click", () => {
   const view = resultView;
   if (!view?.loaded || busy || !sameSession(view.generation, view.roomId, view.memberId)
     || !state.messages.some(message => message.id === view.originalId && message.workItemId === view.workItemId)) return;
   closeResult(false);
   history.replaceState(null, "", recordHref("message", view.originalId)); revealMessage(view.originalId);
 });
-$("#result-dialog").addEventListener("cancel", event => { event.preventDefault(); closeResult(); });
+resultReader.addEventListener("keydown", event => {
+  if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeResult(); }
+});
 function loadExactResult(view) {
   const owns = () => resultView === view && sameSession(view.generation, view.roomId, view.memberId);
   client.workResult(view.workItemId, { completionEventId: view.receipt.completionEventId }).then(value => {
@@ -6271,22 +6220,23 @@ function loadExactResult(view) {
     // than showing an empty box: the result was still reported and verified,
     // and the receipt still names what it was verified against.
     view.withdrawn = value.result.text.withdrawnAt ? { by: value.result.text.withdrawnBy, at: value.result.text.withdrawnAt } : null;
-    $("#result-body").textContent = view.withdrawn ? "" : value.result.text.body;
-    $("#result-body").hidden = Boolean(view.withdrawn);
+    resultElement("result-body").textContent = view.withdrawn ? "" : value.result.text.body;
+    resultElement("result-body").hidden = Boolean(view.withdrawn);
     const message = state.messages.find(message => message.id === value.result.text.messageId && message.workItemId === view.workItemId
       && message.body === value.result.text.body);
+    view.discussionId = message?.id; view.body = value.result.text.body;
     const original = state.messages.find(original => original.id === message?.replyToId && original.workItemId === view.workItemId && original.proposal);
-    view.originalId = original?.id; $("#result-original").hidden = !original;
+    view.originalId = original?.id; resultElement("result-original").hidden = !original;
     view.loaded = true; view.retrying = false;
-    if (document.activeElement === $("#result-retry")) $("#close-result").focus({ preventScroll: true });
+    if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
     resultStatus();
-    loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, $("#result-diff"), owns);
+    loadResultComparison(view.workItemId, view.previousCompletionEventId, value.result.text, resultElement("result-diff"), owns);
   }).catch(() => { if (owns()) { view.error = true; view.retrying = false; resultStatus(); } });
 }
-$("#result-retry").addEventListener("click", () => {
+resultElement("result-retry").addEventListener("click", () => {
   const view = resultView;
   if (!view?.error || busy || !sameSession(view.generation, view.roomId, view.memberId)) return;
-  if (document.activeElement === $("#result-retry")) $("#close-result").focus({ preventScroll: true });
+  if (document.activeElement === resultElement("result-retry")) resultElement("close-result").focus({ preventScroll: true });
   view.error = false; view.retrying = true; resultStatus();
   loadExactResult(view);
 });
@@ -6299,11 +6249,13 @@ function readResult(e) {
     if (fromResults && !currentResult(item)) return;
     const view = { generation: client.generation, roomId: session.roomId, memberId: session.member.id, workItemId: item.id,
       fromResults, previousCompletionEventId: receipt.nativeText.previousCompletionEventId, receipt: { completionEventId: receipt.eventId, evidenceVersion: receipt.evidenceVersion }, reportedById: receipt.reportedById }; resultView = view;
-    $("#result-title").textContent = item.title; $("#result-status").textContent = "Loading exact text…"; $("#result-body").textContent = ""; $("#result-body").hidden = false;
-    $("#result-original").hidden = true;
-    const diffBox = $("#result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
-    $("#result-retry").hidden = true; $("#result-retry").disabled = true;
-    $("#result-dialog").showModal();
+    resultElement("result-title").textContent = item.title; resultElement("result-status").textContent = "Loading exact text…"; resultElement("result-body").textContent = ""; resultElement("result-body").hidden = false;
+    resultElement("result-original").hidden = true;
+    resultElement("result-discuss").hidden = true;
+    const diffBox = resultElement("result-diff"); diffBox.hidden = true; diffBox.innerHTML = "";
+    resultElement("result-retry").hidden = true; resultElement("result-retry").disabled = true;
+    mountResultReader(); resultReader.hidden = false;
+    resultElement("result-title").focus();
     loadExactResult(view);
     return;
   }
@@ -6662,19 +6614,47 @@ window.addEventListener("pageshow", e => {
   if (!e.persisted) return;
   if (accountHomeFromLocation()) { ensureAccountSession().then(showAccountWorkspace).catch(handleFailureNotice); return; }
   const roomId = selectedRoomFromLocation();
+  // Access held when the page was shown again. A restore that cannot
+  // revalidate it has ended it, even though restore() itself only reports
+  // the failure — the teardown below is what drops the stale room shell.
+  const hadAccess = Boolean(client.session);
   // Same join-flow rule as the initial boot: a #room/ deep link first tries
   // the room-cookie session (no account needed), then the account flow.
   const restoreDeepLink = async () => {
-    if (!roomId) return client.restore();
+    if (!roomId) {
+      try { return await client.restore(); }
+      catch (error) {
+        if (hadAccess && [401, 403].includes(error.status)) client.endAccess();
+        throw error;
+      }
+    }
+    let accessEnded = false;
     try {
       const joined = await client.restore();
+      // A superseded restore returns null (the client generation guard):
+      // a newer wake or a room/account switch cancelled this attempt
+      // mid-flight. That is a cancellation, never a wrong-room result —
+      // touch nothing and let the newer lifecycle own the current access.
+      if (joined === null) return null;
       if (joined?.roomId === roomId) return joined;
-      client.endAccess();
+      client.endAccess(); accessEnded = true;
     } catch (error) {
       if (![401, 403].includes(error.status)) throw error;
     }
+    // Fence the account continuation to this wake: baseline the client
+    // generation now that this wake's own restore has settled, and bail if
+    // a newer lifecycle (second wake, room/account switch) began while the
+    // account session was being restored — restoring over it could end
+    // the access it just established.
+    const probeGeneration = client.generation;
     const account = await ensureAccountSession();
-    return account?.authenticated ? client.restore(roomId) : null;
+    if (client.generation !== probeGeneration || selectedRoomFromLocation() !== roomId) return null;
+    if (account?.authenticated) return client.restore(roomId);
+    // Neither credential restored the session: the access this page held is
+    // over. End it through the lifecycle's own teardown (the same one a
+    // stream 401 uses) instead of leaving the room shell on stale content.
+    if (hadAccess && !accessEnded) client.endAccess();
+    return null;
   };
   restoreDeepLink().catch(handleFailureNotice);
 });
@@ -7593,7 +7573,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     const items = Object.values(state.workItems);
     if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
-    renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>');
+    preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
     if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) ($("#settings-dialog").classList.contains("results-only") ? $("#room-results-list") : $("#results-panel > summary")).focus({ preventScroll: true });
     resultStatus();
     syncActionForm();
@@ -7894,8 +7874,10 @@ configureAuthPanel();
   }
 }
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
-(async () => {
+const ready = (async () => {
   const initialResult = await initialSignin;
+  if (restoreRoomSession) { await client.restore(); return; }
+  if (signedIn) { await landAfterSignIn(); return; }
   if (initialResult?.pendingPasswordReset) {
     resetJourneyPending = true;
     $("#auth-panel").hidden = false;
@@ -8083,3 +8065,9 @@ if (initialInvitationFragment && !initialInvitationFragment.redirect && !initial
   render = () => { if (!state) { squadsPanel.reset(); return; } priorSquadsRender(); squadsPanel.sync(); };
 }
 // --- end W board ---
+
+return ready;
+}
+
+// Cached HTML from before the entry split still names this module directly.
+if (document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();

@@ -167,7 +167,10 @@ export class RoomAttachmentBytes {
   }
 
   messageIndex(roomId) {
-    return new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    const byId = new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    // A file committed onto an archived DM must keep the DM's visibility rule:
+    // a missing message would read as room-wide.
+    return { get: id => byId.get(id) ?? this.store.archivedMessage(roomId, id) };
   }
 
   list(token, roomId) {

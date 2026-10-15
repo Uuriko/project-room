@@ -17,6 +17,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { accessReviewReport, assembleAccessReview, renderAccessReview, ACCESS_REVIEW_FORMAT } from "../server/access-review.mjs";
+import { GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_KIND, GUEST_AGENT_PERMISSIONS, guestAgentMemberId } from "../server/guest-agent-links.mjs";
 
 const execFileAsync = promisify(execFile);
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -62,10 +63,21 @@ async function fixture(t) {
   // Multi-room agent identity linked into the room.
   const identity = store.identities.create("Roaming agent");
   store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
-  // Guest agent (2 h credential). GA-1 (issue #941): the token is always
-  // server-issued; callers never supply linkToken.
-  const guestAgent = store.guestAgentLinks.mint(ownerKey, "commons", { requestId: randomUUID(), expectedOwnerRevision: 0, displayName: "Scout" }, null);
-  const guestAgentToken = guestAgent.token;
+  // Guest agent (2 h credential), seeded as legacy data. The v0 mint door
+  // was cut in #3216, but guests minted before the cut live out their
+  // credentials and the review must keep surfacing them, so the fixture
+  // writes exactly what the old mint wrote: the membership (guest-agent
+  // member id, no permissions, owner accountable) plus the hashed room
+  // credential. GA-1 (issue #941) holds here too: the token is issued by
+  // this fixture's CSPRNG, never caller-chosen, and only its hash is stored.
+  const guestAgentToken = GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+  const guestMemberId = guestAgentMemberId("access-review-fixture", "scout-1");
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: {
+    memberId: guestMemberId, displayName: "Scout", kind: GUEST_AGENT_KIND,
+    permissions: [...GUEST_AGENT_PERMISSIONS], accountableHumanId: "owner" } });
+  store.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
+    .run(createHash("sha256").update(guestAgentToken).digest("hex"), "commons", guestMemberId, store.now() + 2 * 3600000);
+  const guestAgent = { token: guestAgentToken, member: { id: guestMemberId } };
   // One-time agent invite codes: one pending (1 h), one revoked that must be absent.
   const invite = store.invites.create(ownerKey, "commons", { profile: "chat", expiresInMinutes: 60, displayName: "Scribe" }, null);
   const revokedInvite = store.invites.create(ownerKey, "commons", { permissions: ["steer"] }, null);

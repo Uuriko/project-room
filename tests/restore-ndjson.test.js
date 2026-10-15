@@ -13,6 +13,8 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonText } from "../server/room-export.mjs";
 import { replayNdjsonInto, operatorRestoreResponse, RESTORE_MAX_BYTES } from "../server/restore-ndjson.mjs";
+import { withPublicWorkClaimWriter } from "../server/public-work-claim-fence.mjs";
+import { createWork } from "../server/work-claims.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 const OPERATOR_TOKEN = "operator-token-for-restore-tests";
@@ -213,4 +215,58 @@ test("restore refuses a torn export (trailer disagrees with the event rows)", t 
   const torn = lines.filter((line, i) => !(line.includes('"table":"events"') && i === lines.findIndex(l => l.includes('"table":"events"')))).join("\n");
   const target = openStore(t, "restore-ndjson-torn-");
   assert.throws(() => replayNdjsonInto(torn, target), /torn|watermark/);
+});
+
+// #3324: an export from a store with PUBLIC board activity carries
+// public_work_tasks rows whose namespace makes the claim fence guard every
+// work_claims write. The file replay opens the target's own writer permit
+// for the bulk load; the into-store replay must do the same, or exactly the
+// production-shaped backups abort with "unsupported public claim writer".
+test("replayNdjsonInto restores an export carrying public-namespace claims (#3324)", t => {
+  const namespace = `public_${"ab".repeat(16)}`;
+  const seeded = openStore(t, "restore-ndjson-public-seed-");
+  seeded.initialize(initialRoom(namespace));
+  const now = Date.now();
+  seeded.db.prepare(`INSERT INTO public_work_tasks
+      (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run("offer-1", namespace, namespace, 1, "https://github.com/Uuriko/project-room", "main", JSON.stringify(["README.md"]), 1, now);
+  // Claim writes in a public namespace go through the permit machinery;
+  // seed the claim the same way production writes it.
+  withPublicWorkClaimWriter(seeded, () => seeded.workClaims.set(namespace,
+    createWork({ id: "pub-claim", title: "Public task", repo: "Uuriko/project-room" }, now)));
+  const ndjson = exportNdjsonText(seeded.db);
+  assert.match(ndjson, /"table":"work_claims"/, "the export carries the public claim row");
+  const target = openStore(t, "restore-ndjson-public-target-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.equal(result.verified, true);
+  const claim = target.workClaims.get(namespace, "pub-claim");
+  assert.ok(claim, "the public claim row restored");
+  assert.equal((claim.data ?? claim).state, "unclaimed");
+  const permit = target.db.prepare("SELECT enabled FROM public_work_claim_writer_permit WHERE singleton=1").get();
+  assert.equal(permit.enabled, 0, "the target permit is closed at rest after the restore");
+});
+
+// #3324: the exported permit row is the SOURCE's authority and must never be
+// imported. A doctored export carrying enabled=1 used to restore
+// "verified" with the fence open, bricking the store at its next open.
+test("replayNdjsonInto never imports the exported writer permit row (#3324)", t => {
+  const { ndjson } = seed(t);
+  // The export carries the source's own (closed) permit row; doctor it open.
+  const doctored = ndjson.split("\n").map(line => line.includes('"table":"public_work_claim_writer_permit"')
+    ? line.replace('"enabled":0', '"enabled":1') : line).join("\n");
+  assert.match(doctored, /"table":"public_work_claim_writer_permit".*"enabled":1/, "the fixture really carries an open permit");
+  const directory = mkdtempSync(join(tmpdir(), "restore-ndjson-permit-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const target = new RoomStore(join(directory, "room.sqlite"));
+  const result = replayNdjsonInto(doctored, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.skippedTables["public_work_claim_writer_permit"], 1, "the exported permit row is reported as skipped");
+  assert.equal(target.db.prepare("SELECT enabled FROM public_work_claim_writer_permit WHERE singleton=1").get().enabled, 0);
+  target.close();
+  // Reopening runs the closed-at-rest fence verification; an imported open
+  // permit would throw here.
+  const reopened = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { try { reopened.close(); } catch { /* already closed */ } });
+  assert.ok(reopened.room("commons"), "the restored store reopens with the fence closed");
 });

@@ -709,6 +709,33 @@ export class WebFetch {
       entry.host, entry.cacheStatus, entry.bytes, JSON.stringify(entry.tags), entry.at);
   }
 
+  // Quota reservation (#2963): the quota used to be checked in
+  // checkRateLimits and only journaled after `await fetchPage(...)` (up
+  // to 15s), so N concurrent requests at e.g. 99 logged fetches all
+  // passed the count check before any of them journaled and all
+  // succeeded past the daily limits. Reserve instead: run the check
+  // and insert the journal row as a billed 'miss' in ONE transaction,
+  // before any await, so concurrent requests count each other's
+  // reservations. settleJournal() then rewrites the reservation to its
+  // final outcome — 'hit' for a cache hit, 'miss' with the real
+  // host/bytes for a successful fetch, 'error' for a fetch failure
+  // (errors are journaled but never billed, so a failure releases its
+  // reservation). A crash mid-fetch leaves the reservation billed:
+  // conservative, never an over-admission.
+  reserveQuota(entry) {
+    const reserve = () => {
+      this.checkRateLimits(entry.roomId, entry.memberId, entry.at); // rate_limited: 429 + retry info
+      this.journal({ ...entry, cacheStatus: "miss", bytes: 0 });
+    };
+    if (typeof this.store.transaction === "function") this.store.transaction(reserve);
+    else reserve();
+  }
+
+  settleJournal(requestId, { cacheStatus, host, bytes }) {
+    this.db.prepare("UPDATE web_fetch_log SET cache_status=?, host=?, bytes=? WHERE request_id=?")
+      .run(cacheStatus, host, bytes, requestId);
+  }
+
   // Room-scoped cache visibility (RC-2026-09-24-310 fix): record that this room
   // fetched this cache key, so the research room leg can scope to the room's
   // own fetch memory. Idempotent; called on every successful fetch (hit or
@@ -736,7 +763,12 @@ export class WebFetch {
     const req = validateInput(input);
     const now = this.store.now();
     const normalized = normalizeUrl(req.url); // invalid_url before quota is touched
-    this.checkRateLimits(roomId, memberId, now); // rate_limited: 429 + retry info
+    // Reserve the quota slot atomically before any await (#2963): a
+    // rate_limited refusal rolls the reservation back, so it leaves no
+    // journal row, exactly like the old check-only refusal.
+    this.reserveQuota({
+      requestId, roomId, memberId, credentialHash, host: safeHost(normalized), tags: req.tags, at: now,
+    });
     const key = cacheKeyFor(normalized);
     const cached = this.getCache(key, now, req.maxAgeMs);
     let finalUrl, markdown, metadata, bytes, cacheStatus, ageMs;
@@ -750,9 +782,10 @@ export class WebFetch {
       try {
         page = await fetchPage(normalized); // blocked_host / fetch_failed / timeout / unsupported_content
       } catch (error) {
-        if (error instanceof WebFetchError) {
-          this.journal({ requestId, roomId, memberId, credentialHash, host: safeHost(normalized), cacheStatus: "error", bytes: 0, tags: req.tags, at: this.store.now() });
-        }
+        // Release the reservation: typed failures are journaled but
+        // never billed, so the row settles to 'error' and stops
+        // counting toward the quota.
+        this.settleJournal(requestId, { cacheStatus: "error", host: safeHost(normalized), bytes: 0 });
         throw error;
       }
       markdown = htmlToMarkdown(page.html, page.finalUrl);
@@ -768,10 +801,9 @@ export class WebFetch {
     const highlights = req.highlights
       ? extractHighlights(markdown, req.query, req.maxPassages, metadata.title)
       : [];
-    this.journal({
-      requestId, roomId, memberId, credentialHash, host: safeHost(finalUrl),
-      cacheStatus, bytes, tags: req.tags, at: this.store.now(),
-    });
+    // Settle the pre-fetch reservation to the real outcome (hit/miss,
+    // final host, real byte count) instead of journaling a second row.
+    this.settleJournal(requestId, { cacheStatus, host: safeHost(finalUrl), bytes });
     // Room-scoped visibility: this room fetched this URL (hit or miss).
     this.noteRoomFetch(key, roomId, this.store.now());
     return {

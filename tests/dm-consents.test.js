@@ -308,3 +308,13 @@ test("default-open: strangers may DM; an explicit block the other way still wins
   // A bystander pair with no row at all flows on default-open.
   assert.equal(dms.requireDmAllowed("r1", "carol", "alice"), true);
 });
+
+test("list: the owner's view of another pair carries no request note (r221)", () => {
+  const store = makeStore({ r1: baseState() });
+  const dms = new DmConsents(store);
+  dms.request("r1", "alice", "bob", "private note for bob");
+  assert.equal(dms.list("r1", "owner")[0].reason, null);
+  assert.equal(dms.list("r1", "owner")[0].status, "pending");
+  assert.equal(dms.list("r1", "alice")[0].reason, "private note for bob");
+  assert.equal(dms.list("r1", "bob")[0].reason, "private note for bob");
+});

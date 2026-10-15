@@ -92,6 +92,56 @@ test("assembleOutsideAgents marks the link verified on an owner approval", () =>
   assert.equal(cursor.verifiedBy, "owner");
 });
 
+test("assembleOutsideAgents ignores an approval when no link is in effect, so it cannot pre-verify a later link", () => {
+  // A verify record replayed over a windowed/out-of-order message set:
+  // the approval is seen before any link exists (#2978).
+  const noLink = [msg(introduce("bus:cursor"), "producer", "m1"),
+    msg(verifyRec("bus:cursor", "approved"), "owner", "m2")];
+  const unlinked = assembleOutsideAgents(noLink, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(unlinked.linkedMemberId, null);
+  assert.equal(unlinked.verified, false);
+  assert.equal(unlinked.latestDecision, null);
+  assert.equal(unlinked.decidedLinkMessageId, null);
+  assert.equal(unlinked.verificationPending, false);
+
+  // The same approval must not pre-verify a link that arrives after it:
+  // the later link goes back to pending and waits for a fresh decision.
+  const laterLink = [...noLink, msg(link("bus:cursor"), "producer", "m3")];
+  const cursor = assembleOutsideAgents(laterLink, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(cursor.linkedMemberId, "producer");
+  assert.equal(cursor.verified, false);
+  assert.equal(cursor.verificationPending, true);
+  // And a fresh decision on that link is planned, not treated as a replay.
+  const plan = planOutsideAgentVerify(laterLink, members, "room1", "owner",
+    { externalRef: "bus:cursor", decision: "approved" }, { verifiers });
+  assert.equal(plan.recorded, "verify");
+});
+
+test("assembleOutsideAgents ignores a decision replayed after its link was denied, until a re-link is decided", () => {
+  const messages = [...linkedMessages(),
+    msg(verifyRec("bus:cursor", "denied"), "owner", "m3"),
+    msg(verifyRec("bus:cursor", "approved"), "owner", "m4"),
+    msg(link("bus:cursor"), "producer", "m5")];
+  const cursor = assembleOutsideAgents(messages, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(cursor.linkedMemberId, "producer");
+  assert.equal(cursor.verified, false);
+  assert.equal(cursor.verificationPending, true);
+});
+
+test("assembleOutsideAgents still honors an approval for a link buffered before its introduction", () => {
+  const messages = [msg(link("bus:cursor"), "producer", "m1"),
+    msg(introduce("bus:cursor"), "producer", "m2"),
+    msg(verifyRec("bus:cursor", "approved"), "owner", "m3")];
+  const cursor = assembleOutsideAgents(messages, members, { verifiers })
+    .find(a => a.externalRef === "bus:cursor");
+  assert.equal(cursor.linkedMemberId, "producer");
+  assert.equal(cursor.verified, true);
+  assert.equal(cursor.decidedLinkMessageId, "m1");
+});
+
 test("assembleOutsideAgents ignores verify records from non-verifiers", () => {
   const messages = [...linkedMessages(), msg(verifyRec("bus:cursor", "approved", "mallory"), "mallory", "m3")];
   const agents = assembleOutsideAgents(messages, members, { verifiers });

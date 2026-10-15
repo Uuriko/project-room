@@ -19,7 +19,10 @@ const messageOf = value => {
     check(typeof value.inReplyTo === "string" && value.inReplyTo.length > 0, "inReplyTo must be text when present");
   return value;
 };
-const byTime = (a, b) => a.occurredAt.localeCompare(b.occurredAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+// Compare timestamps as instants, not strings: occurredAt need only be
+// Date.parse-able, so offset forms like '2026-01-01T09:00:00+02:00' (07:00Z)
+// must order by the instant they denote, and equal instants tie on id.
+const byTime = (a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 // Build threads. Messages without a threadId form singleton threads keyed by
 // their own id. Each thread flattens oldest-first with depth.
 export function buildThreads(messages) {
@@ -51,7 +54,7 @@ export function buildThreads(messages) {
     return Object.freeze({ threadId, messageCount: nodes.size, depth: flat.reduce((max, entry) => Math.max(max, entry.depth), 0),
       firstAt: sorted[0].occurredAt, lastAt: sorted[sorted.length - 1].occurredAt, entries: Object.freeze(flat) });
   });
-  threads.sort((a, b) => b.lastAt.localeCompare(a.lastAt) || (a.threadId < b.threadId ? -1 : 1));
+  threads.sort((a, b) => Date.parse(b.lastAt) - Date.parse(a.lastAt) || (a.threadId < b.threadId ? -1 : 1));
   return Object.freeze(threads);
 }
 const depthOf = (nodes, id, depth) => {

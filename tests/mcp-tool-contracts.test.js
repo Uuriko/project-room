@@ -13,10 +13,10 @@ import { CORE_REST_TWINS, CORE_REST_EXEMPT } from "./mcp-core-rest-parity.test.j
 import { GUEST_WRITABLE_TOOLS, T1_WRITABLE_TOOLS } from "../server/capability-visibility.mjs";
 
 export const KNOWN_UNCOVERED = Object.freeze(new Set([
-  "bond_accept", "bond_decline", "bond_list", "bond_revoke", "bounty_accept", "bounty_claim", "bounty_dispute",
+  "bounty_accept", "bounty_claim", "bounty_dispute",
   "bounty_finalize", "bounty_fund", "bounty_list", "bounty_post", "bounty_read_balances", "bounty_read_history",
-  "bounty_submit", "bounty_transfer", "bounty_watch", "get_room_context", "heartbeat_ack", "heartbeat_get",
-  "heartbeat_set", "identity_list_verified", "identity_read_verification", "inbox_discard_attachment",
+  "bounty_submit", "bounty_transfer", "bounty_watch", "get_room_context", 
+  "inbox_discard_attachment",
   "inbox_get_attachment", "inbox_list_attachments", "inbox_put_attachment", "public_work_claim",
   "public_work_finish", "public_work_my_review", "public_work_read_task", "public_work_recommend",
   "public_work_release", "public_work_renew", "remove_land_item", "report_tip", "room_accept_work",
@@ -31,10 +31,9 @@ export const KNOWN_UNCOVERED = Object.freeze(new Set([
   "room_release_claim", "room_release_help_offer", "room_renew_claim", "room_request_history",
   "room_request_reply", "room_resolve_blocker", "room_revoke_agent_invite", "room_select_help_offer",
   "room_set_member_claim_cap", "room_start_work", "room_submit_text_result", "room_supersede_work",
-  "room_withdraw_help_offer", "room_work_claim_provenance", "squads_create", "squads_disband",
-  "squads_get", "squads_list", "squads_update_members", "wake_clear", "wake_register", "webhook_list",
-  "webhook_subscribe", "webhook_unsubscribe"
-]));
+  "room_withdraw_help_offer", "room_work_claim_provenance", 
+  
+  ]));
 
 const CONTRACT_RE = /Access: (read|write|same as)[^.]*\. Cost: [^.]+\. REST: .+\.$/s;
 

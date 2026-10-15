@@ -7,7 +7,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 import { claimScope, conflictingClaim } from '../server/claim-scopes.mjs';
-import { boardClaimId } from '../server/work-claim-mirror.mjs';
+import { boardClaimId } from '../server/work-item-board.mjs';
 import { makeTestSigner } from '../scripts/helpers/signed-evidence.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
 
@@ -223,7 +223,12 @@ test('a handoff from a member without the board profile is refused and writes no
       workItemId: 'job', expectedRevision: 2, doneSummary: 'Half', nextAction: 'Finish it', limitReason: 'Out of time',
     })),
     { status: 403, code: 'work_claims_not_permitted' });
-  assert.equal(f.store.workClaims.get('commons', 'job'), null, 'no source card is mirrored');
+  // Decision #10's write-path sync created the source card at
+  // work.started; the refused handoff itself must write nothing: no
+  // chain link on the source card, no successor card, no event.
+  const sourceCard = f.store.workClaims.get('commons', 'job');
+  assert.equal(sourceCard.state, 'in_progress', 'source card exists from the earlier start sync');
+  assert.deepEqual(sourceCard.chain, [], 'no handoff chain link is written');
   assert.equal(f.store.workClaims.get('commons', 'job-next'), null, 'no successor card is mirrored');
   assert.equal(f.store.room('commons').sequence, sequence, 'a refused handoff adds no event');
 });
@@ -244,8 +249,13 @@ test('a supersede from a member without the board profile is refused and writes 
       workItemId: 'old', expectedRevision: f.item('old').revision, supersededByWorkItemId: 'new', reason: 'Better',
     })),
     { status: 403, code: 'work_claims_not_permitted' });
-  assert.equal(f.store.workClaims.get('commons', 'old'), null, 'no source card is mirrored');
-  assert.equal(f.store.workClaims.get('commons', 'new'), null, 'no successor card is mirrored');
+  // Decision #10's write-path sync created both cards at their accepts;
+  // the refused supersede itself must write nothing: the source is not
+  // closed or marked superseded, and no lineage lands on the successor.
+  const sourceCard = f.store.workClaims.get('commons', 'old');
+  assert.equal(sourceCard.state, 'unclaimed', 'source card unchanged by the refused supersede');
+  assert.equal(sourceCard.supersededBy, null, 'no supersededBy is written');
+  assert.deepEqual(f.store.workClaims.get('commons', 'new').dependsOn, [], 'no lineage dependsOn is written');
   assert.equal(f.store.room('commons').sequence, sequence, 'a refused supersede adds no event');
 });
 

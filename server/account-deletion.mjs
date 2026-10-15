@@ -487,7 +487,7 @@ const EXECUTORS = {
   sessions: (store, accountId) => {
     const db = store.db, now = typeof store.now === "function" ? store.now() : Date.now();
     const kept = db.prepare(`UPDATE account_session_slots SET revision=revision+1,account_id=NULL,account_auth_epoch=NULL,
-      parent_credential_hash=NULL,authenticated_until=NULL,expires_at=?
+      parent_credential_hash=NULL,authenticated_until=NULL,login_method_kind=NULL,login_method_ref=NULL,expires_at=?
       WHERE account_id=? AND EXISTS (SELECT 1 FROM share_link_joins WHERE slot_hash=account_session_slots.hash)`).run(now, accountId).changes;
     return kept + db.prepare("DELETE FROM account_session_slots WHERE account_id=?").run(accountId).changes;
   },

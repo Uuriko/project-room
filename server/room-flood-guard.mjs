@@ -32,7 +32,8 @@ export function createRoomFloodGuard({ now, capacity = 30, refillPerSecond = 0.5
       const decision = limiter.check(`${roomId}:${memberId}`);
       if (decision.allowed) return true;
       const seconds = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
-      const error = new ServiceError(429, "rate_limited", AGENT_WAIT, { "Retry-After": String(seconds) });
+      // AUX-13 follow-up: a 429 names its bucket, like every other limiter.
+      const error = new ServiceError(429, "rate_limited", AGENT_WAIT, { "Retry-After": String(seconds), "X-RateLimit-Bucket": "chat-flood" });
       error.retryAfterMs = decision.retryAfterMs;
       throw error;
     },

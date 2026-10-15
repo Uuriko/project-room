@@ -62,7 +62,7 @@ test("held records survive a store reopen and ids keep counting across restarts"
   assert.deepEqual(reopened.held().map(r => r.messageId), ["msg-1", "msg-2", "msg-3"]);
 });
 
-test("release and dismiss transitions are final and review fields are recorded", t => {
+test("release and dismiss transitions are final and review fields are recorded", async t => {
   const f = fixture(t);
   const one = f.journal().quarantine(entry("msg-1"));
   const two = f.journal().quarantine(entry("msg-2"));
@@ -75,23 +75,23 @@ test("release and dismiss transitions are final and review fields are recorded",
     { status: "dismissed", reviewedBy: "owner", note: null });
   assert.deepEqual(f.journal().held().map(r => r.id), [], "reviewed rows leave the held backlog");
   assert.deepEqual(f.journal().counts(), { held: 0, released: 1, dismissed: 1 });
-  rejects(Promise.resolve().then(() => f.journal().release(one.id, { reviewer: "owner" })), 409, "quarantine_already_reviewed");
-  rejects(Promise.resolve().then(() => f.journal().dismiss(two.id, { reviewer: "owner" })), 409, "quarantine_already_reviewed");
-  rejects(Promise.resolve().then(() => f.journal().release("qz-404", { reviewer: "owner" })), 404, "unknown_quarantine");
+  await rejects(Promise.resolve().then(() => f.journal().release(one.id, { reviewer: "owner" })), 409, "quarantine_already_reviewed");
+  await rejects(Promise.resolve().then(() => f.journal().dismiss(two.id, { reviewer: "owner" })), 409, "quarantine_already_reviewed");
+  await rejects(Promise.resolve().then(() => f.journal().release("qz-404", { reviewer: "owner" })), 404, "unknown_quarantine");
   const reopened = f.reopen();
   assert.deepEqual(reopened.counts(), { held: 0, released: 1, dismissed: 1 }, "reviews survive a restart too");
   assert.deepEqual(reopened.verify(), { held: 0, released: 1, dismissed: 1 });
 });
 
-test("review() bridges the in-memory queue's decision vocabulary", t => {
+test("review() bridges the in-memory queue's decision vocabulary", async t => {
   const f = fixture(t);
   const one = f.journal().quarantine(entry("msg-1"));
   const two = f.journal().quarantine(entry("msg-2"));
   assert.equal(f.journal().review(one.id, { decision: "release", reviewer: "owner" }).status, "released");
   assert.equal(f.journal().review(two.id, { decision: "confirm_spam", reviewer: "owner" }).status, "dismissed",
     "confirm_spam dismisses the message as spam; it is not a release");
-  rejects(Promise.resolve().then(() => f.journal().review(one.id, { decision: "release", reviewer: "owner" })), 409, "quarantine_already_reviewed");
-  rejects(Promise.resolve().then(() => f.journal().review(two.id, { decision: "nuke", reviewer: "owner" })), 422, "invalid_quarantine");
+  await rejects(Promise.resolve().then(() => f.journal().review(one.id, { decision: "release", reviewer: "owner" })), 409, "quarantine_already_reviewed");
+  await rejects(Promise.resolve().then(() => f.journal().review(two.id, { decision: "nuke", reviewer: "owner" })), 422, "invalid_quarantine");
 });
 
 test("accountId/sourceId are explicit on write and read, null for legacy rows", t => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { memberCan } from "../src/events.js";
+import { memberCan, ownMember } from "../src/events.js";
 import { outsideAgentBody, parseOutsideAgentBody, planOutsideAgentRecord, planOutsideAgentVerify, assembleOutsideAgents, publicRef } from "../src/outside-agents.mjs";
 export { outsideAgentBody, parseOutsideAgentBody, planOutsideAgentRecord, planOutsideAgentVerify, assembleOutsideAgents } from "../src/outside-agents.mjs";
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -89,7 +89,8 @@ export class OutsideAgents {
     const externalRef = publicRef(input?.externalRef);
     const memberId = input?.memberId;
     if (memberId !== auth.member.id) fail(403, "outside_agent_forbidden", "A member may only assert their own outside-agent link; it remains unverified");
-    if (!Object.hasOwn(room.state.members, memberId) || room.state.members[memberId].active === false)
+    const linkedMember = ownMember(room.state.members, memberId);
+    if (!linkedMember || linkedMember.active === false)
       fail(404, "outside_agent_not_found", "Link only to a member who already joined. This does not grant access.");
     const existing = this.#view(roomId, room).agents.find(agent => agent.externalRef === externalRef);
     if (!existing) fail(404, "outside_agent_not_found", "Introduce the agent before linking a joined member");
