@@ -5,6 +5,8 @@ import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 import { archiveMarker } from "./messages-store.mjs";
+import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { squadMentionTargets } from "./squads.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
@@ -146,6 +148,17 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       selected.push(row); bytes += size;
     }
     const messages = selected.map(row => JSON.parse(row.body)).reverse();
+    // Selected-message consumers distinguish an explicit address from a reply
+    // notification with the same canonical names/ambiguity rules as delivery.
+    // This is observed context, not execution permission; page reads do no
+    // extra mention work and an implicit reply needs no roster/alias lookup.
+    const addressing = messageId === null ? null : { explicitlyMentioned: false };
+    if (addressing && typeof messages[0]?.body === "string" && messages[0].body.includes("@")) {
+      const message = messages[0], members = store.room(roomId).state.members;
+      addressing.explicitlyMentioned = ((!message.toMemberId || message.toMemberId === auth.member.id)
+        && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId).includes(auth.member.id))
+        || squadMentionTargets(store.db, roomId, message.body, message.authorId, members, message.toMemberId).includes(auth.member.id);
+    }
     const nextCursor = rows.length > selected.length ? signed.encode({ kind: "page", scope, sequence: head.sequence, anchor,
       before: selected.at(-1).archived ? 0 : selected.at(-1).position, indexed,
       ...(indexed ? { beforeId: selected.at(-1).messageId } : {}),
@@ -157,6 +170,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     if (since !== null && saved.version === version) return { ...base, mode: "not_modified", nextCursor, checkpoint };
     return withContentTrust({
       ...base, mode: "replace",
+      ...(addressing ? { addressing } : {}),
       messages: messages.map(message => markIfOther(message, auth.member.id, message.authorId)),
       nextCursor, checkpoint, messageBytes: bytes
     });
