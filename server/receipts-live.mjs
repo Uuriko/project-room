@@ -17,14 +17,16 @@
 import { ensurePublicReceiptsColumn } from "./room-directory.mjs";
 import {
   PUBLIC_RECEIPT_ID,
+  LOT_RECEIPT_ID,
   projectPublicWorkReceipt,
   queryPublicReceipts as queryUnderlying,
   publicReceiptById as byIdUnderlying,
   listPublicReceiptSitemap as sitemapUnderlying,
   collectPublicReceipts as collectUnderlying,
+  roomProofRows as proofRowsUnderlying,
 } from "./public-read-model.mjs";
 
-export { PUBLIC_RECEIPT_ID, projectPublicWorkReceipt };
+export { PUBLIC_RECEIPT_ID, LOT_RECEIPT_ID, projectPublicWorkReceipt };
 
 // Column presence. The schema carries public_receipts on every booted
 // store; this is only the legacy-database path (a table predating the
@@ -98,8 +100,25 @@ export function queryPublicReceipts(store, options) {
   return { ...page, receipts: page.receipts.filter(receipt => !hidden.has(receipt.id)) };
 }
 
+// Lot receipts have no public_receipts row for hiddenReceiptIds to key
+// on, so the owner toggle is checked against the lot's own room. Fail
+// closed when the setting cannot be read, matching hiddenReceiptIds.
+function roomReceiptsPrivate(db, roomId) {
+  try {
+    if (!anyRoomPrivate(db)) return false;
+    const row = db.prepare("SELECT public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
+    return row ? row.public_receipts === 0 : false;
+  } catch { return true; }
+}
+
 export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
+  if (LOT_RECEIPT_ID.test(id)) {
+    const receipt = byIdUnderlying(store, id);
+    if (!receipt) return null;
+    if (!receipt.room?.id || roomReceiptsPrivate(store.db, receipt.room.id)) return null;
+    return receipt;
+  }
   if (hiddenReceiptIds(store, [id]).has(id)) return null;
   return byIdUnderlying(store, id);
 }
@@ -112,6 +131,13 @@ export function listPublicReceiptSitemap(store, limit) {
 
 export function collectPublicReceipts(store) {
   const receipts = collectUnderlying(store);
+  const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
+  return receipts.filter(receipt => !hidden.has(receipt.id));
+}
+
+// One room's proof-page rows with the owner toggle applied, newest first.
+export function queryRoomProof(store, slug) {
+  const receipts = proofRowsUnderlying(store, slug);
   const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
   return receipts.filter(receipt => !hidden.has(receipt.id));
 }

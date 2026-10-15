@@ -112,6 +112,7 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
     names: room.names,
     tasks: room.tasks,
     receipts,
+    proofHref: room.receiptsEnabled ? `/r/${slug}/proof` : null,
     join,
   };
   const description = room.purpose || `${room.title} on Project Room.`;
@@ -133,6 +134,7 @@ ${nameLine}
 ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
+${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
 <p><a href="${escapeHtml(join.href)}">Join</a></p>
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
@@ -302,10 +304,9 @@ export function publicSitemapEntries(store) {
     { path: "/agents", lastmod: PUBLIC_PAGE_LASTMOD },
   ];
   for (const room of listPublicRoomSitemap(store)) {
-    entries.push({
-      path: `/r/${room.slug}`,
-      lastmod: typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD,
-    });
+    const lastmod = typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD;
+    entries.push({ path: `/r/${room.slug}`, lastmod });
+    if (room.receiptsEnabled) entries.push({ path: `/r/${room.slug}/proof`, lastmod });
   }
   return entries;
 }

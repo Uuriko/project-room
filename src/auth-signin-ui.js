@@ -39,7 +39,7 @@ export function classifyAuthLink(params) {
   return { kind: hasReset ? "reset" : "magic", proof, email };
 }
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions, onProviderCapabilities }) {
   let container = null, welcome = false, mountedBefore = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
   let magicPhase = "request", magicEmail = "", busy = false;
@@ -84,6 +84,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
         if (emailMethod === "magic" && !pendingLink) { emailMethod = "password"; passwordMode = "login"; }
         render();
       }
+      // The OAuth anchors are static HTML outside this component; the host
+      // owns them. Hand it the same feed answer so an OAuth provider this
+      // deployment cannot serve (its start route answers 503) is never
+      // offered (§8.1, same rule as mail above). Fires only on a successful
+      // load — a missing loader or any failure leaves the anchors as-is.
+      if (options?.providers) onProviderCapabilities?.(options.providers);
     } catch { /* fail open — see the mailConfigured note above */ }
   }
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });

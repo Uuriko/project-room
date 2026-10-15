@@ -6,6 +6,27 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Per-room proof page
+
+`/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
+`project-room-public-room-proof/1`). It exists only when the room is
+publicly listed and its owner has public receipts on. It lists the room's
+own public receipts — the same records as above, through the same toggle
+and unpublish filters — and labels each with the level of proof its record
+carries:
+
+- **Server-verified merge** — a work claim this server recorded as merged
+  (`pr_merged` with `syncedAt`) before publishing. The strongest claim here.
+- **Room-recorded completion** — a completed work item with a receipt. The
+  room's own record; no server-verified merge backs it.
+- **Artifact hash recorded** — a public-work delivery whose artifact
+  sha256 was recorded at submission. Its checks are worker-reported
+  (`hash_only`): not an acceptance, not a payment.
+
+Every entry links to its `/receipts/<id>` record. No payment is proved on
+the proof page: bounty credit movements are proved by signed lot receipts,
+which are member-gated and have no public page.
+
 ## What is public
 
 - Public-work receipts are already public. They stay on this page.
@@ -15,6 +36,15 @@ No login. The page is indexable when the URL has no query string.
   not.
 - A completed work item appears only when it has a receipt and the same
   owner setting is on.
+- A bounty lot (`/receipts/lot_<id>`) appears once its bounty's settlement
+  verdict is recorded — paid out, failed, unverified, or split. The page
+  shows the one ledger movement the lot names (kind, amount, source and
+  destination accounts) plus the bounty's poster, worker, award, pinned
+  rubric hash, and settlement outcome. Before settlement, and for journal
+  lots that are not bounty movements, the id is a 404. The record is
+  composed from the credit ledger at read time, not stored as a copy. A
+  room that turned public receipts off in the directory settings, and
+  operator unpublish, hide it like the other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has
