@@ -910,7 +910,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
       return store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds, roomId: auth.roomId ?? null,
-        fencingToken: data.fencingToken ?? null });
+        fencingToken: data.fencingToken ?? null, door: "rest" });
     }));
   });
 
@@ -1030,7 +1030,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
-        return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes, ...pausedField(auth.identityId),
+        // #3265: the poll door carries the heartbeat door's truncation
+        // flag — a full page says whether more signals are waiting.
+        return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+          more: immediate.more === true, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -1050,7 +1053,8 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         reject(403, "identity_changed", "Credential binding changed during wake wait");
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
-      return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes, ...pausedField(auth.identityId),
+      return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+        more: fresh.more === true, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();
