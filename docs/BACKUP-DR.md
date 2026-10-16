@@ -27,8 +27,8 @@ honestly cannot survive yet.
     token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
-  - *KV-native restore (the #3409 fix; on main, effective in production on
-    the next deploy):*
+  - *KV-native restore (the #3409 fix; present in the deployed build —
+    tree-verified at `c0e5aefb` — and on main):*
     `POST /api/operator/restore-from-backup` restores the daily backup
     already stored in the `ROOM_BACKUPS_KV` namespace — same operator token
     and fail-closed posture, no size cap: the manifest and parts are pulled
@@ -55,15 +55,19 @@ impossible or unprovable have all been addressed on `main`:
 - **#3324 — fixed, closed 2026-10-15.** Open-store restores no longer
   import the exported public-claim writer permit; regression tests cover
   both the buffered and the KV streaming restore paths.
-- **#3325 — fix in PR #3536.** Restore verification pinned only the event
-  log; trailer version 2 adds per-table content digests over the rows as
-  exported, verified by all three restore paths, which now report an
-  explicit content-verification level (full / events-only /
-  watermark-only) instead of one bare `verified` flag.
+- **#3325 — fixed, closed 2026-10-15 (PR #3536 merged).** Restore
+  verification pinned only the event log; trailer version 2 adds per-table
+  content digests over the rows as exported, verified by all three restore
+  paths, which now report an explicit content-verification level
+  (full / events-only / watermark-only) instead of one bare `verified`
+  flag.
 
-Until the KV-native endpoint is deployed to production, the recovery
-route for a DO loss is file replay into a new Node sqlite store (above),
-not the restore endpoints.
+The KV-native endpoint is in the deployed build, so for a DO loss today
+the recovery route is the KV-native restore (file replay into a new Node
+sqlite store remains the offline fallback). The full rehearsed procedure
+— restore, boot checks, credential re-issue, loop smoke, first ticks,
+second-generation backup — is [RESTORE-RUNBOOK.md](RESTORE-RUNBOOK.md),
+executed end to end in the 2026-10-15 disaster game-day.
 
 ## Honest RPO / RTO
 
@@ -71,10 +75,16 @@ not the restore endpoints.
   successful daily export. Cloudflare also replicates Durable Object storage
   internally, but there is no user-facing snapshot or point-in-time recovery
   for DO SQLite — the nightly export is the recovery point.
-- **RTO: hours, not minutes.** File replay is rehearsed, but re-issuing
-  credentials and re-applying post-backup revocations (below) are manual.
-  There is no runbook rehearsal against production — and there must never be
-  one that touches production data.
+- **RTO: the mechanical core measures ~1 minute; the human tail is the
+  variable part.** In the 2026-10-15 game-day (production-shaped
+  90,650,112-byte backup, local instance): KV restore 42.8 s, production
+  entry booted and healthy in 11.6 s, disaster-declared → completed
+  claim → finish → receipt loop in 60.1 s, and a second-generation
+  backup → restore → smoke inside 2 minutes total. Production adds
+  provisioning an empty store, setting secrets, and switching traffic.
+  Re-issuing credentials and re-applying post-backup revocations (below)
+  stay manual. Rehearsals run against production-shaped fixtures, never
+  against production data.
 
 ## What a restore recovers — and what it destroys
 
@@ -103,14 +113,15 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    `--from <export>` (or `scripts/replay-room-export.mjs` directly).
    A failed replay leaves the destination unpromoted.
 3. Re-issue every credential, and re-apply post-backup revocations (see
-   above). Treat the restored room as authoritative **as of `backedUpAt`**.
+   above; exact commands in [RESTORE-RUNBOOK.md](RESTORE-RUNBOOK.md)
+   step 3). Treat the restored room as authoritative **as of
+   `backedUpAt`**.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
 `Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
-backup, use the KV-native endpoint above (once deployed) with the backup's
-key instead.)
+backup, use the KV-native endpoint above with the backup's key instead.)
 
 ## What was deliberately not done
 
