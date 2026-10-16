@@ -222,7 +222,7 @@ function behaviourTile(store, now) {
       }),
       sli("tool-accuracy", {
         state: "not-recorded", observed: null,
-        gap: "No tool-call outcome telemetry is recorded; agent tool calls leave no per-call success/failure ledger to measure accuracy from"
+        gap: "No tool-call outcome telemetry is recorded; agent tool calls leave no per-call success/failure ledger, so their accuracy cannot be measured"
       }),
       sli("cost-per-task", {
         state: settled ? "recorded" : "not-recorded",
