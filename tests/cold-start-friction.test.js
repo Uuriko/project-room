@@ -1,5 +1,5 @@
 // Cold-start friction: MCP error shapes, room-create defaults, land-queue
-// pr_not_found, room_react, and replyToId.
+// pr_not_found, and replyToId.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -60,7 +60,7 @@ test("MCP tools/call names unknown_tool, auth_required, and invalid_arguments", 
   assert.equal(missing.error.data.invalid.arguments, "must be an object");
 });
 
-test("authenticated MCP reports field reasons and serves room_react plus replyToId", async t => {
+test("authenticated MCP reports field reasons and serves replyToId", async t => {
   const { store, rooms } = setup(t);
   const identity = store.identities.create("Ada");
   const created = rooms.create(identity.secret, { title: "Ada room", purpose: "Ship the first post" });
@@ -101,15 +101,6 @@ test("authenticated MCP reports field reasons and serves room_react plus replyTo
   });
   assert.equal(reply.result.structuredContent.command.data.replyToId, post.command.data.messageId);
 
-  const reacted = await call("room_react", {
-    roomId: created.roomId, messageId: post.command.data.messageId, reaction: "like"
-  });
-  assert.equal(reacted.result.structuredContent.command.type, "message.reaction_set");
-  assert.equal(reacted.result.structuredContent.command.data.active, true);
-  const cleared = await call("room_react", {
-    roomId: created.roomId, messageId: post.command.data.messageId, reaction: "like", active: false
-  });
-  assert.equal(cleared.result.structuredContent.command.data.active, false);
 
   const bonds = await call("bond.list", { roomId: created.roomId });
   assert.equal(bonds.error, undefined);
@@ -156,18 +147,18 @@ test("room create defaults kind, roomId, and displayName and names the bad field
   });
 });
 
-test("a missing reaction active is invalid_arguments and a no-bearer 401 preserves saved-connection guidance", t => {
+test("a missing poll vote active is invalid_arguments and a no-bearer 401 preserves saved-connection guidance", t => {
   const { store } = setup(t);
   const key = store.issueAccessKey("commons", "owner");
   assert.throws(() => store.command(key, "commons", {
-    id: randomUUID(), type: T.MESSAGE_REACTION_SET, data: { messageId: "topic", reaction: "like" }
+    id: randomUUID(), type: T.POLL_VOTED, data: { messageId: "topic", option: 0 }
   }), error => {
     assert.equal(error.status, 422);
     assert.equal(error.code, "invalid_arguments");
     assert.equal(errorCategory(error.status, error.code), "input");
     const ax = agentErrorAx({ httpStatus: error.status, code: error.code, message: error.message });
     assert.equal(ax.reason, "invalid_arguments");
-    assert.match(ax.hint, /active/);
+    assert.match(ax.hint, /named fields/);
     assert.equal(ax.next.some(step => step.tool === "room_read_work"), false);
     return true;
   });

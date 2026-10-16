@@ -1,31 +1,18 @@
 // src/polls.js — Poll message helpers. A poll is a message with kind "poll"
-// carrying a poll payload { question, options: [{ label, emoji }], allowMultiple }.
+// carrying a poll payload { question, options: [{ label }], allowMultiple }.
 // Votes are poll.voted { messageId, option, active } events stored as
-// message.pollVotes; this
-// module validates poll creation, assigns the option emojis, and aggregates
-// the visible votes. Pure: no store, no HTTP, no side effects.
+// message.pollVotes. Pure: no store, no HTTP, no side effects.
 export const POLL_MIN_OPTIONS = 2;
 export const POLL_MAX_OPTIONS = 10;
 export const POLL_MAX_LABEL_CHARS = 120;
 export const POLL_MAX_QUESTION_CHARS = 500;
-
-// Digit keycap emoji, the stable vote keys (1..10). Single graphemes that
-// canonicalReaction accepts. There is no two-digit keycap sequence: a
-// keycap can only follow one code point, so "10\uFE0F\u20E3" segments into
-// two graphemes and canonicalReaction rejects it. The 10th option uses the
-// dedicated KEYCAP: 10 emoji (U+1F51F, "🔟") instead.
-const KEYCAP = digit => `${digit}\uFE0F\u20E3`;
-const KEYCAP_TEN = "\u{1F51F}";
-export const POLL_OPTION_EMOJIS = Object.freeze(
-  Array.from({ length: POLL_MAX_OPTIONS }, (_, i) => (i === 9 ? KEYCAP_TEN : KEYCAP(String(i + 1))))
-);
 
 function fail(message) {
   throw new Error(message);
 }
 
 // Validate a caller-supplied poll payload and normalize it into the stored
-// record shape { question, options: [{ label, emoji }], allowMultiple }.
+// record shape { question, options: [{ label }], allowMultiple }.
 // Throws a plain Error naming the bad field.
 export function normalizePoll(data) {
   const poll = data?.poll;
@@ -46,7 +33,7 @@ export function normalizePoll(data) {
     if (seen.has(folded)) fail("Poll option labels must not duplicate");
     seen.add(folded);
     return label;
-  }).map((label, i) => ({ label, emoji: POLL_OPTION_EMOJIS[i] }));
+  }).map(label => ({ label }));
   return { question, options, allowMultiple: poll.allowMultiple === true };
 }
 
@@ -59,13 +46,7 @@ export function pollTally(message) {
   if (!poll || !Array.isArray(poll.options)) return null;
   const results = poll.options.map((option, i) => {
     const voters = Array.isArray(message.pollVotes?.[i]) ? [...message.pollVotes[i]] : [];
-    return { label: option.label, emoji: option.emoji, votes: voters.length, voters };
+    return { label: option.label, votes: voters.length, voters };
   });
   return { question: poll.question, allowMultiple: poll.allowMultiple === true, results, total: results.reduce((sum, r) => sum + r.votes, 0) };
-}
-
-// The vote keys belonging to this poll message (a subset of its reactions).
-export function pollOptionEmojis(message) {
-  if (!message || message.kind !== "poll" || !Array.isArray(message.poll?.options)) return [];
-  return message.poll.options.map(option => option.emoji);
 }
