@@ -246,9 +246,7 @@ const signalView = row => {
     roomId: row.room_id, messageId: row.message_id,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
-    // Tag acknowledgment (2026-09-23): the one-tap ack copy rides the journaled
-    // pending-wake signal too, so an agent reading its heartbeat queue learns a
-    // bare 👍 react counts as a response. Additive — every existing field stands.
+    // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
   });
 };
