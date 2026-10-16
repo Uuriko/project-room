@@ -183,6 +183,28 @@ export class PublicWorkReviews {
           const recentNeglects = this.hasTable('public_work_reviews') ? (this.db.prepare("SELECT COUNT(*) AS c FROM public_work_reviews WHERE room_id=? AND instr(state_json, 'neglectLadder') > 0").get(roomId)?.c || 0) : 0;
           if (recentNeglects >= 3) fail(429, 'review_neglect_wave_limit', 'Maximum wave limit of 3 neglect-ladder auto-accepts reached for this room');
         }
+        if (input.decision === 'accepted') {
+          // Packet §4 rotation caps enforcement
+          const sevenDaysAgo = new Date(this.store.now() - 7 * 24 * 3600 * 1000).toISOString();
+          const claimantId = receipt.identityId;
+          if (this.hasTable('public_work_reviews')) {
+            const claimantCount = this.db.prepare(
+              "SELECT COUNT(*) AS c FROM public_work_reviews WHERE instr(state_json, 'accepted') > 0 AND json_extract(state_json, '$.decision.at') > ? AND receipt_id IN (SELECT receipt_id FROM public_work_receipts WHERE identity_id=?)"
+            ).get(sevenDaysAgo, claimantId)?.c || 0;
+            if (claimantCount >= 3) fail(429, 'claimant_completion_cap_exceeded', 'Claimant has reached the limit of 3 task completions per rolling 7 days');
+
+            const pairCount = this.db.prepare(
+              "SELECT COUNT(*) AS c FROM public_work_reviews WHERE instr(state_json, 'accepted') > 0 AND json_extract(state_json, '$.decision.at') > ? AND json_extract(state_json, '$.decision.actorId')=? AND receipt_id IN (SELECT receipt_id FROM public_work_receipts WHERE identity_id=?)"
+            ).get(sevenDaysAgo, actorId, claimantId)?.c || 0;
+            if (pairCount >= 3) fail(429, 'reviewer_pair_cap_exceeded', 'This (claimant, reviewer) pair has reached the limit of 3 acceptances per rolling 7 days');
+
+            const last10 = this.db.prepare(
+              "SELECT json_extract(state_json, '$.decision.actorId') AS decider FROM public_work_reviews WHERE json_extract(state_json, '$.decision') IS NOT NULL ORDER BY rowid DESC LIMIT 10"
+            ).all();
+            const reviewerShare = last10.filter(r => r.decider === actorId).length;
+            if (reviewerShare >= 5 && last10.length >= 10) fail(429, 'reviewer_rotation_cap_exceeded', 'Reviewer has decided >50% of the last 10 submissions in rotation');
+          }
+        }
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
         current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
       }
