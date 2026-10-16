@@ -23,6 +23,13 @@ export class JobsProbe extends ProjectRoom {
     if (this.paused || !this.store) return null;
     return this.ctx.storage.getAlarm();
   }
+  // Invoke the DO's own fetch handler, whose finally arms the job alarm via
+  // waitUntil — the per-request arming path, without running due jobs first
+  // (ensureJobAlarm runs them, which would mask the armed time).
+  async armViaFetch() {
+    const response = await this.fetch(new Request("https://room.example.test/api/health/jobs"));
+    return { status: response.status };
+  }
   async finishPublicBackfill() {
     for (let step = 0; step < 8; step += 1) {
       const result = await this.backfillPublicReadModel();
@@ -89,6 +96,9 @@ export default {
     }
     if (url.pathname === "/probe/alarm-at") {
       return Response.json({ alarmAt: await room(env, request).readJobAlarm() });
+    }
+    if (url.pathname === "/probe/arm") {
+      return Response.json(await room(env, request).armViaFetch());
     }
     if (url.pathname === "/probe/seed-due") {
       const delay = Number(url.searchParams.get("delayMs") ?? "30000");
