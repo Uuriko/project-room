@@ -49,8 +49,12 @@ export const GLOBAL_FILES = new Set([
 ]);
 
 const DEFAULT_ESTIMATE_MS = 15000;
-// Files whose recorded CI time hits the 300s cap are skipped unless they
-// changed themselves: one of them alone would blow the two-minute target.
+// Files whose recorded hosted time is at least two minutes are skipped
+// unless they changed themselves: one of them alone would blow the
+// two-minute target. (The durations table is now hosted JUnit testcase
+// sums refreshed from shard receipts — see
+// scripts/refresh-unit-ci-durations.mjs — not the legacy capped solo
+// wall-clock measurements, so this threshold reads real measured time.)
 const SLOW_MS = 120000;
 
 const IMPORT_RES = [

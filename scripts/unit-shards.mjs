@@ -146,8 +146,13 @@ export function unitPlan(testsDir = ".") {
     shard.files.push(file);
     shard.estimatedMs += estimate(file);
   }
-  // Retain the canonical relative order within each shard.
-  for (const shard of shards) shard.files.sort((a, b) => files.indexOf(a) - files.indexOf(b));
+  // Longest-first within each shard (Jest-sequencer pattern): node --test
+  // starts files in list order, so the long files begin at t=0 instead of
+  // being discovered late and setting the shard's tail. Ties keep the
+  // canonical (discovery) order, so the plan stays deterministic.
+  for (const shard of shards) {
+    shard.files.sort((a, b) => estimate(b) - estimate(a) || files.indexOf(a) - files.indexOf(b));
+  }
   const planHash = createHash("sha256").update(JSON.stringify({ files, shards })).digest("hex");
   return { files, shards, planHash };
 }
