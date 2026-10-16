@@ -1,5 +1,5 @@
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
-import { publicPageCsp } from "../server/public-search.mjs";
+import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -460,6 +460,7 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
     let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
       // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
@@ -469,6 +470,12 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
+        // /about carries its own path-pinned policy (see aboutPageCsp);
+        // header equality identifies it, so it rebases the same way.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserAboutPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       }
       // JDOT-PUBLIC-CSP-RUM end
@@ -500,6 +507,8 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     internalPublicPolicy = publicPageCsp(url.origin);
     browserPublicPolicy = publicPageCsp(browserOrigin);
+    internalAboutPolicy = aboutPageCsp(url.origin);
+    browserAboutPolicy = aboutPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy

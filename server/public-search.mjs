@@ -16,11 +16,31 @@ const agentDocRoutes = Object.freeze([
 ]);
 export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
 export const PUBLIC_PAGE_LASTMOD = "2026-10-02";
-// About and compare documents ship no first-party scripts. Cloudflare injects
-// its Web Analytics beacon at the edge, so script-src and connect-src name
-// the manual beacon host. publicPageCsp adds only the exact auto-injected
-// same-origin endpoint; default-src and every other directive stay unchanged.
+// Compare and docs/agents documents ship no first-party scripts. Cloudflare
+// injects its Web Analytics beacon at the edge, so script-src and
+// connect-src name the manual beacon host. publicPageCsp adds only the exact
+// auto-injected same-origin endpoint; default-src and every other directive
+// stay unchanged. /about is the one exception: aboutPageCsp below.
 export const PUBLIC_SEARCH_CSP = "default-src 'none'; script-src https://static.cloudflareinsights.com; style-src 'unsafe-inline'; connect-src https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+// The /about front door ships exactly one first-party script
+// (src/front-door.js), which freshens the hero's live counters from exactly
+// one feed (GET /api/public/front-door). Its policy names those two absolute
+// paths — the same path-pinning publicPageCsp applies to /cdn-cgi/rum — so
+// every other script and connection stays refused, exactly as on the other
+// public pages. Both are direct responders (no redirects), which the
+// path-pinning caveat on publicPageCsp requires.
+export function aboutPageCsp(origin) {
+  const url = new URL(origin);
+  if (!["http:", "https:"].includes(url.protocol) || url.origin !== origin) throw new TypeError("Exact HTTP(S) public page origin required");
+  return publicPageCsp(origin, PUBLIC_SEARCH_CSP)
+    .replace("script-src ", () => `script-src ${url.origin}/src/front-door.js `)
+    .replace("connect-src ", () => `connect-src ${url.origin}/api/public/front-door `);
+}
+// The CSP a public search page is served under: the shared locked-down
+// policy, with /about's two path-pinned additions.
+export function publicSearchPageCsp(pathname, origin) {
+  return pathname === "/about" ? aboutPageCsp(origin) : publicPageCsp(origin, PUBLIC_SEARCH_CSP);
+}
 // Use only a trusted, exact configured/validated served origin, never a
 // forwarded Host header. An absolute path source (without a trailing slash)
 // allows /cdn-cgi/rum and its query variants, not arbitrary same-origin APIs.
