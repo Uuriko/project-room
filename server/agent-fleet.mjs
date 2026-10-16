@@ -149,14 +149,16 @@ export function fleetScope(state, viewerId) {
 
 // Rows for every agent the scope allows. `room` is store.room(roomId) so the
 // caller controls the single projection read.
-export function fleetRows(store, roomId, room, { memberIds = null } = {}) {
+export function fleetRows(store, roomId, room, { memberIds = null, boardList = null } = {}) {
   const { state } = room;
   const nowMs = store.now();
   const agents = Object.values(state.members ?? {})
     .filter(member => member && member.kind === "agent" && (!memberIds || memberIds.includes(member.id)))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   let claims = [];
-  try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
+  // boardList: a caller's per-request memoized board list (PERF-10X L4) —
+  // when supplied, the rows share the board the caller already decoded.
+  try { claims = (boardList ? boardList(roomId) : store.workClaims?.list?.(roomId)) ?? []; } catch { claims = []; }
   const lastEvents = lastEventsByActor(store.db, roomId, agents.map(member => member.id));
   const wakes = wakeState(store.db, roomId);
   return agents.map(member => {
@@ -220,7 +222,7 @@ export function fleetFor(store, auth, roomId) {
 }
 
 // The calling agent's own summary for room_orient (`you`).
-export function fleetSelf(store, roomId, room, memberId) {
-  const [row] = fleetRows(store, roomId, room, { memberIds: [memberId] });
+export function fleetSelf(store, roomId, room, memberId, { boardList = null } = {}) {
+  const [row] = fleetRows(store, roomId, room, { memberIds: [memberId], boardList });
   return row ? { state: row.state, badges: row.badges, budget: row.budget } : null;
 }
