@@ -4,6 +4,12 @@
 // missing the methods it needs is an error, so a broken target is logged
 // instead of looking like a quiet success.
 //
+// #3585 guard: while R2_BACKUP_RESTORABLE is false, an R2 binding never
+// becomes the write target (see writeDailyBackup). No restore path can
+// read an R2 backup yet, and the R2 writer is not memory-safe at the
+// current backup size, so preferring R2 would silently trade a restorable
+// KV backup for an unrestorable R2 one.
+//
 // KV caps one value at 25 MiB, so the KV target stores the export in parts
 // of at most BACKUP_KV_PART_BYTES and writes the manifest last, under the
 // same key the R2 object would use. A day with no manifest has no complete
@@ -25,6 +31,13 @@ export const BACKUP_KV_TTL_SECONDS = 35 * 24 * 60 * 60;
 // too. A version 1 manifest for today was written by the export that dropped
 // them, so the next tick rewrites that day instead of skipping it.
 export const BACKUP_MANIFEST_VERSION = 2;
+// #3585: false because no restore path can read an R2 backup — the DO
+// restore endpoint and scripts/restore-room-backup.mjs read KV or a local
+// file only — and writeR2Backup holds the whole export in Durable Object
+// memory, which the ~90 MB export no longer fits safely. Flip to true only
+// in the change that ships the R2 restore reader and the chunked R2
+// writer; writeDailyBackup's guard keys off this flag.
+export const R2_BACKUP_RESTORABLE = false;
 
 export function backupObjectKey(now = new Date()) {
   const date = now instanceof Date ? now : new Date(now);
@@ -52,6 +65,9 @@ function backupKv(env) {
   return kv;
 }
 
+// Raw binding preference only. The target a write actually uses is decided
+// by writeDailyBackup, whose #3585 guard overrides an "r2" answer here for
+// as long as R2_BACKUP_RESTORABLE is false.
 export function backupTarget(env) {
   if (backupBucket(env)) return "r2";
   if (backupKv(env)) return "kv";
@@ -300,9 +316,22 @@ function currentManifest(stored) {
   } catch { return false; }
 }
 
-export async function writeDailyBackup(env, room, now = new Date()) {
-  const bucket = backupBucket(env);
-  const kv = bucket ? null : backupKv(env);
+export async function writeDailyBackup(env, room, now = new Date(), { r2Restorable = R2_BACKUP_RESTORABLE } = {}) {
+  let bucket = backupBucket(env);
+  let kv = bucket ? null : backupKv(env);
+  if (bucket && !r2Restorable) {
+    // #3585 guard: never let an R2 binding silently become the target.
+    // An R2 backup cannot be restored by any shipped path, and the write
+    // itself buffers the whole export in DO memory. Never lose the tick
+    // silently either: when KV is also bound, write there and say so
+    // loudly; when it is not, throw — the room-backup job turns a throw
+    // into an { errors: 1 } tick with a [room-backup] log line, so a
+    // refused day is operator-visible instead of looking backed up.
+    kv = backupKv(env);
+    if (!kv) throw new Error("room-backup: refusing to write an unrestorable backup: ROOM_BACKUPS (R2) is bound, but no restore path can read R2 backups and the R2 writer is not memory-safe at the current backup size (#3585); bind ROOM_BACKUPS_KV as well, or remove the R2 binding");
+    console.error("[room-backup] ROOM_BACKUPS (R2) is bound, but R2 backups are not restorable and the R2 writer is not memory-safe at the current backup size (#3585); writing today's backup to ROOM_BACKUPS_KV instead");
+    bucket = null;
+  }
   if (!bucket && !kv) return { skipped: "unconfigured" };
   const key = backupObjectKey(now);
   if (bucket) {

@@ -37,18 +37,23 @@ Every export now ends with a trailer line (`{"kind": "trailer", "version": 1, "e
 
 The production cron writes one backup a day of the whole Durable Object store (every room). The key is `room-backups/YYYY-MM-DD.ndjson` in UTC. If that day's backup is already there, the tick does nothing. A failed write is logged as `[room-backup]` and does not fail the rest of the cron.
 
-Two targets, checked in this order:
+Two bindings, checked in this order:
 
-1. An R2 binding named `ROOM_BACKUPS`. One object per day.
+1. An R2 binding named `ROOM_BACKUPS`. One object per day — **but see the guard below: this target is not usable yet (#3585).**
 2. A Workers KV binding named `ROOM_BACKUPS_KV`. This is what production uses today: `cloudflare/wrangler.jsonc` binds it under `env.production` to the KV namespace `project-room-backups` (`ee73a90c4e6749bb92ebe16fc57c117d`). KV caps a value at 25 MiB, so the export is stored as parts `room-backups/YYYY-MM-DD.ndjson.part-0000`, `...part-0001` (16 MiB each at most), and the manifest is written last under `room-backups/YYYY-MM-DD.ndjson`. The manifest lists every part with its size and sha256, plus the whole file's size and sha256. A day without a manifest has no complete backup. Every key expires after 35 days, so KV holds about a month of nightly copies with no sweep job.
 
-R2 is not enabled on the Cloudflare account yet (`wrangler r2 bucket list` answers code 10042, "Please enable R2 through the Cloudflare Dashboard"). To move to R2 later: enable R2, create the bucket `project-room-backups`, and add this under `env.production` in `cloudflare/wrangler.jsonc`:
+**Do not bind R2 as a standalone step (#3585).** Binding `ROOM_BACKUPS` does not give you a working second backup target today, for two independent reasons:
+
+- **An R2 backup cannot be restored.** No restore path reads R2: the DO restore endpoint and `scripts/restore-room-backup.mjs` read KV or a local file only. An R2-written backup is write-only from the product's own tooling.
+- **The R2 writer is not memory-safe at the current backup size.** It buffers the whole export in Durable Object memory (a 128 MB limit) to verify it before its single-object put; the backup is ~90 MB and growing, so the write is expected to die mid-export and leave the day with no backup at all.
+
+The writer guards against this (`R2_BACKUP_RESTORABLE` in `cloudflare/room-backup.mjs`): while no R2 restore reader exists, a bound R2 target is never used — if KV is also bound, the backup is written to KV with a loud `[room-backup]` log line; if KV is not bound, the tick fails with an error instead of producing an unrestorable backup. Binding R2 becomes the right move only when the chunked R2 writer and the R2 restore reader ship (#3585). At that point: enable R2 on the account, create the bucket `project-room-backups`, and add this under `env.production` in `cloudflare/wrangler.jsonc`:
 
 ```json
 "r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
 ```
 
-R2 wins as soon as it is bound; the KV binding can stay until the KV copies expire. A binding added only in the dashboard does not stick: the next deploy drops bindings the config does not list.
+A binding added only in the dashboard does not stick: the next deploy drops bindings the config does not list. (R2 is not enabled on the Cloudflare account yet in any case: `wrangler r2 bucket list` answers code 10042, "Please enable R2 through the Cloudflare Dashboard".)
 
 Isolated staging has no cron and no backup binding, so it does not write a nightly copy.
 

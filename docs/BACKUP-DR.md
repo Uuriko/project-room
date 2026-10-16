@@ -13,8 +13,10 @@ honestly cannot survive yet.
   `room-backup: ok`, last success 2026-10-14T06:30Z. Mechanics:
   [BACKUPS.md](BACKUPS.md).
 - **It is a single copy.** R2 is not enabled on the Cloudflare account, so
-  there is no second backup target. Enabling R2 (account action, then the
-  `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.
+  there is no second backup target. Enabling R2 is **not** yet the fix:
+  the R2 writer buffers the whole export in DO memory and no restore path
+  can read an R2 backup, so the writer refuses to use an R2 binding until
+  the chunked R2 writer and reader ship (#3585; see BACKUPS.md).
 - **Operator export works.** `GET /api/operator/export` streams the same
   NDJSON when `ROOM_BACKUP_TOKEN` is configured on the owning script.
 - **Restore paths:**
@@ -55,7 +57,7 @@ impossible or unprovable have all been addressed on `main`:
 - **#3324 — fixed, closed 2026-10-15.** Open-store restores no longer
   import the exported public-claim writer permit; regression tests cover
   both the buffered and the KV streaming restore paths.
-- **#3325 — fix in PR #3536.** Restore verification pinned only the event
+- **#3325 — fixed, closed 2026-10-15 (PR #3536 merged).** Restore verification pinned only the event
   log; trailer version 2 adds per-table content digests over the rows as
   exported, verified by all three restore paths, which now report an
   explicit content-verification level (full / events-only /
