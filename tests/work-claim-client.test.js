@@ -186,7 +186,10 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   const linked = await owner.linkWorkItemPullRequest(claimed.id, args);
   assert.equal(linked.pullRequests[0].url, args.pullRequest.slice(0, -1));
-  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
+  // #3661: reads derive pullRequest.settlement (never stored), so the read
+  // carries exactly one field the mutation response and stored record lack.
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)),
+    { ...linked, pullRequest: { ...linked.pullRequest, settlement: 'pending' } });
   await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, args), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'work_claim_conflict');
@@ -199,7 +202,9 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     { expectedClaimedAt: null }, { pullRequest: { url: args.pullRequest, outcome: 'merged' } }]) {
     await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, { ...fresh, ...fields }), invalid);
   }
-  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
+  // #3661: as above, the read carries the derived settlement field.
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)),
+    { ...linked, pullRequest: { ...linked.pullRequest, settlement: 'pending' } });
 });
 
 // Transport regression: handler coverage cannot see a state option dropped by
