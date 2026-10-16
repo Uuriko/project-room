@@ -128,6 +128,42 @@ test('maximum legal matching packets remain readable within a bounded response',
   assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') > 262144);
 });
 
+test('a decided receipt reads through the client with its composed outcome; malformed outcomes are refused', async t => {
+  const f = await fixture(t);
+  const claim = await f.firstClient.claim('client:task', { requestId: 'outcome-claim', expectedTermsVersion: 1 });
+  const { receipt } = await f.firstClient.finish('client:task', { requestId: 'outcome-finish', expectedTermsVersion: 1, generation: claim.task.claim.generation, artifactText: 'Decided outcome fixture', checksReported: [] });
+  assert.equal((await f.publicClient.readReceipt(receipt.receiptId)).state, 'submitted', 'undecided reads keep the minted shape');
+  const binding = { taskId: receipt.taskId, expectedTermsVersion: receipt.termsVersion, generation: receipt.generation, artifactSha256: receipt.artifact.sha256 };
+  f.store.publicWorkReviews.decide('commons', 'owner', receipt.receiptId, { ...binding, requestId: 'outcome-reject', expectedReviewRevision: 0, decision: 'rejected', reason: 'Private rejection feedback' });
+  const decided = await f.publicClient.readReceipt(receipt.receiptId);
+  assert.equal(decided.state, 'rejected', 'a rejected receipt reads rejected through the client');
+  assert.deepEqual(Object.keys(decided.review).sort(), ['decidedAt', 'state', 'verificationReviewerKind', 'verificationVerdict', 'verifiedAt']);
+  assert.equal(decided.review.state, 'rejected'); assert.equal(decided.review.verificationVerdict, null);
+  assert.ok(Number.isFinite(Date.parse(decided.review.decidedAt)));
+  assert.equal(JSON.stringify(decided).includes('Private rejection feedback'), false, 'the member-side reason never reaches the client');
+  assert.equal((await f.publicClient.readArtifact(decided)).text, 'Decided outcome fixture', 'the composed record still binds the artifact');
+  let mutate;
+  const proxy = createServer(async (request, response) => {
+    const upstream = await fetch(f.origin + request.url, { redirect: 'error', credentials: 'omit' });
+    const body = await upstream.json(); if (body?.schema === 'public-work-receipt/1') mutate(body);
+    response.writeHead(upstream.status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(body));
+  });
+  await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { proxy.closeAllConnections(); await new Promise(resolve => proxy.close(resolve)); });
+  const intercepted = new PublicWorkClaimsClient({ origin: `http://127.0.0.1:${proxy.address().port}` });
+  for (mutate of [
+    body => { body.state = 'bogus'; },
+    body => { body.review.state = 'bogus'; },
+    body => { body.review.verificationVerdict = 'MAYBE'; },
+    body => { body.review.verificationReviewerKind = 'owner'; },
+    body => { body.review.verifiedAt = 'not a date'; },
+    body => { delete body.review.decidedAt; },
+    body => { body.review.reason = 'Private rejection feedback'; },
+    body => { body.state = 'accepted'; },
+    body => { body.review = null; },
+  ]) await assert.rejects(intercepted.readReceipt(receipt.receiptId), error => error.code === 'invalid_response');
+});
+
 test('saved-identity feedback rejects malformed or private follow-up pointers from an HTTP intermediary', async t => {
   const f = await fixture(t);
   const claim = await f.firstClient.claim('client:task', { requestId: 'pointer-claim', expectedTermsVersion: 1 });

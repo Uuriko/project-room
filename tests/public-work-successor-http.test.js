@@ -33,17 +33,23 @@ async function json(response, status = 200) { assert.equal(response.status, stat
 
 test('owner HTTP publication leads to saved-identity follow-up claim and a fresh review without altering the parent', async t => {
   const f = await fixture(t), before = f.snapshot();
+  const client = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: f.producer.secret });
+  // The parent's canonical read before publication. The read composes the
+  // review outcome onto the stored record (#3733) — the fixture parent was
+  // decided revision_requested — so "unaltered" is pinned against this read,
+  // not against the minted record.
+  const parentRead = await client.readReceipt(f.receipt.receiptId);
+  assert.equal(parentRead.state, 'revision_requested');
   const created = await json(await f.call());
   assert.equal(created.task.claim.state, 'unclaimed');
   assert.equal(JSON.stringify(created.task).includes('Private feedback'), false);
   assert.deepEqual(await json(await f.call()), created);
-  const client = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: f.producer.secret });
   assert.deepEqual((await client.readReview(f.receipt)).followUp, created.followUp);
   const other = new PublicWorkClaimsClient({ origin: f.origin, identitySecret: f.other.secret });
   const child = await other.claim(created.task.taskId, { requestId: 'child-claim', expectedTermsVersion: 1 });
   const finished = await other.finish(created.task.taskId, { requestId: 'child-finish', expectedTermsVersion: 1, generation: child.task.claim.generation, artifactText: 'New independent artifact', checksReported: [] });
   assert.equal((await other.readReview(finished.receipt)).review.state, 'pending');
-  assert.deepEqual(await client.readReceipt(f.receipt.receiptId), f.receipt);
+  assert.deepEqual(await client.readReceipt(f.receipt.receiptId), parentRead, 'follow-up publication leaves the parent read unaltered');
   assert.equal((await client.readArtifact(f.receipt)).text, 'Immutable original artifact');
   for (const table of ['public_work_reviews', 'public_work_review_requests', 'identity_links', 'bounty_journal']) assert.deepEqual(f.snapshot()[table], before[table], table);
   await assert.rejects(other.readReview(f.receipt), error => error.status === 404);

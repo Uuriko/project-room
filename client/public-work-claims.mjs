@@ -20,14 +20,32 @@ function packet(value, taskId) {
     || value.claim.submittedReceiptId !== null && !validId(value.claim.submittedReceiptId)) throw invalid();
   return value;
 }
+// The stored receipt is minted as "submitted" and never rewritten; the
+// canonical read composes the review outcome onto it (#3733). A decided
+// receipt therefore reports its terminal state and carries the review
+// block — exactly these five fields, the whole public outcome (the reviewer
+// id, reason and fingerprint never project). A still-pending review leaves
+// the state at "submitted"; no review record, no block.
+function receiptReview(value) {
+  const review = value.review;
+  if (review === undefined) return true;
+  if (!object(review) || Object.keys(review).length !== 5
+    || !['pending', 'accepted', 'rejected', 'revision_requested'].includes(review.state)
+    || review.verificationVerdict !== null && !['PASS', 'FAIL'].includes(review.verificationVerdict)
+    || review.verificationReviewerKind !== null && !['human', 'agent'].includes(review.verificationReviewerKind)
+    || review.verifiedAt !== null && !date(review.verifiedAt)
+    || review.decidedAt !== null && !date(review.decidedAt)) return false;
+  return review.state === 'pending' ? value.state === 'submitted' : value.state === review.state;
+}
 function receipt(value, receiptId) {
   if (!object(value) || value.schema !== 'public-work-receipt/1' || !validId(value.receiptId)
     || receiptId !== undefined && value.receiptId !== receiptId || !validId(value.taskId) || !validId(value.namespaceId)
     || !positive(value.termsVersion) || !positive(value.generation) || !validId(value.identityId)
-    || value.state !== 'submitted' || value.verification !== 'hash_only' || !date(value.createdAt)
+    || !['submitted', 'accepted', 'rejected', 'revision_requested'].includes(value.state) || value.verification !== 'hash_only' || !date(value.createdAt)
     || !object(value.artifact) || !/^[a-f0-9]{64}$/.test(value.artifact.sha256)
     || !Number.isSafeInteger(value.artifact.bytes) || value.artifact.bytes < 0 || value.artifact.bytes > 65536
-    || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')) throw invalid();
+    || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')
+    || !receiptReview(value)) throw invalid();
   return value;
 }
 export class PublicWorkClaimsClient {

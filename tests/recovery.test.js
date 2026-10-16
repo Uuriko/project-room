@@ -123,7 +123,13 @@ test("online capture preserves all application tables, identity boundaries and e
     assert.deepEqual(recovered.projectOffers.ownerList("commons", "owner"), offerRecords);
     assert.deepEqual(recovered.publicWorkClaims.act("public-recovery", publicIdentity.secret, "claim", publicClaimInput), publicClaimed);
     assert.deepEqual(recovered.publicWorkClaims.act("public-recovery", publicIdentity.secret, "finish", publicFinishInput), publicFinished);
-    assert.deepEqual(recovered.publicWorkClaims.receipt(publicFinished.receipt.receiptId), publicFinished.receipt);
+    // The canonical receipt read composes the review outcome onto the stored
+    // record (#3733), so the round-trip guarantee is asserted in its two
+    // halves: the stored record returns byte-for-byte, and the composed read
+    // of the recovered store equals the source's composed read of the same
+    // two records (receipt + review, the review rows pinned verbatim below).
+    assert.deepEqual(JSON.parse(recovered.db.prepare("SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?").get(publicFinished.receipt.receiptId).receipt_json), publicFinished.receipt);
+    assert.deepEqual(recovered.publicWorkClaims.receipt(publicFinished.receipt.receiptId), f.store.publicWorkClaims.receipt(publicFinished.receipt.receiptId));
     assert.deepEqual(recovered.publicWorkClaims.artifact(publicFinished.receipt.receiptId), publicArtifact);
     assert.deepEqual(recovered.publicWorkReviews.verify("commons", "reply-reviewer", publicFinished.receipt.receiptId, publicVerifyInput), publicVerified);
     assert.deepEqual(recovered.publicWorkReviews.decide("commons", "owner", publicFinished.receipt.receiptId, publicReviewInput), publicReviewed);
@@ -133,7 +139,8 @@ test("online capture preserves all application tables, identity boundaries and e
     assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_successor_requests ORDER BY request_id").all(), followJournal);
     assert.deepEqual(recovered.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput), followResult, "restoration retains the exact original creation outcome");
     assert.deepEqual(recovered.publicWorkReviews.contributorReview(publicIdentity.secret, followReceipt.receiptId).followUp, followResult.followUp);
-    assert.deepEqual(recovered.publicWorkClaims.receipt(followReceipt.receiptId), followReceipt);
+    assert.deepEqual(JSON.parse(recovered.db.prepare("SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?").get(followReceipt.receiptId).receipt_json), followReceipt);
+    assert.deepEqual(recovered.publicWorkClaims.receipt(followReceipt.receiptId), f.store.publicWorkClaims.receipt(followReceipt.receiptId));
 
     assert.equal(recovered.db.prepare("SELECT enabled FROM public_work_claim_writer_permit").get().enabled, 0);
     for (const offer of f.projectOffers) for (const retry of offer.retries) {

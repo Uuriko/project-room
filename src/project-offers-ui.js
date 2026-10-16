@@ -117,7 +117,11 @@ async function loadContribution(offer, flight) {
     paint('<p role="status">Submitted · loading receipt…</p>');
     const id = task.claim.submittedReceiptId, record = await read(`/api/public-work/receipts/${encodeURIComponent(id)}`, flight.signal);
     if (!current()) return;
-    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || record.state !== 'submitted' || record.verification !== 'hash_only' || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
+    // The canonical read composes the review outcome onto the receipt
+    // (#3733), so a decided receipt no longer reads "submitted". This view
+    // accepts the composed states as the same receipt but keeps masking the
+    // decision itself: it paints "Submitted" and never renders the outcome.
+    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'accepted', 'rejected', 'revision_requested'].includes(record.state) || record.verification !== 'hash_only' || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
     paint(`<p role="status">Submitted</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.</p>`);
   } catch (error) {
