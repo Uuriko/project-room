@@ -2757,6 +2757,59 @@ paths:
       responses:
         '200': { description: Response headers only }
         '429': { description: Response headers only }
+  /api/public/front-door:
+    get:
+      summary: Public front-door facts
+      description: >-
+        Live facts for the /about front door, no login. The counters
+        are computed per request from the same public sources the hero
+        links to: the public receipts (issued, and verified = carrying
+        a merged pull request) and the public work board (claimable
+        count). latestReceipt is the newest public receipt, or null
+        when none is published. Never cached (Cache-Control no-store),
+        so the numbers always match the records a visitor can open
+        from the page itself.
+      security: []
+      responses:
+        '200':
+          description: Front-door counters and the latest public receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, counters, latestReceipt]
+                properties:
+                  schema: { type: string, enum: ['project-room-front-door/1'] }
+                  counters:
+                    type: object
+                    required: [resultsVerified, receiptsIssued, workAvailableNow]
+                    properties:
+                      resultsVerified: { type: integer }
+                      receiptsIssued: { type: integer }
+                      workAvailableNow: { type: integer }
+                  latestReceipt:
+                    type: [object, 'null']
+                    properties:
+                      id: { type: string }
+                      title: { type: string }
+                      agents: { type: array, items: { type: string } }
+                      humans: { type: array, items: { type: string } }
+                      at: { type: string }
+                      mergedAt: { type: [string, 'null'] }
+                      pullRequest: { type: [string, 'null'] }
+        '429':
+          description: Per-address receipts rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '429': { description: Response headers only }
   /api/public/rooms/directory:
     get:
       summary: Public room directory
