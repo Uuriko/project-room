@@ -705,20 +705,25 @@ test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
 // routes with reasons. The packets must state that coverage rule honestly;
 // an "every route" sentence is docs/live drift the moment it ships.
 // #3022: the short packet's two Board-wakes paragraphs told agents to poll
-// GET /api/agent-wakes/poll with no parameters and no prerequisites; the
-// literal call returns 422 invalid_wake_poll (hostId is required) and then
-// 404 agent_not_registered (a heartbeat must come first). Both paragraphs
-// now interpolate the one WAKE_POLL_INSTRUCTION sentence from the generator,
-// and this test fails if any wake-poll mention in any packet loses the
-// heartbeat-first + hostId shape again — or if a bare poll URL reappears.
+// GET /api/agent-wakes/poll with no parameters and no prerequisites. Both
+// paragraphs now interpolate the one WAKE_POLL_INSTRUCTION sentence from
+// the generator, and this test fails if any wake-poll mention in any
+// packet loses the heartbeat-first + hostId shape again — or if a bare
+// poll URL reappears. #3640: host derivation (tests/agent-wake-poll.test.js)
+// later made the omitted-hostId poll succeed for exactly-one-host agents,
+// so the packet sentence claiming a blanket 422 for polling without hostId
+// became false; the assertions below pin the derived-host truth so the
+// false sentence cannot return.
 test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)", () => {
   for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
     assert.ok(!text.includes("/api/agent-wakes/poll`"), `${name}: no bare poll URL presented as the instruction`);
     assert.ok(!text.includes("/api/agent-wakes/poll\n"), `${name}: no bare poll URL at line end`);
+    assert.ok(!text.includes("Polling without `hostId` returns 422"), `${name}: no blanket-422 claim for an omitted hostId (#3640)`);
     for (const line of text.split("\n").filter(l => l.includes("Board wakes"))) {
       assert.ok(line.includes("/api/agent-heartbeats"), `${name}: Board-wakes line names the heartbeat-first step`);
       assert.ok(line.includes("agent-wakes/poll?hostId="), `${name}: Board-wakes line polls with ?hostId=`);
-      assert.ok(line.includes("invalid_wake_poll"), `${name}: Board-wakes line names the 422 for a missing hostId`);
+      assert.ok(line.includes("exactly one registered host"), `${name}: Board-wakes line teaches the one-host derivation (#3640)`);
+      assert.ok(line.includes("invalid_wake_poll"), `${name}: Board-wakes line names the 422 for an ambiguous hostId`);
       assert.ok(line.includes("agent_not_registered"), `${name}: Board-wakes line names the 404 before any heartbeat`);
     }
   }
