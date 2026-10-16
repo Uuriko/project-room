@@ -7,7 +7,7 @@
 // carry the sender, a lock-screen-safe preview of the message, and a deep
 // link back to it. Quiet hours suppress the push channel for the window the
 // member sets.
-import { isMutedBy } from "../src/events.js";
+import { isMutedBy, ownMember } from "../src/events.js";
 import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
@@ -368,7 +368,7 @@ export class HumanPush {
         if (prefs.quietHours && isQuietAt(prefs.quietHours, this.store.now())) continue;
         const subscriptions = this._rows(roomId, recipient.memberId);
         if (subscriptions.length === 0) continue;
-        const sender = state?.members?.[senderMemberId] ?? null;
+        const sender = ownMember(state?.members, senderMemberId) ?? null;
         const payload = declarativePushPayload(richPushPayloadFor({
           roomId,
           roomName: typeof state?.room?.title === "string" ? state.room.title : null,
@@ -387,7 +387,7 @@ export class HumanPush {
           const stored = this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, sequence);
           if (stored?.id !== eventId) return false;
           const current = this.store.room(roomId).state;
-          const member = current.members?.[recipient.memberId];
+          const member = ownMember(current.members, recipient.memberId);
           const message = current.messages?.find(row => row.id === messageId);
           const prefs = this._prefsFor(roomId, recipient.memberId);
           const kindOn = recipient.kind === "mention" ? prefs.mention : prefs.dm;

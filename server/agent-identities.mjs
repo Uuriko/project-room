@@ -12,7 +12,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fastIdentityHashCandidates, forgetIdentityVerifier, isV2IdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
 import { ServiceError } from "./store.mjs";
 import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
-import { memberCan } from "../src/events.js";
+import { memberCan, ownMember } from "../src/events.js";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
@@ -133,7 +133,7 @@ const MEMBER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 // member for a conflicting one. All member-map reads in this module go
 // through this helper: own properties only, inherited names read as absent.
 export const memberOf = (members, id) =>
-  members && typeof id === "string" && Object.hasOwn(members, id) ? members[id] : undefined;
+  (typeof id === "string" ? ownMember(members, id) : undefined);
 
 export function isIdentitySecret(token) {
   return typeof token === "string" && token.startsWith(IDENTITY_SECRET_PREFIX)

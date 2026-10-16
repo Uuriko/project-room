@@ -16,7 +16,7 @@ import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { randomUUID } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
-import { MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { MAX_MESSAGE_BODY_CHARS, ownMember } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -89,7 +89,7 @@ export function squadView(row) {
 function activeMemberIds(room, ids) {
   const members = room?.state?.members ?? {};
   return [...new Set(ids)].filter(id => {
-    const m = members[id];
+    const m = ownMember(members, id);
     return m && m.active !== false;
   });
 }
@@ -121,7 +121,7 @@ export function squadMentionTargets(db, roomId, text, senderMemberId, members, t
     if (!row) continue;
     for (const id of parseMembers(row.members_json)) {
       if (id === senderMemberId || out.includes(id)) continue;
-      const m = members?.[id];
+      const m = ownMember(members, id);
       if (!m || m.active === false) continue;
       out.push(id);
       if (out.length >= MAX_SQUAD_MEMBERS) return out;

@@ -147,7 +147,7 @@ function assignEnrollmentTier(db, roomId, memberId, nowMs) {
     .run(roomId, memberId, ENROLLMENT_TIER, nowMs);
 }
 
-const memberName = (state, memberId) => state?.members?.[memberId]?.displayName ?? memberId;
+const memberName = (state, memberId) => ownMember(state?.members, memberId)?.displayName ?? memberId;
 
 // Called by store.command() inside the write transaction, before the event
 // is applied — next to enforceSpendAllowance (server/spend-allowance.mjs),

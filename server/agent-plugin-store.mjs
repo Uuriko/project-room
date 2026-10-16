@@ -22,6 +22,7 @@
 // a socket; that lookup is the SSRF gate and runs outside the write
 // transaction.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { ownMember } from "../src/events.js";
 import { createAgentApiKeys, ApiKeyError, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentDirectory, DirectoryError, toA2ACard } from "./agent-directory.mjs";
 import { createIdentityVerification, VERIFIED, UNVERIFIED } from "./identity-verification.mjs";
@@ -1247,7 +1248,7 @@ export class AgentPluginStore {
       if (members === undefined) {
         try { members = this.store?.roomAuthority?.(roomId)?.members ?? null; } catch { members = null; }
       }
-      return members?.[event?.actorId] ?? null;
+      return ownMember(members, event?.actorId) ?? null;
     };
     for (const row of rows) {
       // R282-1: a revoked identity's subscription must not keep pushing the
