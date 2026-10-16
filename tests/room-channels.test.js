@@ -181,6 +181,46 @@ test("replies pin to their thread root's channel and can't drift across channels
     /Reply must reference a message in this Room/);
 });
 
+test("prototype-named channel ids resolve only as own keys (#3694)", () => {
+  const base = baseState();
+  // Inherited Object.prototype names are not channels: posting is refused
+  // with the ordinary domain error, and owner rename/archive fail the same
+  // clean way (previously: post accepted into a phantom channel, rename died
+  // with a raw TypeError, archive silently no-opped).
+  for (const bad of ["toString", "valueOf", "hasOwnProperty"]) {
+    assert.throws(() => applyEvent(base, post(`mp-${bad}`, "maya", { channelId: bad })), /Unknown channel/);
+    assert.throws(() => applyEvent(base, fixedEvent(`rp-${bad}`, T.CHANNEL_RENAMED, "potter", { channelId: bad, name: "phantom" })), /Unknown channel/);
+    assert.throws(() => applyEvent(base, fixedEvent(`ap-${bad}`, T.CHANNEL_ARCHIVED, "potter", { channelId: bad })), /Unknown channel/);
+  }
+  // Reserved names never reach the reducer: the envelope refuses them first.
+  for (const reserved of ["constructor", "__proto__"]) {
+    assert.throws(() => applyEvent(base, post(`mp-${reserved}`, "maya", { channelId: reserved })), /Invalid channelId/);
+    assert.throws(() => applyEvent(base, fixedEvent(`rp-${reserved}`, T.CHANNEL_RENAMED, "potter", { channelId: reserved, name: "phantom" })), /Invalid channelId/);
+  }
+  // A channel actually created under an inherited name is an own key and
+  // behaves like any other channel (the ownMember precedent for members).
+  let state = applyEvent(base, mkChannel("ch-ts", "maya", { channelId: "toString", name: "tostring" }));
+  assert.equal(Object.hasOwn(state.channels, "toString"), true);
+  state = applyEvent(state, post("mp-real", "maya", { channelId: "toString" }));
+  assert.equal(state.messages.at(-1).channelId, "toString");
+  state = applyEvent(state, fixedEvent("rp-real", T.CHANNEL_RENAMED, "potter", { channelId: "toString", name: "renamed" }));
+  assert.equal(state.channels["toString"].name, "renamed");
+});
+
+test("prototype-named work item ids resolve only as own keys (#3694 sweep)", () => {
+  const base = baseState();
+  // setPublicTask on a phantom work item is refused, not applied to the
+  // Object.prototype member the raw index used to return.
+  assert.throws(() => applyEvent(base, fixedEvent("pt-1", T.WORK_PUBLIC_SET, "potter", { workItemId: "toString", enabled: true })), /Unknown work item/);
+  // Proposing a work item under an inherited name is not a false
+  // "already exists": it creates the item as an own key.
+  const state = applyEvent(base, fixedEvent("wp-1", T.WORK_PROPOSED, "potter",
+    { workItemId: "toString", title: "t", definitionOfDone: "d", accountableMemberId: "potter" }));
+  assert.equal(Object.hasOwn(state.workItems, "toString"), true);
+  assert.throws(() => applyEvent(state, fixedEvent("wp-2", T.WORK_PROPOSED, "potter",
+    { workItemId: "toString", title: "t", definitionOfDone: "d", accountableMemberId: "potter" })), /Work Item already exists/);
+});
+
 test("upgrade repair backfills #general into legacy stored projections", async () => {
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
