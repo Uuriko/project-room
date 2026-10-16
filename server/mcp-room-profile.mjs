@@ -23,6 +23,7 @@ import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
+import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -497,7 +498,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_activation_pack") {
     const auth = store.authenticate(secret, roomId);
-    return buildActivationPack(store, roomId, auth.member.id);
+    return buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
   }
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as
@@ -528,7 +529,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     });
     if (context.not_modified) return context;
     const auth = store.authenticate(secret, roomId);
-    return { ...context, orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret }) };
+    return { ...context, orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);

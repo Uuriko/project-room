@@ -84,6 +84,29 @@ function viewerMayClaim(state, viewerId) {
   return mayWriteWorkClaims({ member: { ...member, id: viewerId }, ownerId: state?.room?.ownerId ?? null });
 }
 
+// Per-request board-list memo (PERF-10X L4, Lane 3 item #3): one decoded
+// board per request, shared by every consumer in that request. The board
+// list is the expensive read (a full SELECT + JSON decode of every claim
+// row), and the composite reads (orient / activation-pack / context) each
+// used to decode it two to three times — once directly, once through
+// AvailableWork, and once again through next-actions / the fleet badge.
+// The memo is lazy (nothing is listed until a consumer asks), scoped to
+// the object the caller creates, and never outlives it: builders create
+// one when the caller did not supply one, so a memo can never go stale
+// across requests. A failed list memoizes as an empty board, matching
+// every consumer's own catch-to-empty behaviour today.
+export function memoizeBoardList(store) {
+  const cache = new Map();
+  return roomId => {
+    if (!cache.has(roomId)) {
+      let board = [];
+      try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
+      cache.set(roomId, board);
+    }
+    return cache.get(roomId);
+  };
+}
+
 // All available board items from a board the caller already listed —
 // orientation builders list the board once for their own-claims sections,
 // and a list() read is the expensive part (needs-me measured 80-175ms at
@@ -105,10 +128,11 @@ export function availableClaimsFromBoard(board, roomId, { viewerId = null, state
 // #5) with no second source to diverge or double-count. The `now`
 // option is accepted for caller compatibility and no longer consulted:
 // board availability is a property of the stored rows.
-export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50 } = {}) {
+export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
   const { state } = store.room(roomId);
   let board = [];
-  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
+  if (boardList) board = boardList(roomId);
+  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
   const claims = availableClaimsFromBoard(board, roomId, { viewerId, state });
   return { items: claims.slice(0, limit), total: claims.length };
 }
@@ -117,9 +141,10 @@ export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50
 // orientation surfaces have carried since #3020 (plus source/claimAction).
 // buildOrient and buildActivationPack both consume this — one definition,
 // so the two surfaces cannot diverge again.
-export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 50 } = {}) {
+export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
   let board = [];
-  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
+  if (boardList) board = boardList(roomId);
+  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
   let state = null;
   try { state = store.room(roomId)?.state ?? null; } catch { state = null; }
   return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
