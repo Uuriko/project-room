@@ -280,6 +280,15 @@ function optedInRows(store, state) {
     // settles a merge rewrites this same row through the branch above.
     const tier = resultVerificationTier(item);
     if (!tier) continue;
+    // A completed board work item projects its own wir_ receipt in the
+    // loop below; the claim the board sync mirrors it into (same id)
+    // must not project the same completion a second time as a wcr_ row.
+    // One completion carries one public receipt, at the work-item
+    // source — this branch's subject is claims with no board item, or
+    // no projected item receipt, behind them.
+    const workItemTwin = state.workItems && typeof state.workItems === "object" ? state.workItems[item.id] : null;
+    if (workItemTwin && workItemTwin.state === "completed"
+      && workItemTwin.receipt && typeof workItemTwin.receipt === "object") continue;
     const { agents, humans } = claimCredits(item);
     rows.push({
       id: hashId("wcr", roomId, item.id),
