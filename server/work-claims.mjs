@@ -295,6 +295,21 @@ const memberRefOf = (value, what) => {
   check(typeof value === "string" && value.length >= 1 && value.length <= 128, `${what} must be 1..128 characters or null`);
   return value;
 };
+// The work brief on a claim row (B-4' slice 3a): `mode` is the item's
+// read/write vocabulary verbatim; `definitionOfDone` is a string with no
+// length cap, mirroring the item/event path, which caps it nowhere.
+const briefOf = value => {
+  if (value.mode !== undefined && value.mode !== null) {
+    check(value.mode === "read" || value.mode === "write", "mode must be one of read, write");
+  }
+  if (value.definitionOfDone !== undefined && value.definitionOfDone !== null) {
+    check(typeof value.definitionOfDone === "string", "definitionOfDone must be a string or null");
+  }
+  return {
+    mode: value.mode ?? null,
+    definitionOfDone: value.definitionOfDone ?? null,
+  };
+};
 const decisionGateOf = value => {
   if (value.ownerDecisionRequired !== undefined && value.ownerDecisionRequired !== null) {
     check(typeof value.ownerDecisionRequired === "boolean", "ownerDecisionRequired must be a boolean");
@@ -542,6 +557,7 @@ export const workOf = value => {
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const decisionGate = decisionGateOf(value);
   const accountableMemberId = memberRefOf(value.accountableMemberId, "accountableMemberId");
+  const brief = briefOf(value);
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
@@ -554,6 +570,7 @@ export const workOf = value => {
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     ...decisionGate,
     accountableMemberId,
+    ...brief,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
