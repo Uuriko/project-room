@@ -31,7 +31,12 @@ a{color:var(--blue)}
 .receipt-next p{margin:0}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
-img,svg,table{max-width:100%}`;
+img,svg,table{max-width:100%}
+.replay{list-style:none;margin:.75rem 0 0;padding:0;border-top:1px dashed var(--line)}
+.replay .stop{padding:.6rem 0;border-bottom:1px dashed var(--line)}
+.replay .stop:target{outline:2px solid var(--blue);outline-offset:3px;border-radius:4px}
+.replay .stop-head{margin:0}
+.replay .stop p{margin:.15rem 0}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
@@ -81,7 +86,7 @@ ${next}
 </body></html>`;
 }
 
-export function renderReceiptDetailHtml(receipt) {
+export function renderReceiptDetailHtml(receipt, timelineHtml = "") {
   const description = `${receipt.title}. A public receipt from Project Room.`;
   const room = receipt.room?.title
     ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.title)}</dd></div>`
@@ -150,6 +155,7 @@ ${room}
 ${pr}${merged}${hashes}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
+${timelineHtml ? `<h2>Replay</h2><p class="meta">How this record came to be, step by step — the same public record as the fields above, in the order it happened. Each step is a link; open one to land on that step directly.</p>${timelineHtml}` : ""}
 <p class="meta">${provenNote}</p>
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>

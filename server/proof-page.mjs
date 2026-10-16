@@ -23,6 +23,7 @@ import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { escapeHtml } from "./receipts-page.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
 import { queryRoomProof } from "./receipts-live.mjs";
+import { publicWorkPostedAt, renderTimelineHtml, timelineForReceipt, TIMELINE_CSS } from "./receipt-timeline.mjs";
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/receipts.png`;
 export const PROOF_PAGE_SIZE = 20;
@@ -63,7 +64,8 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .level{color:var(--text);font-weight:600}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
-img,svg,table{max-width:100%}`;
+img,svg,table{max-width:100%}
+${TIMELINE_CSS}`;
 
 function head({ title, description, path }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
@@ -94,7 +96,7 @@ const when = value => {
   return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : "";
 };
 
-function proofEntry(receipt) {
+function proofEntry(receipt, postedAt = null) {
   const level = proofLevelOf(receipt);
   return {
     id: receipt.id,
@@ -109,6 +111,10 @@ function proofEntry(receipt) {
     humans: receipt.humans ?? [],
     hashes: receipt.hashes ?? [],
     at: receipt.at,
+    // The replay: the same public record as an ordered event list. It
+    // derives from this entry's own fields (plus a public-work task's
+    // posted time), so it can show nothing the static views do not.
+    timeline: timelineForReceipt(receipt, { postedAt }),
   };
 }
 
@@ -140,7 +146,8 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
     start = index + 1;
   }
   const pageRows = visible.slice(start, start + PROOF_PAGE_SIZE);
-  const entries = pageRows.map(proofEntry);
+  const entries = pageRows.map(receipt =>
+    proofEntry(receipt, receipt.source === "public-work" ? publicWorkPostedAt(store, receipt.id) : null));
   const nextCursor = start + PROOF_PAGE_SIZE < visible.length ? pageRows.at(-1)?.id ?? null : null;
   const document = {
     schema: "project-room-public-room-proof/1",
@@ -167,6 +174,7 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
 <h2><a href="${escapeHtml(entry.receiptHref)}">${escapeHtml(entry.title)}</a></h2>
 <p class="meta"><span class="level">${escapeHtml(entry.proofLabel)}</span> · ${escapeHtml(when(entry.at))}${people ? ` · ${people}` : ""}${pr}</p>
 <p class="meta">${escapeHtml(PROOF_LEVELS[entry.proofLevel].note)}</p>
+${renderTimelineHtml(entry.timeline, entry.id)}
 </article>`;
   }).join("") || `<p>No published results yet. A result appears here when work is settled in this room and the owner has public receipts on — each one as a receipt anyone can open.</p>`;
   const next = nextCursor ? `<p><a href="/r/${escapeHtml(slug)}/proof?cursor=${escapeHtml(nextCursor)}">Older results</a></p>` : "";

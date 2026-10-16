@@ -83,6 +83,7 @@ import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { publicWorkPostedAt, renderTimelineHtml, timelineForReceipt } from "./receipt-timeline.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
@@ -1987,15 +1988,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const receipt = publicReceiptById(store, receiptDetail[1]);
           if (!receipt) reject(404, "not_found", "Not found");
           res.setHeader("Link", publicPageLinks(url, `/receipts/${receipt.id}`));
+          // The replay timeline derives from this same public record, so
+          // it inherits the fail-closed read above: no receipt, no replay.
+          const timeline = timelineForReceipt(receipt, {
+            postedAt: receipt.source === "public-work" ? publicWorkPostedAt(store, receipt.id) : null,
+          });
           if (receiptDetail[2]) {
-            const body = Buffer.from(JSON.stringify(receiptJson(receipt)));
+            const json = receiptJson(receipt);
+            json.timeline = timeline;
+            const body = Buffer.from(JSON.stringify(json));
             res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
           res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
           // JDOT-PUBLIC-CSP-RUM end
-          const html = Buffer.from(renderReceiptDetailHtml(receipt));
+          const html = Buffer.from(renderReceiptDetailHtml(receipt, renderTimelineHtml(timeline, receipt.id)));
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
         }
