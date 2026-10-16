@@ -27,6 +27,11 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// PERF-10X L12 / Lane 8 C4: an explicit nextDueAt already in the past arms
+// the alarm this far from now — not a full cadence later. 1 s is inside the
+// alarm granularity the jobs-alarm workerd check already tolerates (±1 s)
+// and far below the delivery/poll backoffs the due times themselves encode.
+export const PAST_DUE_ALARM_MS = 1000;
 
 const oneLine = value => String(value ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
 
@@ -447,15 +452,37 @@ export function lastRanFrom(stored) {
 }
 
 // Fast jobs only. Slow jobs ride the safety-net cron so an idle hour stays
-// at two Durable Object wakes. A due time already in the past is pushed out
-// by one cadence so a finished tick cannot schedule an immediate loop.
-export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = "worker" }) {
+// at two Durable Object wakes. What a past-due time arms at depends on how
+// the job's due time was derived (PERF-10X L12 / Lane 8 C4):
+// - A job with an explicit nextDueAt (webhook-dispatch, land-queue,
+//   claim-prs) names the moment a concrete item is due, and that moment
+//   already encodes the item's own spacing — webhook retry backoff, the
+//   GitHub poll backoff steps, a rate-limit horizon. Pushing it out by a
+//   whole cadence was a pure latency tail on top of that spacing, so a
+//   past-due explicit time arms at now + PAST_DUE_ALARM_MS.
+// - A cadence-only job (gmail-sync, channel-drain, public-read-model,
+//   public-work-reseed) has no concrete item due; its cadence IS the
+//   schedule, so a past-due time keeps the one-cadence push-out — a
+//   finished tick cannot schedule an immediate loop.
+// `notBefore` (Map or plain object, job name → ms timestamp) floors a job's
+// contribution: the alarm-failure path passes the retry time for the jobs
+// that just threw, so a poison item that stays past-due re-arms at the
+// retry delay instead of tight-looping at the past-due epsilon, while
+// other jobs' due times are unaffected.
+export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = "worker", notBefore = null }) {
+  const floorOf = name => {
+    if (!notBefore) return null;
+    const value = notBefore instanceof Map ? notBefore.get(name) : notBefore[name];
+    return Number.isFinite(value) ? value : null;
+  };
   let earliest = null;
   for (const job of jobs) {
     if (job.slow || !job.runtimes.includes(runtime) || !jobEnabled(job, env, store)) continue;
     let next = jobNextDue(job, store, now, lastRan?.[job.name]);
     if (next == null) continue;
-    if (next <= now) next = now + job.cadenceMs;
+    if (next <= now) next = typeof job.nextDueAt === "function" ? now + PAST_DUE_ALARM_MS : now + job.cadenceMs;
+    const floor = floorOf(job.name);
+    if (floor != null && next < floor) next = floor;
     if (earliest == null || next < earliest) earliest = next;
   }
   return earliest;
