@@ -10,9 +10,12 @@
 // packaging path, and it must not collide with in-flight export changes.
 //
 // What a restore is and is not:
-// - The export hashes every secret column (see room-export.mjs sanitizeRow),
-//   so a restore recovers data, never working credentials. Every agent key,
-//   token and secret must be re-issued after a restore.
+// - The export hashes every secret column (see room-export.mjs
+//   EXPORT_SECRET_COLUMNS), so a restore recovers data, never working
+//   credentials. Every agent key, token and secret must be re-issued
+//   after a restore. #3599: placeholders are never loaded as live values —
+//   sanitized cells resolve to safe substitutes and are counted in the
+//   result's sanitizedCells (see createSanitizedCellTracker).
 // - Restore is fail-closed: it replays only into a store whose rooms table is
 //   empty. It never overwrites a live room.
 // - A restore resurrects authority exactly as it was at backup time. Anything
@@ -20,7 +23,7 @@
 //   (docs/BACKUP-DR.md); there is no "current" store left to reconcile against.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
+import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -161,6 +164,10 @@ export function replayNdjsonInto(ndjson, store) {
   const existing = new Set(tableNames(db));
   const order = insertOrder(new Set(byTable.keys()));
   for (const table of order) if (!existing.has(table)) throw new Error("Export names a table this store does not have");
+  // #3599: sanitized cells resolve to safe substitutes, never the
+  // placeholder; legacy streams (no sanitizePolicy marker) get the
+  // legacy resolutions for the two columns the old exporter over-hashed.
+  const tracker = createSanitizedCellTracker(db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
   // A migrated-but-empty store still holds migration-seeded singleton rows.
   // Clear each replayed table first, exactly like the file-based replay;
   // foreign keys go off for the walk and the foreign_key_check below proves
@@ -196,7 +203,7 @@ export function replayNdjsonInto(ndjson, store) {
           if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
           if (!keys.length) continue;
           // Binary cells leave the exporter as {$base64}; decode and prove them.
-          const cells = Object.fromEntries(keys.map(key => [key, cellOf(row[key])]));
+          const cells = Object.fromEntries(keys.map(key => [key, tracker.resolve(table, key, cellOf(row[key]))]));
           checkStoredBytes(table, cells);
           db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
             .run(...keys.map(key => cells[key]));
@@ -224,7 +231,7 @@ export function replayNdjsonInto(ndjson, store) {
       const contentVerification = contentVerificationLevel(trailer, tableDigests);
       const recovery = auditRecovery(store);
       const audit = store.verifyInvitationAudit();
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...audit, recovery };
     });
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
@@ -283,6 +290,11 @@ export function createBackupReplaySession(store) {
   let trailer = null;
   let carry = "";
   let settled = false;
+  // #3599: created when the watermark line lands (it names the sanitize
+  // policy); a row arriving before it resolves under the legacy policy —
+  // finish() refuses a watermark-less stream and aborts the replay anyway.
+  let tracker = null;
+  const cellTracker = () => tracker ??= createSanitizedCellTracker(db, { legacySanitize: true });
 
   db.exec("PRAGMA foreign_keys=OFF");
   // #3324, as in replayNdjsonInto: open the target's own permit for the
@@ -343,7 +355,7 @@ export function createBackupReplaySession(store) {
         const keys = Object.keys(row);
         if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
         if (!keys.length) continue;
-        const cells = Object.fromEntries(keys.map(key => [key, cellOf(row[key])]));
+        const cells = Object.fromEntries(keys.map(key => [key, cellTracker().resolve(table, key, cellOf(row[key]))]));
         checkStoredBytes(table, cells);
         db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
           .run(...keys.map(key => cells[key]));
@@ -375,6 +387,7 @@ export function createBackupReplaySession(store) {
     if (record?.kind === "watermark") {
       if (watermark) throw new Error("Export has more than one watermark");
       watermark = record;
+      tracker = createSanitizedCellTracker(db, { legacySanitize: record.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
       return;
     }
     if (record?.kind === "trailer") {
@@ -471,7 +484,7 @@ export function createBackupReplaySession(store) {
       const audit = store.verifyInvitationAudit();
       settled = true;
       db.exec("PRAGMA foreign_keys=ON");
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, ...audit, recovery };
+      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...audit, recovery };
     } catch (error) {
       abort();
       throw error;
@@ -575,7 +588,7 @@ export async function operatorRestoreResponse(request, token, store) {
   } catch (error) {
     const message = error?.message ?? String(error);
     if (/non-empty/.test(message)) return jsonResponse(409, { error: { code: "restore_refused_nonempty", message: "Restore refuses a store that already holds rooms" } });
-    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)/.test(message))
+    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message } });
     if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
@@ -588,11 +601,12 @@ export async function operatorRestoreResponse(request, token, store) {
     events: result.events,
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
-    note: "Secrets in the export are hashes, not working credentials: re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.",
+    sanitizedCells: result.sanitizedCells,
+    note: "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.",
   });
 }
 
-const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.";
+const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.";
 const BACKUP_KEY_PATTERN = /^room-backups\/\d{4}-\d{2}-\d{2}\.ndjson$/;
 
 function kvBytes(value) {
@@ -688,6 +702,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       key,
       bytes: total,
       skippedTables: result.skippedTables,
+      sanitizedCells: result.sanitizedCells,
       note: RESTORE_NOTE,
     });
   } catch (error) {
@@ -695,7 +710,7 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     try { cleanup = session.abort() ?? cleanup; } catch (cleanupError) { cleanup = { cleaned: false, error: cleanupError, skipped: false }; }
     const cleanupNote = !cleanup.cleaned && !cleanup.skipped ? { cleanupFailed: true } : {};
     const message = error?.message ?? String(error);
-    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)/.test(message))
+    if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)|unrecognized placeholder/.test(message))
       return jsonResponse(422, { error: { code: "invalid_restore", message, ...cleanupNote } });
     if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)/.test(message))
       return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
