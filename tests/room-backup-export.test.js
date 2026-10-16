@@ -260,7 +260,7 @@ test("the KV target is used only when R2 is absent", () => {
   assert.throws(() => backupTarget({ ROOM_BACKUPS_KV: {} }), /put or get/);
 });
 
-test("the daily KV backup writes parts then a manifest, once a day, with a TTL", async t => {
+test("the daily KV backup writes parts then a manifest, once a day, with its retention-class TTL", async t => {
   const { store } = openStore(t);
   const kv = fakeKv();
   const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
@@ -271,7 +271,9 @@ test("the daily KV backup writes parts then a manifest, once a day, with a TTL",
   const manifest = JSON.parse(kv.map.get("room-backups/2026-10-08.ndjson").value.toString());
   assert.equal(manifest.kind, "room-backup-manifest");
   assert.equal(manifest.parts.length, wrote.parts);
-  for (const { options } of kv.map.values()) assert.equal(options.expirationTtl, 35 * 24 * 60 * 60);
+  // 2026-10-08 is a Thursday and not the 1st: a daily-class copy, kept 7 days.
+  // Tiered class assignment and expiry are covered in cloudflare/backup-retention.check.mjs.
+  for (const { options } of kv.map.values()) assert.equal(options.expirationTtl, 7 * 24 * 60 * 60);
   const again = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, { exportRoomNdjson: () => { throw new Error("must not export twice"); } }, when);
   assert.deepEqual(again, { skipped: "exists", key: "room-backups/2026-10-08.ndjson", target: "kv" });
 });
