@@ -19,8 +19,7 @@ import { rederivePublicReceipt } from "./public-read-model.mjs";
 
 export const RECEIPT_VERIFICATION_SCHEMA = "project-room-receipt-verification/1";
 
-// What no check in this module even attempts. Stated on every verdict so
-// the checks that DID run cannot borrow scope (proof-ux R2).
+// What no check here even attempts — stated so ran checks can't borrow scope.
 const NEVER_CHECKED = [
   "Whether the work itself is any good — no check here judges quality",
   "The real-world identity of the named people — names are as the room recorded them",
@@ -120,10 +119,7 @@ export function verifyPublicReceipt(store, receipt, { nowMs = Date.now() } = {})
     checks,
     scope: {
       checked: checks.map(check => check.label),
-      notChecked: [
-        ...(receipt.pullRequest ? ["The linked pull request's current state on GitHub"] : []),
-        ...NEVER_CHECKED,
-      ],
+      notChecked: [...(receipt.pullRequest ? ["The linked pull request's current state on GitHub"] : []), ...NEVER_CHECKED],
       by: "the Project Room server, at read time",
     },
   };

@@ -71,8 +71,7 @@ function settledLot() {
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation:
     { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   nowMs += 3 * 24 * 3600 * 1000 + 1; // let the challenge window elapse
-  escrow.finalizeBounty(ROOM, bounty.bountyId, {});
-  escrow.closeEpoch(ROOM, {});
+  escrow.finalizeBounty(ROOM, bounty.bountyId, {}); escrow.closeEpoch(ROOM, {});
   const lotId = db.prepare("SELECT lot_id FROM bounty_journal WHERE room_id=? AND bounty_id=? AND kind='payout' ORDER BY seq LIMIT 1")
     .get(ROOM, bounty.bountyId).lot_id;
   return { db, store, lotId };
