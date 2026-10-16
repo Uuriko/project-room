@@ -177,6 +177,12 @@ export class PublicWorkReviews {
       const at = new Date(this.store.now()).toISOString();
       if (action === 'verify') current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint };
       else {
+        const submissionAge = this.store.now() - (receipt.createdAt ? Date.parse(receipt.createdAt) : this.store.now());
+        const isNeglectLadder = submissionAge >= 72 * 3600 * 1000;
+        if (input.decision === 'accepted' && isNeglectLadder) {
+          const recentNeglects = this.hasTable('public_work_reviews') ? (this.db.prepare("SELECT COUNT(*) AS c FROM public_work_reviews WHERE room_id=? AND instr(state_json, 'neglectLadder') > 0").get(roomId)?.c || 0) : 0;
+          if (recentNeglects >= 3) fail(429, 'review_neglect_wave_limit', 'Maximum wave limit of 3 neglect-ladder auto-accepts reached for this room');
+        }
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
         current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
       }
