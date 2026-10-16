@@ -189,12 +189,19 @@ deploy. Until `PROBE_STATE` is a real namespace, the Worker cannot remember a
 streak, so it does not notify. The config is
 [external-probe.wrangler.jsonc](../cloudflare/external-probe.wrangler.jsonc).
 
+The wrangler version is pinned (#3579): an unpinned `npx wrangler` would
+execute whatever wrangler is latest that day, with your Cloudflare
+credentials. The pin matches the locked wrangler in
+[cloudflare/package.json](../cloudflare/package.json); after a
+`pnpm install --frozen-lockfile` in `cloudflare/`, `pnpm exec wrangler`
+is equivalent.
+
 ```sh
 cd cloudflare
-npx wrangler kv namespace create PROBE_STATE --config external-probe.wrangler.jsonc
-npx wrangler secret put PROBE_ALERT_WEBHOOK_URL --config external-probe.wrangler.jsonc
-npx wrangler secret put ROOM_AGENT_ORIGIN --config external-probe.wrangler.jsonc
-npx wrangler secret put ROOM_AGENT_ROOM --config external-probe.wrangler.jsonc
-npx wrangler secret put ROOM_AGENT_TOKEN --config external-probe.wrangler.jsonc
-npx wrangler deploy --config external-probe.wrangler.jsonc
+npx wrangler@4.116.0 kv namespace create PROBE_STATE --config external-probe.wrangler.jsonc
+npx wrangler@4.116.0 secret put PROBE_ALERT_WEBHOOK_URL --config external-probe.wrangler.jsonc
+npx wrangler@4.116.0 secret put ROOM_AGENT_ORIGIN --config external-probe.wrangler.jsonc
+npx wrangler@4.116.0 secret put ROOM_AGENT_ROOM --config external-probe.wrangler.jsonc
+npx wrangler@4.116.0 secret put ROOM_AGENT_TOKEN --config external-probe.wrangler.jsonc
+npx wrangler@4.116.0 deploy --config external-probe.wrangler.jsonc
 ```
