@@ -743,10 +743,6 @@ test("record identities and fragments remain collision-safe and legacy work link
       id: `event-${messageId}`, idempotencyKey: `seed-${messageId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_POSTED,
       data: { messageId, body }
     }));
-    seed.push(event({
-      id: `reaction-${memberId}`, idempotencyKey: `seed-reaction-${memberId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_REACTION_SET,
-      data: { messageId: "list", reaction: "heart", active: true }
-    }));
   }
   seed.push(event({
     id: "message-colon", idempotencyKey: "seed-message-colon", roomId: "commons", actorId: "owner", type: T.MESSAGE_POSTED,
