@@ -1,16 +1,18 @@
 # Project Room ↔ machine protocol — canonical contract
 
-**Status:** canonical as of 2026-10-13 (simplification program, decision 18 / issue #3217). This document is the single contract the machine + relay extraction will version against when `machine/` and `relay/` leave this repo. It describes the protocol **as implemented today**; where an older document disagrees with this one, this one wins, and where this document and the code disagree, the code wins and this document is the bug.
+**Status:** canonical as of 2026-10-13 (simplification program, decision 18 / issue #3217); revised 2026-10-16 — the relay was deleted (TOTAL-AUDIT-50X C-02) without ever being deployed, so the relay-specific parts of this document (§1's enroll-via-relay steps, §3, §4, §5) are **historical**: preserved as the re-derivation contract if a relay is ever restored under a fresh decision. §2 remains the live contract for `machine/`. This document is the single contract the machine extraction will version against when `machine/` leaves this repo. It describes the protocol **as implemented today**; where an older document disagrees with this one, this one wins, and where this document and the code disagree, the code wins and this document is the bug.
 
-It replaces, as the canonical statement, the overlapping descriptions previously spread across `machine/PROTOCOL.md` (daemon wire contract), `relay/PROTOCOL.md` (relay operator notes), `machine/lib/protocol.mjs`, and `relay/src/protocol.mjs`. Those files remain as implementation-local notes until extraction; their protocol constants are pinned by §6.
+It replaces, as the canonical statement, the overlapping descriptions previously spread across `machine/PROTOCOL.md` (daemon wire contract), `relay/PROTOCOL.md` (relay operator notes, deleted with the relay), `machine/lib/protocol.mjs`, and `relay/src/protocol.mjs` (deleted with the relay). The surviving files remain as implementation-local notes until extraction; their protocol constants are pinned by §6.
 
 ## Parties
 
 - **Room (core)** — the Project Room server (`server/`), served canonically by the Cloudflare Worker + Durable Object at `https://room.trydemigod.com`.
 - **Machine daemon** — `machine/` (CLI + daemon + bot loop) running on an operator's macOS host. A *client* of Room: at runtime it imports nothing from core and speaks only the HTTP surface in §2 plus, when a relay is configured, the relay link in §3.
-- **Relay** — `relay/`, a separate Worker (`project-room-relay`). A bridge between Room and daemons that cannot or should not hold a direct Room session. **The relay is undeployed today** (its README: "off until someone deploys it"); phase-0 passthrough is the only working mode (§4).
+- **Relay** — formerly `relay/`, a separate Worker (`project-room-relay`): a bridge between Room and daemons that cannot or should not hold a direct Room session. **The relay was never deployed** (its README: "off until someone deploys it") and was deleted in October 2026; phase-0 passthrough was the only working mode (§4, historical).
 
 ## 1. Enrollment and identity
+
+*Steps 1–3 describe enrollment via the relay and are historical since its deletion; the daemon's own identity creation (step 4) and inertness rule (step 5) remain live.*
 
 1. An operator mints a Room **agent invite** (`profile: "contribute"`) in the room the machine will join, and stores that invite code on a relay enroll record via `POST /admin/enroll-codes` (`Authorization: Bearer <RELAY_ADMIN_TOKEN>`; body: `label`, `roomId` or `rooms` (1..8), `ownerMemberId`, `inviteCode`, optional `displayName`, `roomOrigin`).
 2. The daemon calls `POST {relay}/v0/enroll` with `{ "code": "<machineId>.<verifier>" }`. The code is single-use and expires **15 minutes** after minting. `200` returns `machineToken`, `machineId`, `label`, `roomId`, `ownerMemberId`, `inviteCode`, `displayName`, `relayUrl` (`wss://<host>/v0/machines/link`, derived from the host that served the enroll), and optional `roomOrigin` (daemon falls back to `ROOM_ORIGIN`, then `https://room.trydemigod.com`). Errors: `401 code_invalid`, `410 code_used` / `code_expired`. (`POST /enroll` is the same handler with `Deprecation: true`, kept for one release.)
@@ -42,7 +44,7 @@ A **desk lease is an ordinary work claim** whose `files` entry is `resource/<mac
 
 **Approvals ride this surface too:** for gated tool classes (§3), the daemon posts `approve <code>` as a room message and accepts one exact reply `approve <code>` from `ownerMemberId` within 10 minutes, once, polling the events feed above.
 
-## 3. Relay link (daemon ↔ relay, WebSocket)
+## 3. Relay link (daemon ↔ relay, WebSocket) — historical, relay deleted 2026-10-16
 
 Socket: daemon connects to `relayUrl` with `Authorization: Bearer <machineToken>` on the upgrade. Frames are JSON text; call ids match `[A-Za-z0-9_-]{1,64}`; a result frame is at most **4 MiB** (4,194,304 bytes); a call frame at most **1 MiB**.
 
@@ -63,16 +65,18 @@ Error codes: `lease_required`, `slot_held`, `tool_denied`, `deadman`, `halted`, 
 
 The relay also exposes the link over MCP (`/.well-known/oauth-protected-resource/v0/machines/<machineId>/mcp`; MCP protocol `2025-11-25`, also accepts `2025-06-18`, `2025-03-26`) and `POST /call`; the outcome returned is the daemon's result frame either way.
 
-## 4. Authorization models
+## 4. Authorization models — historical, relay deleted 2026-10-16
 
 - **Phase 0 — passthrough (the model today; decision 18: this is the model, RES-0 is parked).** The caller presents a Room identity secret or agent API key; the relay reads the room board, and forwards a call with `caller.verified: true` only after its membership/claim check succeeds. Relay-side caches are bounded (identity cache 5 min; lock cache ≤ 30 s). Updates pagination must not silently truncate (defect #2871, fix in flight, PR #3132).
 - **Lease tokens (specified, not deployed).** Room-minted Ed25519 compact JWS, verified against `ROOM_RESOURCE_LEASE_PUBLIC_JWK`; claims `iss` (Room origin), `aud` (`relay:<resourceId>` or `relay:<machineId>`), `sub`, `room`, `claim`, `slot`, `caps`, `epoch` (tokens older than `haltEpoch` refused), `exp` (≤ 15 min out), `jti` (revoked by listing on halt). Until the JWK is configured, lease-token calls return `503 lease_verifier_unconfigured`. **Do not build on this model without unparking RES-0 by explicit decision.**
 
-## 5. Room → relay control plane
+## 5. Room → relay control plane — historical, relay deleted 2026-10-16
 
 Room (or an operator acting for it) pushes control to the relay: `POST /v0/machines/<machineId>/halt | /pause | /resume | /bye`, carrying `X-Relay-Timestamp` (unix seconds) and `X-Relay-Signature` (hex HMAC-SHA256 of `<timestamp>.<path>.<raw body>` under `RELAY_LINK_SECRET`; skew > 300 s refused; an already-honored signature is rejected `409 replay_rejected` — retries must re-sign with a fresh timestamp or distinct body). Halt may include `epoch`, `resourceId`, `revoke: [{ "jti", "exp" }]`. **As-is note:** the relay verifies these requests (`relay/src/machine-link.mjs`), but no sender exists in `server/` today — control issuance is currently operator/relay-side. A core sender, if built, must follow this section unchanged.
 
 ## 6. Pinned constants
+
+*Rows whose source of truth was `relay/src/protocol.mjs` are historical since the relay's deletion; the values are preserved here and in git history.*
 
 | Constant | Value | Source of truth |
 | --- | --- | --- |
@@ -93,4 +97,4 @@ Room (or an operator acting for it) pushes control to the relay: `POST /v0/machi
 ## 7. Versioning and change rules
 
 - Changes to §§1–5 require a revision note in the PR that makes them and a version bump of this document's status line; frame-shape changes require `protocol` to advance beyond `1` in both constants files in the same change.
-- The extraction (decision 18) moves `machine/` + `relay/` to their own repo; this document moves with them as the published contract, and core keeps a pointer to it. Until then, this root copy is canonical.
+- The extraction (decision 18) moves `machine/` to its own repo; this document moves with it as the published contract, and core keeps a pointer to it. Until then, this root copy is canonical. (The relay half of the original extraction was deleted undeployed in October 2026 instead; see the status line.)

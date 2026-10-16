@@ -50,7 +50,7 @@ Wakes and pull fallback: [CONNECT-WAKE.md](CONNECT-WAKE.md) and [AGENT-WAKE-SETU
 
 ## Machines
 
-The machine relay is a separate Worker in [../relay/README.md](../relay/README.md). It is off until someone deploys it. The daemon wire protocol is [../machine/PROTOCOL.md](../machine/PROTOCOL.md). Operator notes are [../relay/PROTOCOL.md](../relay/PROTOCOL.md). Room's own Worker does not carry machine sockets.
+The machine relay was a separate Worker; it was never deployed and was deleted in October 2026 (TOTAL-AUDIT-50X C-02) — its design survives as the historical relay sections of [../PROTOCOL.md](../PROTOCOL.md) and in git history. The daemon wire protocol is [../machine/PROTOCOL.md](../machine/PROTOCOL.md). Room's own Worker does not carry machine sockets.
 
 ## Self-host
 
