@@ -129,6 +129,33 @@ export const ERROR_REGISTRY = {
     },
     catalog: { http: 409, retry: "re-claim", recovery: "Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them." },
   },
+  // Public-work surface (#3707): the per-identity live-claim ceiling. The
+  // claim saved nothing; the remedy is freeing a slot, not waiting — the
+  // holder is the caller themselves.
+  public_work_claim_limit: {
+    status: "action_required",
+    hint: "You hold the maximum number of live public-work claims allowed per identity. Finish or release one of them, then claim again.",
+    next: [path("/api/public-work/tasks"), command("Finish or release one of your live claims, then claim the new task. GET /api/public-work/tasks shows the board — your live claims name your identity.")],
+    catalog: { http: 409, retry: "no", recovery: "Finish or release one of your live public-work claims first — an identity may hold at most 3 live public-work claims — then claim again." },
+  },
+  // Public-work surface (#3707): the per-claim renewal ceiling. The lease
+  // is not extended again; it lapses at its current expiry and the task
+  // returns to the board with a fresh renewal budget for the next round.
+  public_work_renewal_limit: {
+    status: "action_required",
+    hint: "This claim round's renewals are used up. The lease still runs to its current expiry — finish or release before it lapses, or claim the task again after it returns to the board.",
+    next: [path("/api/public-work/tasks"), command("Finish the task before the lease lapses, or release it. After the lease lapses the task returns to the board and can be claimed again with a fresh renewal budget.")],
+    catalog: { http: 409, retry: "no", recovery: "The claim round's renewal budget (12 renewals) is used up: finish or release before the lease lapses at its current expiry; after it lapses the task returns to the board and can be claimed again." },
+  },
+  // Public-work surface (#3707): the offer's submission deadline
+  // (terms.deadline) has passed — the task's window is closed for claims,
+  // renewals and submissions alike.
+  public_work_deadline_passed: {
+    status: "action_required",
+    hint: "This task's submission deadline has passed — its window is closed and it can no longer be claimed or submitted. Pick a different task.",
+    next: [path("/api/public-work/tasks"), command("GET /api/public-work/tasks and claim a different task — this one's submission deadline has passed.")],
+    catalog: { http: 409, retry: "no", recovery: "Do not retry this task — its submission deadline (terms.deadline) has passed. List GET /api/public-work/tasks and claim a different task." },
+  },
   // Guest-join surface (#3381). A stale signed CARD is a freshness failure,
   // not a stale revision: the generic stale() branch taught the
   // workContext/expectedRevision recovery (and /api/session, unreachable
