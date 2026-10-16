@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 
@@ -19,7 +20,7 @@ async function fixture(t) {
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const get = (path = "", key = f.keys.producer) => fetch(`${origin}/api/rooms/commons${path}`, { headers: { Authorization: `Bearer ${key}` } });
+  const get = (path = "", key = f.keys.producer, headers = {}) => fetch(`${origin}/api/rooms/commons${path}`, { headers: { Authorization: `Bearer ${key}`, ...headers } });
   const post = (key, body, extra = {}) => f.store.command(key, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: randomUUID(), body, ...extra } });
   return { ...f, get, post };
@@ -77,4 +78,39 @@ test("the recent selector is strict", async t => {
     assert.equal((await response.json()).error.code, "invalid_snapshot_view", query);
   }
   assert.equal((await f.get("?messages=recent", "not-a-key")).status, 401);
+});
+
+test("negotiated chat activity avoids duplicate message bodies while preserving decisions and work", async t => {
+  const f = await fixture(t); f.store.roomFlood = { consume() {} };
+  for (let i = 0; i < 30; i++) f.post(f.keys.producer, `Shared message ${i}: ${'content '.repeat(250)}`);
+  const source = f.post(f.keys.owner, 'Keep the pilot invitation only.').event.data.messageId;
+  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'decision.recorded', data: { sourceMessageId: source, statement: 'Invitation-only pilot.' } });
+  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'work.proposed', data: { workItemId: 'lean-work', title: 'Pilot brief', definitionOfDone: 'A usable brief', accountableMemberId: 'producer', verifierMemberId: 'reviewer', humanDecisionMakerId: 'owner' } });
+  const full = await (await f.get('?messages=recent')).json();
+  const lean = await (await f.get('?messages=recent', f.keys.producer, { 'X-Project-Room-Audit-View': 'activity-v1' })).json();
+  assert.equal(lean.auditView, 'activity'); assert.equal(lean.auditVersion, 1);
+  assert.deepEqual(lean.state.messages, full.state.messages);
+  assert.deepEqual(lean.state.workItems, full.state.workItems);
+  assert.deepEqual(lean.state.eventLog, full.state.eventLog.filter(e => e.type === 'decision.recorded' || e.data?.workItemId !== undefined));
+  assert.equal(lean.sequence, full.sequence); assert.equal(lean.cursor, full.cursor);
+  assert.ok(Buffer.byteLength(JSON.stringify(lean)) < Buffer.byteLength(JSON.stringify(full)) * .7, 'fixture payload drops substantially without losing projected messages');
+  const fullBody = JSON.stringify(full), leanBody = JSON.stringify(lean);
+  t.diagnostic(JSON.stringify({ workload: '30 seeded messages plus decision/work activity', fullBytes: Buffer.byteLength(fullBody), activityBytes: Buffer.byteLength(leanBody), fullGzipBytes: gzipSync(fullBody).length, activityGzipBytes: gzipSync(leanBody).length }));
+  assert.equal(Object.hasOwn(full, 'auditView'), false, 'legacy response remains unchanged');
+  const restored = await (await f.get('?messages=recent')).json();
+  assert.deepEqual(restored.state.eventLog, full.state.eventLog, 'full Record read remains available');
+});
+
+test("activity negotiation preserves private-message filtering and rejects invalid versions", async t => {
+  const f = await fixture(t);
+  f.post(f.keys.owner, 'Private for reviewer', { toMemberId: 'reviewer' });
+  for (const key of [f.keys.owner, f.keys.producer, f.keys.reviewer]) {
+    const full = await (await f.get('?messages=recent', key)).json();
+    const lean = await (await f.get('?messages=recent', key, { 'X-Project-Room-Audit-View': 'activity-v1' })).json();
+    assert.deepEqual(lean.state.messages, full.state.messages);
+    assert.deepEqual(lean.state.pins, full.state.pins);
+  }
+  for (const [path, value] of [['', ''], ['', 'activity-v2'], ['?view=work', 'activity-v1']])
+    assert.equal((await f.get(path, f.keys.owner, { 'X-Project-Room-Audit-View': value })).status, 422);
+  assert.equal((await f.get('', 'revoked-or-invalid', { 'X-Project-Room-Audit-View': 'activity-v1' })).status, 401);
 });

@@ -270,3 +270,61 @@ test("replayNdjsonInto never imports the exported writer permit row (#3324)", t 
   t.after(() => { try { reopened.close(); } catch { /* already closed */ } });
   assert.ok(reopened.room("commons"), "the restored store reopens with the fence closed");
 });
+
+// #3325: the trailer (version 2) pins every loadable table's content, so a
+// tampered non-event row — the issue's probe edits a credential's
+// expires_at by +10 years with every count and event hash still
+// consistent — must refuse instead of restoring verified.
+function tamperCredentialsExpiry(ndjson) {
+  let done = false;
+  const out = ndjson.split("\n").map(line => {
+    if (done || !line.includes('"table":"credentials"')) return line;
+    const record = JSON.parse(line);
+    if (typeof record.row.expires_at !== "number") return line;
+    record.row.expires_at += 315576000000;
+    done = true;
+    return JSON.stringify(record);
+  }).join("\n");
+  assert.ok(done, "fixture export has a credentials row with a numeric expires_at");
+  return out;
+}
+
+test("a tampered credentials row fails the table digest instead of restoring verified (#3325)", t => {
+  const { ndjson } = seed(t);
+  const target = openStore(t, "restore-ndjson-tampered-");
+  assert.throws(() => replayNdjsonInto(tamperCredentialsExpiry(ndjson), target), /table digest does not match for credentials/);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "failed replay leaves the store empty");
+});
+
+test("a clean export reports full content verification (#3325)", t => {
+  const { ndjson } = seed(t);
+  const trailer = JSON.parse(ndjson.trim().split("\n").at(-1));
+  assert.equal(trailer.version, 2, "the exporter pins table digests in a version 2 trailer");
+  assert.ok(trailer.tables.credentials, "the credentials table is pinned");
+  const target = openStore(t, "restore-ndjson-full-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.contentVerification, "full");
+});
+
+test("legacy exports restore at an explicitly weaker verification level (#3325)", t => {
+  const { ndjson } = seed(t);
+  const lines = ndjson.trim().split("\n");
+  const downgrade = lines.map(line => {
+    if (!line.includes('"kind":"trailer"')) return line;
+    const trailer = JSON.parse(line);
+    delete trailer.tables;
+    trailer.version = 1;
+    return JSON.stringify(trailer);
+  }).join("\n") + "\n";
+  const target = openStore(t, "restore-ndjson-legacy-");
+  const result = replayNdjsonInto(downgrade, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.trailer, "verified");
+  assert.equal(result.contentVerification, "events-only", "a version 1 trailer pins only the event log and says so");
+  const noTrailer = lines.filter(line => !line.includes('"kind":"trailer"')).join("\n") + "\n";
+  const target2 = openStore(t, "restore-ndjson-notrailer-");
+  const result2 = replayNdjsonInto(noTrailer, target2);
+  assert.equal(result2.verified, true);
+  assert.equal(result2.contentVerification, "watermark-only");
+});
