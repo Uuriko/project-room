@@ -272,7 +272,9 @@ test("error mapping: unknown bounty, invalid input, unauthenticated", async t =>
 
 test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t => {
   const { origin, keys } = await startServer(t);
-  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100 }), keys.owner);
+  // #3727: the dispute below can only open if a decider seats, so the bounty
+  // names its designated verifier (the reviewer) at posting.
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100, verifierId: "reviewer" }), keys.owner);
   const bountyId = (await createRes.json()).bounty.bountyId;
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/claim`, {}, keys.producer);
