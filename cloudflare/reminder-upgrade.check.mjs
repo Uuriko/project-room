@@ -22,7 +22,13 @@ test(`real Workers v7→v${STORE_SCHEMA_VERSION} migration fences a cached legac
   // and recreates them, and replaying their CREATE TABLE is rejected as reserved.
   const schema = db.prepare("SELECT name,type,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name NOT GLOB 'writer_v*' AND name NOT GLOB 'private_reminder*' AND name NOT GLOB 'private_inbox*' AND name NOT GLOB 'private_email*' AND name NOT GLOB 'agent_connection*' ORDER BY rowid").all();
   const tables = schema.filter(row => row.type === 'table').map(row => row.name);
-  const rows = tables.flatMap(table => db.prepare(`SELECT * FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row) })));
+  // Stored columns only (PRAGMA table_info excludes generated columns):
+  // the replayed schema carries the v39 generated columns on events, and
+  // workerd rejects INSERTs that name them; they recompute from body.
+  const rows = tables.flatMap(table => {
+    const stored = db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+    return db.prepare(`SELECT ${stored.map(name => `"${name}"`).join(', ')} FROM ${table}`).all().map(row => ({ table, columns: Object.keys(row), values: Object.values(row) }));
+  });
   const account = fixture.store.accountForMember('commons', 'owner').id;
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./reminder-upgrade.test-fixture.mjs', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const config = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
