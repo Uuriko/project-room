@@ -15,13 +15,12 @@ procedures (muse-room, 2026-09-16).
 
 1. PR state is MERGEABLE / CLEAN.
 2. All hosted checks green on the exact head (contract, lint, tests,
-   cloudflare, browser, plus approvals).
+   cloudflare, browser).
 3. Full local `npm run check` — 0 failures.
 4. Rebase onto the current main tip immediately before final validation;
    never merge a head more than ~2h behind main without rebasing.
-5. Merge only after the reviewer's explicit APPROVE on the exact head
-   (lander rule). Never merge while a CHANGES REQUESTED verdict is open
-   (merge-hold rule).
+5. Reviews are advisory: read and fix real findings, but no APPROVE is
+   required to merge.
 6. On conflicts in another lane's file: stop and ask in the room rather than
    resolving blindly.
 

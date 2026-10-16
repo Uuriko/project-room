@@ -51,7 +51,7 @@ import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers targe
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
-import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
+import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims, withPullSettlement } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import {
   assertBoardEventBudget, assertBoardLeaseHours, assertDependsOnKnown, boardText, boardTextFields, clientPullRequestInput,
@@ -355,8 +355,11 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
   const present = page => {
+    // #3661: every claim read carries the derived pull settlement state on
+    // its pull record (verified / asserted / pending; link-less claims
+    // keep pullRequest null, which reads as "none").
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
+      claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
@@ -718,6 +721,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item,
       action,
       previousOwnerId: extra.previousOwnerId ?? null,
+      previousState: extra.previousState ?? null,
       atMs: nowMs,
       paths: action === "released" || action === "pr_closed" ? (prior?.files ?? []) : undefined,
       pullRequest: extra.pullRequest,
@@ -978,7 +982,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
+    // #3661: the single-claim read carries the same derived pull
+    // settlement state as the board page.
+    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1103,7 +1109,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if ((verifyCall || sendBackCall) && item.owner !== caller) {
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
     } else requireWriter();
-    requireEventBudget();
+    // #3546/#3747: the reviewer's verify is a review action, not a board
+    // write, so the board-write event-budget floor does not refuse it.
+    // The exit it lands is cap-exempt at the emit layer (#3747); refusing
+    // it here would leave a delivered, approved claim unverifiable in any
+    // room inside its budget reserve. Every other update keeps the floor.
+    if (!(verifyCall && item.owner !== caller)) requireEventBudget();
     // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
     // updates. The appendPullRequest variant binds its write to claimedAt +
     // history length; a plain update had no such binding, so a stale client
@@ -1209,7 +1220,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const acked = data.readingAck === undefined ? updated
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
+    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
     return json(res, 200, acked);
   }
   if (workClaimRoute === "review" && req.method === "POST") {

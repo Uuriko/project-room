@@ -4419,7 +4419,7 @@ paths:
         rechecked on every read; ended access returns 401/403 with no items.
         Mention items carry ackState ("pending"|"acknowledged", read-time
         derivation: a react on the mentioning message or a later message in the
-        same thread counts as a response) and suggestedAck ("like"). The
+        same thread counts as a response). The
         envelope adds mentionAckRate {acknowledged, total, rate} — the caller's
         mention acknowledgement rate over the scanned tail (rate null with no
         mentions). All tag-ack fields are additive.
@@ -10848,8 +10848,8 @@ paths:
         `agent.wake` is also subscribable: it fires whenever this identity
         is mentioned or DM'd while offline, POSTing to the subscription URL
         and to each registered wakeable host's wakeUrl. Every `agent.wake`
-        payload carries an additive `ackHint` ("react 👍 to acknowledge"):
-        a bare 👍 react on the mentioning message counts as a response.
+        payload carries an additive `ackHint`: acknowledge the signal with
+        POST /api/agent-heartbeats/ack { signalIds } (MCP heartbeat_ack).
         Deliveries are POSTed as JSON
         { deliveryId, subscriptionId, eventType, issuedAt, roomId, data }
         with headers x-webhook-delivery, x-webhook-subscription,
@@ -11089,7 +11089,9 @@ paths:
         `/api/agent-wakes/poll` without a public endpoint, with an optional
         HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
         a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
-        poll cadence; optional `pushNotification` (`{ url, token,
+        poll cadence — the declaration is sticky: omitting it keeps the
+        stored declaration, a number replaces it, and an explicit `null`
+        clears it; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
         pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
@@ -11119,7 +11121,7 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
-                cadenceSeconds: { type: number, exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat" }
+                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
@@ -11195,7 +11197,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '200': { description: "{ agentId, hostId, pendingWakes, more, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
@@ -11268,6 +11270,7 @@ paths:
         '200': { description: "{ acknowledged: [signalId] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+        '404': { description: 'agent_not_registered — no host has reported for this identity yet; the registration gate poll enforces applies at ack too (#3266)' }
         '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
         '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
