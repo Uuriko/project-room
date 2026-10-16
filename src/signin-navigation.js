@@ -1,6 +1,11 @@
 export function createSigninNavigation({ getUI, active }) {
   const $ = selector => document.querySelector(selector);
   let current = "password-login", replay = false;
+  // OAuth providers the deployment positively reported unconfigured (via
+  // the signin-options feed, relayed by the host). Their start routes answer
+  // 503, so the anchors stay hidden in every view — fail-open: a provider is
+  // only ever added here on a positive "configured: false" answer.
+  const unavailableProviders = new Set();
   function sync(view) {
     const previous = current;
     current = view;
@@ -23,6 +28,8 @@ export function createSigninNavigation({ getUI, active }) {
     $("#signin-entry-routes").hidden = auxiliary;
     $("#google-signin").hidden = view === "welcome";
     $("#github-signin").hidden = view === "welcome";
+    if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
+    if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
     $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {
@@ -39,6 +46,12 @@ export function createSigninNavigation({ getUI, active }) {
   window.addEventListener("popstate", onPopState);
   return {
     sync, withReplay,
+    setProviderUnavailable(name) {
+      unavailableProviders.add(name);
+      if (!active()) return;
+      const anchor = $(`#${name}-signin`);
+      if (anchor) anchor.hidden = true;
+    },
     back() {
       if (active() && history.state?.roomSigninView) { history.back(); return false; }
       return true;

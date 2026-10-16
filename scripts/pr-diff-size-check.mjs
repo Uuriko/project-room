@@ -7,10 +7,18 @@
 // you can; justify it when you cannot.
 //
 // Pure contract: checkDiffSize({ numstat, prBody, threshold? }) -> { ok, counted, message }.
+// The verdict is a deterministic function of (numstat, prBody, threshold):
+// the same inputs always produce the same verdict. Two runs at the same head
+// SHA can still disagree when an *input* moved — the base ref (a stacked PR
+// retargeted when its parent merges) or the PR body (a justification section
+// added by an edit). Every message therefore carries an input fingerprint
+// (body sha256 + justification status) so a flipped verdict is attributable
+// from the check output alone instead of reading as nondeterminism.
 // CLI: BASE_SHA/HEAD_SHA (env or --base/--head), PR_BODY or PR_BODY_B64
 // (env) or --body/--body-b64/--body-file args. DIFF_SIZE_THRESHOLD overrides
 // the single constant without a code change.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 // Single configurable constant. Override per-run with DIFF_SIZE_THRESHOLD.
@@ -68,19 +76,32 @@ function countedLines(numstat) {
   return total;
 }
 
+// Short fingerprint of the exact body the verdict was computed from, so two
+// runs' outputs can be compared without echoing body text into the log.
+export function bodyFingerprint(prBody) {
+  return createHash("sha256").update(String(prBody || ""), "utf8").digest("hex").slice(0, 12);
+}
+
 function findJustification(prBody) {
   const lines = String(prBody || "").split("\n");
-  const headingRe = /^\s*#{0,6}\s*large\s+diff\s+justification\b\s*:?\s*$/i;
+  // The heading line may carry justification text after the colon
+  // ("## Large diff justification: <reason>") — the failure message shows the
+  // heading with a trailing colon, so authors naturally write it that way;
+  // that text counts as the section's first content line.
+  const headingRe = /^\s*#{0,6}\s*large\s+diff\s+justification\b\s*:?\s*(.*)$/i;
   let start = -1;
+  let inline = "";
   for (let i = 0; i < lines.length; i++) {
-    if (headingRe.test(lines[i])) {
+    const m = headingRe.exec(lines[i]);
+    if (m) {
       start = i + 1;
+      inline = m[1] || "";
       break;
     }
   }
   if (start === -1) return null;
   // Justification runs to the next markdown heading or the end of the body.
-  const content = [];
+  const content = inline ? [inline] : [];
   for (let i = start; i < lines.length; i++) {
     if (/^\s*#{1,6}\s+\S/.test(lines[i])) break;
     content.push(lines[i]);
@@ -89,22 +110,31 @@ function findJustification(prBody) {
   return nonWs >= MIN_JUSTIFICATION_CHARS ? content.join("\n").trim() : null;
 }
 
+function inputsLine(counted, prBody, justificationStatus) {
+  return `inputs: counted ${counted} · body sha256 ${bodyFingerprint(prBody)} · justification ${justificationStatus}`;
+}
+
 export function checkDiffSize({ numstat, prBody, threshold } = {}) {
   const limit = threshold ?? resolveThreshold();
   const counted = countedLines(numstat);
+  const justification = counted > limit ? findJustification(prBody) : null;
+  const inputs = inputsLine(
+    counted,
+    prBody,
+    counted <= limit ? "not needed" : justification ? "found" : "missing",
+  );
   if (counted <= limit) {
     return {
       ok: true,
       counted,
-      message: `ok: ${counted} changed lines (threshold ${limit}) — no justification needed.`,
+      message: `ok: ${counted} changed lines (threshold ${limit}) — no justification needed.\n${inputs}`,
     };
   }
-  const justification = findJustification(prBody);
   if (justification) {
     return {
       ok: true,
       counted,
-      message: `ok: ${counted} changed lines exceed the ${limit}-line threshold, but the PR body carries a justification section.`,
+      message: `ok: ${counted} changed lines exceed the ${limit}-line threshold, but the PR body carries a justification section.\n${inputs}`,
     };
   }
   return {
@@ -112,6 +142,7 @@ export function checkDiffSize({ numstat, prBody, threshold } = {}) {
     counted,
     message: [
       `PR diff size check failed: ${counted} changed lines exceed the ${limit}-line threshold.`,
+      inputs,
       "",
       "Why: smaller diffs mean fewer rebase conflicts (PR #1530 needed five rebase",
       "cycles partly because of diff size) and faster reviews.",
@@ -121,6 +152,7 @@ export function checkDiffSize({ numstat, prBody, threshold } = {}) {
       "  1. Split this PR into smaller PRs (preferred), or",
       "  2. Add a '## Large diff justification:' section to the PR body explaining",
       "     why this diff cannot be split (about 40 characters of real content or more).",
+      "     The reason may start on the heading line itself, after the colon.",
     ].join("\n"),
   };
 }
@@ -162,6 +194,7 @@ if (isCli) {
     process.exit(2);
   }
   const result = checkDiffSize({ numstat, prBody });
+  console.log(`diff-size inputs: base ${base.slice(0, 12)} head ${head.slice(0, 12)}`);
   console.log(result.message);
   process.exit(result.ok ? 0 : 1);
 }
