@@ -209,15 +209,6 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_messages": {
       "inputSchema": "ddc58b6f3ab954c3",
       "annotations": {
@@ -985,15 +976,6 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_board": {
       "inputSchema": "7dac81175f92cec4",
       "annotations": {
@@ -1319,7 +1301,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "a4311d75365d3fa1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1835,15 +1817,6 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_inbox": {
       "inputSchema": "cd4b47e787ec024d",
       "annotations": {
@@ -2308,7 +2281,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "a4311d75365d3fa1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
