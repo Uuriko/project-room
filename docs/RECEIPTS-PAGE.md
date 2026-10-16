@@ -21,6 +21,19 @@ description. Names are omitted — the page qualifies them as room-recorded, not
 the structured vocabulary cannot carry that qualifier. There is no rating or review markup: a receipt
 is a record, not a review.
 
+The detail page also carries a share block: the pre-filled share text
+("Work, verified: <title> — <verdict line>") shown verbatim on the page,
+one-tap share links (X, LinkedIn, email — plain anchors; these pages are
+script-free), and the badge embed below.
+
+`/receipts/<id>/badge.svg` is the embeddable badge for READMEs and
+portfolios: the surface name and the receipt's graded verdict in words —
+never a bare checkmark, which readers take as a blanket quality verdict.
+It resolves through the same public read as the page, so it exists only
+while the receipt is public, and it is cacheable under the same
+five-minute exception as the OG card. The snippet the page offers wraps
+the badge in the receipt link with the verdict line as its alt text.
+
 ## Per-room proof page
 
 `/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
@@ -39,8 +52,17 @@ carries:
   (`hash_only`): not an acceptance, not a payment.
 
 Every entry links to its `/receipts/<id>` record. No payment is proved on
-the proof page: bounty credit movements are proved by signed lot receipts,
-which are member-gated and have no public page.
+the proof page: bounty credit movements are recorded by lot receipts,
+which never appear as proof-page entries. A lot receipt's own detail page
+is public only under the same owner receipts setting as every other
+receipt, and its share surfaces follow that same gate.
+
+The proof page carries the same share layer as a receipt: JSON-LD
+(`CollectionPage` with an `ItemList` mirroring the visible entries and
+their level notes) and a per-room share card at
+`/r/<slug>/proof/og.png` — the room's counts and the stored-hashes
+footer — gated by the same view and cacheable under the same five-minute
+exception as the receipt card.
 
 ## What is public
 

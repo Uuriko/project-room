@@ -125,6 +125,16 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
   assert.match(og.headers.get("cache-control"), /max-age=300/);
   const bytes = new Uint8Array(await og.arrayBuffer());
   assert.deepEqual([...bytes.slice(0, 4)], [137, 80, 78, 71]);
+  // The share block shows the exact pre-filled text and one-tap targets,
+  // and the badge serves the graded verdict as an embeddable SVG.
+  assert.match(pwrPage.text, /Share this receipt/);
+  assert.match(pwrPage.text, /Work, verified: Public task — Artifact hash recorded/);
+  assert.match(pwrPage.text, /twitter\.com\/intent\/tweet/);
+  assert.match(pwrPage.text, new RegExp(`/receipts/${PWR}/badge\\.svg`));
+  const badge = await fetch(`${origin}/receipts/${PWR}/badge.svg`);
+  assert.equal(badge.status, 200);
+  assert.match(badge.headers.get("content-type"), /image\/svg\+xml/);
+  assert.ok((await badge.text()).includes("Artifact hash recorded"));
   const post = await raw(origin, `/receipts/${PWR}/og.png`, { method: "POST" });
   assert.equal(post.status, 405);
   // A claim receipt joins once the owner publishes; unpublishing removes
@@ -145,6 +155,7 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
     body: JSON.stringify({ id: "unpublish", type: "room.public_receipts_set", data: { enabled: false } }),
   });
   assert.equal((await fetch(`${origin}/receipts/${id}/og.png`)).status, 404);
+  assert.equal((await fetch(`${origin}/receipts/${id}/badge.svg`)).status, 404);
   assert.equal((await raw(origin, `/receipts/${id}`)).status, 404);
   assert.equal((await fetch(`${origin}/receipts/wcr_${"0".repeat(32)}/og.png`)).status, 404);
 });
