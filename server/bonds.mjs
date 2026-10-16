@@ -15,6 +15,7 @@
 // errors unchanged.
 
 import { randomUUID } from "node:crypto";
+import { ASK_AGING } from "./attention-aging.mjs";
 
 class BondError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -22,7 +23,10 @@ class BondError extends Error {
 const fail = (status, code, message) => { throw new BondError(status, code, message); };
 
 export const BOND_SCOPES = Object.freeze(["peer.wake", "peer.card", "peer.context", "peer.dm"]);
-export const BOND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// The bond TTL is the attention-aging doctrine's bond_proposal TTL
+// (server/attention-aging.mjs, charter B-3 step 2): derived expiry —
+// stored state stays `proposed`, reads compute "expired" past this age.
+export const BOND_TTL_MS = ASK_AGING.bond_proposal.ttlMs;
 export const MAX_PENDING_PROPOSALS = 20;
 export const MAX_INCOMING_PROPOSALS = 20;
 export const MAX_BOND_NOTE_CHARS = 500;

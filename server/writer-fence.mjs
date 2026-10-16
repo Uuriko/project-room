@@ -375,6 +375,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // additive, older writers have no code path to it, and the row only gates
   // delivery — it never grants anything.
   "human_push_preferences",
+  // owner_alert_state (charter B-3 step 3: the owner-alert dispatcher's
+  // persisted snapshot, one row per room). Purely additive side table —
+  // older writers have no code path to it, and the row is delivery
+  // state for escalations, never room content and never a grant.
+  "owner_alert_state",
   // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
   // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
   // and intentionally NOT fenced — older writers have no code path to them,

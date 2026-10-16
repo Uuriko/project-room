@@ -17,6 +17,8 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { countExpiredUndecided, expireAccessRequests } from "./attention-aging.mjs";
+import { roomsWithEscalatedAsks, runOwnerAlertEscalation } from "./owner-alert-escalation.mjs";
 
 export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
@@ -330,6 +332,46 @@ export const JOBS = Object.freeze([
           failureDetail: failure
         };
       }
+    }
+  }),
+  defineJob({
+    name: "attention-aging",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled(_env, store) {
+      if (!store?.db?.prepare) return true;
+      try {
+        return store.db.prepare(
+          "SELECT 1 AS hit FROM access_requests WHERE status IN ('pending','pending_upgrade') LIMIT 1"
+        ).get()?.hit === 1;
+      } catch { return false; }
+    },
+    disabledReason: () => "No access request is waiting",
+    async run(store, ctx) {
+      // Charter B-3 step 2: access requests used to lapse only when a
+      // read happened to call expireOld() — silently, with no count
+      // anywhere. The sweep flips past-TTL rows to `expired` on a
+      // schedule; the guarded UPDATE makes a re-run a no-op, and the
+      // expired-undecided total is reported so the lapse is a counted,
+      // visible state (the #3342 overview counts the same rows).
+      const now = ctx.now?.() ?? Date.now();
+      if (ctx.room?.expireAccessRequests) return ctx.room.expireAccessRequests({ now });
+      const swept = expireAccessRequests(store, { now });
+      // Charter B-3 step 3 (PR4): the owner-alert dispatcher (O2) is the
+      // escalation engine behind this doctrine — escalated asks raise
+      // alerts that dispatch through the decision push class, decided
+      // asks resolve their alerts, and unacknowledged critical alerts
+      // re-notify on the dispatcher's own sweep. Alerting never fails
+      // the expiry sweep above.
+      const alerts = { raised: 0, dispatched: 0, resolved: 0, escalated: 0, errors: 0 };
+      try {
+        for (const roomId of roomsWithEscalatedAsks(store, { now })) {
+          const tick = await runOwnerAlertEscalation(store, roomId, { now });
+          for (const key of Object.keys(alerts)) alerts[key] += tick[key] ?? 0;
+        }
+      } catch { alerts.errors += 1; }
+      return { ...swept, expiredUndecidedTotal: countExpiredUndecided(store.db), alerts };
     }
   }),
   defineJob({
