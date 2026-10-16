@@ -23,6 +23,14 @@
 // the board (server/work-item-board.mjs), so an accepted work item IS a
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
+//
+// What does NOT read through this projection, deliberately: the public
+// facade's browse list (PublicWorkClaims.list) serves every task state
+// including submitted — a transparency listing, not a discovery of
+// available work — and the single-task read is a detail read. Every
+// read that answers "what can I take?" goes through here: the board
+// consumers above, the public board's claimable read (listClaimable),
+// and the public-work matcher's candidate window (match).
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
