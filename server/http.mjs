@@ -83,6 +83,8 @@ import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { renderOgPng } from "./og-render.mjs";
+import { receiptOgFields } from "./receipt-share.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
@@ -1973,7 +1975,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
-      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
+      const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/og\.png$/.exec(url.pathname);
+      if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
@@ -1982,6 +1985,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // response cached while public would keep disclosing a room's
         // receipts after the owner switches privacy off.
         res.setHeader("Cache-Control", "no-store");
+        if (receiptCard) {
+          if (!PUBLIC_RECEIPT_ID.test(receiptCard[1])) reject(404, "not_found", "Not found");
+          const receipt = publicReceiptById(store, receiptCard[1]);
+          if (!receipt) reject(404, "not_found", "Not found");
+          // The OG card is the one deliberate exception to no-store: a share
+          // card only travels if unfurlers may cache it. The TTL is minutes,
+          // the read above re-checks the owner toggle on every origin fetch,
+          // and the card restates the receipt's own public verdict line.
+          res.setHeader("Cache-Control", "public, max-age=300");
+          const png = Buffer.from(await renderOgPng(receiptOgFields(receipt)));
+          res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
+          return res.end(req.method === "HEAD" ? undefined : png);
+        }
         if (receiptDetail) {
           if (!PUBLIC_RECEIPT_ID.test(receiptDetail[1])) reject(404, "not_found", "Not found");
           const receipt = publicReceiptById(store, receiptDetail[1]);
@@ -2020,7 +2036,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
       }
-      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) reject(405, "method_not_allowed", "Method not allowed");
+      if (url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) reject(405, "method_not_allowed", "Method not allowed");
       if ((url.pathname === "/join.html" || url.pathname === "/room/join.html") && ["GET", "HEAD"].includes(req.method)) {
         res.writeHead(301, { Location: url.pathname.replace(/\.html$/, "") + url.search });
         return res.end();
