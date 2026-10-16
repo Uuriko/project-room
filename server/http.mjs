@@ -83,7 +83,7 @@ import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
-import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
+import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, collectPublicReceipts, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
@@ -1972,6 +1972,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const gr2Alias = gr2PublicPath(url.pathname);
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
+      // EXP-7 Variant B (rival hero, #3548): live facts for the /about front
+      // door. Every number is computed per request from the same public
+      // sources the hero links to — never hand-typed, never cached across
+      // the owner public-receipts toggle (hence no-store, like /receipts).
+      if (url.pathname === "/api/public/front-door" && ["GET", "HEAD"].includes(req.method)) {
+        rate(`receipts:${remoteAddress}`, 120);
+        res.setHeader("Cache-Control", "no-store");
+        const receipts = collectPublicReceipts(store);
+        const latest = receipts[0] ?? null;
+        const body = Buffer.from(JSON.stringify({
+          schema: "project-room-front-door/1",
+          counters: {
+            resultsVerified: receipts.filter(r => r.mergedAt && r.pullRequest).length,
+            receiptsIssued: receipts.length,
+            workAvailableNow: store.publicWorkClaims.list({ limit: 1 }).claimableCount ?? 0,
+          },
+          latestReceipt: latest ? { id: latest.id, title: latest.title, agents: latest.agents ?? [], humans: latest.humans ?? [], at: latest.at, mergedAt: latest.mergedAt ?? null, pullRequest: latest.pullRequest ?? null } : null,
+        }));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
+        return res.end(req.method === "HEAD" ? undefined : body);
+      }
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);

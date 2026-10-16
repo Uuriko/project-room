@@ -43,6 +43,7 @@
   "src/error-copy.js",
   "src/events.js",
   "src/first-room-copy.js",
+  "src/front-door.js",
   "src/friend-bond.js",
   "src/gmail-ui.js",
   "src/growth-alerts.js",
