@@ -210,6 +210,70 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
   assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'work_item_session%'").all().length, 0);
 });
 
+test("#3697: session usage figures are idempotency content — a retry with different figures conflicts", async t => {
+  const { store, request, agentKey } = await serve(t);
+  const post = data => request("/api/rooms/commons/work-sessions", { method: "POST", token: agentKey, data });
+
+  const started = await post(sessionBody({ action: "set_status", status: "processing" }));
+  assert.equal(started.status, 201);
+
+  const report = { requestId: "usage-report-1", workItemId: "session-one", action: "set_status",
+    status: "active", expectedRevision: 1, spendCents: 100, rounds: 2, toolCalls: 5 };
+  const first = await post(report);
+  assert.equal(first.status, 201);
+
+  const identical = await post({ ...report });
+  assert.equal(identical.status, 200);
+  assert.equal((await identical.json()).duplicate, true);
+
+  // A lost-response retry carrying corrected cumulative figures is a
+  // different request under the same id: 409, and the recorded figures
+  // stay the ones that actually committed.
+  for (const mutated of [
+    { ...report, spendCents: 900 },
+    { ...report, rounds: 7 },
+    { ...report, toolCalls: 9 },
+    (({ spendCents, ...rest }) => rest)(report)
+  ]) {
+    const conflict = await post(mutated);
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).error.code, "idempotency_conflict");
+  }
+  const item = store.room("commons").state.workItems["session-one"];
+  assert.equal(item.spend_cents, 100);
+  assert.equal(item.round_count, 2);
+  assert.equal(item.tool_calls, 5);
+});
+
+test("#3697: a budget declared on start is idempotency content", async t => {
+  const { request, agentKey } = await serve(t);
+  const post = data => request("/api/rooms/commons/work-sessions", { method: "POST", token: agentKey, data });
+
+  const start = { requestId: "budget-start-1", workItemId: "session-one", action: "set_status",
+    status: "processing", expectedRevision: 0, budget: { maxSpendCents: 100000, maxRounds: 10 } };
+  const first = await post(start);
+  assert.equal(first.status, 201);
+
+  const identical = await post({ ...start });
+  assert.equal(identical.status, 200);
+  assert.equal((await identical.json()).duplicate, true);
+
+  // Key order is not content (the command fingerprint canonicalizes it).
+  const reordered = await post({ ...start, budget: { maxRounds: 10, maxSpendCents: 100000 } });
+  assert.equal(reordered.status, 200);
+  assert.equal((await reordered.json()).duplicate, true);
+
+  for (const mutated of [
+    { ...start, budget: { maxSpendCents: 5, maxRounds: 10 } },
+    { ...start, budget: { maxSpendCents: 100000 } },
+    (({ budget, ...rest }) => rest)(start)
+  ]) {
+    const conflict = await post(mutated);
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).error.code, "idempotency_conflict");
+  }
+});
+
 test("session claims: worker recorded on start, visible on card, cleared on stop; stale heartbeats are takeable", () => {
   const item = { id: "w", title: "W", state: "accepted", revision: 0, accountableMemberId: "agent" };
   assert.equal(sessionWorker(item), null);

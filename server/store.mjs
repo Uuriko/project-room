@@ -621,12 +621,37 @@ const invitationSchema = `
   CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
 `;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+// #3697: the recorded budget is the validated declaration from the original
+// start; a retry matches only when its budget normalizes to the same
+// declaration (key order is not content — the command fingerprint
+// canonicalizes it away too). An unvalidatable retry budget is different
+// content, never a duplicate.
+const sessionBudgetMatchesRequest = (recorded, requested) => {
+  if (recorded == null || requested == null) return (recorded ?? null) === (requested ?? null);
+  let normalized;
+  try { normalized = validateSessionBudget(requested); } catch { return false; }
+  if (!normalized) return false;
+  const keys = Object.keys(normalized);
+  return keys.length === Object.keys(recorded).length && keys.every(key => recorded[key] === normalized[key]);
+};
+// The session door's idempotency fingerprint: every caller-supplied content
+// field of the request must equal what the recorded event carries, or the
+// retry is a conflict, not a duplicate (#3697 — the usage figures below are
+// the session's cumulative spend/rounds/tool calls, the numbers the budget
+// trip-wires enforce). Deliberately excluded: expectedRevision, a
+// compare-and-swap token rather than content (a genuine retry may refresh
+// it after re-reading the item), and the system-set fields
+// (resumeApproved / suspendReason), which callers may not supply at all.
 const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId === request.workItemId
   && (request.action === "request_stop" ? event.type === T.SESSION_STOP_REQUESTED
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
   && (event?.data?.environment ?? null) === (request.environment ?? null)
-  && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
+  && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null)
+  && (event?.data?.spendCents ?? null) === (request.spendCents ?? null)
+  && (event?.data?.rounds ?? null) === (request.rounds ?? null)
+  && (event?.data?.toolCalls ?? null) === (request.toolCalls ?? null)
+  && sessionBudgetMatchesRequest(event?.data?.budget ?? null, request.budget ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
