@@ -1,1 +1,10 @@
-{"actor":"jill","at":"2026-10-16T20:44:41Z","holds":"none","main-tip-verified":"e49e9c812ac5aa62df8e66106d73b51cc601d52a (tip observed via gh api at bootstrap; run conclusion not checked by this lane)","next-landings":[],"requestId":"status-2026-10-16T20-44-41Z-jill-bootstrap","version":1,"wave":"coordination-v3-ledger-bootstrap"}
+{
+  "version": 1,
+  "actor": "jill",
+  "requestId": "status-2026-10-16T20-46-54Z-jill-11eb",
+  "at": "2026-10-16T20:46:54Z",
+  "wave": "coordination-v3-ledger-bootstrap",
+  "next-landings": [],
+  "holds": "none",
+  "main-tip-verified": "e49e9c812ac5aa62df8e66106d73b51cc601d52a (tip observed via gh api at bootstrap; run conclusion not checked by this lane)"
+}
