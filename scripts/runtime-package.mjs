@@ -340,6 +340,7 @@ optional.push("server/legal-store.mjs", "server/legal-pages.mjs", "server/legal-
 optional.push("docs/legal/terms.md", "docs/legal/privacy.md", "docs/legal/acceptable-use.md", "docs/legal/subprocessors.json");
 optional.push("server/public-read-model.mjs"); // public page tables (imported by server/store.mjs and the public routes)
 optional.push("server/templates.mjs", "server/public-rooms.mjs"); // GR2 template gallery, public room pages, agent directory (imported by server/http.mjs)
+optional.push("server/proof-page.mjs"); // per-room public proof page (imported by server/http.mjs)
 optional.push("src/design-tokens.js"); // token declarations embedded in the public receipts page
 optional.push("server/boot-options.mjs"); // imported by server.mjs: default boot args incl. ChannelWebhookInbox
 optional.push("server/instance-lock.mjs"); // imported by server.mjs: single-instance boot lock for the on-disk database

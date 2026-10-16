@@ -385,3 +385,35 @@ test("configured mail keeps the email-link offers (#3341)", async () => {
   assert.match(container.innerHTML, /data-email-method="magic"/);
   assert.match(container.innerHTML, /Email me a sign-in link instead/);
 });
+
+test("provider capabilities reach the host so an unconfigured OAuth anchor can hide (F1)", async () => {
+  const seen = [];
+  const client = stubClient({});
+  const ui = createAuthSigninUI({
+    accountClient: client,
+    ensureAccountSession: async () => {},
+    onSignedIn: async () => {},
+    loadSigninOptions: async () => ({ providers: { github: { configured: false }, google: { configured: true }, mail: { configured: true } } }),
+    onProviderCapabilities: providers => seen.push(providers)
+  });
+  ui.mount(fakeContainer());
+  await flushOptions();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].github.configured, false);
+  assert.equal(seen[0].google.configured, true);
+});
+
+test("a failed capability load never reports providers to the host (F1 fail-open)", async () => {
+  const seen = [];
+  const client = stubClient({});
+  const ui = createAuthSigninUI({
+    accountClient: client,
+    ensureAccountSession: async () => {},
+    onSignedIn: async () => {},
+    loadSigninOptions: async () => { throw new Error("offline"); },
+    onProviderCapabilities: providers => seen.push(providers)
+  });
+  ui.mount(fakeContainer());
+  await flushOptions();
+  assert.equal(seen.length, 0, "no answer means the anchors keep the historical behavior");
+});
