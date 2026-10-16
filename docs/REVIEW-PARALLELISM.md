@@ -8,8 +8,7 @@ is two passes with a clean handoff between them:
 2. **Strong-model judgment pass** — a human or lane reviewer in clean
    context: they get ONLY the diff, the claim, and the mechanical report.
 
-The merge gate is unchanged: merge only after a rev-reviewer's explicit
-APPROVE on the exact head, never with an open CHANGES REQUESTED.
+Reviews are advisory. No APPROVE is required to merge; fix real findings.
 
 ## 1. The mechanical pass
 

@@ -19,39 +19,18 @@ contributing. Use your fork, inspect overlapping public issues and PRs, follow
 operating rules below describe shared-checkout and release work; they do not
 grant outside contributors production access or deployment authority.
 
-## Essential rules
+## Rules
 
-1. **Act on existing authorization.** John has authorized Project Room pushes,
-   PR merges and deployments through the gates below. Do not ask again for
-   routine work within that scope. This does not authorize Dasha/Dasha Desk,
-   unrelated services, private-data access or new credential/settings changes.
-2. **Protect other work and data.** Use your own branch and checkout. Check
-   live claims and overlapping PRs before changing shared files; claim your
-   scope and read it back. Respect explicit holds. Never overwrite a peer's
-   branch or force-push it. Keep secrets and private data out of public output.
-3. **Verify the change and report facts.** Run relevant checks and report
-   failures and limits. Tests should guard meaningful behavior without
-   duplicating existing coverage. Service doubles must reject unknown methods;
-   use Miniflare/workerd when the runtime boundary matters. Distinguish prepared,
-   tested, merged, deployed and live-verified outcomes.
-4. **Land through PRs.** Never push directly to `main`. Merge one PR at a time
-   on the merge-slot only with fully green required hosted CI at the exact head.
-   The slot is the Board claim `MERGE-SLOT`; the merge-queue HTTP route is not
-   mounted (see [docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)).
-   John's 2026-10-07 instruction makes independent reviewer approval advisory,
-   not a landing prerequisite. Assess review findings and fix actual blockers;
-   a missing approval or review status alone does not block authorized work.
-5. **Deploy through the shared lane.** Rebuild the CI-qualified source SHA, use smoke checks
-   and automatic rollback in [docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md).
-6. **Leave a usable receipt.** Post CLAIM/DONE with scope, PR and evidence.
-   When stopping, leave the blocker and next step. Mark completed work done;
-   release only unfinished work. Honor the item's enforced review policy.
+1. Never leak secrets or private data. Never ask John or Dasha for keys.
+2. Never Webflow Designer-publish, use plugin.jup.ag, or scrape people data.
+3. After every deploy, smoke-check prod and roll back if it is broken
+   ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
 
-[docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md) explains claims and the
-outage fallback. These instructions replace older blanket startup reading,
-30-minute PR/push deadlines, fixed lease durations, mandatory partners and
-repeated permission requests. Read other guides as needed for the task;
-actual API constraints and explicit task-specific holds still apply.
+Everything else is judgment. GitHub enforces PRs to `main` and the required
+checks; independent review is advisory, never a merge gate. Coordinate in the
+room ([docs/ROOM-COORDINATION.md](docs/ROOM-COORDINATION.md)) and don't
+overwrite another agent's branch. Fix a repeated mistake in code, types or a
+test before adding a rule here.
 
 ## References when needed
 
