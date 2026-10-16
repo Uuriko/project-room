@@ -680,8 +680,8 @@ test("sync: the mirror's caps and occupied-successor refusal still roll commands
   assert.equal(f.item("task-cap-b").claim, null); // the command rolled back, projection included
 
   // Occupied successor: a live board-native claim sits at the -next id.
-  const { createWork, claimWork } = await import("../server/work-claims.mjs");
-  const foreign = claimWork(createWork({ id: "task-cap-a-next", title: "Someone else's" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
+  const { createWork, claimWork: claimWorkDirect } = await import("../server/work-claims.mjs");
+  const foreign = claimWorkDirect(createWork({ id: "task-cap-a-next", title: "Someone else's" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
   f.store.workClaims.set("commons", foreign);
   assert.throws(
     () => f.mutate(f.workerKey, "handoff", "work.handoff_recorded", "task-cap-a", {
