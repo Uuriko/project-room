@@ -31,10 +31,12 @@ const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // Per host the window is max(180s, cadenceSeconds * 1.5).
 export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // plan-wake-live: an agent is "wakeable" when it polled (GET
-// /api/agent-wakes/poll) or heartbeated within the last 24h. Deliberately
-// far wider than the 180s presence window: presence measures host
-// liveness, wakeability measures listener recency — the room must tell a
-// live listener from an idle agent whose queue merely looks empty.
+// /api/agent-wakes/poll) or heartbeated within its wakeability window:
+// WAKEABLE_WINDOW_MS (24h), widened by wakeableWindowFor when the agent
+// declared a slower poll cadence (issue #3592). Deliberately far wider
+// than the 180s presence window: presence measures host liveness,
+// wakeability measures listener recency — the room must tell a live
+// listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_PENDING_WAKES = 50;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -375,12 +377,46 @@ export class AgentHeartbeats {
     }
   }
 
+  // Issue #3592: the agent's declared poll cadence — the slowest cadence
+  // any of its hosts currently declares in agent_push_configs, or null
+  // when no host declares one. Poll stamps are per agent, not per host,
+  // so the slowest declaration governs: the agent is not derelict until
+  // its longest declared check-in interval has run out. Missing-table
+  // tolerant like the other read paths — a database without
+  // agent_push_configs reads as no declarations.
+  declaredCadenceOf(agentId) {
+    try {
+      const row = this.db.prepare(
+        "SELECT MAX(cadence_seconds) AS cadenceSeconds FROM agent_push_configs WHERE agent_id=?")
+        .get(agentId);
+      return row?.cadenceSeconds ?? null;
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return null;
+    }
+  }
+
+  // Batch form of declaredCadenceOf for the list reads: agentId -> its
+  // slowest declared cadence. Agents with no declaration are absent;
+  // agents whose hosts all store a null cadence map to null.
+  declaredCadences() {
+    try {
+      return new Map(this.db.prepare(
+        "SELECT agent_id AS agentId, MAX(cadence_seconds) AS cadenceSeconds FROM agent_push_configs GROUP BY agent_id")
+        .all().map(row => [row.agentId, row.cadenceSeconds]));
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return new Map();
+    }
+  }
+
   // plan-wake-live: wakeable = the agent polled or heartbeated within
-  // WAKEABLE_WINDOW_MS. Agents that never polled (including host rows
-  // from before agent_wake_polls existed) read as not wakeable with a
-  // null stamp — never as an error. The COMMS-02 mention-target-warning
-  // surface consumes this to warn the poster before @mentioning an
-  // idle agent.
+  // its wakeability window (wakeableWindowFor over its declared cadence;
+  // WAKEABLE_WINDOW_MS when undeclared). Agents that never polled
+  // (including host rows from before agent_wake_polls existed) read as
+  // not wakeable with a null stamp — never as an error. The COMMS-02
+  // mention-target-warning surface consumes this to warn the poster
+  // before @mentioning an idle agent.
   wakeStatusOf(agentId) {
     checkAgentId(agentId);
     let row = null;
@@ -401,9 +437,10 @@ export class AgentHeartbeats {
     for (const roomRow of this.roomActivityOf(agentId)) {
       if (lastPolledAt === null || roomRow.lastPolledAt > lastPolledAt) lastPolledAt = roomRow.lastPolledAt;
     }
+    const windowMs = this.wakeableWindowFor(this.declaredCadenceOf(agentId));
     return Object.freeze({
-      agentId, lastPolledAt, windowMs: WAKEABLE_WINDOW_MS,
-      wakeable: lastPolledAt !== null && this.now() - lastPolledAt <= WAKEABLE_WINDOW_MS,
+      agentId, lastPolledAt, windowMs,
+      wakeable: lastPolledAt !== null && this.now() - lastPolledAt <= windowMs,
     });
   }
 
@@ -429,9 +466,15 @@ export class AgentHeartbeats {
       if (!isMissingTable(error)) throw error;
       roomRows = [];
     }
+    // Issue #3592: room-scoped stamps are judged against the same
+    // per-agent wakeability window as identity stamps (wakeableWindowFor
+    // over the agent's declared cadence) — not the flat 24h base.
+    const cadences = this.declaredCadences();
     const roomFresh = new Map();
     for (const row of roomRows) {
-      if (at - row.lastPolledAt <= WAKEABLE_WINDOW_MS) roomFresh.set(row.agentId, row.lastPolledAt);
+      if (at - row.lastPolledAt <= this.wakeableWindowFor(cadences.get(row.agentId) ?? null)) {
+        roomFresh.set(row.agentId, row.lastPolledAt);
+      }
     }
     if (roomFresh.size === 0) return base;
     const wakeable = [], notWakeable = [];
@@ -460,6 +503,10 @@ export class AgentHeartbeats {
   // pre-heartbeat DB without any of the tables lists nobody at all).
   wakeStatusList() {
     const at = this.now();
+    // Issue #3592: each agent is partitioned against its own cadence-aware
+    // window; the list-level windowMs stays the base WAKEABLE_WINDOW_MS
+    // (the window for agents with no slower declaration).
+    const cadences = this.declaredCadences();
     let rows;
     try {
       rows = this.db.prepare(`SELECT h.agent_id AS agentId, p.last_polled_at AS lastPolledAt
@@ -482,7 +529,8 @@ export class AgentHeartbeats {
     for (const row of rows) {
       const lastPolledAt = row.lastPolledAt ?? null;
       const entry = Object.freeze({ agentId: row.agentId, lastPolledAt });
-      (lastPolledAt !== null && at - lastPolledAt <= WAKEABLE_WINDOW_MS ? wakeable : notWakeable).push(entry);
+      const windowMs = this.wakeableWindowFor(cadences.get(row.agentId) ?? null);
+      (lastPolledAt !== null && at - lastPolledAt <= windowMs ? wakeable : notWakeable).push(entry);
     }
     return Object.freeze({
       windowMs: WAKEABLE_WINDOW_MS, asOf: at,
@@ -604,6 +652,23 @@ export class AgentHeartbeats {
     const cadence = Number(cadenceSeconds);
     const cadenceMs = Number.isFinite(cadence) && cadence > 0 ? cadence * 1500 : 0;
     return Math.max(this.staleAfterMs, cadenceMs);
+  }
+
+  // Per-agent wakeability window (issue #3592): WAKEABLE_WINDOW_MS,
+  // widened for a declared poll cadence by the same grace doctrine as
+  // windowFor — the cadence plus half a cadence of slack (cadence x 1.5).
+  // Any cadence up to 16h therefore keeps exactly the 24h window
+  // (16h x 1.5 = 24h), so undeclared agents and every cadence the docs
+  // teach (60s, 300s) behave exactly as before; a 48h cadence reads
+  // wakeable for 72h — its whole cycle, not half of it — and the maximum
+  // 7d cadence for 10.5 days. Every wakeability surface (wakeStatusOf,
+  // wakeStatusList, wakeStatusListForRoom, and through them the
+  // wake-status route and the directory reach card) reads through this
+  // one helper; there is no second wakeability window computation.
+  wakeableWindowFor(cadenceSeconds) {
+    const cadence = Number(cadenceSeconds);
+    const cadenceMs = Number.isFinite(cadence) && cadence > 0 ? cadence * 1500 : 0;
+    return Math.max(WAKEABLE_WINDOW_MS, cadenceMs);
   }
 
   // Async subscribe-time DNS-rebinding check for a push url. The route

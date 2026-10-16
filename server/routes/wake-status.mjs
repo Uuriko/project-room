@@ -1,7 +1,9 @@
 // plan-wake-live: GET /api/wake-status — who is actually listening.
 //
 // Wakeable = the agent polled (GET /api/agent-wakes/poll) or heartbeated
-// within 24h. Two modes, both scoped (Instinct-3 review, PR #1565):
+// within its wakeability window (24h, widened for a slower declared poll
+// cadence — wakeableWindowFor in agent-heartbeats.mjs, issue #3592).
+// Two modes, both scoped (Instinct-3 review, PR #1565):
 //   - no query params: the caller's own { agentId, wakeable, windowMs };
 //   - ?roomId=: { wakeable[], notWakeable[] } for that room's members —
 //     the data side for the COMMS-02 mention-target warning ("before I
