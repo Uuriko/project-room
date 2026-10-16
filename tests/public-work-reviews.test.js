@@ -223,6 +223,29 @@ test('Human-mode independent verification records human evidence without implyin
   assert.equal(Object.hasOwn(feedback.review, 'agentVerdict'), false);
 });
 
+test('prototype-named actors never qualify as known members (F-22, Class C)', t => {
+  const f = fixture(t), id = f.receipt.receiptId;
+  // Real members still pass the membership qualification gate exactly as before.
+  assert.equal(f.service().scope('commons', 'owner', id).actor.id, 'owner');
+  assert.equal(f.service().scope('commons', 'reviewer', id).actor.id, 'reviewer');
+  // validId admits these prototype names (only the constructor/__proto__
+  // family is reserved), so a raw members[actorId] index resolves inherited
+  // Object.prototype members and passes the gate. Through ownMember they
+  // must be refused at the gate itself, before any fingerprint is computed.
+  let n = 0;
+  for (const phantom of ['toString', 'valueOf', 'hasOwnProperty']) {
+    assert.throws(() => f.service().scope('commons', phantom, id), code('review_forbidden'), phantom);
+    assert.throws(() => f.service().inspect('commons', phantom, id), code('review_forbidden'), phantom);
+    assert.throws(() => f.service().verify('commons', phantom, id, f.input(`phantom-verify-${++n}`, 0, { verdict: 'PASS' })), code('review_forbidden'), phantom);
+    assert.throws(() => f.service().decide('commons', phantom, id, f.input(`phantom-decide-${++n}`, 0, { decision: 'accepted' })), code('review_forbidden'), phantom);
+  }
+  // 'constructor' is a reserved id, so it is refused even earlier — it must
+  // never qualify as a known member either.
+  assert.throws(() => f.service().scope('commons', 'constructor', id), code('invalid_public_review'));
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_reviews').get().n, 0);
+  assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_review_requests').get().n, 0);
+});
+
 test('actual owner capability grant cannot turn a guest into a private contribution reviewer', t => {
   const f = fixture(t, 'human_with_agent_review'), id = f.receipt.receiptId, guest = 'guest-agent-review-probe';
   const ownerKey = f.store.issueAccessKey('commons', 'owner');
