@@ -1,10 +1,15 @@
 {
   "version": 1,
   "actor": "jill",
-  "requestId": "status-2026-10-16T20-46-54Z-jill-11eb",
-  "at": "2026-10-16T20:46:54Z",
-  "wave": "coordination-v3-ledger-bootstrap",
-  "next-landings": [],
+  "requestId": "status-2026-10-16T20-53-43Z-jill-ac75",
+  "at": "2026-10-16T20:53:43Z",
+  "wave": "money-train (in flight, legacy claim 6224047776); Coordination v3 handshake posted 6224488191",
+  "next-landings": [
+    3627,
+    3782,
+    3762,
+    3566
+  ],
   "holds": "none",
-  "main-tip-verified": "e49e9c812ac5aa62df8e66106d73b51cc601d52a (tip observed via gh api at bootstrap; run conclusion not checked by this lane)"
+  "main-tip-verified": "e49e9c812ac5 at last check; train runner re-verifies live tip per landing"
 }
