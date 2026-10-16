@@ -103,11 +103,37 @@ export function renderReceiptDetailHtml(receipt) {
     const s = l.settlement ?? {};
     const credits = value => typeof value === "number" && Number.isFinite(value) ? `${escapeHtml(value)} credits` : "—";
     const side = entry => entry ? `${escapeHtml(entry.account)} · ${escapeHtml(entry.lotState)}` : "—";
+    const kinds = Array.isArray(l.kinds) && l.kinds.length ? l.kinds : [l.kind].filter(Boolean);
+    // A lot can carry several movements under one id: a dispute split
+    // writes attribute + approve + refund, an epoch payout writes payout +
+    // fee. The Movement/Amount/From/To rows name only the first movement,
+    // so a multi-movement lot also lists every movement in full — without
+    // it the face misstates the settlement (a split lot headlined as the
+    // full award going to the worker though half refunded to the poster,
+    // #3765). Movements are the consecutive same-kind journal legs.
+    const groups = [];
+    for (const movement of Array.isArray(l.movements) ? l.movements : []) {
+      const current = groups.at(-1);
+      if (current && current.kind === movement.kind) current.legs.push(movement);
+      else groups.push({ kind: movement.kind, legs: [movement] });
+    }
+    const movementsRow = groups.length > 1
+      ? `<div><dt>Movements</dt><dd>${groups.map(group => {
+          const debits = group.legs.filter(leg => leg.amountMillis < 0);
+          const creditsIn = group.legs.filter(leg => leg.amountMillis > 0);
+          const millis = creditsIn.reduce((sum, leg) => sum + leg.amountMillis, 0)
+            || Math.abs(debits.reduce((sum, leg) => sum + leg.amountMillis, 0));
+          const froms = debits.length ? debits.map(side).join(", ") : "—";
+          const tos = creditsIn.length ? creditsIn.map(side).join(", ") : "—";
+          return `${escapeHtml(group.kind)}: ${froms} → ${tos} — ${credits(millis / 1000)} (${millis} milli-credits)`;
+        }).join("<br>")}</dd></div>`
+      : "";
     const rows = [
-      `<div><dt>Movement</dt><dd>${escapeHtml(l.kind ?? "")}</dd></div>`,
+      `<div><dt>Movement</dt><dd>${escapeHtml(kinds.join(", "))}</dd></div>`,
       `<div><dt>Amount</dt><dd>${credits(l.amountCredits)} (${escapeHtml(l.amountMillis)} milli-credits)</dd></div>`,
       `<div><dt>From</dt><dd>${side(l.from)}</dd></div>`,
       `<div><dt>To</dt><dd>${side(l.to)}</dd></div>`,
+      movementsRow,
       `<div><dt>Posted by</dt><dd>${escapeHtml(l.poster ?? "—")}</dd></div>`,
       `<div><dt>Worker</dt><dd>${escapeHtml(l.worker ?? "—")}</dd></div>`,
       l.verifier ? `<div><dt>Verifier</dt><dd>${escapeHtml(l.verifier)}</dd></div>` : "",
@@ -115,6 +141,10 @@ export function renderReceiptDetailHtml(receipt) {
       l.bountyState ? `<div><dt>Bounty state</dt><dd>${escapeHtml(l.bountyState)}</dd></div>` : "",
       `<div><dt>Award</dt><dd>${credits(l.awardCredits)}</dd></div>`,
       s.kind ? `<div><dt>Settlement</dt><dd>${escapeHtml(s.kind)}</dd></div>` : "",
+      // The settlement's own amounts, on the face: for a split these are
+      // the numbers the first-movement headline cannot express (#3765).
+      typeof s.workerCredits === "number" ? `<div><dt>Worker received</dt><dd>${credits(s.workerCredits)}</dd></div>` : "",
+      typeof s.refundCredits === "number" ? `<div><dt>Refunded to poster</dt><dd>${credits(s.refundCredits)}</dd></div>` : "",
       s.reason ? `<div><dt>Settlement reason</dt><dd>${escapeHtml(s.reason)}</dd></div>` : "",
       s.settledAt ? `<div><dt>Settled</dt><dd><time datetime="${escapeHtml(s.settledAt)}">${escapeHtml(s.settledAt)}</time></dd></div>` : "",
       s.settledBy?.id ? `<div><dt>Settled by</dt><dd>${escapeHtml(s.settledBy.id)}${s.settledBy.kind ? ` (${escapeHtml(s.settledBy.kind)})` : ""}</dd></div>` : "",
