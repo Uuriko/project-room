@@ -119,7 +119,7 @@ Replay a saved export into a new file:
 node scripts/replay-room-export.mjs --from room-export.ndjson --to /var/lib/project-room/restore/room.sqlite
 ```
 
-The production cron writes one nightly backup of the whole Durable Object store to `room-backups/YYYY-MM-DD.ndjson`. It uses an R2 binding named `ROOM_BACKUPS` when one exists, and otherwise the Workers KV binding `ROOM_BACKUPS_KV`. Production uses KV today: `cloudflare/wrangler.jsonc` binds `ROOM_BACKUPS_KV` under `env.production` to the KV namespace `project-room-backups`, stored as 16 MiB parts plus a manifest written last, with a 35-day expiry. R2 is not enabled on the Cloudflare account yet. A failed write is logged as `[room-backup]` and does not fail the rest of the cron. See [BACKUPS.md](BACKUPS.md) for the KV layout, the R2 switch-over steps, and the tested restore.
+The production cron writes one nightly backup of the whole Durable Object store to `room-backups/YYYY-MM-DD.ndjson`. It uses an R2 binding named `ROOM_BACKUPS` when one exists, and otherwise the Workers KV binding `ROOM_BACKUPS_KV`. Production uses KV today: `cloudflare/wrangler.jsonc` binds `ROOM_BACKUPS_KV` under `env.production` to the KV namespace `project-room-backups`, stored as 16 MiB parts plus a manifest written last, with tiered expiry (daily copies 7 days, Sunday weekly copies 4 weeks, 1st-of-month monthly copies until the 1st three calendar months later). R2 is not enabled on the Cloudflare account yet. A failed write is logged as `[room-backup]` and does not fail the rest of the cron. See [BACKUPS.md](BACKUPS.md) for the KV layout, the R2 switch-over steps, and the tested restore.
 
 Bindings must live in the checked-in config: a binding that exists only in the dashboard is dropped on the next deploy.
 
