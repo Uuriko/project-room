@@ -3119,6 +3119,14 @@
     },
     {
       "method": "GET",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "GET",
       "path": "/robots.txt"
     },
     {
@@ -6730,6 +6738,14 @@
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}/og.png"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}/og.png"
     },
     {
       "method": "GET",
