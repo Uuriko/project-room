@@ -14,6 +14,7 @@ export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.edited",
   "message.deleted",
   "message.reaction_set",
+  "poll.voted",
   "message.pinned",
   "message.unpinned",
   "message.redacted"

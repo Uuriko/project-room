@@ -1,16 +1,14 @@
 // tests/polls.test.js — Poll message type + vote aggregation over the
-// existing reaction plumbing. A poll is a message with kind "poll" carrying a
-// poll payload (question + labeled options, each assigned a vote emoji by the
-// server). Votes are ordinary message.reaction_set events on the option emoji;
-// the reducer enforces one vote per member on single-choice polls, and
-// pollTally aggregates the visible votes. Record-shaped and additive: no new
-// event types, no new tables.
+// dedicated poll.voted command. A poll is a message with kind "poll" carrying a
+// poll payload (question + labeled options). Votes are poll.voted
+// { messageId, option, active } events stored as message.pollVotes; the
+// reducer enforces one vote per member on single-choice polls, and pollTally
+// aggregates them.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, replay } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
 import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS, POLL_OPTION_EMOJIS } from "../src/polls.js";
-import { canonicalReaction } from "../src/emoji.js";
 
 const at = "2026-10-06T22:30:00.000Z";
 const fixed = (id, type, actorId, data) => ({ id, idempotencyKey: `key-${id}`, roomId: "room-project-room-v0", type, actorId, at, causationId: null, data });
@@ -25,7 +23,7 @@ function twoMembers() {
 const postPoll = (state, id, actor, poll, extra = {}) => applyEvent(state, fixed(id, T.MESSAGE_POSTED, actor, {
   messageId: id, body: "poll body", kind: "poll", poll, ...extra
 }));
-const vote = (state, id, actor, messageId, reaction, active = true) => applyEvent(state, fixed(id, T.MESSAGE_REACTION_SET, actor, { messageId, reaction, active }));
+const vote = (state, id, actor, messageId, emoji, active = true) => applyEvent(state, fixed(id, T.POLL_VOTED, actor, { messageId, option: POLL_OPTION_EMOJIS.indexOf(emoji), active }));
 const pollOf = state => state.messages.find(m => m.id === "poll-1");
 
 const POLL = { question: "Which option?", options: ["alpha", "beta", "gamma"] };
@@ -62,15 +60,8 @@ test("poll validation rejects bad payloads", () => {
   assert.equal(ok.messages.find(m => m.id === "poll-1").poll.options.length, POLL_MIN_OPTIONS);
 });
 
-test("every option emoji at the maximum option count is a votable reaction, including the 10th", () => {
-  // Regression #2980: the 10th emoji was built as "10\uFE0F\u20E3", which
-  // segments into two graphemes, so canonicalReaction returned null and
-  // setMessageReaction threw 'Invalid reaction choice' for that option.
+test("the 10th option is votable", () => {
   assert.equal(POLL_OPTION_EMOJIS.length, POLL_MAX_OPTIONS);
-  assert.equal(new Set(POLL_OPTION_EMOJIS).size, POLL_MAX_OPTIONS, "each option gets a distinct vote emoji");
-  for (const emoji of POLL_OPTION_EMOJIS) {
-    assert.equal(canonicalReaction(emoji), emoji, `option emoji ${JSON.stringify(emoji)} must be accepted as a reaction`);
-  }
   assert.equal(POLL_OPTION_EMOJIS[9], "🔟");
 
   let state = postPoll(twoMembers(), "poll-1", "pv-a", {
@@ -139,16 +130,11 @@ test("unvoting clears a vote", () => {
   assert.equal(tally.total, 0);
 });
 
-test("non-option reactions do not touch the tally", () => {
-  let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
-  const [e1] = pollOf(state).poll.options.map(o => o.emoji);
-  state = vote(state, "v1", "pv-a", "poll-1", e1);
-  state = vote(state, "v2", "pv-b", "poll-1", "👍");
-  const tally = pollTally(pollOf(state));
-  assert.equal(tally.results[0].votes, 1);
-  assert.equal(tally.total, 1);
-  // the thumbs-up still lands on the message as an ordinary reaction
-  assert.deepEqual(pollOf(state).reactions["👍"], ["pv-b"]);
+test("invalid votes are rejected", () => {
+  const state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
+  assert.throws(() => applyEvent(state, fixed("v1", T.POLL_VOTED, "pv-b", { messageId: "poll-1", option: 9, active: true })), /Invalid poll vote/);
+  assert.throws(() => applyEvent(state, fixed("v2", T.POLL_VOTED, "pv-b", { messageId: "poll-1", option: 0, active: "yes" })), /Invalid/);
+  assert.throws(() => applyEvent(state, fixed("v3", T.POLL_VOTED, "pv-b", { messageId: "nope", option: 0, active: true })), /reference a message/);
 });
 
 test("pollTally is null for non-poll messages", () => {
@@ -167,4 +153,23 @@ test("polls replay deterministically", () => {
     return pollTally(pollOf(state));
   };
   assert.deepEqual(run(), run());
+});
+
+test("store admits poll.voted with an integer option", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { RoomStore } = await import("../server/store.mjs");
+  const { initialRoom } = await import("../server/bootstrap.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "poll-vote-"));
+  try {
+    const store = new RoomStore(join(dir, "room.sqlite"));
+    store.initialize(initialRoom());
+    const owner = store.issueAccessKey("commons", "owner");
+    store.command(owner, "commons", { id: "p1", type: T.MESSAGE_POSTED, data: { messageId: "poll", body: "Pick", kind: "poll", poll: { question: "Pick", options: ["a", "b"] } } });
+    store.command(owner, "commons", { id: "v1", type: T.POLL_VOTED, data: { messageId: "poll", option: 1, active: true } });
+    const message = store.snapshot(owner, "commons").state.messages.find(m => m.id === "poll");
+    assert.deepEqual(pollTally(message).results.map(r => r.votes), [0, 1]);
+    assert.throws(() => store.command(owner, "commons", { id: "v2", type: T.POLL_VOTED, data: { messageId: "poll", option: 5, active: true } }), /Invalid poll vote/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
