@@ -8,7 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EVENT_TYPES as T, applyEvent, replay } from "../src/events.js";
 import { seedEvents } from "../src/seed.js";
-import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS, POLL_OPTION_EMOJIS } from "../src/polls.js";
+import { pollTally, POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from "../src/polls.js";
 
 const at = "2026-10-06T22:30:00.000Z";
 const fixed = (id, type, actorId, data) => ({ id, idempotencyKey: `key-${id}`, roomId: "room-project-room-v0", type, actorId, at, causationId: null, data });
@@ -23,21 +23,19 @@ function twoMembers() {
 const postPoll = (state, id, actor, poll, extra = {}) => applyEvent(state, fixed(id, T.MESSAGE_POSTED, actor, {
   messageId: id, body: "poll body", kind: "poll", poll, ...extra
 }));
-const vote = (state, id, actor, messageId, emoji, active = true) => applyEvent(state, fixed(id, T.POLL_VOTED, actor, { messageId, option: POLL_OPTION_EMOJIS.indexOf(emoji), active }));
+const vote = (state, id, actor, messageId, option, active = true) => applyEvent(state, fixed(id, T.POLL_VOTED, actor, { messageId, option, active }));
 const pollOf = state => state.messages.find(m => m.id === "poll-1");
 
 const POLL = { question: "Which option?", options: ["alpha", "beta", "gamma"] };
 
-test("a poll message records the question and option emojis", () => {
+test("a poll message records the question and option labels", () => {
   const state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
   const message = pollOf(state);
   assert.equal(message.kind, "poll");
   assert.equal(message.poll.question, "Which option?");
   assert.equal(message.poll.options.length, 3);
   assert.deepEqual(message.poll.options.map(o => o.label), ["alpha", "beta", "gamma"]);
-  const emojis = message.poll.options.map(o => o.emoji);
-  assert.equal(new Set(emojis).size, 3, "each option gets a distinct vote emoji");
-  for (const emoji of emojis) assert.ok(typeof emoji === "string" && emoji.length > 0);
+  assert.equal(message.poll.options.some(o => "emoji" in o), false);
 });
 
 test("poll validation rejects bad payloads", () => {
@@ -61,8 +59,6 @@ test("poll validation rejects bad payloads", () => {
 });
 
 test("the 10th option is votable", () => {
-  assert.equal(POLL_OPTION_EMOJIS.length, POLL_MAX_OPTIONS);
-  assert.equal(POLL_OPTION_EMOJIS[9], "🔟");
 
   let state = postPoll(twoMembers(), "poll-1", "pv-a", {
     question: "Which option?",
@@ -70,7 +66,7 @@ test("the 10th option is votable", () => {
   });
   const tenth = pollOf(state).poll.options[9];
   assert.equal(tenth.label, "option 10");
-  state = vote(state, "v10", "pv-b", "poll-1", tenth.emoji);
+  state = vote(state, "v10", "pv-b", "poll-1", 9);
   const tally = pollTally(pollOf(state));
   assert.equal(tally.results[9].votes, 1);
   assert.deepEqual(tally.results[9].voters, ["pv-b"]);
@@ -84,7 +80,7 @@ test("unknown message kinds are still rejected", () => {
 
 test("votes aggregate by option", () => {
   let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
-  const [e1, e2, _e3] = pollOf(state).poll.options.map(o => o.emoji);
+  const [e1, e2] = [0, 1, 2];
   state = vote(state, "v1", "pv-a", "poll-1", e1);
   state = vote(state, "v2", "pv-b", "poll-1", e1);
   state = vote(state, "v3", "potter", "poll-1", e2);
@@ -100,7 +96,7 @@ test("votes aggregate by option", () => {
 
 test("single-choice polls move the vote, not stack it", () => {
   let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
-  const [e1, e2] = pollOf(state).poll.options.map(o => o.emoji);
+  const [e1, e2] = [0, 1, 2];
   state = vote(state, "v1", "pv-a", "poll-1", e1);
   state = vote(state, "v2", "pv-a", "poll-1", e2);
   const tally = pollTally(pollOf(state));
@@ -111,7 +107,7 @@ test("single-choice polls move the vote, not stack it", () => {
 
 test("allowMultiple polls keep every vote", () => {
   let state = postPoll(twoMembers(), "poll-1", "pv-a", { ...POLL, allowMultiple: true });
-  const [e1, e2] = pollOf(state).poll.options.map(o => o.emoji);
+  const [e1, e2] = [0, 1, 2];
   state = vote(state, "v1", "pv-a", "poll-1", e1);
   state = vote(state, "v2", "pv-a", "poll-1", e2);
   const tally = pollTally(pollOf(state));
@@ -122,7 +118,7 @@ test("allowMultiple polls keep every vote", () => {
 
 test("unvoting clears a vote", () => {
   let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
-  const [e1] = pollOf(state).poll.options.map(o => o.emoji);
+  const [e1] = [0, 1, 2];
   state = vote(state, "v1", "pv-a", "poll-1", e1);
   state = vote(state, "v2", "pv-a", "poll-1", e1, false);
   const tally = pollTally(pollOf(state));
@@ -147,7 +143,7 @@ test("pollTally is null for non-poll messages", () => {
 test("polls replay deterministically", () => {
   const run = () => {
     let state = postPoll(twoMembers(), "poll-1", "pv-a", POLL);
-    const [e1, e2] = pollOf(state).poll.options.map(o => o.emoji);
+    const [e1, e2] = [0, 1, 2];
     state = vote(state, "v1", "pv-a", "poll-1", e1);
     state = vote(state, "v2", "pv-b", "poll-1", e2);
     return pollTally(pollOf(state));
