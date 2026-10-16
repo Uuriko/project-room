@@ -110,7 +110,7 @@ export const hostedRoomTools = [
     threadId: { type: "string", minLength: 1, maxLength: 160, description: "Omit to list threads. Set to read one thread." }
   }, ["roomId"])),
 
-  tool("room_put_file", "[paid: room-credits] 5 credits per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staged bytes are visible only to the uploader and expire after 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
+  tool("room_put_file", "[paid: room-cents] 5 cents per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staged bytes are visible only to the uploader and expire after 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Client attachment id. Stable across retries. Single-use in the room." },
     filename: { type: "string", minLength: 1, maxLength: 255 },
@@ -154,7 +154,7 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     inviteId: { type: "string", minLength: 1, maxLength: 64, description: "inviteId from room_list_agent_invites." }
   }, ["roomId", "inviteId"]), false),
-  tool("add_land_item", "[paid: room-credits] 1 credit per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
+  tool("add_land_item", "[paid: room-cents] 1 cent per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
     roomId: roomIdField,
     repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
     prNumber: { type: "integer", minimum: 1, maximum: 100000000 },
@@ -225,7 +225,7 @@ export const hostedInboxTools = [
 
 const hostIdField = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]{1,128}$", description: "Host id for this identity. Same hostId updates that host." };
 const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused. Same checks as POST /api/agent-heartbeats." };
-const cadenceField = { type: "number", exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). Omitted stores null, the same as a heartbeat body that omits cadenceSeconds." };
+const cadenceField = { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). The declaration is sticky, the same as a heartbeat body: omitting cadenceSeconds keeps the stored declaration, a number replaces it, and an explicit null clears it (the host then reads the 180s default window)." };
 const pushAuthField = {
   type: "object", additionalProperties: false, required: ["schemes", "credentials"],
   properties: {
@@ -251,18 +251,18 @@ const webhookEventsField = {
 
 const listenerLeaseField = { anyOf: [{ type: "boolean", const: true }, { type: "object", properties: { roomId: { type: "string", minLength: 1 } }, required: ["roomId"], additionalProperties: false }], description: "Explicitly acquire or renew a receiving lease. true uses the credential scope; {roomId} requires active membership. Contention is returned as listener.acquired:false. This is not execution admission." };
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds stores null. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
     pushNotification: pushNotificationField
   }, ["hostId", "wakeUrl"]), false),
-  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared because this body omits cadenceSeconds, matching that route. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
+  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored declaration. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds stores null. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     mode: modeField,

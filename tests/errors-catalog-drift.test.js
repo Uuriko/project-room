@@ -311,6 +311,18 @@ const REGISTRY_FIXTURES = [
       assert.match(ax.hint, /full members/);
       assert.match(nextTextOf(ax), /full membership/);
     }],
+  // #3432: everyone reaching the guest-invite owner gate IS the owner (or
+  // their delegate) — the advice must address the owner, name the
+  // account-session remedy and the Add-agent door, and never self-loop
+  // with "Ask the owner to mint".
+  ["guest_invite_account_session_required", { httpStatus: 403, message: "Guest invites are managed from the room owner's signed-in account session" },
+    ax => {
+      assert.equal(ax.reason, "guest_invite_account_session_required");
+      assert.match(ax.hint, /signed-in account session/);
+      assert.match(ax.hint, /owner delegate/);
+      assert.match(nextTextOf(ax), /agent-invites/);
+      assert.doesNotMatch(`${ax.hint} ${nextTextOf(ax)}`, /Ask the owner to mint/);
+    }],
   ["proof_required", { httpStatus: 428, message: "Identity mint proof required" },
     ax => {
       assert.match(ax.hint, /SHA-256/);
@@ -322,7 +334,7 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "guest_scope_denied", "invalid_wake_poll", "proof_required",
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "guest_invite_account_session_required", "guest_scope_denied", "invalid_wake_poll", "proof_required",
     "public_work_already_submitted", "public_work_claim_conflict", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {

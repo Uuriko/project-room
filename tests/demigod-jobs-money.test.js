@@ -20,6 +20,7 @@ const headerOf = (rel) =>
 const {
   placementFeeBreakdown,
   trialManagementFee,
+  DEMIGOD_CURRENCY,
   DEMIGOD_PLACEMENT_FEE_BPS,
   DEMIGOD_POLICY_VERSION,
 } = await import("../server/demigod-policy-adapter.mjs");
@@ -72,6 +73,15 @@ test("placement fee is exactly 1000 bps: table of known values", () => {
   }
   assert.equal(DEMIGOD_PLACEMENT_FEE_BPS, "1000");
   assert.equal(DEMIGOD_POLICY_VERSION, "demigod-placement/1");
+});
+
+// #3305: the Demigod currency is pinned in the record layer — USD, minor
+// units (cents) — as a named constant Demigod records are stated in.
+test("the Demigod currency is pinned to USD in the record layer", () => {
+  assert.equal(DEMIGOD_CURRENCY, "USD");
+  const out = placementFeeBreakdown({ placementValueMinor: "100000", currency: DEMIGOD_CURRENCY });
+  assert.equal(out.currency, "USD");
+  assert.equal(out.feeMinor, "10000", "the pin changes no math");
 });
 
 test("all placement amounts are decimal strings", () => {

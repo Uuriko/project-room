@@ -161,8 +161,13 @@ export class PublicWorkClaims {
   }
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
-    const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
-    const state = receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed';
+    const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    // #3546: submitted is the delivered state, not the end of the story —
+    // once the named review accepts the submission, the receipt's state
+    // becomes "verified" and the packet says so distinctly.
+    let receiptBody = null;
+    if (receipt) { try { receiptBody = JSON.parse(receipt.receipt_json); } catch { receiptBody = null; } }
+    const state = receipt ? (receiptBody?.state === 'verified' ? 'verified' : 'submitted') : live.owner ? 'claimed' : 'unclaimed';
     const settlement = this.settlementService().viewForOffer(row.offer_id);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
@@ -170,7 +175,10 @@ export class PublicWorkClaims {
       reward: offer.reward, ...(settlement ? { settlement } : {}),
       claimable: state === 'unclaimed',
       claim: { state, generation: row.generation,
-        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
+        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
+        verification: receipt ? (receiptBody?.verification ?? 'hash_only') : null,
+        deliveryDigest: receiptBody?.deliveryDigest ?? null,
+        criteriaAttestation: receiptBody?.criteriaAttestation ?? null } };
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -346,7 +354,7 @@ export class PublicWorkClaims {
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
     check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
-    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : []);
+    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation'] : []);
     check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
       && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
@@ -410,14 +418,73 @@ export class PublicWorkClaims {
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
           check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
+          // #3547: the delivery bundle's criteria leg. artifactText +
+          // checksReported stay the bundle's v1 serialization; when the
+          // deliverer adds a per-criterion attestation, the platform
+          // validates it against the offer's acceptanceCriteria itself —
+          // coverage is executed here, never trusted from the caller — and
+          // the executed result rides the receipt. An absent attestation
+          // stays absent (recorded null, never fabricated).
+          const offerCriteria = Array.isArray(offer.acceptanceCriteria) ? offer.acceptanceCriteria : [];
+          let criteriaAttestation = null;
+          const executedChecks = [];
+          if (input.criteriaAttestation !== undefined) {
+            check(Array.isArray(input.criteriaAttestation) && input.criteriaAttestation.length <= 64
+              && input.criteriaAttestation.every(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
+                && typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500
+                && ['met', 'not_met', 'na'].includes(entry.status)
+                && (entry.evidenceRef === undefined || entry.evidenceRef === null
+                  || (typeof entry.evidenceRef === 'string' && entry.evidenceRef.length > 0 && entry.evidenceRef.length <= 512))),
+              'Invalid criteria attestation');
+            check(new Set(input.criteriaAttestation.map(entry => entry.criterion)).size === input.criteriaAttestation.length,
+              'criteriaAttestation maps a criterion more than once');
+            criteriaAttestation = input.criteriaAttestation.map(entry => ({ criterion: entry.criterion, status: entry.status,
+              ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) }));
+            if (offerCriteria.length > 0) {
+              const mapped = new Set(criteriaAttestation.map(entry => entry.criterion));
+              const missing = offerCriteria.find(criterion => !mapped.has(criterion));
+              check(missing === undefined, `criteriaAttestation does not cover criterion "${missing}"`);
+              // #3683: coverage executes the attestation's statuses, not
+              // just its names. A criterion the deliverer declares not_met
+              // fails the check, and an na counts only when its
+              // evidenceRef resolves to something the platform holds: one
+              // of the reported checks that passed ("unit: pass"), or the
+              // submitted artifact itself (sha256:<artifact hash>, which
+              // the platform computes from the bytes at this very finish).
+              const byCriterion = new Map(criteriaAttestation.map(entry => [entry.criterion, entry]));
+              const passedChecks = new Set();
+              for (const text of input.checksReported) {
+                const match = /^(.+?):\s*(pass|passed)\s*$/i.exec(text);
+                if (match) passedChecks.add(match[1].trim());
+              }
+              const naBacked = entry => {
+                if (!entry || typeof entry.evidenceRef !== 'string' || entry.evidenceRef.length === 0) return false;
+                if (entry.evidenceRef === `sha256:${hash(input.artifactText)}`) return true;
+                const name = entry.evidenceRef.startsWith('check:') ? entry.evidenceRef.slice('check:'.length) : entry.evidenceRef;
+                return passedChecks.has(name);
+              };
+              const coveragePass = offerCriteria.every(criterion => {
+                const entry = byCriterion.get(criterion);
+                return entry.status === 'met' || (entry.status === 'na' && naBacked(entry));
+              });
+              executedChecks.push({ name: 'criteria_coverage', result: coveragePass ? 'pass' : 'fail', at: new Date(this.store.now()).toISOString() });
+            }
+          }
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
+          const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
-            artifact: { sha256, bytes }, checksReported: input.checksReported, verification: 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            // #3683: the system_checked label is earned by a check that
+            // PASSED — a recorded failure is honest evidence on the
+            // receipt, never a label upgrade.
+            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
           // Paid tasks attach the submission to the funded escrow bounty
           // before the receipt lands, so a receipt never exists without its
           // settlement vehicle in 'submitted' state (no-op when unpaid).
+          // attachSubmission reads only receiptId/identityId/artifact.sha256/
+          // checksReported, so the #3546 evidence fields ride along inertly.
           const settlement = this.settlementService().attachSubmission(row.room_id, offerId, receipt);
           if (settlement) outcome.settlement = settlement;
           this.db.prepare('INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)').run(receiptId, offerId, row.namespace_key, row.generation, identity.identityId, input.artifactText, sha256, bytes, JSON.stringify(receipt), this.store.now());

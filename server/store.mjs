@@ -148,6 +148,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
+import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -1066,13 +1067,13 @@ function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "")
 // tests/schema-stamp-coverage.test.js pins a digest of each helper's source
 // to its label, so changing a helper without bumping its revision fails CI.
 export const ADDITIVE_SCHEMA_ENSURES = [
-  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
+  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
   [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
-  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@2"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
@@ -5586,9 +5587,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     } catch { return; }
     if (!link?.identityId) return;
     try {
-      this.db.prepare(
+      const acked = this.db.prepare(
         "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=? AND delivered_at IS NULL"
-      ).run(this.now(), link.identityId, roomId, messageId);
+      ).run(this.now(), link.identityId, roomId, messageId).changes;
+      // #3345: the reaction door is an ack door — count its completions.
+      if (acked > 0) recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+        event: "acked", door: "reaction", n: acked, subjectId: link.identityId });
     } catch { /* pre agent_wake_signals schema: nothing to ack */ }
   }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
@@ -5607,7 +5611,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
       const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
-      if (!link) continue;
+      // #3345: a mention target with no identity link on either table can
+      // never be woken — that used to be a silent `continue`; it is now a
+      // counted, journaled loss (the member exists; the fabric cannot
+      // address them).
+      if (!link) {
+        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+          event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+        continue;
+      }
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
