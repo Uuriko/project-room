@@ -5,6 +5,7 @@
 import { configuredOperatorTokenHash, presentedOperatorToken, operatorTokenMatches, carriesRoomOrAccountCookie } from "./operator-auth.mjs";
 import { createOperatorPurge } from "./operator-purge.mjs";
 import { operatorStatus, operatorDrift } from "./operator-status.mjs";
+import { collectStatusSurface } from "./operator-status-surface.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 
 const POST = "POST";
@@ -15,10 +16,11 @@ const ROUTES = Object.freeze({
   "/api/operator/purge/execute": POST,
   "/api/operator/actions": GET,
   "/api/operator/status": GET,
+  "/api/operator/status-surface": GET,
   "/api/operator/drift": GET
 });
 
-export function createOperatorRoutes({ store, json, reject, body, rate }) {
+export function createOperatorRoutes({ store, json, reject, body, rate, statusProviders = null }) {
   const purge = createOperatorPurge(store);
   return async function operatorRoutes(req, res, { url, remoteAddress, requestId }) {
     const path = url.pathname;
@@ -53,6 +55,10 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     }
     if (path === "/api/operator/status") {
       json(res, 200, operatorStatus(store));
+      return true;
+    }
+    if (path === "/api/operator/status-surface") {
+      json(res, 200, await collectStatusSurface({ providers: statusProviders ?? {} }));
       return true;
     }
     const main = url.searchParams.get("main");

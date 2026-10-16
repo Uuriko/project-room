@@ -65,6 +65,8 @@ Find plus plan is the dry run: it lists what would be deleted and writes an audi
 
 `GET /api/operator/drift?main=<sha>` compares that SHA with the revision this process was built from. The server does not call GitHub. A SHA is 7 to 64 hex characters, or `unstamped`. A short SHA matches when it is a prefix of the deployed commit.
 
+`GET /api/operator/status-surface` composes those records into one read (schema `room.operator-status/1`): the deployed revision at both doors (the Durable Object door is this process; the Worker door is read back from this deployment's own `/api/version/worker`, the same read the deploy tooling makes) with their drift state; one row per registered job with its last success, last failure, and consecutive-failure count, from the Worker heartbeat in production or the Node scheduler's records locally; and the claim-prs skipped-row count from its last summary. A fact the records do not hold is returned as an explicit `not-recorded` state with the reason — never as a zero or a guess.
+
 The table counts leave out Cloudflare's internal `_cf_*` tables. A table that refuses a count is listed in `skippedTables` instead of failing the status read.
 
 ## Console
