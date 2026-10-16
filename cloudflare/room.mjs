@@ -18,6 +18,7 @@ import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
+import { readLatestBackupStatus } from './room-backup.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
 import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath } from '../server/agent-discovery.mjs';
@@ -150,6 +151,14 @@ export class ProjectRoom extends DurableObject {
       // SQLite (pending_channel_updates), so they survive eviction and restart.
       channelWebhooks: (this.channelWebhooks = new ChannelWebhookInbox(this.store)),
       operatorAccountId: env.ROOM_OPERATOR_ACCOUNT_ID || "",
+      // Operator status surface: the heartbeat lives in this object's
+      // storage and the backup bindings on env, so both reads are provided
+      // from here; the server itself only composes what it is handed.
+      statusProviders: {
+        jobHealth: () => this.readJobHealth(),
+        jobHealthSource: "worker-heartbeat",
+        backupStatus: () => readLatestBackupStatus(env)
+      },
       resolveRequestSignal: () => this.requestSignals.getStore(),
       loadAsset: async path => {
         const response = await env.ASSETS.fetch(new Request(new URL('/' + path, env.ROOM_ORIGIN)));
