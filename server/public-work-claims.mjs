@@ -156,14 +156,22 @@ export class PublicWorkClaims {
   }
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
-    const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
-    const state = receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed';
+    const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    // #3546: submitted is the delivered state, not the end of the story —
+    // once the named review accepts the submission, the receipt's state
+    // becomes "verified" and the packet says so distinctly.
+    let receiptBody = null;
+    if (receipt) { try { receiptBody = JSON.parse(receipt.receipt_json); } catch { receiptBody = null; } }
+    const state = receipt ? (receiptBody?.state === 'verified' ? 'verified' : 'submitted') : live.owner ? 'claimed' : 'unclaimed';
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
       claimable: state === 'unclaimed',
       claim: { state, generation: row.generation,
-        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
+        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
+        verification: receipt ? (receiptBody?.verification ?? 'hash_only') : null,
+        deliveryDigest: receiptBody?.deliveryDigest ?? null,
+        criteriaAttestation: receiptBody?.criteriaAttestation ?? null } };
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -334,7 +342,7 @@ export class PublicWorkClaims {
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
     check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
-    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : []);
+    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation'] : []);
     check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
       && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
@@ -395,11 +403,42 @@ export class PublicWorkClaims {
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
           check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
+          // #3547: the delivery bundle's criteria leg. artifactText +
+          // checksReported stay the bundle's v1 serialization; when the
+          // deliverer adds a per-criterion attestation, the platform
+          // validates it against the offer's acceptanceCriteria itself —
+          // coverage is executed here, never trusted from the caller — and
+          // the executed result rides the receipt. An absent attestation
+          // stays absent (recorded null, never fabricated).
+          const offerCriteria = Array.isArray(offer.acceptanceCriteria) ? offer.acceptanceCriteria : [];
+          let criteriaAttestation = null;
+          const executedChecks = [];
+          if (input.criteriaAttestation !== undefined) {
+            check(Array.isArray(input.criteriaAttestation) && input.criteriaAttestation.length <= 64
+              && input.criteriaAttestation.every(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
+                && typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500
+                && ['met', 'not_met', 'na'].includes(entry.status)
+                && (entry.evidenceRef === undefined || entry.evidenceRef === null
+                  || (typeof entry.evidenceRef === 'string' && entry.evidenceRef.length > 0 && entry.evidenceRef.length <= 512))),
+              'Invalid criteria attestation');
+            check(new Set(input.criteriaAttestation.map(entry => entry.criterion)).size === input.criteriaAttestation.length,
+              'criteriaAttestation maps a criterion more than once');
+            criteriaAttestation = input.criteriaAttestation.map(entry => ({ criterion: entry.criterion, status: entry.status,
+              ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) }));
+            if (offerCriteria.length > 0) {
+              const mapped = new Set(criteriaAttestation.map(entry => entry.criterion));
+              const missing = offerCriteria.find(criterion => !mapped.has(criterion));
+              check(missing === undefined, `criteriaAttestation does not cover criterion "${missing}"`);
+              executedChecks.push({ name: 'criteria_coverage', result: 'pass', at: new Date(this.store.now()).toISOString() });
+            }
+          }
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
+          const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
-            artifact: { sha256, bytes }, checksReported: input.checksReported, verification: 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            verification: executedChecks.length > 0 ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
           this.db.prepare('INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)').run(receiptId, offerId, row.namespace_key, row.generation, identity.identityId, input.artifactText, sha256, bytes, JSON.stringify(receipt), this.store.now());
           projectPublicWorkReceipt(this.store, receipt, sha256);
           item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
