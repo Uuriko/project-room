@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonLines, exportTrailer, exportNdjsonStream, exportNdjsonText, operatorExportResponse, replayNdjson, sanitizeCell, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
-import { backupTarget, writeDailyBackup, writeKvBackup } from "../cloudflare/room-backup.mjs";
+import { backupTarget, writeDailyBackup, writeKvBackup, R2_BACKUP_RESTORABLE } from "../cloudflare/room-backup.mjs";
 import { assembleKvBackup, summarizeRoom } from "../scripts/restore-room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -135,21 +135,24 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   const { store } = openFixture(t);
   const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
   const when = new Date(Date.UTC(2026, 9, 2));
+  // The R2 writer's own contract, exercised with the #3585 guard lifted
+  // (the guard itself is pinned by the tests that follow).
+  const restorable = { r2Restorable: true };
   assert.deepEqual(await writeDailyBackup({}, room, when), { skipped: "unconfigured" });
-  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: {} }, room, when), /put or head/);
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: {} }, room, when, restorable), /put or head/);
   let puts = 0;
   const existing = r2({
     head: async () => ({ key: "room-backups/2026-10-02.ndjson", customMetadata: { sha256: "ab".repeat(32), bytes: "123", backupVersion: "2" } }),
     put: async () => { puts += 1; }
   });
-  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: existing }, room, when), { skipped: "exists", key: "room-backups/2026-10-02.ndjson" });
+  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: existing }, room, when, restorable), { skipped: "exists", key: "room-backups/2026-10-02.ndjson" });
   assert.equal(puts, 0);
   const seen = [];
   const bucket = r2({
     head: async () => null,
     put: async (key, body, options) => { seen.push({ key, text: await new Response(body).text(), type: options.httpMetadata.contentType, customMetadata: options.customMetadata }); }
   });
-  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when), { wrote: "room-backups/2026-10-02.ndjson" });
+  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when, restorable), { wrote: "room-backups/2026-10-02.ndjson" });
   assert.equal(seen.length, 1);
   assert.equal(seen[0].key, "room-backups/2026-10-02.ndjson");
   assert.equal(seen[0].type, "application/x-ndjson");
@@ -157,6 +160,46 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   assert.equal(seen[0].text.includes(sha(HOOK)), true);
   assert.equal(seen[0].customMetadata.sha256, sha(seen[0].text));
   assert.equal(seen[0].customMetadata.backupVersion, "2");
+});
+
+test("#3585 guard: R2 bound alone refuses loudly and writes nothing to R2", async t => {
+  const { store } = openStore(t, 2);
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 2));
+  const key = "room-backups/2026-10-02.ndjson";
+  assert.equal(R2_BACKUP_RESTORABLE, false, "no R2 restore reader ships yet; the #3585 fix flips this");
+  const bucket = fakeR2Bucket();
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when), /unrestorable backup.*#3585/);
+  assert.equal(bucket.map.has(key), false, "the guard must refuse before any R2 put");
+  // A verified R2 object already under today's key must not turn the
+  // refusal into a silent "exists" skip: that object is still unrestorable.
+  bucket.map.set(key, { bytes: new TextEncoder().encode("stored earlier\n"), options: { customMetadata: { sha256: "ab".repeat(32), bytes: "15", backupVersion: "2" } } });
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when), /unrestorable backup.*#3585/);
+});
+
+test("#3585 guard: R2 bound with KV falls back to KV, loudly, and never touches R2", async t => {
+  const { store } = openStore(t, 2);
+  const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
+  const when = new Date(Date.UTC(2026, 9, 2));
+  const key = "room-backups/2026-10-02.ndjson";
+  const bucket = fakeR2Bucket();
+  const kv = fakeKv();
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => { errors.push(args.join(" ")); };
+  let wrote;
+  try {
+    wrote = await writeDailyBackup({ ROOM_BACKUPS: bucket, ROOM_BACKUPS_KV: kv }, room, when);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(wrote.wrote, key);
+  assert.equal(wrote.target, "kv");
+  assert.equal(bucket.map.size, 0, "the fallback must not write anything to R2");
+  assert.ok(kv.map.has(key), "the KV manifest is written, so the day still has a restorable backup");
+  assert.ok(errors.some(line => line.includes("[room-backup]") && line.includes("#3585")), "the fallback is logged loudly, not silent");
+  // A second tick the same day is the ordinary KV exists-skip.
+  assert.equal((await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when)).skipped, "exists");
 });
 
 function fakeR2Bucket() {
@@ -188,15 +231,16 @@ test("the daily R2 backup refuses a torn export and leaves the day retryable", a
   const bucket = fakeR2Bucket();
   const when = new Date(Date.UTC(2026, 9, 2));
   const key = "room-backups/2026-10-02.ndjson";
-  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, { exportRoomNdjson: () => torn }, when), /torn/);
+  const restorable = { r2Restorable: true };
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, { exportRoomNdjson: () => torn }, when, restorable), /torn/);
   assert.equal(bucket.map.has(key), false, "a torn export must not be stored under the day's key");
   // The same day must be retryable: a later, untorn export writes and verifies.
   const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
-  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when), { wrote: key });
+  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when, restorable), { wrote: key });
   const stored = bucket.map.get(key);
   assert.ok(stored, "the retry stores the good export");
   assert.equal(stored.options.customMetadata.sha256, sha(stored.bytes), "the stored object carries the sha256 of its exact bytes");
-  const again = await writeDailyBackup({ ROOM_BACKUPS: bucket }, { exportRoomNdjson: () => { throw new Error("must not export twice"); } }, when);
+  const again = await writeDailyBackup({ ROOM_BACKUPS: bucket }, { exportRoomNdjson: () => { throw new Error("must not export twice"); } }, when, restorable);
   assert.deepEqual(again, { skipped: "exists", key });
 });
 
@@ -210,7 +254,7 @@ test("the daily R2 backup refuses a same-count tear the trailer hash catches", a
   assert.notEqual(torn, text, "the fixture tear must change the export");
   const bucket = fakeR2Bucket();
   const when = new Date(Date.UTC(2026, 9, 2));
-  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, { exportRoomNdjson: () => torn }, when), /torn/);
+  await assert.rejects(() => writeDailyBackup({ ROOM_BACKUPS: bucket }, { exportRoomNdjson: () => torn }, when, { r2Restorable: true }), /torn/);
   assert.equal(bucket.map.has("room-backups/2026-10-02.ndjson"), false, "a hash-torn export must not be stored");
 });
 
@@ -223,7 +267,7 @@ test("an R2 object with no verified integrity metadata is rewritten, not skipped
   // metadata: head-exists alone must not make it the day's backup.
   bucket.map.set(key, { bytes: new TextEncoder().encode("possibly torn\n"), options: {} });
   const room = { exportRoomNdjson: () => exportNdjsonStream(store.db) };
-  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when), { wrote: key });
+  assert.deepEqual(await writeDailyBackup({ ROOM_BACKUPS: bucket }, room, when, { r2Restorable: true }), { wrote: key });
   const stored = bucket.map.get(key);
   assert.equal(stored.options.customMetadata.sha256, sha(stored.bytes));
   assert.notEqual(new TextDecoder().decode(stored.bytes), "possibly torn\n");
