@@ -3,8 +3,12 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 
-// Private review is a separate fact. Submission bytes, public receipt, leases,
-// work gates, credit balances and payment state are never changed here.
+// Private review is a separate fact. Submission bytes, the stored public
+// receipt, leases, work gates, credit balances and payment state are never
+// changed here. The outcome is not private, though: receipt reads compose
+// this record's state, verdict and decision onto the canonical and public
+// receipt faces (#3733, publicWorkReceiptOutcome in public-read-model.mjs);
+// the reviewer identity, reason and fingerprint stay member-side.
 export const publicWorkReviewsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_reviews (
   receipt_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL

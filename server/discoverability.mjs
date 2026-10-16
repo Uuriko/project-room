@@ -335,9 +335,17 @@ const publicWorkSchemas = {
     type: "object", required: ["schema", "receiptId", "taskId", "termsVersion", "namespaceId", "generation", "identityId", "state", "artifact", "checksReported", "verification", "createdAt"],
     properties: {
       schema: { const: "public-work-receipt/1" }, receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
-      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" }, state: { const: "submitted" },
+      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" },
+      // The stored record is minted as "submitted"; the read composes the
+      // review outcome, so a decided receipt reports its terminal state.
+      state: { enum: ["submitted", "accepted", "rejected", "revision_requested"] },
       artifact: { type: "object", required: ["sha256", "bytes"], properties: { sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, bytes: { type: "integer", minimum: 0, maximum: 65536 } } },
       checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { const: "hash_only" }, createdAt: { type: "string", format: "date-time" },
+      review: { type: "object", required: ["state", "verificationVerdict", "verificationReviewerKind", "verifiedAt", "decidedAt"], properties: {
+        state: { enum: ["pending", "accepted", "rejected", "revision_requested"] },
+        verificationVerdict: { type: ["string", "null"] }, verificationReviewerKind: { type: ["string", "null"] },
+        verifiedAt: { type: ["string", "null"], format: "date-time" }, decidedAt: { type: ["string", "null"], format: "date-time" },
+      } },
     },
   },
   PublicWorkOutcome: { type: "object", required: ["action", "task"], properties: {

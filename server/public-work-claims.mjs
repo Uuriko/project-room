@@ -4,7 +4,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
-import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
@@ -509,7 +509,19 @@ export class PublicWorkClaims {
   receipt(receiptId, viewer = {}) {
     const row = this._receiptRow(receiptId);
     this._requireReceiptVisible(row.roomId, viewer.memberId);
-    return JSON.parse(row.receiptJson);
+    const body = JSON.parse(row.receiptJson);
+    // The stored record is immutable (minted at finish, always "submitted");
+    // the review outcome is a later fact in public_work_reviews. The
+    // canonical read composes the two, so a decided receipt no longer
+    // reads "submitted" after a terminal verdict (#3733). The stored
+    // bytes are never rewritten — review binding and artifact checks keep
+    // reading the record itself.
+    const outcome = publicWorkReceiptOutcome(this.store, receiptId);
+    if (outcome) {
+      body.state = outcome.state;
+      if (outcome.review) body.review = outcome.review;
+    }
+    return body;
   }
   artifact(receiptId, viewer = {}) {
     const row = this._receiptRow(receiptId);

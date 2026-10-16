@@ -61,6 +61,19 @@ work-item receipts, a self-supplied name on public-work receipts — not
 identity-verified. Hash values are stored as recorded, not re-verified at
 read time.
 
+A public-work receipt also carries its outcome, composed at read time
+from the receipt record and the room's review record: `state` (the
+receipt's current state — `submitted` until the designated reviewer
+decides, then `accepted`, `rejected`, or `revision_requested`),
+`verification` (the tier the receipt record carries), `checksReported`
+(the checks the worker reported), `executedChecks` when the record
+carries platform-executed checks, and — once a review is recorded — a
+`review` summary (review state, the reviewer's verdict and kind, and
+the verdict/decision times). The
+reviewer's identity, reason, and review fingerprint never appear. A
+rejected delivery reads as rejected on the page, in the JSON, and in
+the list — it is not removed, and it is not dressed as accepted work.
+
 The JSON envelope is unsigned. Receipt Standard v1 was not used: that
 draft requires a fresh signature, and these pages are durable records of
 work the room already stored. The server does not sign a statement the

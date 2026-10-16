@@ -60,7 +60,11 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   assert.equal(accepted.review.state, 'accepted'); assert.equal(accepted.review.revision, 1);
   assert.equal(accepted.authority.canDecide, false);
   f.reopen(); assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
-  assert.deepEqual(f.store.publicWorkClaims.receipt(id), f.receipt);
+  // The stored receipt record is never rewritten by a review; the canonical
+  // read composes the recorded outcome onto it (#3733).
+  assert.deepEqual(JSON.parse(f.store.db.prepare('SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?').get(id).receipt_json), f.receipt);
+  const canonical = f.store.publicWorkClaims.receipt(id);
+  assert.equal(canonical.state, 'accepted'); assert.equal(canonical.review.state, 'accepted'); assert.equal(canonical.review.decidedAt != null, true);
   assert.deepEqual(f.store.publicWorkClaims.artifact(id), artifact);
   assert.equal(f.store.workClaims.get(kernel.namespaceId, kernel.taskId).state, 'done');
   assert.deepEqual(f.store.db.prepare('SELECT * FROM bounty_journal ORDER BY seq').all(), balances);
@@ -83,7 +87,7 @@ test('CAS, exact tuple and room isolation refuse stale or unauthorized decisions
   try { assert.throws(() => otherService.decide('commons', 'owner', id, f.input('other-connection', 0, { decision: 'rejected' })), code('stale_review')); } finally { concurrent.close(); }
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('concurrent', 0, { decision: 'accepted' })), code('stale_review'));
   assert.equal(f.service().decide('commons', 'owner', id, f.input('explicit-after-revision', 1, { decision: 'accepted' })).review.revision, 2);
-  assert.equal(f.store.publicWorkClaims.receipt(id).state, 'submitted');
+  assert.equal(f.store.publicWorkClaims.receipt(id).state, 'accepted'); // read composes the decision (#3733); the stored record still says submitted
 });
 
 test('mixed acceptance requires real authorized exact-current PASS and survives restart', t => {

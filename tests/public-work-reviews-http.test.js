@@ -44,7 +44,12 @@ test('owner retains withdrawn submissions and records one explicit decision with
   assert.deepEqual(await read(await f.call(path + '/decide', input)), outcome);
   assert.equal((await f.call(path + '/decide', { ...input, reason: 'Different retry' })).status, 409);
   assert.equal((await f.call(path + '/decide', f.decision('second-decision', 'rejected'))).status, 409);
-  assert.deepEqual(await read(await f.call('/api/public-work/receipts/' + f.receipt.receiptId, undefined, null)), f.receipt);
+  // The canonical read composes the recorded decision (#3733): state and a
+  // review summary move; every minted field — the bytes' record — is exact.
+  const canonical = await read(await f.call('/api/public-work/receipts/' + f.receipt.receiptId, undefined, null));
+  const { state: canonicalState, review: canonicalReview, ...canonicalRecord } = canonical;
+  assert.equal(canonicalState, 'accepted'); assert.equal(canonicalReview.state, 'accepted'); assert.ok(canonicalReview.decidedAt);
+  assert.deepEqual({ ...canonicalRecord, state: 'submitted' }, f.receipt);
   assert.equal(await (await f.call('/api/public-work/receipts/' + f.receipt.receiptId + '/artifact', undefined, null)).text(), f.artifactText);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM bounty_journal').get().n, before);
 });

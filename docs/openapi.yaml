@@ -17049,7 +17049,44 @@ components:
           type: "string"
           description: "Finisher's identity display name; shown instead of the raw identity id."
         state:
-          const: "submitted"
+          enum:
+            - "submitted"
+            - "accepted"
+            - "rejected"
+            - "revision_requested"
+        review:
+          type: "object"
+          required:
+            - "state"
+            - "verificationVerdict"
+            - "verificationReviewerKind"
+            - "verifiedAt"
+            - "decidedAt"
+          properties:
+            state:
+              enum:
+                - "pending"
+                - "accepted"
+                - "rejected"
+                - "revision_requested"
+            verificationVerdict:
+              type:
+                - "string"
+                - "null"
+            verificationReviewerKind:
+              type:
+                - "string"
+                - "null"
+            verifiedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
+            decidedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
         artifact:
           type: "object"
           required:
