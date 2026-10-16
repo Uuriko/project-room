@@ -9,6 +9,18 @@
 // same key the R2 object would use. A day with no manifest has no complete
 // backup; parts without a manifest are an aborted run and expire on their own.
 //
+// KV parts are gzip-compressed transport (PERF-10X CALL 1, manifest
+// version 3): the parts are one gzip stream of the NDJSON export, split
+// at BACKUP_KV_PART_BYTES of *compressed* bytes. Compression wraps the
+// transport only — decompressing the concatenated parts yields the
+// NDJSON byte for byte, and every torn-export check below still runs
+// over the uncompressed stream. The manifest declares the format in its
+// `compression` field and pins both the stored (compressed) bytes and
+// the uncompressed NDJSON (sizes + sha256 for each). Version 2 manifests
+// carry no `compression` field and are the legacy uncompressed format;
+// restores keep reading them, and any manifest whose declared format is
+// neither "gzip" nor the legacy absence is refused (fail-closed).
+//
 // The R2 target stores one object per day, verified before it is written
 // (see writeR2Backup): the export's sha256 is recorded in the object's
 // custom metadata, and only an object carrying current verified metadata
@@ -24,7 +36,40 @@ export const BACKUP_KV_TTL_SECONDS = 35 * 24 * 60 * 60;
 // Version 2: BLOB cells (room file bytes) are base64 on the Durable Object
 // too. A version 1 manifest for today was written by the export that dropped
 // them, so the next tick rewrites that day instead of skipping it.
-export const BACKUP_MANIFEST_VERSION = 2;
+// Version 3: KV parts are gzip-compressed and the manifest declares it
+// (see the header). A version 2 manifest for today was written by the
+// uncompressed writer, so the next tick rewrites that day compressed
+// instead of skipping it — the same rewrite rule version 2 applied to 1.
+export const BACKUP_MANIFEST_VERSION = 3;
+// The oldest KV manifest a restore accepts: version 2 is the legacy
+// uncompressed format. Version 1 dropped BLOB cells and is never restored.
+export const BACKUP_MANIFEST_MIN_VERSION = 2;
+// The R2 single-object format did not change with version 3 (it stores
+// the raw NDJSON object, verified before the put), so its metadata
+// version stays at 2 and is tracked separately from the KV manifest.
+export const BACKUP_R2_VERSION = 2;
+export const BACKUP_COMPRESSION_GZIP = "gzip";
+export const BACKUP_COMPRESSION_NONE = "none";
+
+// The compression format a manifest declares, fail-closed: "gzip" or
+// "none" only when the field says so, the legacy absence reads as "none"
+// only for pre-version-3 manifests, and anything else (an unknown string,
+// or a version 3+ manifest that declares nothing) throws — a restore
+// must never guess a backup's format.
+export function backupCompressionOf(manifest) {
+  if (manifest?.compression === undefined) {
+    if (Number(manifest?.version) >= BACKUP_MANIFEST_VERSION)
+      throw new Error(`Backup manifest version ${manifest?.version} does not declare a compression format`);
+    return BACKUP_COMPRESSION_NONE;
+  }
+  if (manifest.compression === BACKUP_COMPRESSION_GZIP || manifest.compression === BACKUP_COMPRESSION_NONE)
+    return manifest.compression;
+  throw new Error(`Backup manifest declares an unknown compression format: ${String(manifest.compression)}`);
+}
+
+export function isGzipBytes(bytes) {
+  return bytes != null && bytes.byteLength >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+}
 
 export function backupObjectKey(now = new Date()) {
   const date = now instanceof Date ? now : new Date(now);
@@ -76,6 +121,63 @@ async function* byteChunks(body) {
       yield typeof value === "string" ? new TextEncoder().encode(value) : value;
     }
   } finally { reader.releaseLock?.(); }
+}
+
+// Pipes an async iterable of byte chunks through a web compression /
+// decompression transform (the Workers-native streams, also in Node),
+// yielding the transformed chunks. The writer side pumps concurrently
+// with the reads. Failure handling is deliberately belt-and-braces: a
+// source error aborts the transform from inside the pump (which errors
+// the read side), a transform error (corrupt gzip input) rejects the
+// pending read, and if the read side ends while the pump is still
+// blocked on a write the generator aborts the writer itself before
+// waiting for the pump — awaiting an un-aborted pump there can hang
+// forever once the transform has errored, because nothing is left to
+// settle its writes. Exactly one failure surfaces to the caller: the
+// pump's own error wins, as it names the cause (bad source, bad gzip)
+// rather than the transform's generic stream error.
+async function* transformByteChunks(source, transform) {
+  const writer = transform.writable.getWriter();
+  let pumpError = null;
+  let pumpSettled = false;
+  const pump = (async () => {
+    try {
+      for await (const chunk of source) await writer.write(chunk);
+      await writer.close();
+    } catch (error) {
+      pumpError = error;
+      try { await writer.abort(error); } catch { /* already finished */ }
+    } finally {
+      pumpSettled = true;
+    }
+  })();
+  const reader = transform.readable.getReader();
+  let readError = null;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      yield value;
+    }
+  } catch (error) {
+    readError = error;
+  } finally {
+    reader.releaseLock?.();
+    if (!pumpSettled) {
+      try { await writer.abort(readError ?? new Error("backup transform stream ended early")); } catch { /* already finished */ }
+    }
+  }
+  await pump;
+  if (pumpError) throw pumpError;
+  if (readError) throw readError;
+}
+
+export function gzipByteChunks(source) {
+  return transformByteChunks(source, new CompressionStream(BACKUP_COMPRESSION_GZIP));
+}
+
+export function gunzipByteChunks(source) {
+  return transformByteChunks(source, new DecompressionStream(BACKUP_COMPRESSION_GZIP));
 }
 
 // Write-time torn-export detection. The stream's first line is the watermark
@@ -198,17 +300,32 @@ function trailerHashTracker() {
   };
 }
 
-// Streams the export into parts so at most one part sits in memory.
+// Streams the export into parts so at most one part sits in memory. The
+// uncompressed NDJSON is tapped chunk by chunk for the torn-export
+// checks and the uncompressed size/hash, then gzip-compressed; the
+// compressed stream is what gets cut into parts, hashed as stored, and
+// described by the manifest (whose `bytes`/`sha256` are therefore the
+// stored bytes, exactly as restores verify them per part).
 export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds = BACKUP_KV_TTL_SECONDS, now = Date.now() } = {}) {
   const whole = createHash("sha256");
+  const uncompressedHash = createHash("sha256");
   const parts = [];
   let pending = [];
   let pendingBytes = 0;
   let total = 0;
+  let uncompressedBytes = 0;
   const options = { expirationTtl: ttlSeconds };
   const tracker = headTailTracker();
   const hashTracker = trailerHashTracker();
-  const noteHeadTail = chunk => { tracker.note(chunk); hashTracker.note(chunk); };
+  async function* rawChunks() {
+    for await (const chunk of byteChunks(body)) {
+      tracker.note(chunk);
+      hashTracker.note(chunk);
+      uncompressedHash.update(chunk);
+      uncompressedBytes += chunk.byteLength;
+      yield chunk;
+    }
+  }
   const flush = async () => {
     if (!pendingBytes && parts.length) return;
     const bytes = concatBytes(pending, pendingBytes);
@@ -218,8 +335,7 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
     pending = [];
     pendingBytes = 0;
   };
-  for await (let chunk of byteChunks(body)) {
-    noteHeadTail(chunk);
+  for await (let chunk of gzipByteChunks(rawChunks())) {
     whole.update(chunk);
     total += chunk.byteLength;
     while (chunk.byteLength) {
@@ -238,7 +354,13 @@ export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_
   const hashReason = hashTracker.finish();
   if (hashReason) throw new Error(`room-backup: refusing manifest, export torn (${hashReason})`);
   if (pendingBytes || !parts.length) await flush();
-  const manifest = { kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(), bytes: total, sha256: whole.digest("hex"), parts };
+  const manifest = {
+    kind: "room-backup-manifest", version: BACKUP_MANIFEST_VERSION, key, createdAt: new Date(now).toISOString(),
+    compression: BACKUP_COMPRESSION_GZIP,
+    bytes: total, sha256: whole.digest("hex"),
+    uncompressedBytes, uncompressedSha256: uncompressedHash.digest("hex"),
+    parts
+  };
   await kv.put(key, JSON.stringify(manifest), { ...options, metadata: { parts: parts.length, bytes: total } });
   return manifest;
 }
@@ -252,7 +374,7 @@ function verifiedR2Backup(stored) {
   if (stored == null) return false;
   const meta = stored.customMetadata;
   if (!meta || typeof meta.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(meta.sha256)) return false;
-  if (!Number.isSafeInteger(Number(meta.backupVersion)) || Number(meta.backupVersion) < BACKUP_MANIFEST_VERSION) return false;
+  if (!Number.isSafeInteger(Number(meta.backupVersion)) || Number(meta.backupVersion) < BACKUP_R2_VERSION) return false;
   if (meta.bytes !== undefined && Number.isSafeInteger(stored.size) && Number(meta.bytes) !== stored.size) return false;
   return true;
 }
@@ -287,7 +409,7 @@ async function writeR2Backup(bucket, key, body) {
   const sha256 = whole.digest("hex");
   await bucket.put(key, bytes, {
     httpMetadata: { contentType: "application/x-ndjson" },
-    customMetadata: { sha256, bytes: String(total), backupVersion: String(BACKUP_MANIFEST_VERSION) }
+    customMetadata: { sha256, bytes: String(total), backupVersion: String(BACKUP_R2_VERSION) }
   });
   return { bytes: total, sha256 };
 }
