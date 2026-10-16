@@ -53,6 +53,20 @@ function decideActions(roomId, request) {
   ]);
 }
 
+// The one #662 item shape with a true inline action. Exported for the
+// cross-room Owner Cockpit (#3342), which merges these items across rooms
+// and must not grow a second copy of the decide contract.
+export function accessRequestAttentionItem(roomId, request) {
+  return Object.freeze({
+    kind: "access_request",
+    id: request.requestId,
+    severity: "action",
+    title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
+    detail: `Requested ${request.requestedPermissions.join(", ")}`,
+    actions: decideActions(roomId, request),
+  });
+}
+
 function reviewAction(roomId, workItemId) {
   return Object.freeze({ action: "review", method: "GET",
     path: `/api/rooms/${roomId}/work-context?workItemId=${encodeURIComponent(workItemId)}` });
@@ -67,14 +81,7 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
 
   // 1. Pending access requests — the only item with true inline approve/deny.
   for (const request of accessRequests.list(token, roomId, { status: "pending" }, expectedSessionBinding)) {
-    items.push(Object.freeze({
-      kind: "access_request",
-      id: request.requestId,
-      severity: "action",
-      title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
-      detail: `Requested ${request.requestedPermissions.join(", ")}`,
-      actions: decideActions(roomId, request),
-    }));
+    items.push(accessRequestAttentionItem(roomId, request));
   }
 
   const room = store.room(roomId);
