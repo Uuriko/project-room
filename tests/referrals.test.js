@@ -154,6 +154,23 @@ test("a member cannot refer themselves", t => {
   );
 });
 
+test("prototype-named ids are not members for referral recording (#3224)", t => {
+  const { store, ownerKey, roomId } = fixture(t);
+  const { redeemed } = mintRedeem(store, ownerKey, roomId, "Prototype Guard");
+  const rowsBefore = store.db.prepare("SELECT COUNT(*) AS n FROM referrals WHERE room_id=?").get(roomId).n;
+  // "toString"/"constructor" pass the id pattern, and a raw members[id]
+  // lookup would resolve Object.prototype members as truthy "members".
+  for (const phantom of ["toString", "constructor", "hasOwnProperty"]) {
+    assert.throws(
+      () => store.referrals.record({ roomId, referrerMemberId: phantom, refereeMemberId: redeemed.memberId, via: "invite" }),
+      /referrer is not an active member/, `${phantom} as referrer must not resolve as a member`);
+    assert.throws(
+      () => store.referrals.record({ roomId, referrerMemberId: "owner", refereeMemberId: phantom, via: "invite" }),
+      /referee is not an active member/, `${phantom} as referee must not resolve as a member`);
+  }
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM referrals WHERE room_id=?").get(roomId).n, rowsBefore, "phantom attempts recorded nothing");
+});
+
 test("referral.completed validation rejects bad shapes", t => {
   const { store, ownerKey, roomId } = fixture(t);
   const { redeemed } = mintRedeem(store, ownerKey, roomId, "Validate Me");

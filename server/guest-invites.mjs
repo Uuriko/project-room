@@ -13,7 +13,7 @@
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
-import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
+import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId, ownMember } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { verifyCardSignature } from "./agent-card-signing.mjs";
 import {
@@ -284,7 +284,7 @@ export class GuestInvites {
     const members = this.store.room(roomId).state.members;
     let n = 0;
     for (const row of this.db.prepare("SELECT member_id FROM guest_members WHERE room_id=?").all(roomId)) {
-      const member = members[row.member_id];
+      const member = ownMember(members, row.member_id);
       if (member && member.kind === "agent" && member.active !== false && isGuestAgentMemberId(member.id)) n++;
     }
     return n;
@@ -298,7 +298,7 @@ export class GuestInvites {
     // the predicate honest for audits.
     const row = this.db.prepare("SELECT room_id,tier FROM guest_members WHERE member_id=?").get(memberId);
     if (!row) return null;
-    const member = this.store.room(row.room_id).state.members[memberId];
+    const member = ownMember(this.store.room(row.room_id).state.members, memberId);
     if (!member || member.active === false) return null;
     return row.tier;
   }
@@ -443,7 +443,7 @@ export class GuestInvites {
       // revision is irrelevant to their delegated authority, so the check
       // always reads the owner's record.
       const authority = this.store.roomAuthority(roomId);
-      if (expectedOwnerRevision !== authority.members[authority.ownerId]?.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
+      if (expectedOwnerRevision !== ownMember(authority.members, authority.ownerId)?.revision) fail(409, "stale_member_revision", "Your room permissions changed; refresh before minting");
       // Expiry rides the existing sweep: any expired guest-agent-* member
       // (ga1. or GX-redeemed) is deactivated here, during owner mint activity.
       this.store.guestAgentLinks.sweepExpired(token, roomId, binding);
@@ -534,7 +534,7 @@ export class GuestInvites {
       // re-redeeming with its own card name must reuse its seat, not
       // collide with itself.
       const seat = this.seatOf(roomId, identity.identityId);
-      const existingMember = seat && room.state.members[seat.member_id];
+      const existingMember = seat && ownMember(room.state.members, seat.member_id);
       let memberId;
       let tier = row.tier;
       let duplicate = false;
@@ -566,7 +566,7 @@ export class GuestInvites {
           fail(429, "rate_limited", "This room is at its absolute external-guest seat limit; ask the owner to disconnect a guest");
         }
         memberId = guestAgentMemberId(identity.identityId, roomId);
-        if (room.state.members[memberId]) fail(409, "seat_taken", "This identity already holds a guest seat in this room");
+        if (ownMember(room.state.members, memberId)) fail(409, "seat_taken", "This identity already holds a guest seat in this room");
         // Self-serve redemption: no owner token is present, so the event is
         // built directly (the joinAgent pattern) with the minting owner as
         // the actor — the journal always shows who sponsored the guest.
@@ -604,7 +604,7 @@ export class GuestInvites {
       const expiresAt = this.store.now() + row.credential_ttl_ms;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, memberId, expiresAt);
-      const member = this.store.room(roomId).state.members[memberId];
+      const member = ownMember(this.store.room(roomId).state.members, memberId);
       return {
         token,
         member: { id: member.id, kind: member.kind, permissions: [...member.permissions], displayName: member.displayName, expiresAt },
@@ -631,7 +631,7 @@ export class GuestInvites {
     const lowered = name.toLowerCase();
     if (RESERVED_GUEST_NAMES.includes(lowered)) fail(422, "card_invalid", "That name is reserved");
     const taken = new Set();
-    const owner = state.members[state.room.ownerId];
+    const owner = ownMember(state.members, state.room.ownerId);
     if (owner?.displayName) taken.add(owner.displayName.toLowerCase());
     for (const member of Object.values(state.members)) {
       if (typeof member.displayName === "string") {
@@ -692,7 +692,7 @@ export class GuestInvites {
     if (!isGuestAgentMemberId(memberId)) fail(422, "invalid_guest_invite", "That member is not a guest");
     return this.store.transaction(() => {
       this.ownerGate(token, roomId, binding);
-      const member = this.store.room(roomId).state.members[memberId];
+      const member = ownMember(this.store.room(roomId).state.members, memberId);
       if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
       const isKnownGuest = !!this.db.prepare("SELECT 1 FROM guest_members WHERE member_id=? AND room_id=?").get(memberId, roomId);
       const hasLiveCredential = !!this.db.prepare(
@@ -716,7 +716,7 @@ export class GuestInvites {
       const members = this.store.room(roomId).state.members;
       let n = 0;
       for (const row of this.db.prepare("SELECT member_id FROM guest_members WHERE room_id=?").all(roomId)) {
-        const member = members[row.member_id];
+        const member = ownMember(members, row.member_id);
         if (!member || member.kind !== "agent" || member.active === false || !isGuestAgentMemberId(member.id)) continue;
         this.store.command(token, roomId, {
           id: `guest-revoke-all-${hash(`${member.id}:${this.store.now()}:${n}`).slice(0, 40)}`,
@@ -764,7 +764,7 @@ export class GuestInvites {
       this.ownerGate(token, roomId, binding);
       const seat = this.db.prepare("SELECT tier FROM guest_members WHERE member_id=? AND room_id=?").get(memberId, roomId);
       if (!seat) fail(404, "guest_not_found", "No guest seat with that member id");
-      const member = this.store.room(roomId).state.members[memberId];
+      const member = ownMember(this.store.room(roomId).state.members, memberId);
       if (!member || member.kind !== "agent" || member.active === false) fail(404, "guest_not_found", "No active guest with that member id");
       if (seat.tier === tier) return { memberId, tier, unchanged: true };
       // The tier change is journaled as a MEMBER_ACCESS_CHANGED carrying

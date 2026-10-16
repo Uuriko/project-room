@@ -36,10 +36,15 @@ export const RAW_MEMBERS_INDEX_ENFORCED = [
   "server/access-requests.mjs",
   "server/access-review.mjs",
   "server/agent-connections.mjs",
+  "server/agent-invites.mjs",
   "server/agent-rooms.mjs",
+  "server/guest-invites.mjs",
   "server/invitation-evidence.mjs",
   "server/member-permission-requests.mjs",
+  "server/membership-delegation.mjs",
   "server/outside-agents.mjs",
+  "server/referral-invites.mjs",
+  "server/referrals.mjs",
   "server/room-lifecycle.mjs",
 ];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
