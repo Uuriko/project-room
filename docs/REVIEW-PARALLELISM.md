@@ -148,8 +148,7 @@ merge gate.
 - `npm run check` / `npm run lint` / the `test` workflow remain the quality
   gates. The mechanical pass aggregates and adds scope; it duplicates no
   test execution.
-- Branch protection and the lander rule (APPROVE on the exact head) are
-  untouched. This workflow is informational, never required.
+- Branch protection is untouched. This workflow is informational, never required.
 - Money-adjacent code paths (bounties, $DASHA, payouts) keep their existing
   review bar regardless of what the mechanical pass says.
 
