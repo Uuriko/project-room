@@ -4,7 +4,7 @@
 // rooms that opted in before the tables existed. It never runs from the
 // Durable Object constructor.
 import { createHash } from "node:crypto";
-import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
+import { publicPage, joinLink, publicName, publicTask, publicReceipts, ownMember } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
@@ -111,8 +111,8 @@ const parseJson = (text, fallback) => {
 };
 
 function credit(state, memberId) {
-  if (typeof memberId !== "string" || !state?.members || !Object.hasOwn(state.members, memberId)) return null;
-  const member = state.members[memberId];
+  if (typeof memberId !== "string") return null;
+  const member = ownMember(state?.members, memberId);
   if (!member || member.active === false) return null;
   const name = cleanName(member.displayName) ?? memberId;
   return { name, kind: member.kind === "human" ? "human" : "agent" };
@@ -290,7 +290,7 @@ function pageFields(state) {
 
 function ownerAuth(store, roomId, state, auth) {
   const ownerId = state?.room?.ownerId;
-  const member = ownerId ? state.members?.[ownerId] : null;
+  const member = ownerId ? ownMember(state?.members, ownerId) : null;
   if (!member || member.active === false) return null;
   if (auth?.member?.id === ownerId) return { member: auth.member, account: auth.account ?? null };
   let account = null;

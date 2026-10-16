@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId } from '../src/events.js';
+import { validId, ownMember } from '../src/events.js';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 
@@ -30,7 +30,7 @@ export class PublicWorkSuccessors {
     return true;
   }
   owner(roomId, ownerId) {
-    const state = this.store.projectOffers.requireOwner(roomId, ownerId), member = state.members[ownerId];
+    const state = this.store.projectOffers.requireOwner(roomId, ownerId), member = ownMember(state.members, ownerId);
     if (!member || member.active === false || isGuestAgentMemberId(ownerId)) fail(403, 'owner_only', 'Current non-guest room owner required');
     return state;
   }

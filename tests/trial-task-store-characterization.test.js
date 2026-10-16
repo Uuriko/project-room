@@ -218,3 +218,16 @@ test('create refuses prototype-named or identical parties', (t) => {
   assert.throws(() => create(store, { requestId: 'create-same', taskId: 'trial-same', candidateId: 'worker', buyerId: 'worker' }), { code: 'invalid_trial_party' });
   assert.throws(() => create(store, { requestId: 'create-ghost', taskId: 'trial-ghost', candidateId: 'never-added' }), { code: 'invalid_trial_party' });
 });
+
+test('railActor rejects prototype-named ids while real members pass (#3224 slice 4)', (t) => {
+  const store = fixture(t);
+  // members["toString"] on the plain room projection resolves
+  // Object.prototype.toString — a truthy phantom that raw indexing treated
+  // as an active member. Resolved through ownMember it is absent, so the
+  // rail gate must refuse it (trial-task-store.mjs railActor).
+  for (const phantom of ['toString', 'constructor', 'hasOwnProperty']) {
+    assert.throws(() => store.trialTasks.list('commons', phantom), { code: 'access_denied' });
+  }
+  // A real member still passes the same gate.
+  assert.deepEqual(store.trialTasks.list('commons', 'owner'), { tasks: [] });
+});

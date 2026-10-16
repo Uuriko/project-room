@@ -19,6 +19,7 @@
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
 import { randomBytes } from "node:crypto";
+import { ownMember } from "../src/events.js";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
@@ -49,7 +50,7 @@ const nowMs = () => Date.now();
 const newPublicCode = () => PUBLIC_CODE_PREFIX + randomBytes(24).toString("base64url");
 
 const handleOf = (state, memberId) => {
-  const member = state?.members?.[memberId];
+  const member = ownMember(state?.members, memberId);
   if (!member || member.active === false) return null;
   const name = typeof member.displayName === "string" ? member.displayName.trim() : "";
   return name || null;

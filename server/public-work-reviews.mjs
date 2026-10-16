@@ -1,4 +1,4 @@
-import { validId, roomPolicy } from '../src/events.js';
+import { validId, roomPolicy, ownMember } from '../src/events.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
@@ -18,7 +18,7 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_public_review', message); };
 const normalize = sql => sql?.trim().replace(/;$/, '').replace(/IF NOT EXISTS /g, '').replace(/\s+/g, ' ');
 const knownMember = (state, actorId) => {
-  const actor = state.members[actorId];
+  const actor = ownMember(state.members, actorId);
   if (!actor || actor.active === false || isGuestAgentMemberId(actorId)) fail(403, 'review_forbidden', 'Current non-guest room membership required');
   return actor;
 };
@@ -49,18 +49,18 @@ export class PublicWorkReviews {
     const receipt = JSON.parse(row.receipt_json), policy = roomPolicy(state);
     const fingerprint = canonicalJson({ receiptId, taskId: receipt.taskId, termsVersion: receipt.termsVersion,
       generation: receipt.generation, sha256: receipt.artifact.sha256, approvalPolicy: offer.approvalPolicy,
-      reviewers: offer.reviewerMemberIds, reviewerStanding: offer.reviewerMemberIds.map(id => { const member = state.members[id]; return { id, revision: member?.revision, kind: member?.kind, active: member?.active, permissions: member?.permissions }; }), policy, work: work ? { id: work.id, revision: work.revision,
+      reviewers: offer.reviewerMemberIds, reviewerStanding: offer.reviewerMemberIds.map(id => { const member = ownMember(state.members, id); return { id, revision: member?.revision, kind: member?.kind, active: member?.active, permissions: member?.permissions }; }), policy, work: work ? { id: work.id, revision: work.revision,
         accountableMemberId: work.accountableMemberId, verifierMemberId: work.verifierMemberId,
         humanDecisionMakerId: work.humanDecisionMakerId, independentVerificationRequired: work.independentVerificationRequired,
         ownerDecisionRequired: work.ownerDecisionRequired, state: work.state } : null });
     return { roomId, actorId, state, actor, receipt, offer, work, policy, fingerprint, task: { repositoryRef: row.repository_ref, files: JSON.parse(row.files_json) } };
   }
   selfReviewer(scope, actorId) {
-    return actorId === scope.receipt.identityId || scope.state.members[actorId]?.identityId === scope.receipt.identityId || Boolean(this.db.prepare('SELECT 1 FROM identity_links WHERE room_id=? AND member_id=? AND identity_id=?')
+    return actorId === scope.receipt.identityId || ownMember(scope.state.members, actorId)?.identityId === scope.receipt.identityId || Boolean(this.db.prepare('SELECT 1 FROM identity_links WHERE room_id=? AND member_id=? AND identity_id=?')
       .get(scope.roomId, actorId, scope.receipt.identityId));
   }
   permissions(scope, actorId) {
-    const actor = scope.state.members[actorId], mode = scope.offer.approvalPolicy.mode;
+    const actor = ownMember(scope.state.members, actorId), mode = scope.offer.approvalPolicy.mode;
     // Granted verify bits never widen the guest credential's fixed scope;
     // this also invalidates a historical guest PASS before a human decision.
     if (!actor || actor.active === false || isGuestAgentMemberId(actorId) || !scope.offer.reviewerMemberIds.includes(actorId) || this.selfReviewer(scope, actorId)) return { decide: false, verify: false };

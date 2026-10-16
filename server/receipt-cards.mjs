@@ -6,7 +6,7 @@
 // untouched while BF (#1331, #1345) is open; emitWorkClaimEvent calls
 // postReceiptCard instead.
 import { createHash } from "node:crypto";
-import { applyEvent, event, isRoomArchived } from "../src/events.js";
+import { applyEvent, event, isRoomArchived, ownMember } from "../src/events.js";
 import { syncMessageRows } from "./messages-store.mjs";
 
 export const ROOM_GUIDE_ID = "room-guide";
@@ -22,7 +22,7 @@ export function appendRoomEvent(store, roomId, { id, type, actorId, data, atMs }
     const room = store.room(roomId);
     if (isRoomArchived(room.state)) return null;
     if (store.db.prepare("SELECT 1 FROM events WHERE id=?").get(id)) return null;
-    const member = room.state.members?.[actorId];
+    const member = ownMember(room.state.members, actorId);
     const incoming = event({
       id,
       idempotencyKey: id,
@@ -59,9 +59,9 @@ export function postReceiptCard(store, roomId, item, atMs) {
   if (!["result", "merged", "production"].includes(item.deliveryMode)) return null;
   const room = store.room(roomId);
   const members = room.state.members ?? {};
-  const guide = members[ROOM_GUIDE_ID];
-  const closer = item.owner && members[item.owner]?.active !== false ? members[item.owner] : null;
-  const author = guide?.system === true && guide.active !== false ? guide : (closer ?? members[room.state.room.ownerId]);
+  const guide = ownMember(members, ROOM_GUIDE_ID);
+  const closer = item.owner && ownMember(members, item.owner)?.active !== false ? ownMember(members, item.owner) : null;
+  const author = guide?.system === true && guide.active !== false ? guide : (closer ?? ownMember(members, room.state.room.ownerId));
   if (!author) return null;
   const claimId = item.id;
   const title = typeof item.title === "string" && item.title.trim() ? item.title.trim() : claimId;

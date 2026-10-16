@@ -2,7 +2,7 @@ import { renderPublicContributionTerms } from '../src/contribution-brief.js';
 // Public offers are owner-authored opt-in terms, not room projection exports.
 // Money remains unconfigured; the independent valueless-credit ledger is unchanged.
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId, roomPolicy } from '../src/events.js';
+import { validId, roomPolicy, ownMember } from '../src/events.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
@@ -77,7 +77,7 @@ function validateReview(state, terms, links) {
   const reviewers = links.reviewerMemberIds;
   check(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.length <= 10, 'Reviewers required');
   check(reviewers.every(id => !isGuestAgentMemberId(id)), 'Guest passes cannot approve work; choose a durable reviewer');
-  const members = reviewers.map(id => state.members[identifier(id)]);
+  const members = reviewers.map(id => ownMember(state.members, identifier(id)));
   check(members.every(member => member && member.active !== false), 'Reviewers must be active room members');
   const mode = terms.approvalPolicy.mode;
   const human = members.some(member => member.kind === 'human' && member.permissions?.includes('decide'));
@@ -88,10 +88,10 @@ function validateReview(state, terms, links) {
   if (roomPolicy(state).requireOwnerDecision || work?.ownerDecisionRequired) {
     check(mode !== 'agent', 'Room or work policy requires a human decision');
     const decider = work?.humanDecisionMakerId ?? state.room.ownerId;
-    check(reviewers.includes(decider) && state.members[decider]?.kind === 'human' && state.members[decider]?.permissions?.includes('decide'), 'Include the designated human decision-maker');
+    check(reviewers.includes(decider) && ownMember(state.members, decider)?.kind === 'human' && ownMember(state.members, decider)?.permissions?.includes('decide'), 'Include the designated human decision-maker');
   }
   if (work?.verifierMemberId) {
-    const verifier = state.members[work.verifierMemberId];
+    const verifier = ownMember(state.members, work.verifierMemberId);
     check(reviewers.includes(work.verifierMemberId) && verifier?.permissions?.includes('verify'), 'Include the designated work verifier');
     check(!work.independentVerificationRequired || work.verifierMemberId !== work.accountableMemberId, 'Independent reviewer required');
     check(verifier.kind !== 'agent' || mode !== 'human', 'Linked work requires agent review');
