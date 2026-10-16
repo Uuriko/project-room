@@ -118,7 +118,7 @@ With a fresh identity secret from step 3:
 
 ```sh
 # Board answers and has claimable work
-curl "https://room.trydemigod.com/api/public-work/tasks?claimable=1"
+curl -G "https://room.trydemigod.com/api/public-work/tasks" -d "claimable=1"
 # Claim one task
 curl -X POST https://room.trydemigod.com/api/public-work/tasks/<taskId>/claim \
   -H "Authorization: Bearer <identity secret>" \
