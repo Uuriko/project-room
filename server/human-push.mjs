@@ -7,18 +7,25 @@
 // carry the sender, a lock-screen-safe preview of the message, and a deep
 // link back to it. Quiet hours suppress the push channel for the window the
 // member sets.
-import { isMutedBy } from "../src/events.js";
+import { isMutedBy, ownMember } from "../src/events.js";
 import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
-import { deliverToSubscriptions, normaliseSubscription, richPushPayloadFor } from "./push-subscriptions.mjs";
+import { deliverToSubscriptions, normaliseSubscription, pushPayloadFor, richPushPayloadFor } from "./push-subscriptions.mjs";
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
-// The two event kinds the push channel actually delivers. Preferences switch
-// each kind on or off for one member in one room; both are on by default, so
-// a member who never touches them gets exactly today's behavior.
-export const HUMAN_PUSH_PREF_KINDS = Object.freeze(["mention", "dm"]);
-export const HUMAN_PUSH_PREF_DEFAULTS = Object.freeze({ mention: true, dm: true });
+// The event kinds the push channel actually delivers. Preferences switch
+// each kind on or off for one member in one room; all are on by default, so
+// a member who never touches them gets exactly today's behavior for
+// mentions and DMs. `decision` (charter B-3 step 3) is the push class for
+// decision asks — access requests, verifications, owner decisions,
+// disputes: before it, human push carried mention|dm only (E63), so a
+// gate reached the owner only when they opened the room or someone
+// relayed it in chat. A decision push is counts-only, like the default
+// mention/dm payload: it names the room and how many decisions wait,
+// never what the ask contains.
+export const HUMAN_PUSH_PREF_KINDS = Object.freeze(["mention", "dm", "decision"]);
+export const HUMAN_PUSH_PREF_DEFAULTS = Object.freeze({ mention: true, dm: true, decision: true });
 const MAX_DEVICES = 8;
 const DECLARATIVE_LIMIT = 4096;
 
@@ -98,6 +105,7 @@ export const humanPushPrefsSchema = `
     member_id TEXT NOT NULL,
     mention_enabled INTEGER NOT NULL DEFAULT 1,
     dm_enabled INTEGER NOT NULL DEFAULT 1,
+    decision_enabled INTEGER NOT NULL DEFAULT 1,
     preview_enabled INTEGER NOT NULL DEFAULT 0,
     quiet_hours TEXT,
     updated_at INTEGER NOT NULL,
@@ -143,6 +151,23 @@ export class HumanPush {
     this.vapid = null;
     this.fetchImpl = null;
     this.inflight = new Set();
+    this._decisionColumnReady = false;
+  }
+
+  // Existing databases predate the decision push class. Converge the
+  // preferences table lazily, the same outcome store.mjs's boot block
+  // produces for preview_enabled/quiet_hours: old rows read decision as
+  // on (the class default) until the member touches the switch.
+  _ensureDecisionColumn() {
+    if (this._decisionColumnReady) return;
+    try {
+      const columns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
+      if (columns.size === 0) return; // table not created yet; schema for new DBs carries the column
+      if (!columns.has("decision_enabled")) {
+        this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN decision_enabled INTEGER NOT NULL DEFAULT 1");
+      }
+      this._decisionColumnReady = true;
+    } catch { /* a later read retries; _prefsFor fails closed meanwhile */ }
   }
 
   configure({ vapid = undefined, fetchImpl = undefined } = {}) {
@@ -190,13 +215,14 @@ export class HumanPush {
   // quiet_hours is stored as JSON text; a row that predates the column (or a
   // corrupt value) reads as no quiet hours rather than failing the send.
   _prefsFor(roomId, memberId) {
+    this._ensureDecisionColumn();
     let row = null;
     try {
       row = this.db.prepare(
-        "SELECT mention_enabled, dm_enabled, preview_enabled, quiet_hours FROM human_push_preferences WHERE room_id=? AND member_id=?"
+        "SELECT mention_enabled, dm_enabled, decision_enabled, preview_enabled, quiet_hours FROM human_push_preferences WHERE room_id=? AND member_id=?"
       ).get(roomId, memberId);
     } catch {
-      return { mention: false, dm: false, preview: false, quietHours: null };
+      return { mention: false, dm: false, decision: false, preview: false, quietHours: null };
     }
     if (!row) return { ...HUMAN_PUSH_PREF_DEFAULTS, preview: false, quietHours: null };
     let quietHours = null;
@@ -209,6 +235,9 @@ export class HumanPush {
     return {
       mention: row.mention_enabled !== 0,
       dm: row.dm_enabled !== 0,
+      // A row read before the column converged has no decision_enabled;
+      // undefined reads as the class default (on), never as off.
+      decision: row.decision_enabled !== 0,
       preview: row.preview_enabled !== 0,
       quietHours
     };
@@ -225,14 +254,14 @@ export class HumanPush {
   // not configured; delivery stays dark until VAPID keys exist.
   setPreferences(token, roomId, data, binding = null) {
     if (!data || typeof data !== "object" || Array.isArray(data) || !exactKeys(data, ["preferences"]))
-      fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm, preview, quietHours } }");
+      fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm, decision, preview, quietHours } }");
     const prefs = data.preferences;
-    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm, preview, quietHours } }");
+    if (!prefs || typeof prefs !== "object" || Array.isArray(prefs)) fail(422, "invalid_human_push_preferences", "Send { preferences: { mention, dm, decision, preview, quietHours } }");
     const fields = Object.keys(prefs);
     const BOOLEAN_FIELDS = [...HUMAN_PUSH_PREF_KINDS, "preview"];
     if (fields.length === 0 || fields.some(field => !BOOLEAN_FIELDS.includes(field) && field !== "quietHours")
       || fields.some(field => BOOLEAN_FIELDS.includes(field) && typeof prefs[field] !== "boolean"))
-      fail(422, "invalid_human_push_preferences", "preferences holds mention, dm, preview (each true or false) and/or quietHours ({ start, end, tz } or null)");
+      fail(422, "invalid_human_push_preferences", "preferences holds mention, dm, decision, preview (each true or false) and/or quietHours ({ start, end, tz } or null)");
     let quietHours = null;
     let quietHoursTouched = false;
     if (Object.hasOwn(prefs, "quietHours")) {
@@ -253,19 +282,22 @@ export class HumanPush {
     const next = {
       mention: fields.includes("mention") ? prefs.mention : current.mention,
       dm: fields.includes("dm") ? prefs.dm : current.dm,
+      decision: fields.includes("decision") ? prefs.decision : current.decision,
       preview: fields.includes("preview") ? prefs.preview : current.preview,
       quietHours: quietHoursTouched ? quietHours : current.quietHours
     };
+    this._ensureDecisionColumn();
     this.db.prepare(`INSERT INTO human_push_preferences
-      (room_id, member_id, mention_enabled, dm_enabled, preview_enabled, quiet_hours, updated_at)
-      VALUES (?,?,?,?,?,?,?)
+      (room_id, member_id, mention_enabled, dm_enabled, decision_enabled, preview_enabled, quiet_hours, updated_at)
+      VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(room_id, member_id) DO UPDATE SET
         mention_enabled=excluded.mention_enabled,
         dm_enabled=excluded.dm_enabled,
+        decision_enabled=excluded.decision_enabled,
         preview_enabled=excluded.preview_enabled,
         quiet_hours=excluded.quiet_hours,
         updated_at=excluded.updated_at`
-    ).run(roomId, memberId, next.mention ? 1 : 0, next.dm ? 1 : 0, next.preview ? 1 : 0,
+    ).run(roomId, memberId, next.mention ? 1 : 0, next.dm ? 1 : 0, next.decision ? 1 : 0, next.preview ? 1 : 0,
       next.quietHours ? JSON.stringify(next.quietHours) : null, this.store.now());
     return Object.freeze({ roomId, preferences: next, configured: Boolean(this.vapid), ...this._viewer(auth) });
   }
@@ -412,6 +444,60 @@ export class HumanPush {
       }
     } catch {
       // The push path never fails the post.
+    }
+  }
+
+  // The decision push class (charter B-3 step 3). Called by the
+  // escalation path (attention-aging job / owner-alert engine) when a
+  // decision ask needs a human who is not looking at the room. Counts
+  // only, always: the payload says how many decisions wait in the room,
+  // never what any ask contains, and preview preferences do not widen
+  // it — a gate's content is released only inside the room, after
+  // re-authentication, exactly like a mention's. Fire-and-forget: a
+  // push failure never fails the caller. Returns how many subscription
+  // sends were started (0 when suppressed for any reason).
+  notifyDecision({ roomId, state, memberId, count = 1, confirm = null } = {}) {
+    try {
+      if (!this.vapid) return { sent: 0 };
+      const member = ownMember(state?.members, memberId);
+      if (!member || member.kind !== "human" || member.active === false) return { sent: 0 };
+      const prefs = this._prefsFor(roomId, memberId);
+      if (!prefs.decision) return { sent: 0 };
+      if (prefs.quietHours && isQuietAt(prefs.quietHours, this.store.now())) return { sent: 0 };
+      const subscriptions = this._rows(roomId, memberId);
+      if (subscriptions.length === 0) return { sent: 0 };
+      const waiting = Number.isInteger(count) && count > 0 ? count : 1;
+      const payload = declarativePushPayload(pushPayloadFor({
+        roomId,
+        unread: waiting,
+        notifications: Array.from({ length: waiting }, () => ({ kind: "decision" }))
+      }), { enabled: declarativePushEnabled() });
+      const stillVisible = endpoint => {
+        // A caller filing the ask inside a transaction passes confirm():
+        // if that transaction rolled back, the ask does not exist and the
+        // push must not fire (the notifyPosted event-visibility rule).
+        if (typeof confirm === "function" && !confirm()) return false;
+        const current = this.store.room(roomId).state;
+        const who = ownMember(current.members, memberId);
+        const now = this._prefsFor(roomId, memberId);
+        return now.decision && who?.kind === "human" && who.active !== false
+          && this._rows(roomId, memberId).some(row => row.endpoint === endpoint);
+      };
+      const pending = Promise.resolve().then(() => deliverToSubscriptions({
+        subscriptions,
+        payload,
+        vapid: this.vapid,
+        fetchImpl: (url, init) => {
+          checkEndpoint(url);
+          if (!stillVisible(url)) throw new Error("Push no longer authorized");
+          return (this.fetchImpl ?? globalThis.fetch)(url, { ...init, redirect: "error" });
+        }
+      })).then(result => this._retire(result.retire)).catch(() => {});
+      this.inflight.add(pending);
+      void pending.finally(() => this.inflight.delete(pending));
+      return { sent: subscriptions.length };
+    } catch {
+      return { sent: 0 };
     }
   }
 
