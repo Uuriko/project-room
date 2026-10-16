@@ -225,8 +225,9 @@ const hostView = (row, cadenceSeconds = null) => Object.freeze({
   agentId: row.agent_id, hostId: row.host_id, mode: row.mode,
   wakeUrl: row.wake_url, lastSeenAt: row.last_seen_at,
   createdAt: row.created_at, updatedAt: row.updated_at,
-  // RC-2026-09-24-203: the host's declared poll cadence (null when the host
-  // never declared one); drives the per-host reachability window.
+  // RC-2026-09-24-203: the host's declared poll cadence (null when none
+  // is in effect — never declared, or cleared by an explicit null);
+  // drives the per-host reachability window.
   cadenceSeconds,
 });
 // work-claim:{id}:{reason}:… is the claim wake id. Poll and heartbeat
@@ -502,7 +503,16 @@ export class AgentHeartbeats {
   // counters, which re-arms a suspended subscription); a body without it
   // leaves the existing subscription untouched, so old heartbeat bodies
   // keep working unchanged.
-  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
+  //
+  // Cadence is sticky (rotation review P5-F2): cadenceSeconds defaults to
+  // undefined, and omission is distinct from an explicit null. Omitting
+  // the field preserves the stored declaration; a number replaces it;
+  // only an explicit null clears it (back to the 180s default window).
+  // The old shape defaulted to null, so any bare heartbeat silently
+  // erased a declared cadence — collapsing the presence window, and
+  // with #3592 the wakeability window too — for a host that had
+  // declared its cadence once and then heartbeated bare.
+  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
     checkAgentId(agentId);
     checkHostId(hostId);
     check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
@@ -542,12 +552,19 @@ export class AgentHeartbeats {
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
+    // Cadence is sticky (see the heartbeat() header): an omitted
+    // cadenceSeconds resolves to the stored declaration before the
+    // upsert, so the upsert itself always writes the effective value.
+    const cadence = cadenceSeconds === undefined
+      ? this.db.prepare("SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+          .get(agentId, hostId)?.cadenceSeconds ?? null
+      : cadenceSeconds;
     this.db.prepare(`INSERT INTO agent_push_configs
       (agent_id, host_id, cadence_seconds, updated_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(agent_id, host_id) DO UPDATE SET
         cadence_seconds=excluded.cadence_seconds, updated_at=excluded.updated_at`)
-      .run(agentId, hostId, cadenceSeconds ?? null, at);
+      .run(agentId, hostId, cadence, at);
     if (push) {
       this.db.prepare(`UPDATE agent_push_configs
         SET push_url=?, push_token=?, push_auth_json=?, push_failures=0, push_suspended=0, updated_at=?
@@ -555,7 +572,6 @@ export class AgentHeartbeats {
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
     if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
-    const cadence = cadenceSeconds ?? null;
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
     const pushRow = this.db.prepare(
