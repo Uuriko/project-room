@@ -331,6 +331,18 @@ function archivePersonalRoom(store, room) {
     store.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(sequence, room.id);
   }
   rebuildRoom(store, room.id);
+  // #3601: the public footprint is publication state, not room content, and
+  // no step above touches it: the room's public_receipts rows and its
+  // public_rooms page row would otherwise stay live (feed, gallery, receipt
+  // pages, proof page, sitemap) forever. A normal archive leaves them
+  // because the living owner can still toggle them off; after deletion the
+  // owner account is deactivated, so nobody can. Tear publication down to
+  // the same end state as the owner disabling both public toggles. Feeds
+  // and the sitemap derive from these tables, so they follow.
+  if (tableExists(store.db, "public_receipts"))
+    store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=?").run(room.id);
+  if (tableExists(store.db, "public_rooms"))
+    store.db.prepare("DELETE FROM public_rooms WHERE slug=?").run(room.id);
   return removed;
 }
 

@@ -234,3 +234,37 @@ test("account deletion also purges archived message rows that are no longer in t
   assert.ok(rows.length > 0);
   for (const row of rows) assert.equal(`${row.body}${row.record_json}`.includes(SECRET), false, `${row.message_id} keeps no secret text`);
 });
+
+test("#3601: account deletion tears down a solely owned room's public footprint", async t => {
+  const ctx = await deletionAccount(t, 7);
+  const roomId = "solo-public";
+  const { key } = createRoom(ctx, roomId, "personal", "Solo public");
+  ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.ROOM_PUBLIC_RECEIPTS_SET, data: { enabled: true } });
+  ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.ROOM_PUBLIC_PAGE_SET, data: { enabled: true } });
+  // The projection rows a settled, opted-in room carries in production.
+  const receiptId = `wcr_${"ab".repeat(16)}`;
+  const db = ctx.f.store.db;
+  db.prepare(`INSERT INTO public_receipts (id,title,source,origin_room_id,room_id,room_title,agents_json,humans_json,pull_request,merged_at,hashes_json,at,start_href)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(receiptId, "Published solo work", "work-claim", roomId, roomId, "Solo public", "[]", "[]", null, null, "[]", "2026-10-10T00:00:00.000Z", "https://room.trydemigod.com/?start=room");
+  db.prepare(`INSERT OR REPLACE INTO public_rooms (slug,title,purpose,humans,agents,names_json,tasks_json,members_json,receipts_enabled,join_mode,join_token,owner_member_id,set_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(roomId, "Solo public", "Account deletion coverage", 1, 0, "[]", "[]", "[]", 1, "request", null, "owner", "2026-10-10T00:00:00.000Z", "2026-10-10T00:00:00.000Z");
+
+  // Sanity: the footprint is live before deletion.
+  assert.equal((await get(ctx.origin, `/receipts/${receiptId}`)).status, 200);
+  assert.equal((await get(ctx.origin, `/r/${roomId}`)).status, 200);
+
+  const planned = await (await get(ctx.origin, "/api/account/deletion/plan", ctx.creds.cookie)).json();
+  const res = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: planned.confirmationToken }, ctx.creds);
+  assert.equal(res.status, 200, await res.clone().text());
+
+  // The room is archived (existing behavior) AND its publication is gone:
+  // no user remains who could toggle it off, so deletion must not strand it.
+  assert.equal(db.prepare("SELECT count(*) AS n FROM public_receipts WHERE origin_room_id=?").get(roomId).n, 0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM public_rooms WHERE slug=?").get(roomId).n, 0);
+  assert.equal((await get(ctx.origin, `/receipts/${receiptId}`)).status, 404);
+  assert.equal((await get(ctx.origin, `/r/${roomId}`)).status, 404);
+  const feed = await (await get(ctx.origin, "/api/public/receipts")).json();
+  assert.ok(!JSON.stringify(feed).includes(receiptId));
+  const sitemap = await (await get(ctx.origin, "/sitemap.xml")).text();
+  assert.ok(!sitemap.includes(receiptId));
+});
