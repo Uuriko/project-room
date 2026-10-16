@@ -228,7 +228,10 @@ test("same-millisecond prejoin history stays private beyond500 intervening event
 // join event for the member id, not the first-ever one.
 test("a removed-then-reactivated guest reads nothing from the removal gap", () => {
   const db = new DatabaseSync(":memory:");
-  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  db.exec(`CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT,
+    ev_type TEXT GENERATED ALWAYS AS (json_extract(body, '$.type')) VIRTUAL,
+    ev_at TEXT GENERATED ALWAYS AS (json_extract(body, '$.at')) VIRTUAL,
+    ev_member_id TEXT GENERATED ALWAYS AS (json_extract(body, '$.data.memberId')) VIRTUAL)`); // v39 shape: readHistoryFloor reads the generated columns
   const at = s => `2026-10-06T12:${s}:00.000Z`;
   const rows = [
     [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "gap-agent" } }],
@@ -259,7 +262,10 @@ test("a removed-then-reactivated guest reads nothing from the removal gap", () =
 // permission edit while already active must not move it.
 test("a guest reactivated through member.access_changed gets a new floor", () => {
   const db = new DatabaseSync(":memory:");
-  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  db.exec(`CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT,
+    ev_type TEXT GENERATED ALWAYS AS (json_extract(body, '$.type')) VIRTUAL,
+    ev_at TEXT GENERATED ALWAYS AS (json_extract(body, '$.at')) VIRTUAL,
+    ev_member_id TEXT GENERATED ALWAYS AS (json_extract(body, '$.data.memberId')) VIRTUAL)`); // v39 shape: readHistoryFloor reads the generated columns
   const at = s => `2026-10-06T12:${s}:00.000Z`;
   const rows = [
     [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "g" } }],
@@ -284,7 +290,10 @@ test("a guest reactivated through member.access_changed gets a new floor", () =>
 
 test("a permission-only member.access_changed (no active field) does not move the floor", () => {
   const db = new DatabaseSync(":memory:");
-  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  db.exec(`CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT,
+    ev_type TEXT GENERATED ALWAYS AS (json_extract(body, '$.type')) VIRTUAL,
+    ev_at TEXT GENERATED ALWAYS AS (json_extract(body, '$.at')) VIRTUAL,
+    ev_member_id TEXT GENERATED ALWAYS AS (json_extract(body, '$.data.memberId')) VIRTUAL)`); // v39 shape: readHistoryFloor reads the generated columns
   const at = s => `2026-10-06T12:${s}:00.000Z`;
   const rows = [
     [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "g" } }],

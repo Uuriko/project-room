@@ -374,11 +374,12 @@ function collectRoomExceptions(store, roomId, base, state, nowMs, windowStart, e
   // displayed: the SESSION_STOPPED source omits it (known defect, spec
   // §1) — the drill goes to the session ledger instead.
   const sinceIso = iso(windowStart);
+  // INDEXED BY pins the v39 type/at index (see usage-summary.mjs).
   const sessionRows = store.db.prepare(
-    `SELECT json_extract(body,'$.type') AS type, json_extract(body,'$.data.workItemId') AS workItemId,
-            json_extract(body,'$.data.budgetEnforced') AS budgetEnforced, json_extract(body,'$.at') AS at
-     FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('session.started','session.status_changed','session.stopped')
-       AND json_extract(body,'$.at')>=? ORDER BY sequence`
+    `SELECT ev_type AS type, ev_work_item_id AS workItemId,
+            json_extract(body,'$.data.budgetEnforced') AS budgetEnforced, ev_at AS at
+     FROM events INDEXED BY events_room_type_at WHERE room_id=? AND ev_type IN ('session.started','session.status_changed','session.stopped')
+       AND ev_at>=? ORDER BY sequence`
   ).all(roomId, sinceIso);
   const workItems = state.workItems ?? {};
   const budgetStops = new Map(); // workItemId -> earliest stop ms

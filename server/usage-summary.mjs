@@ -84,10 +84,13 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
     const agents = active.filter(member => member.kind === "agent" && member.system !== true).length;
     const agentIdentities = store.db.prepare("SELECT count(DISTINCT identity_id) AS n FROM identity_links WHERE room_id=?").get(roomId).n;
     const projectionBytes = store.db.prepare("SELECT length(CAST(projection AS BLOB)) AS bytes FROM rooms WHERE id=?").get(roomId)?.bytes ?? 0;
+    // INDEXED BY pins the v39 type/at index: without it the planner picks
+    // the (room_id, sequence) primary key to satisfy ORDER BY sequence and
+    // parses every body in the room to compute the generated columns.
     const rows = store.db.prepare(
-      `SELECT json_extract(body,'$.type') AS type, json_extract(body,'$.data.workItemId') AS workItemId,
+      `SELECT ev_type AS type, ev_work_item_id AS workItemId,
               json_extract(body,'$.data.spendCents') AS spendCents, json_extract(body,'$.data.budgetEnforced') AS budgetEnforced
-       FROM events WHERE room_id=? AND json_extract(body,'$.type') IN (?,?,?) AND json_extract(body,'$.at')>=? ORDER BY sequence`
+       FROM events INDEXED BY events_room_type_at WHERE room_id=? AND ev_type IN (?,?,?) AND ev_at>=? ORDER BY sequence`
     ).all(roomId, SESSION_EVENT_TYPES.STARTED, SESSION_EVENT_TYPES.STATUS_CHANGED, SESSION_EVENT_TYPES.STOPPED, since);
     const folded = foldSessionEvents(rows);
     return {

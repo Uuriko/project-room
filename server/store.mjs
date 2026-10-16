@@ -1104,7 +1104,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, EVENT_INDEX_SCHEMA, EVENT_GENERATED_COLUMNS.map(([name, expression]) => `${name}=${expression}`).join(";"), MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1165,6 +1165,56 @@ const LOOKUP_INDEXES = `
   CREATE INDEX IF NOT EXISTS gmail_pending_account ON gmail_pending(account_id);
   CREATE INDEX IF NOT EXISTS guest_selfserve_idem_member ON guest_selfserve_idem(member_id);
 `;
+
+// PERF-10X L1 (schema v39): named VIRTUAL generated columns over the hot
+// event-body fields, with ordinary indexes. Named columns are drift-proof
+// (an expression index silently stops applying when query text drifts;
+// a column name does not), and VIRTUAL columns cost no row bytes. The
+// expressions are plain json_extract over `body`, so they stay valid if
+// bodies are ever stored as JSONB (json_extract accepts both) — a future
+// JSONB conversion does not invalidate these indexes. `body` stays JSON
+// text in this migration; only the extraction is promoted.
+// Added per table: events gains 7 columns (4 -> 11), far under the DO SQL
+// 100-column cap. Export/restore enumerate columns via PRAGMA table_info,
+// which excludes generated columns, so backups keep carrying bodies only
+// and restores recompute the columns from them.
+export const EVENT_GENERATED_COLUMNS = Object.freeze([
+  ["ev_type", "json_extract(body, '$.type')"],
+  ["ev_actor_id", "json_extract(body, '$.actorId')"],
+  ["ev_at", "json_extract(body, '$.at')"],
+  ["ev_work_item_id", "json_extract(body, '$.data.workItemId')"],
+  ["ev_message_id", "json_extract(body, '$.data.messageId')"],
+  ["ev_member_id", "json_extract(body, '$.data.memberId')"],
+  ["ev_to_member_id", "json_extract(body, '$.data.toMemberId')"]
+]);
+
+// The type index is unconditional from v39 (it was previously created
+// lazily by the provenance repair, in expression form). The migration
+// drops the legacy expression index before running this: CREATE INDEX
+// IF NOT EXISTS would otherwise keep the old definition under the name.
+export const EVENT_INDEX_SCHEMA = `
+  CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, ev_type, sequence);
+  CREATE INDEX IF NOT EXISTS events_room_type_member ON events(room_id, ev_type, ev_member_id, sequence);
+  CREATE INDEX IF NOT EXISTS events_room_work_item ON events(room_id, ev_work_item_id, sequence);
+  CREATE INDEX IF NOT EXISTS events_room_actor ON events(room_id, ev_actor_id, ev_at, sequence);
+  CREATE INDEX IF NOT EXISTS events_room_type_at ON events(room_id, ev_type, ev_at, sequence);
+  CREATE INDEX IF NOT EXISTS events_room_type_to_member ON events(room_id, ev_type, ev_to_member_id, sequence);
+  CREATE INDEX IF NOT EXISTS events_room_message ON events(room_id, ev_message_id, sequence);
+`;
+
+// Converge the events table to the v39 shape: add any missing generated
+// column, replace the legacy expression type index, and create the named
+// indexes. Idempotent; runs inside the schema pass, whose stamp hashes
+// EVENT_INDEX_SCHEMA + the column list, so a warm wake skips it.
+function migrateEventIndexColumnsV39(db) {
+  const present = new Set(db.prepare("SELECT name FROM pragma_table_xinfo('events')").all().map(row => row.name));
+  for (const [name, expression] of EVENT_GENERATED_COLUMNS) {
+    if (!present.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} TEXT GENERATED ALWAYS AS (${expression}) VIRTUAL`);
+  }
+  const typeIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='events_room_type'").get();
+  if (typeIndex?.sql && typeIndex.sql.includes("json_extract")) db.exec("DROP INDEX events_room_type");
+  db.exec(EVENT_INDEX_SCHEMA);
+}
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
@@ -1836,6 +1886,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
       }
+      // PERF-10X L1 (v39): VIRTUAL generated columns over the hot event
+      // fields + named indexes (see EVENT_GENERATED_COLUMNS). Purely
+      // additive — no body is rewritten and no data moves; existing rows
+      // compute the columns on read. Runs for fresh databases too (the
+      // v0 block above creates events in the pre-v39 shape).
+      migrateEventIndexColumnsV39(this.db);
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
       this.db.exec(WANTS_WORK_SCHEMA);
@@ -2581,12 +2637,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
       }
       const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+        `SELECT ev_actor_id AS actor, max(ev_at) AS at
          FROM events WHERE room_id=? GROUP BY actor`
       ).all(roomId).filter(row => row.actor).map(row => [row.actor, asMs(row.at)]));
       const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+        `SELECT ev_member_id AS member, MIN(ev_at) AS at
+         FROM events WHERE room_id=? AND ev_type='member.added' GROUP BY member`
       ).all(roomId).filter(row => row.member).map(row => [row.member, asMs(row.at)]));
       const stale = [];
       for (const [memberId, member] of Object.entries(members)) {
@@ -2654,9 +2710,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // --- end PRIV-2 ---
   ensureEventTypeIndex() {
-    // Additive. Expression indexes do not fire writer triggers. Durable Object
+    // Additive. Indexes do not fire writer triggers. Durable Object
     // SQL rejects SAVEPOINT, so this runs inside the open transaction itself.
-    this.db.exec("CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
+    // From v39 the index is over the generated ev_type column. A database
+    // whose v39 migration has not run yet (the provenance repair runs
+    // before it in the open sequence) has no such column, so fall back to
+    // the legacy expression form under the same name; the migration then
+    // drops and recreates it in column form.
+    const hasColumn = this.db.prepare("SELECT 1 FROM pragma_table_xinfo('events') WHERE name='ev_type'").get();
+    this.db.exec(hasColumn
+      ? "CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, ev_type, sequence)"
+      : "CREATE INDEX IF NOT EXISTS events_room_type ON events(room_id, json_extract(body, '$.type'))");
   }
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
@@ -2720,7 +2784,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   replayProvenance(rooms, { upgradeV1 }) {
     const placeholders = PROVENANCE_EVENT_TYPES.map(() => "?").join(",");
-    const findEvents = this.db.prepare(`SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type') IN (${placeholders}) ORDER BY sequence`);
+    // The provenance repair runs before the v39 migration in the open
+    // sequence, so a pre-v39 database has no ev_type column yet: fall back
+    // to the json_extract form there (same pattern as ensureEventTypeIndex).
+    const typePredicate = this.db.prepare("SELECT 1 FROM pragma_table_xinfo('events') WHERE name='ev_type'").get()
+      ? "ev_type" : "json_extract(body, '$.type')";
+    const findEvents = this.db.prepare(`SELECT body FROM events WHERE room_id=? AND ${typePredicate} IN (${placeholders}) ORDER BY sequence`);
     const saveCheckpoint = this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)");
     const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
     const slicesOf = this.db.prepare(`SELECT json_extract(projection, '$.room') AS room, json_extract(projection, '$.channels') AS channels, json_extract(projection, '$.workItems') AS workItems FROM rooms WHERE id=?`);
@@ -3481,7 +3550,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Inactive, and the last deactivation was the member's own act.
   memberSelfLeft(roomId, memberId, state) {
     if (state.members[memberId]?.active !== false) return false;
-    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.memberId')=? ORDER BY sequence DESC LIMIT 1")
+    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND ev_type=? AND ev_member_id=? ORDER BY sequence DESC LIMIT 1")
       .get(roomId, T.MEMBER_ACCESS_CHANGED, memberId);
     const lastEvent = last ? JSON.parse(last.body) : null;
     return Boolean(lastEvent) && lastEvent.data?.active === false && lastEvent.actorId === memberId;
@@ -4036,7 +4105,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const item = room.state.workItems[workItemId];
       if (!item) fail(404, "work_not_found", "Choose an existing work item");
       if (since !== null && (!Number.isSafeInteger(since) || since < 0 || since > item.revision)) fail(422, "invalid_history_basis", "Choose a revision this work item has reached");
-      const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.workItemId')=? ORDER BY sequence").all(roomId, workItemId);
+      const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? AND ev_work_item_id=? ORDER BY sequence").all(roomId, workItemId);
       const changes = workItemChanges(rows.map(row => JSON.parse(row.body)));
       return { historyVersion: 1, workItemId, revision: item.revision,
         changes: since === null ? changes : changes.filter(change => change.revision > since) };
@@ -4273,12 +4342,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
       }
       const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+        `SELECT ev_actor_id AS actor, max(ev_at) AS at
          FROM events WHERE room_id=? GROUP BY actor`
       ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
       const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+        `SELECT ev_member_id AS member, MIN(ev_at) AS at
+         FROM events WHERE room_id=? AND ev_type='member.added' GROUP BY member`
       ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
       const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
@@ -4764,7 +4833,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
         `SELECT sequence, body FROM events WHERE room_id=?
-         AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
+         AND ev_type=? AND ev_to_member_id=?
          ORDER BY sequence DESC LIMIT ?`)
         .all(roomId, T.MESSAGE_POSTED, memberId, limit)
         .map(row => {

@@ -192,8 +192,8 @@ function roomDmsOf(store, roomId, memberId, after, state) {
   while (items.length <= MAX_PER_KIND) {
     const rows = store.db.prepare(
       `SELECT sequence, body FROM events
-       WHERE room_id=? AND sequence>? AND json_extract(body,'$.type')='message.posted'
-         AND json_extract(body,'$.data.toMemberId')=?
+       WHERE room_id=? AND sequence>? AND ev_type='message.posted'
+         AND ev_to_member_id=?
        ORDER BY sequence ASC LIMIT ?`
     ).all(roomId, cursor, memberId, MAX_PER_KIND + 1);
     if (!rows.length) break;

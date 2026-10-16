@@ -543,7 +543,7 @@ export class ShareLinks {
   // stays out: the link is not a way around a removal.
   reactivateSelfLeft(row, memberId, auth, redemptionId) {
     const room = this.store.room(row.room_id), member = room.state.members[memberId];
-    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.memberId')=? ORDER BY sequence DESC LIMIT 1")
+    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND ev_type=? AND ev_member_id=? ORDER BY sequence DESC LIMIT 1")
       .get(row.room_id, T.MEMBER_ACCESS_CHANGED, memberId);
     const lastEvent = last ? JSON.parse(last.body) : null;
     if (!lastEvent || lastEvent.data?.active !== false || lastEvent.actorId !== memberId) {

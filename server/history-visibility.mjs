@@ -43,10 +43,10 @@ export function historyFloor(db, state, roomId, memberId, headSequence = null) {
   // floor is the member's most recent move from absent-or-inactive to active,
   // whichever event made it; role/permission edits while active do not move it.
   const rows = db.prepare(
-    `SELECT sequence, json_extract(body,'$.at') AS at, json_extract(body,'$.type') AS type,
+    `SELECT sequence, ev_at AS at, ev_type AS type,
             json_extract(body,'$.data.active') AS active FROM events
-     WHERE room_id=? AND json_extract(body,'$.type') IN (${[...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED].map(() => "?").join(",")})
-       AND json_extract(body,'$.data.memberId')=?
+     WHERE room_id=? AND ev_type IN (${[...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED].map(() => "?").join(",")})
+       AND ev_member_id=?
      ORDER BY sequence`
   ).all(roomId, ...JOIN_TYPES, T.MEMBER_ACCESS_CHANGED, memberId);
   let row = null, active = false;

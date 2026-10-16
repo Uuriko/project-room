@@ -149,11 +149,11 @@ for (const [version, baseline] of [[8, v8ConnectionBaseline], [9, v9TextBaseline
   assert.deepEqual(auditRecovery(current).tables.filter(comparable), before.tables.filter(comparable));
   assert.deepEqual(current.email.verify(), version >= 18 ? { connections: 1, folders: 1, sources: 1 } : { connections: 0, folders: 0, sources: 0 });
   assert.equal(current.authenticate(f.keys.agent).member.id, "agent");
-  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v38|unsupported database writer/);
+  assert.throws(() => cached.run(f.owner.session.account.id), /project_room_writer_v39|unsupported database writer/);
   assert.throws(() => new OldStore(f.filename), /newer than this service/);
   current.createAccount("after-v36-upgrade");
   assert.equal(current.account("after-v36-upgrade").active, true);
-  assert.equal(auditRecovery(current).schemaVersion, 38);
+  assert.equal(auditRecovery(current).schemaVersion, 39);
   if (version >= 21) {
     f.replyRequests.forEach((request, index) => assert.deepEqual(current.inbox.reply(f.owner.token, request, f.owner.session.sessionBinding).receipt, f.replyReceipts[index]));
     const attempt = current.inbox.replyAttempts(f.owner.token, f.emailEnvelope.sourceId, f.owner.session.sessionBinding).attempts[0];
@@ -247,6 +247,17 @@ test("genuine v11 legacy request-like fields stay ordinary, while reserved marke
         try {
           assert.equal(Object.hasOwn(current.room("commons").state, "replyRequests"), false);
           for (const [table, rows] of Object.entries(before.tables)) {
+            if (table === "events") {
+              // v39 adds generated columns to events; they are a pure
+              // function of body, which is compared here, so strip them.
+              const stripDerived = row => {
+                const stripped = Object.assign(Object.create(null), row);
+                for (const column of ["ev_type", "ev_actor_id", "ev_at", "ev_work_item_id", "ev_message_id", "ev_member_id", "ev_to_member_id"]) delete stripped[column];
+                return stripped;
+              };
+              assert.deepEqual(records().tables.events.map(stripDerived), rows);
+              continue;
+            }
             if (table !== "rooms") { assert.deepEqual(records().tables[table], rows); continue; }
             // v28 adds rooms.archived_at, null for every pre-v28 room; every other column is unchanged.
             const after = records().tables.rooms.map(({ archived_at, ...rest }, index) => {
