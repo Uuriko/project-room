@@ -123,7 +123,12 @@ test("online capture preserves all application tables, identity boundaries and e
     assert.deepEqual(recovered.projectOffers.ownerList("commons", "owner"), offerRecords);
     assert.deepEqual(recovered.publicWorkClaims.act("public-recovery", publicIdentity.secret, "claim", publicClaimInput), publicClaimed);
     assert.deepEqual(recovered.publicWorkClaims.act("public-recovery", publicIdentity.secret, "finish", publicFinishInput), publicFinished);
-    assert.deepEqual(recovered.publicWorkClaims.receipt(publicFinished.receipt.receiptId), publicFinished.receipt);
+    // #3546: the seed's verify PASS + acceptance stamped the receipt's
+    // verified successor state before capture, so the restored receipt is
+    // compared to the original store's current receipt — capture fidelity
+    // is byte-exactness against the live record, not the finish-time
+    // snapshot (which the finish replay above already pins).
+    assert.deepEqual(recovered.publicWorkClaims.receipt(publicFinished.receipt.receiptId), f.store.publicWorkClaims.receipt(publicFinished.receipt.receiptId));
     assert.deepEqual(recovered.publicWorkClaims.artifact(publicFinished.receipt.receiptId), publicArtifact);
     assert.deepEqual(recovered.publicWorkReviews.verify("commons", "reply-reviewer", publicFinished.receipt.receiptId, publicVerifyInput), publicVerified);
     assert.deepEqual(recovered.publicWorkReviews.decide("commons", "owner", publicFinished.receipt.receiptId, publicReviewInput), publicReviewed);

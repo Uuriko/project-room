@@ -478,6 +478,15 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     ci: existing?.ci ?? null,
     reviews: reviewsMerged,
     readingAcks: existing?.readingAcks ?? {},
+    // #3547 kernel fields: the canonical claim row carries them (workOf's
+    // output shape; the registry codec defaults missing ones to []/null),
+    // so a mapped row that omits them never equals its stored form and the
+    // board diff never converges. The work item cannot express a delivery
+    // bundle or the kernel's verification record, and its criteria live
+    // on the claim, so an existing row's values are preserved verbatim.
+    acceptanceCriteria: Array.isArray(existing?.acceptanceCriteria) ? [...existing.acceptanceCriteria] : [],
+    delivery: existing?.delivery ?? null,
+    verification: existing?.verification ?? null,
   };
   if (historyOmitted > 0) row.historyOmitted = historyOmitted;
   if (existing?.deploy !== undefined && existing?.deploy !== null) row.deploy = existing.deploy;
@@ -567,6 +576,9 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     ci: null,
     reviews: [],
     readingAcks: {},
+    acceptanceCriteria: [],
+    delivery: null,
+    verification: null,
   };
 }
 

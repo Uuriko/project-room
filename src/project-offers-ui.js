@@ -109,17 +109,26 @@ async function loadContribution(offer, flight) {
   try {
     const task = await read(`/api/public-work/tasks/${encodeURIComponent(offer.id)}`, flight.signal);
     if (!current()) return;
-    if (task?.schema !== 'public-work-task/1' || task.taskId !== offer.id || task.termsVersion !== offer.version || !validId(task.namespaceId) || !task.claim || !['unclaimed', 'claimed', 'submitted'].includes(task.claim.state) || !Number.isSafeInteger(task.claim.generation) || task.claim.generation < 0) throw new Error('Unsupported contribution');
+    if (task?.schema !== 'public-work-task/1' || task.taskId !== offer.id || task.termsVersion !== offer.version || !validId(task.namespaceId) || !task.claim || !['unclaimed', 'claimed', 'submitted', 'verified'].includes(task.claim.state) || !Number.isSafeInteger(task.claim.generation) || task.claim.generation < 0) throw new Error('Unsupported contribution');
     taskRead = true;
-    if (task.claim.state !== 'submitted') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Claimed' : 'Open to contributors'}</p>`); return; }
+    if (task.claim.state !== 'submitted' && task.claim.state !== 'verified') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Claimed' : 'Open to contributors'}</p>`); return; }
     submitted = true;
     if (!validId(task.claim.submittedReceiptId)) throw new Error('Unsupported receipt');
     paint('<p role="status">Submitted · loading receipt…</p>');
     const id = task.claim.submittedReceiptId, record = await read(`/api/public-work/receipts/${encodeURIComponent(id)}`, flight.signal);
     if (!current()) return;
-    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || record.state !== 'submitted' || record.verification !== 'hash_only' || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
+    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'verified'].includes(record.state) || !['hash_only', 'system_checked'].includes(record.verification) || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
-    paint(`<p role="status">Submitted</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.</p>`);
+    // #3546: an accepted receipt carries the verified successor state. Show
+    // it truthfully — the level still separates what the platform executed
+    // itself (system_checked) from a hash-only record of acceptance.
+    const status = record.state === 'verified' ? 'Verified' : 'Submitted';
+    const note = record.verification === 'system_checked'
+      ? 'System-checked, unsigned receipt. The platform ran its own checks over the submission.'
+      : record.state === 'verified'
+        ? 'Hash-only, unsigned receipt. Acceptance is recorded on the receipt; reported checks are not system-verified.'
+        : 'Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.';
+    paint(`<p role="status">${status}</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">${note}</p>`);
   } catch (error) {
     if (!current()) return;
     if (!taskRead && error.status === 404) return;
