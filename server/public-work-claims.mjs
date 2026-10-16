@@ -25,28 +25,47 @@ CREATE TABLE IF NOT EXISTS public_work_receipts (
   receipt_json TEXT NOT NULL, created_at INTEGER NOT NULL
 );`;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-const check = (condition, message) => { if (!condition) fail(422, 'invalid_public_work', message); };
+// #3650: an invalid_public_work refusal must name the fields it refused —
+// its own AX hint tells the caller to fix "the refused fields named in this
+// error's message". The names ride the message text (the one channel every
+// door serves, the MCP door included) and, on the HTTP envelope,
+// error.detail.fields as { missing, unexpected, invalid } name lists,
+// mirroring the MCP argument-diagnosis shape in mcp-arg-errors.mjs.
+const failFields = (message, { missing = [], unexpected = [], invalid = [] } = {}) => {
+  const error = new ServiceError(422, 'invalid_public_work', message);
+  error.detail = { fields: { missing, unexpected, invalid } };
+  throw error;
+};
+const check = (condition, message, fields) => { if (!condition) { if (fields) failFields(message, fields); fail(422, 'invalid_public_work', message); } };
 const identifier = value => validId(value);
 const hash = text => createHash('sha256').update(text).digest('hex');
 const normalize = sql => sql?.trim().replace(/;$/, '').replace(/IF NOT EXISTS /g, '').replace(/\s+/g, ' ');
 const shape = (input, required, optional = []) => {
-  check(input && typeof input === 'object' && !Array.isArray(input)
-    && required.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => required.includes(key) || optional.includes(key)), 'Unexpected or missing fields');
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    failFields(`Unexpected or missing fields (missing: ${required.join(', ')})`, { missing: [...required] });
+  const missing = required.filter(key => !Object.hasOwn(input, key));
+  const unexpected = Object.keys(input).filter(key => !required.includes(key) && !optional.includes(key));
+  if (missing.length || unexpected.length) {
+    const parts = [];
+    if (missing.length) parts.push(`missing: ${missing.join(', ')}`);
+    if (unexpected.length) parts.push(`unexpected: ${unexpected.join(', ')}`);
+    failFields(`Unexpected or missing fields (${parts.join('; ')})`, { missing, unexpected });
+  }
 };
 const lease = value => {
   const hours = value === undefined ? 1 : value;
   // Name the real fault: a string like "6h" is a type error, not a range one (#1553).
-  check(typeof hours === 'number' && Number.isFinite(hours), `leaseHours must be a JSON number of hours, like 6, not ${JSON.stringify(hours)}`);
-  check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24');
+  check(typeof hours === 'number' && Number.isFinite(hours), `leaseHours must be a JSON number of hours, like 6, not ${JSON.stringify(hours)}`, { invalid: ['leaseHours'] });
+  check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24', { invalid: ['leaseHours'] });
   return hours;
 };
 const filesOf = input => {
-  check(Array.isArray(input) && input.length > 0 && input.length <= 64, 'Declare 1..64 repository paths');
+  check(Array.isArray(input) && input.length > 0 && input.length <= 64, 'files must declare 1..64 repository paths', { invalid: ['files'] });
   const files = input.map(raw => {
-    check(typeof raw === 'string', 'Invalid repository path');
+    check(typeof raw === 'string', 'files entries must be repository path strings', { invalid: ['files'] });
     const path = raw.trim().replace(/\/+/g, '/').replace(/^(\.\/)+/, '').replace(/\/$/, '');
     check(path && path.length <= 512 && !path.startsWith('/') && !path.split('/').some(segment => !segment || segment === '..' || segment === '.')
-      && !/[\\*\x00-\x1f\x7f]/.test(path), 'Paths must be normalized repository-relative paths');
+      && !/[\\*\x00-\x1f\x7f]/.test(path), 'files paths must be normalized repository-relative paths', { invalid: ['files'] });
     return path;
   });
   return [...new Set(files)].sort();
@@ -131,7 +150,7 @@ export class PublicWorkClaims {
   }
   available() { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_tasks'").get()); }
   task(offerId) {
-    check(identifier(offerId), 'Invalid task ID');
+    check(identifier(offerId), 'Invalid taskId: expected a valid task identifier', { invalid: ['taskId'] });
     const row = this.available() && this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=?').get(offerId);
     if (!row) fail(404, 'public_work_not_found', 'Public task not found');
     return row;
@@ -143,7 +162,7 @@ export class PublicWorkClaims {
     return offer;
   }
   request(row, actorId, action, input, operation) {
-    check(identifier(input.requestId), 'Invalid request ID');
+    check(identifier(input.requestId), 'Invalid requestId: expected a valid request identifier', { invalid: ['requestId'] });
     const encoded = canonicalJson({ action, ...input });
     const previous = this.db.prepare('SELECT * FROM public_work_requests WHERE offer_id=? AND actor_id=? AND request_id=?').get(row.offer_id, actorId, input.requestId);
     if (previous) {
@@ -179,8 +198,12 @@ export class PublicWorkClaims {
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
   list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
-    check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
-    check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    const invalidPage = [...(Number.isInteger(limit) && limit > 0 && limit <= 100 ? [] : ['limit']),
+      ...(after === '' || identifier(after) ? [] : ['after'])];
+    check(!invalidPage.length, `Invalid page fields: ${invalidPage.join(', ')} (limit must be an integer 1..100; after must be a task id or empty)`, { invalid: invalidPage });
+    const invalidFlags = [...(typeof claimable === 'boolean' ? [] : ['claimable']),
+      ...(typeof claimableFirst === 'boolean' ? [] : ['claimableFirst'])];
+    check(!invalidFlags.length, `Invalid page fields: ${invalidFlags.join(', ')} (claimable and claimableFirst must be booleans)`, { invalid: invalidFlags });
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
@@ -303,10 +326,12 @@ export class PublicWorkClaims {
   }
   enable(roomId, actorId, offerId, input) {
     shape(input, ['requestId', 'expectedRevision', 'expectedTermsVersion', 'repositoryRef', 'files']);
-    check(identifier(offerId) && Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0
-      && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0, 'Expected offer revision and terms version required');
+    const invalidEnable = [...(identifier(offerId) ? [] : ['offerId']),
+      ...(Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0 ? [] : ['expectedRevision']),
+      ...(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 ? [] : ['expectedTermsVersion'])];
+    check(!invalidEnable.length, `Invalid fields: ${invalidEnable.join(', ')} (offerId must be a valid task identifier; expectedRevision and expectedTermsVersion must be positive integers)`, { invalid: invalidEnable });
     check(typeof input.repositoryRef === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(input.repositoryRef)
-      && !input.repositoryRef.split('/').some(part => !part || part === '..' || part === '.'), 'Explicit repository ref required');
+      && !input.repositoryRef.split('/').some(part => !part || part === '..' || part === '.'), 'repositoryRef must be an explicit repository ref (letters, digits, dot, dash, underscore or slash; no empty, . or .. segments)', { invalid: ['repositoryRef'] });
     const files = filesOf(input.files);
     return withPublicWorkClaimWriter(this.store, () => {
       this.store.projectOffers.requireOwner(roomId, actorId);
@@ -333,10 +358,11 @@ export class PublicWorkClaims {
     const required = ['requestId', 'expectedTermsVersion'];
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
-    check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
+    check(['claim', 'renew', 'release', 'finish'].includes(action), 'action must be one of: claim, renew, release, finish', { invalid: ['action'] });
     shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : []);
-    check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
-      && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
+    const invalidAct = [...(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 ? [] : ['expectedTermsVersion']),
+      ...(action === 'claim' || (Number.isSafeInteger(input.generation) && input.generation > 0) ? [] : ['generation'])];
+    check(!invalidAct.length, `Invalid fields: ${invalidAct.join(', ')} (expectedTermsVersion must be a positive integer${action === 'claim' ? '' : '; generation must be a positive integer'})`, { invalid: invalidAct });
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
     return withPublicWorkClaimWriter(this.store, () => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
@@ -393,8 +419,8 @@ export class PublicWorkClaims {
         const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
         if (action === 'finish') {
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
-            && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
-          check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
+            && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'artifactText must be valid UTF-8 text no larger than 64 KiB', { invalid: ['artifactText'] });
+          check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'checksReported must be an array of up to 20 non-empty strings, each at most 1000 characters', { invalid: ['checksReported'] });
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
@@ -413,16 +439,18 @@ export class PublicWorkClaims {
   }
   match(secret, input) {
     shape(input, [], ['requestId', 'skills', 'interests', 'reward', 'autoClaim', 'limit', 'leaseHours', 'after']);
-    if (input.requestId !== undefined) check(identifier(input.requestId), 'Invalid request ID');
+    if (input.requestId !== undefined) check(identifier(input.requestId), 'Invalid requestId: expected a valid request identifier', { invalid: ['requestId'] });
     const limit = input.limit ?? 3, reward = input.reward ?? 'volunteer';
-    check(Number.isInteger(limit) && limit >= 1 && limit <= 5 && ['volunteer', 'work_trade', 'cash'].includes(reward), 'Invalid matching preferences');
-    check(input.autoClaim === undefined || typeof input.autoClaim === 'boolean', 'autoClaim must be explicit boolean');
+    const invalidPrefs = [...(Number.isInteger(limit) && limit >= 1 && limit <= 5 ? [] : ['limit']),
+      ...(['volunteer', 'work_trade', 'cash'].includes(reward) ? [] : ['reward'])];
+    check(!invalidPrefs.length, `Invalid matching preferences (fields: ${invalidPrefs.join(', ')}; limit must be an integer 1..5; reward must be volunteer, work_trade or cash)`, { invalid: invalidPrefs });
+    check(input.autoClaim === undefined || typeof input.autoClaim === 'boolean', 'autoClaim must be explicit boolean', { invalid: ['autoClaim'] });
     const preferences = ['skills', 'interests'].flatMap(key => {
       const values = input[key] ?? [];
-      check(Array.isArray(values) && values.length <= 20 && values.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 100 && !/[\x00-\x1f\x7f]/.test(value)), 'Invalid matching preferences');
+      check(Array.isArray(values) && values.length <= 20 && values.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 100 && !/[\x00-\x1f\x7f]/.test(value)), `${key} must be an array of up to 20 non-empty strings of at most 100 characters, without control characters`, { invalid: [key] });
       return values.map(value => value.trim().toLowerCase());
     });
-    check(input.after === undefined || identifier(input.after), 'Invalid matching cursor');
+    check(input.after === undefined || identifier(input.after), 'after must be a valid matching cursor (a task id)', { invalid: ['after'] });
     lease(input.leaseHours);
     const run = operation => input.autoClaim === true ? withPublicWorkClaimWriter(this.store, operation) : this.store.readTransaction(operation);
     return run(() => {
@@ -483,7 +511,7 @@ export class PublicWorkClaims {
   // still serves them to its members; everyone else gets 403. Rows without
   // a task link (legacy) stay public, preserving current behavior.
   _receiptRow(receiptId) {
-    check(identifier(receiptId), 'Invalid receipt ID');
+    check(identifier(receiptId), 'Invalid receiptId: expected a valid receipt identifier', { invalid: ['receiptId'] });
     const row = this.available() && this.db.prepare(
       `SELECT r.receipt_json AS receiptJson, t.room_id AS roomId
        FROM public_work_receipts r LEFT JOIN public_work_tasks t ON t.offer_id = r.offer_id
