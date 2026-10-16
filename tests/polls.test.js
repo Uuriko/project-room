@@ -154,3 +154,22 @@ test("polls replay deterministically", () => {
   };
   assert.deepEqual(run(), run());
 });
+
+test("store admits poll.voted with an integer option", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { RoomStore } = await import("../server/store.mjs");
+  const { initialRoom } = await import("../server/bootstrap.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "poll-vote-"));
+  try {
+    const store = new RoomStore(join(dir, "room.sqlite"));
+    store.initialize(initialRoom());
+    const owner = store.issueAccessKey("commons", "owner");
+    store.command(owner, "commons", { id: "p1", type: T.MESSAGE_POSTED, data: { messageId: "poll", body: "Pick", kind: "poll", poll: { question: "Pick", options: ["a", "b"] } } });
+    store.command(owner, "commons", { id: "v1", type: T.POLL_VOTED, data: { messageId: "poll", option: 1, active: true } });
+    const message = store.snapshot(owner, "commons").state.messages.find(m => m.id === "poll");
+    assert.deepEqual(pollTally(message).results.map(r => r.votes), [0, 1]);
+    assert.throws(() => store.command(owner, "commons", { id: "v2", type: T.POLL_VOTED, data: { messageId: "poll", option: 5, active: true } }), /Invalid poll vote/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
