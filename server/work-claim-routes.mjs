@@ -708,6 +708,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item,
       action,
       previousOwnerId: extra.previousOwnerId ?? null,
+      previousState: extra.previousState ?? null,
       atMs: nowMs,
       paths: action === "released" || action === "pr_closed" ? (prior?.files ?? []) : undefined,
       pullRequest: extra.pullRequest,
@@ -1164,7 +1165,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const acked = data.readingAck === undefined ? updated
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
+    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
     return json(res, 200, acked);
   }
   if (workClaimRoute === "review" && req.method === "POST") {

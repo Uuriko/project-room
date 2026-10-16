@@ -168,9 +168,36 @@ export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
   return Number.isFinite(at) && atMs - at >= 0 && atMs - at < CLAIM_EVENT_COALESCE_MS;
 }
 
+// #3747: the pilot caps gate growth, not exits — the same distinction the
+// command path draws with its cleanup exemption (store.command: a release of
+// an active claim, a completion, a blocker resolution and a supersession all
+// land at capacity; proposals, starts and verdicts refuse). A transition
+// that ends a live claim must always land: capped, it could never fire, and
+// the room would livelock with every open claim frozen mid-flight. Each
+// resolving transition is a one-way exit — it can fire at most once per
+// opening, because reopening is a growth action (created / claimed) that
+// stays capped — so events past the cap stay bounded by the claims already
+// open. A row that lands already terminal (done / closed / superseded)
+// opened nothing, whatever action carried it: superseding a never-accepted
+// item births its board card already closed. previousState is the claim's
+// state before the transition, for the one exit the resulting row cannot
+// show: leaving "blocked" (unblocking lands the claim back in a live
+// state, not a terminal one). A caller whose whole operation is one of
+// the command layer's cleanup transitions (the board sync) may instead
+// declare resolving outright: a supersession's footprint includes the
+// successor's phantom card, born "unclaimed" in the same transaction —
+// lineage bookkeeping for work that already exists, not new work.
+const RESOLVING_ACTIONS = new Set(["released", "lease_expired", "closed", "deleted", "pr_merged", "pr_closed"]);
+
+function isResolvingClaimEvent(action, item, previousState) {
+  if (item?.state === "done" || item?.state === "closed" || item?.supersededBy) return true;
+  if (RESOLVING_ACTIONS.has(action)) return true;
+  return action === "state_changed" && previousState === "blocked" && item?.state !== "blocked";
+}
+
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, previousState = null, resolving = false, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
   if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
@@ -183,8 +210,12 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   // (store.command, appendSideTableEvent). This runs inside the caller's
   // claim transaction, so refusing here rolls the claim write back with
   // its receipt — a capped room refuses the change whole, never records
-  // a claim whose event silently never landed.
-  if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
+  // a claim whose event silently never landed. #3747: resolving
+  // transitions (isResolvingClaimEvent) are exempt from both caps,
+  // mirroring the command path's cleanup exemption — at capacity a room
+  // can still end every claim it has open, it just cannot grow.
+  const resolvingEvent = resolving === true || isResolvingClaimEvent(action, item, previousState);
+  if (!resolvingEvent && room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
   const actor = room.state.members?.[actorId];
   const incoming = event({
     id: randomUUID(),
@@ -200,7 +231,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   const sequence = room.sequence + 1;
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   const projection = store.storedProjection(roomId, compact);
-  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+  if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
   store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);

@@ -807,6 +807,13 @@ export const WORK_ITEM_BOARD_SYNC_TYPES = new Set([
 
 const SYNC_ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
 
+// #3747: the command types the command layer itself treats as cleanup at
+// pilot capacity (store.command's endingClaim / endingWork). Their whole
+// board footprint is a resolution, including a supersession's phantom
+// successor card, so the sync declares it to emitWorkClaimEvent and the
+// pilot caps do not refuse it mid-transaction.
+const RESOLUTION_SYNC_TYPES = new Set(["claim.released", "work.completed", "work.blocker_resolved", "work.superseded"]);
+
 function boardConfig(store, roomId) {
   const registry = store.workClaims;
   if (typeof registry.configFor === "function") return registry.configFor(roomId);
@@ -872,13 +879,14 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // Write only rows that differ (unchanged rows stay untouched, so a
   // no-op command emits nothing). Events fire for the command's own
   // item, plus "created" for any phantom successor the plan produced.
+  const resolving = RESOLUTION_SYNC_TYPES.has(incoming.type);
   let primary = current;
   for (const [rowId, row] of rows) {
     const before = existing.get(rowId) ?? null;
     if (before && sameClaimRow(before, row)) { if (rowId === claimId) primary = row; continue; }
     registry.set(roomId, row);
     if (rowId === claimId) primary = row;
-    if (!before) emitWorkClaimEvent(store, roomId, { actorId, item: row, action: "created", atMs: nowMs });
+    if (!before) emitWorkClaimEvent(store, roomId, { actorId, item: row, action: "created", resolving, atMs: nowMs });
   }
   if (mapped && current && sameClaimRow(current, mapped)) return primary;
   if (mapped) {
@@ -888,7 +896,7 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
         : incoming.type === "claim.renewed" ? "renewed"
           : incoming.type === "claim.released" ? "released"
             : "state_changed";
-    if (action) emitWorkClaimEvent(store, roomId, { actorId, item: mapped, action, atMs: nowMs });
+    if (action) emitWorkClaimEvent(store, roomId, { actorId, item: mapped, action, previousState: current?.state ?? null, resolving, atMs: nowMs });
   }
   return primary;
 }

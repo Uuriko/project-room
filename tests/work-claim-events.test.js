@@ -165,6 +165,86 @@ test('a claim refused at the pilot event cap leaves no claim row and no event (#
   assert.equal(eventCount(), before, 'no event was appended for the refused claim');
 });
 
+test('the claim-event cap exempts resolving transitions only (#3747)', async t => {
+  const store = new RoomStore(':memory:');
+  store.initialize(initialRoom('commons'));
+  t.after(() => store.close());
+  const base = { id: 'w', owner: 'owner', leaseExpiresAt: null, title: 'w', files: [] };
+  const atCap = error => error.status === 409 && error.code === 'pilot_limit';
+  store.db.prepare('UPDATE rooms SET sequence=? WHERE id=?').run(PILOT_LIMITS.eventsPerRoom, 'commons');
+  // Exits land at the cap: each is a one-way end to a live claim, so a
+  // capped room can still unwind every claim it has open.
+  const exits = [
+    { action: 'released', item: { ...base, state: 'unclaimed', owner: null } },
+    { action: 'lease_expired', item: { ...base, state: 'unclaimed', owner: null } },
+    { action: 'closed', item: { ...base, state: 'closed' }, reason: 'closed' },
+    { action: 'pr_merged', item: { ...base, state: 'done' }, pullRequest: { url: 'https://github.com/Uuriko/project-room/pull/1' } },
+    { action: 'pr_closed', item: { ...base, state: 'unclaimed', owner: null }, pullRequest: { url: 'https://github.com/Uuriko/project-room/pull/1' } },
+    { action: 'state_changed', item: { ...base, state: 'done' } },
+    // Unblocking: the row lands back in a live state, so only the
+    // pre-transition state shows the transition was an exit.
+    { action: 'state_changed', item: { ...base, state: 'in_progress' }, previousState: 'blocked' },
+    // A card born already closed (superseding a never-accepted item).
+    { action: 'created', item: { ...base, state: 'closed', supersededBy: 'wb_other' } },
+  ];
+  let sequence = PILOT_LIMITS.eventsPerRoom;
+  for (const { action, item, ...extra } of exits) {
+    const receipt = emitWorkClaimEvent(store, 'commons', { actorId: 'owner', item, action, ...extra });
+    assert.equal(receipt.sequence, ++sequence, `${action} lands at capacity`);
+  }
+  // Growth and ordinary progress still refuse, and record nothing.
+  const growth = [
+    { action: 'created', item: { ...base, state: 'unclaimed', owner: null } },
+    { action: 'claimed', item: { ...base, state: 'claimed' } },
+    { action: 'renewed', item: { ...base, state: 'in_progress' } },
+    { action: 'reviewed', item: { ...base, state: 'in_progress' } },
+    { action: 'reassigned', item: { ...base, state: 'in_progress' } },
+    { action: 'ci_changed', item: { ...base, state: 'in_progress' }, reason: 'ci_changed', ciState: 'success' },
+    { action: 'state_changed', item: { ...base, state: 'in_progress' }, previousState: 'claimed' },
+    { action: 'state_changed', item: { ...base, state: 'blocked' }, previousState: 'in_progress' },
+  ];
+  for (const { action, item, ...extra } of growth) {
+    assert.throws(() => emitWorkClaimEvent(store, 'commons', { actorId: 'owner', item, action, ...extra }), atCap, `${action} refuses at capacity`);
+  }
+  assert.equal(store.room('commons').sequence, sequence, 'refusals appended nothing');
+});
+
+test('at the pilot event cap open claims can still be released, completed, expired and closed, while growth refuses (#3747)', async t => {
+  const { store, owner, peer } = await fixture(t);
+  // Open claims, all set up below the cap. The completion's review
+  // ceremony also happens below the cap: verdicts are progress, not exits.
+  await owner.workClaimCreate({ id: 'open', title: 'Open' });
+  await owner.workClaim('held', { title: 'Held', files: ['docs/held.md'] });
+  await owner.workClaim('lapsed', { title: 'Lapsed', leaseHours: 1 });
+  await owner.workClaim('retire', { title: 'Retire' });
+  await owner.workClaimCreate({ id: 'finish', title: 'Finish', reviewPolicy: 'distinct_member' });
+  await owner.claimWorkItem('finish');
+  await owner.updateWorkItem('finish', { state: 'in_progress' });
+  await peer.reviewWorkItem('finish', { note: 'Checked the result' });
+  await peer.reviewWorkItem('finish', { verdict: 'approve', summary: 'Approved' });
+  store.db.prepare('UPDATE rooms SET sequence=? WHERE id=?').run(PILOT_LIMITS.eventsPerRoom, 'commons');
+  const capped = error => error.status === 409 && error.code === 'pilot_limit';
+  // Growth refuses and records nothing.
+  await assert.rejects(owner.claimWorkItem('open'), capped);
+  assert.equal((await owner.workClaimGet('open')).state, 'unclaimed');
+  // Exits land: release, completion and close each end a live claim.
+  const released = await owner.releaseWorkItem('held', { note: 'parked', ...roundOf(await owner.workClaimGet('held')) });
+  assert.equal(released.state, 'unclaimed');
+  const done = await owner.workComplete('finish', { reviewedBy: 'reviewer' });
+  assert.equal(done.state, 'done');
+  const closed = await owner.closeWorkClaim('retire', { verb: 'close', reason: 'no longer needed' });
+  assert.equal(closed.state, 'closed');
+  // The exits did not reopen growth.
+  await assert.rejects(owner.claimWorkItem('open'), capped);
+  // Expiry still fires: backdate the lease and let a board read sweep it.
+  const row = store.workClaims.get('commons', 'lapsed');
+  store.workClaims.set('commons', { ...row, leaseExpiresAt: new Date(Date.now() - 1000).toISOString() });
+  await owner.workClaims();
+  assert.equal((await owner.workClaimGet('lapsed')).state, 'unclaimed');
+  const expired = (await claimEvents(owner)).filter(e => e.action === 'lease_expired' && e.workClaim === 'lapsed');
+  assert.equal(expired.length, 1);
+});
+
 test('the event payload refuses an action the reducer does not know', () => {
   const item = { id: 'w', state: 'claimed', owner: 'a', leaseExpiresAt: null, title: 'w', files: [] };
   assert.throws(() => workClaimEventData(item, 'teleported'), /Unknown work claim action/);
