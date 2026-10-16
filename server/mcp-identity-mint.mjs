@@ -88,7 +88,7 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
         ...(error.detail ? { detail: error.detail } : {})
       }, true);
     }
-    return result(requestId, { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
+    return result(requestId, { status: 500, code: 'internal', message: 'The server hit an internal error and produced no result. Retry the request once; if it repeats, report code "internal" with the request id.' }, true);
   }
   // create() has already committed the identity, and `created` carries the
   // one-time secret and privateKey that are never shown again. The growth

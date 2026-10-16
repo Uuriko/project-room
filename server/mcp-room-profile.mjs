@@ -99,7 +99,7 @@ function failureValue(error) {
       : 422;
     return { status, code, message: error.message };
   }
-  return { status: 500, code: "internal", message: "Request could not be completed" };
+  return { status: 500, code: "internal", message: "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id." };
 }
 
 export function identityBearer(authorization) {
@@ -614,7 +614,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const built = friendBondCommand("dm", { to: args.to, body: args.body, messageId: args.messageId });
     return commandReceipt(store, secret, roomId, { id: args.id, type: built.type, data: built.data }, "posted");
   }
-  throw new ServiceError(500, "internal", "Request could not be completed");
+  throw new ServiceError(500, "internal", "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.");
 }
 
 function callInboxTool(store, identity, name, args) {
@@ -628,7 +628,7 @@ function callInboxTool(store, identity, name, args) {
   if (name === "inbox_list_attachments") return store.inboxAttachments.list(identityId);
   if (name === "inbox_get_attachment") return store.inboxAttachments.get(identityId, args.id);
   if (name === "inbox_discard_attachment") return store.inboxAttachments.discard(identityId, args.id);
-  throw new ServiceError(500, "internal", "Request could not be completed");
+  throw new ServiceError(500, "internal", "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.");
 }
 
 function commandReceipt(store, secret, roomId, command, status) {
@@ -775,7 +775,7 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "webhook_unsubscribe") {
     return store.agentPlugin.unsubscribeWebhook({ identityId: agentId, subscriptionId: args.subscriptionId });
   }
-  throw new ServiceError(500, "internal", "Request could not be completed");
+  throw new ServiceError(500, "internal", "The server hit an internal error and produced no result. Retry the request once; if it repeats, report code 'internal' with the request id.");
 }
 
 const BASE64_TOOLS = new Set(["room_put_file", "inbox_put_attachment"]);
