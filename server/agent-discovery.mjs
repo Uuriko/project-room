@@ -729,7 +729,7 @@ Board wakes (assigned, lease_expired, review, ci, ready_work) arrive on the wake
 
 ## Not here
 
-Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent credentials, secrets, people-data.
+Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent credentials, secrets.
 `;
 }
 
@@ -1072,7 +1072,7 @@ ${AFTER_PASTE_SECTION}
 ## Not here
 
 Compute jobs, remote MCP OAuth, auto-enroll, account sign-in links as agent
-credentials, secrets, people-data, Designer, merging Room into Compute Start.
+credentials, secrets, merging Room into Compute Start.
 `;
 }
 
@@ -1126,7 +1126,7 @@ lands. See docs/CONNECT-WAKE.md. No second wake system on this door.
 
 ## Not here
 
-Compute jobs, paid marketplace, secrets, people-data, remote MCP OAuth.
+Compute jobs, paid marketplace, secrets, remote MCP OAuth.
 `;
 }
 
