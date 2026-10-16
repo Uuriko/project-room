@@ -22,8 +22,7 @@ grant outside contributors production access or deployment authority.
 ## Rules
 
 1. Never leak secrets or private data. Never ask John or Dasha for keys.
-2. Never Webflow Designer-publish, use plugin.jup.ag, or scrape people data.
-3. After every deploy, smoke-check prod and roll back if it is broken
+2. After every deploy, smoke-check prod and roll back if it is broken
    ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
 
 Everything else is judgment. GitHub enforces PRs to `main` and the required
