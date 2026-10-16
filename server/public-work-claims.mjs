@@ -52,6 +52,15 @@ const filesOf = input => {
   return [...new Set(files)].sort();
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
+// The claim path's fencing rule (#3649), shared by apply(), the board
+// packets and match() so no surface can advertise what a claim would
+// refuse: a task is path-fenced when another live claim in its namespace
+// holds any file overlapping any of the task's declared files. Callers
+// pass the namespace's items with lapsed leases already released
+// (releaseExpired), matching the sweep apply() performs before checking.
+const pathFencedByLiveClaim = (files, namespaceItems, ownId) =>
+  namespaceItems.some(other => other.id !== ownId && other.owner
+    && other.files.some(path => files.some(file => overlaps(path, file))));
 
 // #3530: the standard public-work starter set — the newcomer tasks an
 // operator first seeded on the public board (the pw-garden round of
@@ -154,16 +163,29 @@ export class PublicWorkClaims {
     this.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)').run(row.offer_id, actorId, input.requestId, encoded, JSON.stringify(outcome));
     return outcome;
   }
-  packet(row, item, offer) {
+  packet(row, item, offer, pathFenced = false) {
     const live = releaseExpired([item], this.store.now())[0];
     const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
     const state = receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed';
+    // #3649: an unclaimed task whose paths a live claim fences is NOT
+    // claimable, and the packet says why (claim.pathFenced) instead of
+    // letting the claim attempt discover it with a 409.
+    const fenced = state === 'unclaimed' && pathFenced;
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
-      claimable: state === 'unclaimed',
+      claimable: state === 'unclaimed' && !fenced,
       claim: { state, generation: row.generation,
-        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
+        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
+        ...(fenced ? { pathFenced: true } : {}) } };
+  }
+  // Whether a live claim in the task's namespace fences the task's paths,
+  // judged on the same in-memory swept view match() used: lapsed leases
+  // are released before owners are read, so an expired fence never hides
+  // a task (the claim path's persisted sweep reaches the same verdict).
+  pathFenced(row, namespaceItems) {
+    const items = namespaceItems ?? releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now());
+    return pathFencedByLiveClaim(JSON.parse(row.files_json), items, row.offer_id);
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -171,7 +193,7 @@ export class PublicWorkClaims {
       // Operator unpublish hides the task (and its submittedReceiptId) here too.
       if (isUnpublished(this.db, 'room', row.room_id)) fail(404, 'public_work_not_found', 'Public task not found');
       const offer = this.offer(row);
-      return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer);
+      return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer, this.pathFenced(row));
     });
   }
   // claimableFirst defaults to claimable-first for browse callers (#2988).
@@ -190,8 +212,17 @@ export class PublicWorkClaims {
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
       // packets (including submittedReceiptId) must never be built or served.
+      // Fences are judged per namespace on one swept item list per
+      // namespace (#3649), so claimable/claimableCount tell the truth the
+      // claim path will enforce.
+      const liveByNamespace = new Map();
+      const fencedOf = row => {
+        if (!liveByNamespace.has(row.namespace_key))
+          liveByNamespace.set(row.namespace_key, releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now()));
+        return this.pathFenced(row, liveByNamespace.get(row.namespace_key));
+      };
       let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
-        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
+        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row), fencedOf(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
       if (claimable) tasks = tasks.filter(task => task.claimable);
       if (claimableFirst) {
@@ -325,7 +356,8 @@ export class PublicWorkClaims {
         // Kernel done means submitted delivery here, never independent acceptance.
         const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'self_attested' }, { now: this.store.now() });
         this.store.workClaims.set(namespace, item);
-        return this.packet(this.task(offerId), item, offer);
+        const enabledRow = this.task(offerId);
+        return this.packet(enabledRow, item, offer, this.pathFenced(enabledRow));
       });
     });
   }
@@ -363,10 +395,8 @@ export class PublicWorkClaims {
             fail(409, 'public_work_claim_conflict', `Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'})`);
           }
           const files = JSON.parse(row.files_json);
-          for (const other of this.store.workClaims.list(row.namespace_key)) {
-            if (other.id !== offerId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))))
-              fail(409, 'public_work_path_conflict', 'Another live claim holds these repository paths');
-          }
+          if (pathFencedByLiveClaim(files, this.store.workClaims.list(row.namespace_key), offerId))
+            fail(409, 'public_work_path_conflict', 'Another live claim holds these repository paths');
           item = claimWork(item, identity.identityId, { files, leaseHours: lease(input.leaseHours), now: this.store.now() });
           item = updateWork(item, identity.identityId, { state: 'in_progress', now: this.store.now() });
           this.db.prepare('UPDATE public_work_tasks SET generation=generation+1 WHERE offer_id=?').run(offerId);
@@ -390,7 +420,7 @@ export class PublicWorkClaims {
           }
         }
         this.store.workClaims.set(row.namespace_key, item);
-        const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
+        const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer, this.pathFenced(row)) };
         if (action === 'finish') {
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
@@ -405,7 +435,7 @@ export class PublicWorkClaims {
           item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
           this.store.workClaims.set(row.namespace_key, item);
           outcome.receipt = receipt;
-          outcome.task = this.packet(row, item, offer);
+          outcome.task = this.packet(row, item, offer, this.pathFenced(row));
         }
         return outcome;
       };
@@ -442,11 +472,10 @@ export class PublicWorkClaims {
         const page = this.list({ limit: 100, after: input.after ?? '', claimableFirst: false });
         outcome.inspected = page.tasks.length; outcome.hasMore = page.nextCursor !== null; outcome.nextCursor = page.nextCursor;
         const ages = new Map(page.tasks.length ? this.db.prepare(`SELECT offer_id,created_at FROM public_work_tasks WHERE offer_id IN (${page.tasks.map(() => '?').join(',')})`).all(...page.tasks.map(task => task.taskId)).map(row => [row.offer_id, row.created_at]) : []);
-        const candidates = page.tasks.filter(task => {
-          if (task.claim.state !== 'unclaimed') return false;
-          return !releaseExpired(this.store.workClaims.list(task.namespaceId), this.store.now()).some(other =>
-            other.id !== task.taskId && other.owner && other.files.some(path => task.files.some(file => overlaps(path, file))));
-        }).map(task => {
+        // The packet's claimable is the fence-aware truth (#3649): state
+        // unclaimed AND no live claim fencing its paths — the same rule
+        // the claim path enforces, via the shared helper behind packet().
+        const candidates = page.tasks.filter(task => task.claimable).map(task => {
           const text = [task.title, ...task.acceptanceCriteria].join(' ').toLowerCase();
           const matched = [...new Set(preferences.filter(value => text.includes(value)))];
           return { task, score: matched.length, reasons: matched.length ? matched.map(value => 'Matches preference: ' + value) : ['Available volunteer task with declared repository paths'] };
