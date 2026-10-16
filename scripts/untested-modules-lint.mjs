@@ -23,7 +23,8 @@ const GRANDFATHERED = [
   // the gate and are covered via HTTP-boundary tests; recording them here
   // corrects the baseline so the now-precise check does not flag legacy
   // modules as new gaps. Still never add NEW modules.
-  "opportunities.mjs",
+  // ("opportunities.mjs" left this list in B-2 PR3: tests/available-work-
+  // exceptions.test.js imports it directly, so it is referenced now.)
   "project-offers.mjs",
   "request-runs.mjs",
   "return-brief.mjs",

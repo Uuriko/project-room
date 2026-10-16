@@ -23,6 +23,27 @@
 // the board (server/work-item-board.mjs), so an accepted work item IS a
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
+//
+// NAMED EXCEPTIONS (redesign charter B-2): discovery surfaces whose
+// semantics are NOT "what work can I take?" keep their own reads, by
+// decision rather than by drift. Repointing either would change what
+// the surface means, so both are recorded here and pinned by
+// tests/available-work-exceptions.test.js; a future repoint must
+// update this registry in the same change.
+//   - The public opportunities feed (server/opportunities.mjs,
+//     GET /api/opportunities.json) is an INVITATION surface: it lists
+//     work items carrying an open helpWanted invitation in ANY
+//     non-terminal state (including work already held and in progress)
+//     and bounties in proposed/funded states. Acting on an opportunity
+//     uses the invite/join flow — its items have no claimAction, and
+//     "help wanted on held work" is exactly what this projection must
+//     never call available.
+//   - Room matchmaking (server/work-matchmaking.mjs, mounted by
+//     server/matchmaking-routes.mjs) matches a declared seeker against
+//     member-DECLARED openings (work-declarations terms rows). It reads
+//     no work store at all: undeclared work is invisible to it by
+//     design, and an opening's declared `open` flag — not store
+//     availability — is its candidate rule.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
