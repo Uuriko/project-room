@@ -26,6 +26,9 @@ Deploy only a commit that is on `main` and whose `test` and `schema-gate` push r
    - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
+5. Run the shelf checks before calling the deploy done — a green deploy onto an empty shelf ships silently, so both checks gate the receipt:
+   - **Board stocked:** `curl -sS 'https://room.trydemigod.com/api/public-work/tasks?limit=1'` → `claimableCount` must be **> 0**. A drained board (every task submitted, nothing reseeded) fails the receipt until the board is reseeded.
+   - **Gallery fresh:** `curl -sS 'https://room.trydemigod.com/api/public/receipts?limit=1'` → the newest receipt's `at` must be **less than 7 days old**. A frozen gallery fails the receipt the same way; check whether any room has the *Publish receipts from this room* toggle on with work settled since.
 
 ### Optional auto-deploy
 

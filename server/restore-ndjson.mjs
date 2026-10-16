@@ -111,6 +111,44 @@ function insertOrder(names) {
   return ordered;
 }
 
+// Foreign-key shape of the store's own schema: which tables reference which
+// (PRAGMA foreign_key_list), and which tables reference themselves (e.g.
+// credentials.parent_hash). Self-references cannot be ordered between tables;
+// they need per-row handling during the batched replay instead.
+function foreignKeyShape(db, names) {
+  const deps = new Map();
+  const selfRef = new Map();
+  for (const table of names) {
+    for (const key of db.prepare(`PRAGMA foreign_key_list(${quoteIdent(table)})`).all()) {
+      const parent = key.table;
+      if (!IDENT.test(parent)) continue;
+      if (parent === table) selfRef.set(table, { column: key.from, parentColumn: key.to || key.from });
+      else if (names.has(parent)) {
+        if (!deps.has(table)) deps.set(table, new Set());
+        deps.get(table).add(parent);
+      }
+    }
+  }
+  return { deps, selfRef };
+}
+
+// Kahn topological order over the table dependency graph, alphabetical within
+// each wave for determinism. Self-references are excluded upstream; the
+// fallback keeps every name present should a cross-table cycle ever appear.
+function topologicalTableOrder(names, deps) {
+  const order = [];
+  const remaining = [...names].sort();
+  while (remaining.length) {
+    const wave = remaining.filter(table => {
+      const parents = deps.get(table);
+      return !parents || ![...parents].some(parent => remaining.includes(parent));
+    });
+    if (!wave.length) { order.push(...remaining); break; }
+    for (const table of wave) { order.push(table); remaining.splice(remaining.indexOf(table), 1); }
+  }
+  return order;
+}
+
 // Replay a whole-store NDJSON export into an open store. The store must be
 // empty (no rooms row); a non-empty store is refused, never overwritten.
 export function replayNdjsonInto(ndjson, store) {
@@ -133,6 +171,13 @@ export function replayNdjsonInto(ndjson, store) {
   db.exec("PRAGMA foreign_keys=OFF");
   try {
     return store.transaction(() => {
+      // Workers enforce foreign keys even with the PRAGMA above (the DO
+      // SQLite engine ignores foreign_keys=OFF). Deferring the checks to the
+      // COMMIT makes the whole-row replay order-safe there: row order inside
+      // the walk (self-referencing credentials chains beyond the exporter's
+      // parent-first sort) no longer matters, because every referenced row is
+      // present before the single COMMIT.
+      db.exec("PRAGMA defer_foreign_keys=ON");
       for (const table of order) db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
       // #3324: the claim fence aborts any write to a public namespace's
       // claims unless the permit is open. Mirror the file replay: open the
@@ -215,6 +260,25 @@ export function createBackupReplaySession(store) {
   const buffers = new Map();
   const bufferBytes = new Map();
   const cleared = new Set();
+  // #3324: the Worker enforces foreign keys for the whole replay, so batch
+  // order matters where the pragma made it not matter on node. Read the FK
+  // graph from the target's own schema and flush dependencies before a table
+  // ever batches; self-referencing tables get per-row hold-back below.
+  const { deps, selfRef } = foreignKeyShape(db, existing);
+  const topo = topologicalTableOrder(existing, deps);
+  const topoIndex = new Map(topo.map((table, index) => [table, index]));
+  const ancestors = new Map();
+  for (const table of topo) {
+    const seen = new Set();
+    const stack = [...(deps.get(table) ?? [])];
+    while (stack.length) {
+      const parent = stack.pop();
+      if (seen.has(parent)) continue;
+      seen.add(parent);
+      for (const grand of deps.get(parent) ?? []) if (!seen.has(grand)) stack.push(grand);
+    }
+    ancestors.set(table, seen);
+  }
   let watermark = null;
   let trailer = null;
   let carry = "";
@@ -230,17 +294,52 @@ export function createBackupReplaySession(store) {
     return knownColumns.get(table);
   };
 
-  function insertBuffered(table) {
+  // Insert one table's buffered rows. Under enforced foreign keys a batch
+  // COMMIT still checks every FK it can see, so rows whose self-reference
+  // chain is not yet satisfiable (parent row neither stored nor in this
+  // batch) are held back in the buffer for a later round; a complete export
+  // always resolves them, and a corrupt one fails the watermark count in
+  // finish() instead of storing a broken chain. Deferral inside the batch
+  // makes row order within the batch irrelevant.
+  function flushTable(table) {
     const rows = buffers.get(table);
-    if (!rows?.length) return;
+    if (!rows?.length) return 0;
     bufferBytes.set(table, 0);
+    let insertable = rows;
+    let held = [];
+    const self = selfRef.get(table);
+    if (self) {
+      const parentOf = row => row[self.column];
+      const batchRows = new Map(rows.map(row => [row[self.parentColumn], row]));
+      const stored = new Set();
+      const needed = [...new Set(rows.map(parentOf).filter(value => value != null))];
+      if (needed.length) {
+        for (const found of db.prepare(`SELECT ${quoteIdent(self.parentColumn)} AS key FROM ${quoteIdent(table)} WHERE ${quoteIdent(self.parentColumn)} IN (${needed.map(() => "?").join(", ")})`).all(...needed)) stored.add(found.key);
+      }
+      const status = new Map();
+      const resolvable = value => {
+        if (value == null) return true;
+        if (status.has(value)) return status.get(value);
+        status.set(value, false); // cycle guard
+        const result = stored.has(value) ? true
+          : batchRows.has(value) ? resolvable(parentOf(batchRows.get(value)))
+          : false;
+        status.set(value, result);
+        return result;
+      };
+      insertable = rows.filter(row => resolvable(parentOf(row)));
+      held = rows.filter(row => !resolvable(parentOf(row)));
+    }
+    if (!insertable.length) return 0;
+    let inserted = 0;
     store.transaction(() => {
+      db.exec("PRAGMA defer_foreign_keys=ON");
       if (!cleared.has(table)) {
         db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
         cleared.add(table);
       }
       const known = columnsOf(table);
-      for (const row of rows) {
+      for (const row of insertable) {
         const keys = Object.keys(row);
         if (keys.some(key => !known.has(key))) throw new Error("Export row does not match the store schema");
         if (!keys.length) continue;
@@ -248,9 +347,24 @@ export function createBackupReplaySession(store) {
         checkStoredBytes(table, cells);
         db.prepare(`INSERT INTO ${quoteIdent(table)} (${keys.map(quoteIdent).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`)
           .run(...keys.map(key => cells[key]));
+        inserted += 1;
       }
     });
-    buffers.set(table, []);
+    buffers.set(table, held.length ? held : []);
+    return inserted;
+  }
+
+  // Flush a table's buffered rows after its transitive FK dependencies that
+  // still hold buffered rows, dependency order first. Small parent tables
+  // (one rooms row) never cross the batch threshold on their own, so without
+  // this cascade a 500-row child batch commits while the parent row is still
+  // buffered and the enforced foreign key fails the whole restore.
+  function insertBuffered(target) {
+    const pending = [...(ancestors.get(target) ?? []), target].filter(table => buffers.get(table)?.length);
+    pending.sort((a, b) => topoIndex.get(a) - topoIndex.get(b));
+    let inserted = 0;
+    for (const table of pending) inserted += flushTable(table);
+    return inserted;
   }
 
   function writeLine(line) {
@@ -303,17 +417,26 @@ export function createBackupReplaySession(store) {
   }
 
   function abort() {
-    if (settled) return;
+    if (settled) return { cleaned: true, skipped: true };
     settled = true;
+    let cleanupError = null;
     try {
       store.transaction(() => {
-        for (const table of cleared) db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
+        // Children before parents (reverse topological order): the Worker
+        // enforces foreign keys, so deleting a parent row while its child
+        // rows remain fails the cleanup and leaves half-restored data.
+        for (const table of [...cleared].sort((a, b) => topoIndex.get(b) - topoIndex.get(a)))
+          db.prepare(`DELETE FROM ${quoteIdent(table)}`).run();
       });
-    } catch { /* the store was verified empty before the replay; a failed cleanup is reported by the caller */ }
+    } catch (error) { cleanupError = error; }
     try {
       if (claimPermit) db.prepare(`UPDATE ${CLAIM_PERMIT_TABLE} SET enabled=0 WHERE singleton=1`).run();
     } catch { /* closing the permit must not mask the original failure */ }
     db.exec("PRAGMA foreign_keys=ON");
+    // The caller reports a failed cleanup: the store was verified empty
+    // before the replay, but if these deletes failed it may now hold
+    // partial data, and the operator must not treat it as retryable-empty.
+    return { cleaned: !cleanupError, error: cleanupError, skipped: false };
   }
 
   function finish() {
@@ -321,7 +444,9 @@ export function createBackupReplaySession(store) {
       if (carry) { writeLine(carry); carry = ""; }
       if (!watermark || watermark.version !== 1 || !Number.isSafeInteger(watermark.events))
         throw new Error("Export is missing its watermark");
-      for (const table of [...buffers.keys()]) insertBuffered(table);
+      // Topological order, not stream-arrival order: late buffers must land
+      // dependency-first as well.
+      for (const table of topo) if (buffers.get(table)?.length) insertBuffered(table);
       // Torn export (a write landed mid-stream): refuse, as the buffered
       // replay does — the tuples collected line by line are exactly the
       // rows verifyTrailer hashes.
@@ -566,12 +691,14 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       note: RESTORE_NOTE,
     });
   } catch (error) {
-    try { session.abort(); } catch { /* abort is best-effort; the original error is the report */ }
+    let cleanup = { cleaned: true, skipped: true };
+    try { cleanup = session.abort() ?? cleanup; } catch (cleanupError) { cleanup = { cleaned: false, error: cleanupError, skipped: false }; }
+    const cleanupNote = !cleanup.cleaned && !cleanup.skipped ? { cleanupFailed: true } : {};
     const message = error?.message ?? String(error);
     if (/Export (is empty|line is not JSON|is missing its watermark|has more than one watermark|line is not a table row|has more than one trailer|trailer is malformed|BLOB cell|cell is an object|bytes do not match|names a table|row does not match)/.test(message))
-      return jsonResponse(422, { error: { code: "invalid_restore", message } });
+      return jsonResponse(422, { error: { code: "invalid_restore", message, ...cleanupNote } });
     if (/watermark does not match|torn|foreign key check|table digest does not match|trailer pins|does not pin|Backup (part|does not match)/.test(message))
-      return jsonResponse(422, { error: { code: "restore_verification_failed", message } });
-    return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay" } });
+      return jsonResponse(422, { error: { code: "restore_verification_failed", message, ...cleanupNote } });
+    return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed during replay", ...cleanupNote } });
   }
 }

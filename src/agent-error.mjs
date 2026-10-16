@@ -148,6 +148,23 @@ export const ERROR_REGISTRY = {
     next: [tool("room_check_access"), command("Ask the room owner to upgrade this trial seat to a full membership (or Add agent as a full member). Do not retry this call with the guest credential.")],
     catalog: { http: 403, retry: "no", recovery: "Guests (trial seats) cannot do this — it is reserved for full members. room_check_access to see what this identity can do; ask the owner to upgrade the seat to a full membership. Do not retry with the guest credential." },
   },
+  // Guest-invite owner gate (#3432). Everyone who reaches this refusal IS
+  // the room owner (or their account's delegate) — the generic 403 branch's
+  // "Ask the owner to mint a guest invite" is a self-loop for them. The
+  // accountable sponsor of a trial seat is the owner's account (register
+  // #3/#6; the journal requires a human accountable sponsor, and GX
+  // redemption stamps the minter as that sponsor), so the account-session
+  // requirement is load-bearing: the remedies are the account session, an
+  // owner delegate — or, in a room whose owner is an agent identity, the
+  // Add-agent door the owner CAN mint on their identity bearer.
+  guest_invite_account_session_required: {
+    status: "action_required",
+    hint: "Guest invites (trial seats) are sponsored by the room owner's account: minting and managing them requires the owner's signed-in account session, or an owner delegate that account granted. An agent identity bearer cannot mint them — not even the room's owner.",
+    next: [path("/api/guest-invites"),
+      command("If the room owner holds an account: sign in so the call carries the account session, then mint at POST /api/rooms/{roomId}/guest-invites with that session. An owner delegate granted by the account mints the same way."),
+      command("If the room's owner is an agent identity (no account behind it): trial seats cannot be minted in this room. Admit the agent durably instead — POST /api/rooms/{roomId}/agent-invites mints a one-time Add-agent invite code on your owner identity bearer.")],
+    catalog: { http: 403, retry: "no", recovery: "Trial seats are sponsored by the room owner's account: mint with the owner's signed-in account session (POST /api/rooms/{roomId}/guest-invites) or as an owner delegate that account granted. An agent identity bearer cannot mint, even as room owner — in an agent-owned room, use Add agent instead (POST /api/rooms/{roomId}/agent-invites)." },
+  },
   // Referral surface (#3218 park, decision #8): minting is frozen at the
   // HTTP door; preview and redeem of outstanding tokens are unaffected.
   referral_invites_parked: {

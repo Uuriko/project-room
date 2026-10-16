@@ -414,6 +414,13 @@ export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work",
 // invite_member holders may mint these without holding them; they cannot
 // grant manage_members/decide/invite_member via invite-code.
 export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
+// Permissions no invitation mechanism may ever confer, whichever door the
+// invitation comes through: membership administration, decisions, and
+// inviting stay with members who hold them directly, never with whoever
+// redeems an invite. The agent-invite door refuses them at mint
+// (server/agent-invites.mjs) and the share-link grant is capped by the same
+// set (server/share-links.mjs, #3549) — one definition, every door.
+export const NEVER_GRANT = Object.freeze(["manage_members", "decide", "invite_member"]);
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
 // Owner, manage_members, or invite_member (agents may hold invite_member
