@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility } from "../src/events.js";
+import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility, ownMember } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
 import { canonicalInvitationData } from "./invitation-journal.mjs";
@@ -161,7 +161,7 @@ export class ShareLinks {
   authority(row) {
     const members = this.store.room(row.room_id).state.members;
     // A truthy map lookup treats toString as the issuer and then throws on permissions.includes.
-    const member = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : undefined;
+    const member = ownMember(members, row.issuer_member_id);
     // A personal growth invite belongs to every active member, not only
     // membership administrators. It stays valid while that member is active
     // at the revision stamped when the link was issued.
@@ -216,7 +216,7 @@ export class ShareLinks {
         catch (error) { if ([401, 403, 409].includes(error.status)) unavailable(); throw error; }
       }
       const members = this.store.room(row.room_id).state.members;
-      const issuer = members && Object.hasOwn(members, row.issuer_member_id) ? members[row.issuer_member_id] : null;
+      const issuer = ownMember(members, row.issuer_member_id) ?? null;
       const inviterDisplayName = typeof issuer?.displayName === "string" && issuer.displayName.trim() ? issuer.displayName.trim() : "A member";
       const roomState = this.store.room(row.room_id).state;
       return { link, room: { id: row.room_id, title: roomState.room.title },
@@ -459,7 +459,7 @@ export class ShareLinks {
           }
         }
         const bound = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(row.room_id, auth.account.id);
-        if (this.store.room(row.room_id).state.members[bound.member_id]?.active === false) this.reactivateSelfLeft(row, bound.member_id, auth, redemptionId);
+        if (ownMember(this.store.room(row.room_id).state.members, bound.member_id)?.active === false) this.reactivateSelfLeft(row, bound.member_id, auth, redemptionId);
         return this.result(slotToken, row.room_id, true); // Existing membership survives a full or expired invitation; removed members still fail authentication.
       }
       if (this.view(row).status !== "active") unavailable();
@@ -516,7 +516,7 @@ export class ShareLinks {
       // the NEVER_GRANT ceiling) in the same transaction.
       const grant = access === "co_admin" ? event({ id: `la_${invitationId.replaceAll("-", "")}`, idempotencyKey: `link-access:${invitationId}`,
         roomId: row.room_id, actorId: row.issuer_member_id, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
-        data: { memberId, expectedMemberRevision: state.members[memberId].revision, permissions: linkPermissions("co_admin"), active: true,
+        data: { memberId, expectedMemberRevision: ownMember(state.members, memberId).revision, permissions: linkPermissions("co_admin"), active: true,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } }) : null;
       if (grant) state = { ...applyEventWithGrowth(state, grant, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + (grant ? 2 : 1);
@@ -542,7 +542,7 @@ export class ShareLinks {
   // transaction, no second member_accounts row. A member the owner removed
   // stays out: the link is not a way around a removal.
   reactivateSelfLeft(row, memberId, auth, redemptionId) {
-    const room = this.store.room(row.room_id), member = room.state.members[memberId];
+    const room = this.store.room(row.room_id), member = ownMember(room.state.members, memberId);
     const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.memberId')=? ORDER BY sequence DESC LIMIT 1")
       .get(row.room_id, T.MEMBER_ACCESS_CHANGED, memberId);
     const lastEvent = last ? JSON.parse(last.body) : null;
@@ -567,7 +567,7 @@ export class ShareLinks {
   // same way agent-invite redemption does. Retries return the duplicate path
   // before reaching here, and the referrals primary key keeps it exactly-once.
   creditReferral(row, refereeMemberId, at, trace = {}) {
-    const issuer = this.store.room(row.room_id).state.members?.[row.issuer_member_id];
+    const issuer = ownMember(this.store.room(row.room_id).state.members, row.issuer_member_id);
     if (!this.store.referrals || !issuer || issuer.active === false || row.issuer_member_id === refereeMemberId) return;
     this.store.referrals.record({ roomId: row.room_id, referrerMemberId: row.issuer_member_id, refereeMemberId, via: "invite", at });
     rememberReferee(this.store, row.room_id, refereeMemberId, trace);
@@ -590,12 +590,12 @@ export class ShareLinks {
       fail(403, "invite_not_authorized", "This invite was issued by a member who cannot invite new members");
     }
     const ownerId = this.store.roomAuthority(row.room_id).ownerId;
-    const issuer = room.state.members?.[row.issuer_member_id];
+    const issuer = ownMember(room.state.members, row.issuer_member_id);
     const canAdmit = row.issuer_member_id === ownerId || issuer?.permissions?.includes("manage_members") === true;
     if (!growth || canAdmit) {
       return { accountId: row.issuer_account_id, memberId: row.issuer_member_id, authEpoch: row.issuer_auth_epoch, revision: row.issuer_member_revision };
     }
-    const owner = room.state.members?.[ownerId];
+    const owner = ownMember(room.state.members, ownerId);
     const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, ownerId);
     const account = binding ? this.db.prepare("SELECT auth_epoch FROM accounts WHERE id=? AND active=1").get(binding.account_id) : null;
     return {

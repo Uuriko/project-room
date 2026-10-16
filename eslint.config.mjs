@@ -41,6 +41,7 @@ export const RAW_MEMBERS_INDEX_ENFORCED = [
   "server/member-permission-requests.mjs",
   "server/outside-agents.mjs",
   "server/room-lifecycle.mjs",
+  "server/share-links.mjs",
 ];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
