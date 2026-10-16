@@ -13,7 +13,14 @@ import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
+import { ServiceError } from "./service-error.mjs";
+// Read at call time, like the other satellite modules (access-requests,
+// referrals): store.mjs sits above this module in the import graph, so the
+// binding is only safe to dereference once modules are fully loaded.
+import { PILOT_LIMITS } from "./store.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+
+const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -172,6 +179,12 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   // the receipt so the claim write still commits; an archived room has no
   // live timeline to update.
   if (isRoomArchived(room.state)) return null;
+  // #3699: the same pilot caps every other append path enforces
+  // (store.command, appendSideTableEvent). This runs inside the caller's
+  // claim transaction, so refusing here rolls the claim write back with
+  // its receipt — a capped room refuses the change whole, never records
+  // a claim whose event silently never landed.
+  if (room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
   const actor = room.state.members?.[actorId];
   const incoming = event({
     id: randomUUID(),
@@ -185,9 +198,11 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;
-  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
+  const projection = store.storedProjection(roomId, compact);
+  if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });

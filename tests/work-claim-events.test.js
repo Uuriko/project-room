@@ -6,11 +6,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomAgentClient } from '../client/room-agent.mjs';
-import { RoomStore } from '../server/store.mjs';
+import { PILOT_LIMITS, RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { applyEvent, emptyRoomState } from '../src/events.js';
-import { workClaimEventData } from '../server/work-claim-events.mjs';
+import { emitWorkClaimEvent, workClaimEventData } from '../server/work-claim-events.mjs';
 
 async function fixture(t) {
   const store = new RoomStore(':memory:');
@@ -133,6 +133,36 @@ test('a member cannot forge a claim event through the command path', async t => 
   assert.throws(() => store.command(key, 'commons', { id: 'forged', type: 'work_claim.updated', data: workClaimEventData(item, 'claimed') }));
   const rows = store.db.prepare("SELECT body FROM events WHERE room_id=?").all('commons');
   assert.ok(!rows.some(({ body }) => JSON.parse(body).type === 'work_claim.updated'));
+});
+
+test('the claim path enforces the pilot event cap with the same refusal as the command path (#3699)', async t => {
+  const store = new RoomStore(':memory:');
+  store.initialize(initialRoom('commons'));
+  t.after(() => store.close());
+  const key = store.issueAccessKey('commons', 'owner');
+  const item = { id: 'w', state: 'claimed', owner: 'owner', leaseExpiresAt: null, title: 'w', files: [] };
+  const atCap = error => error.status === 409 && error.code === 'pilot_limit'
+    && error.message === 'Bounded pilot capacity reached; no data was changed';
+  // One below the cap the receipt still lands, at the cap sequence itself.
+  store.db.prepare('UPDATE rooms SET sequence=? WHERE id=?').run(PILOT_LIMITS.eventsPerRoom - 1, 'commons');
+  const receipt = emitWorkClaimEvent(store, 'commons', { actorId: 'owner', item, action: 'claimed' });
+  assert.equal(receipt.sequence, PILOT_LIMITS.eventsPerRoom);
+  // At the cap both append paths refuse identically; neither appends.
+  assert.throws(() => store.command(key, 'commons', { id: 'cap-cmd', type: 'member.added',
+    data: { memberId: 'late', displayName: 'Late', kind: 'human', permissions: [] } }), atCap);
+  assert.throws(() => emitWorkClaimEvent(store, 'commons', { actorId: 'owner', item, action: 'claimed' }), atCap);
+  assert.equal(store.room('commons').sequence, PILOT_LIMITS.eventsPerRoom, 'no event was appended past the cap');
+});
+
+test('a claim refused at the pilot event cap leaves no claim row and no event (#3699)', async t => {
+  const { store, owner } = await fixture(t);
+  const eventCount = () => store.db.prepare('SELECT count(*) AS n FROM events WHERE room_id=?').get('commons').n;
+  const before = eventCount();
+  store.db.prepare('UPDATE rooms SET sequence=? WHERE id=?').run(PILOT_LIMITS.eventsPerRoom, 'commons');
+  await assert.rejects(owner.workClaimCreate({ id: 'past-cap', title: 'Past cap' }),
+    error => error.status === 409 && error.code === 'pilot_limit');
+  assert.equal(store.workClaims.get('commons', 'past-cap'), null, 'the refused claim was not recorded');
+  assert.equal(eventCount(), before, 'no event was appended for the refused claim');
 });
 
 test('the event payload refuses an action the reducer does not know', () => {
