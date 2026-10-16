@@ -28,10 +28,13 @@ import { ServiceError } from './service-error.mjs';
 //   follows existing escrow outcomes (returned on payout, forfeited to the
 //   pool when work is judged bad on rejection — the anti-flake ladder);
 // - acceptance attributes the award to the claimant and the payout releases
-//   through the existing epoch sweep after the existing challenge window,
-//   so the standard dispute flow on the escrow bounty is untouched
-//   (including the #3307 dispute-bond specification conflict, which this
-//   rail neither resolves nor alters);
+//   through the existing epoch sweep after the existing challenge window.
+//   The standard dispute flow applies, with one rail designation (#3702):
+//   fund() names the offer's first non-poster reviewer as the escrow
+//   bounty's dispute decider, so a dispute on a rail bounty can actually
+//   be decided instead of running undecidable into the timeout default.
+//   (The #3307 dispute-bond specification conflict is neither resolved
+//   nor altered by any of this.);
 // - reviewer silence settles NOTHING here: settlement fires only on an
 //   actual review verdict. The free-miss flip (Constitution VIII.1) is
 //   John-gated and not decided, so the mirror bounty's deadline is set a
@@ -114,11 +117,30 @@ export class PublicWorkSettlement {
     const escrow = this.escrow();
     const posterLane = canonicalLane(posterId);
     const deadline = new Date(this.store.now() + 365 * 24 * 3600 * 1000).toISOString();
+    // Designate the dispute decider (#3702): the offer's first named
+    // reviewer who is not the poster. Rail bounties previously designated
+    // nobody, so no decider could ever be seated and every dispute ran
+    // undecidable into the 14-day timeout default. The named reviewer is
+    // the party the offer already seats to render verdicts; the escrow
+    // seats them as tier-1 arbiter and re-checks independence from the
+    // claimant at dispute time. When the sole named reviewer IS the
+    // poster there is no third party to designate — the bounty then
+    // honestly keeps the escrow's unavailable-dispute behavior. The
+    // reviewer list lives in the offer's private links (the public
+    // record omits it), so read the private record here.
+    const offerRow = this.db.prepare('SELECT * FROM project_offers WHERE offer_id=? AND room_id=?')
+      .get(offer.id, roomId);
+    const reviewerMemberIds = offerRow
+      ? (this.store.projectOffers.record(offerRow, true).reviewerMemberIds ?? [])
+      : (offer.reviewerMemberIds ?? []);
+    const deciderId = reviewerMemberIds
+      .find(id => canonicalLane(id) !== posterLane) ?? null;
     let bountyId;
     try {
       const posted = escrow.postBounty(roomId, { poster: posterLane, title: offer.title,
         criteria: offer.acceptanceCriteria.join('\n').slice(0, 2000) || offer.title,
-        amount: amountMillis / MILLIS_PER_CREDIT, deadline, approvalMode: 'human' });
+        amount: amountMillis / MILLIS_PER_CREDIT, deadline, approvalMode: 'human',
+        ...(deciderId ? { disputeDeciderId: deciderId } : {}) });
       bountyId = posted.bounty.bountyId;
       escrow.fundBounty(roomId, bountyId, { funder: posterLane });
     } catch (error) { throw escrowError(error); }
@@ -224,6 +246,7 @@ export class PublicWorkSettlement {
     return { schema: 'public-work-settlement/1', taskId: link.offer_id, bountyId: link.bounty_id,
       amountMillis: link.amount_millis, amountCredits: toCredits(link.amount_millis),
       posterLane: link.poster_lane, claimantLane: link.claimant_lane, receiptId: link.receipt_id,
+      disputeDecider: bounty?.disputeDecider ?? null,
       phase: bounty?.state ?? 'funded', challengeEndsAt: bounty?.challengeEnds ?? null, payoutReceipt };
   }
   viewForOffer(offerId) { return this.view(this.link(offerId)); }
