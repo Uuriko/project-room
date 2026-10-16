@@ -8071,12 +8071,25 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
   // JDOT-COH-NAV end
-  const openBoard = () => {
+  // #3688: the native <dialog> close returns focus to whatever was focused
+  // before showModal() — for the board that chain can bottom out at <body>
+  // (palette opened from body focus, or the recorded element removed while
+  // the board was open), stranding keyboard users at the top of the page.
+  // Remember the opener at open time like closeInvitation/closeWorkForm do,
+  // and restore it on close with a stable fallback anchor.
+  let boardOpener = null;
+  const boardAnchorUsable = node => node?.isConnected && node !== document.body && !node.disabled
+    && !node.closest("[hidden]") && !node.closest("dialog") && node.getClientRects().length > 0;
+  const openBoard = (openerHint = null) => {
     // JDOT-COH-NAV begin
     navigationBoardEpoch++;
     // JDOT-COH-NAV end
     const dialog = $("#board-dialog");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      const hinted = openerHint instanceof Element ? openerHint : null;
+      boardOpener = [hinted, document.activeElement].find(boardAnchorUsable) ?? null;
+      dialog.showModal();
+    }
     $("#board-panel").open = true;
     board.sync();
   };
@@ -8084,6 +8097,19 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
   $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
+  $("#board-dialog").addEventListener("close", () => {
+    const opener = boardOpener; boardOpener = null;
+    const closingEpoch = navigationBoardEpoch;
+    const focusAtClose = document.activeElement;
+    setTimeout(() => {
+      // A reopen, a navigation epoch change, or a flow that already placed
+      // focus deliberately (work return, room switch) owns focus now.
+      if ($("#board-dialog").open || closingEpoch !== navigationBoardEpoch) return;
+      if (document.activeElement !== focusAtClose && document.activeElement !== document.body) return;
+      const target = [opener, $("#tasks-board-open"), $("#conversation-title")].find(boardAnchorUsable);
+      target?.focus({ preventScroll: true });
+    }, 0);
+  });
   $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
   // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
@@ -8092,7 +8118,7 @@ const ready = (async () => {
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
-  chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
+  chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;

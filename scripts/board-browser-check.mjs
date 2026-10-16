@@ -1208,3 +1208,66 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
     await drainBoardRoutes(page, ...holds.map(entry => entry.release));
   }
 });
+
+// #3688: closing the board must hand keyboard focus to a stable anchor —
+// the element that opened it when that element survives, otherwise the
+// conversation title — never <body>. The native <dialog> return chain
+// bottoms out at <body> when the palette was opened from body focus, and
+// when the recorded opener is removed while the board is open.
+test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const dialog = page.locator("#board-dialog");
+  const focusLandsOn = id => page.waitForFunction(expected => document.activeElement?.id === expected, id);
+  const closeWithEscape = async () => {
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+  };
+
+  // A backdrop click is not a close path: the dialog stays open.
+  await openBoard(page);
+  await page.mouse.click(8, 8);
+  assert.equal(await dialog.evaluate(node => node.open), true, "backdrop click does not close the board");
+  await closeWithEscape();
+
+  // Surviving opener: focus starts in the composer, the palette carries it
+  // into the board, and both close paths hand it back to the composer.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("message-input");
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.locator("#board-close").click();
+  await dialog.waitFor({ state: "hidden" });
+  await focusLandsOn("message-input");
+
+  // No opener: the palette was opened from body focus, so the fallback
+  // anchor — the conversation title — takes focus instead of <body>.
+  await page.evaluate(() => document.activeElement?.blur());
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+
+  // Opener removed while the board is open: the same fallback applies.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.evaluate(() => document.querySelector("#message-input").remove());
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+});
