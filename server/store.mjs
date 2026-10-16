@@ -1173,6 +1173,8 @@ const LOOKUP_INDEXES = `
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+// PERF-10X L12: redaction-view cache bound (see redactionMessages).
+const REDACTION_VIEW_CACHE_MAX_ROOMS = 32;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
 
 function deepFreeze(value) {
@@ -1951,9 +1953,46 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
 
   // The projection messages plus a lookup for archived ones, for event-log redaction.
+  //
+  // PERF-10X L12 (VIS-C): the SSE pump calls this on every 250 ms tick per
+  // stream, and the spread below is O(room messages) even when the tick's
+  // event page is empty. The built view is therefore cached per
+  // (room, latest sequence) and reused while the room's message set is
+  // unchanged. The key is deliberately stricter than sequence alone:
+  //
+  // - The cached entry also pins the identity of the frozen messages array
+  //   it was built from. room() deep-freezes the projection it parses, so
+  //   the same array reference guarantees the same contents — and every
+  //   writer that rewrites rooms.projection at the SAME sequence
+  //   (archiveRoomMessages, restoreArchivedMessage(s), rehydrate,
+  //   provenance repair) drops the projection cache via the rooms-write
+  //   watch, so the next room() parse yields a new array and this cache
+  //   misses. A sequence-only key would serve a stale view after those.
+  // - The archived lookup is NOT snapshotted: the view's archivedLookup
+  //   stays a live closure over archivedMessage(), which re-reads the
+  //   messages table on every lookup. Redactions that rewrite archived
+  //   rows without bumping the room sequence (commitMessageRedaction on
+  //   an archived room, account deletion's archived-row clear) therefore
+  //   take effect on the next read even from a cached view.
+  //
+  // When in doubt the entry is rebuilt: any sequence change or any new
+  // messages array discards it. A stale redaction view would be a privacy
+  // bug, not a perf bug.
   redactionMessages(roomId) {
-    const messages = [...this.room(roomId).state.messages];
+    const room = this.room(roomId);
+    const cache = this._redactionViewCache ??= new Map();
+    const hit = cache.get(roomId);
+    if (hit && hit.sequence === room.sequence && hit.source === room.state.messages) {
+      // LRU touch, mirroring ProjectionCache.
+      cache.delete(roomId);
+      cache.set(roomId, hit);
+      return hit.view;
+    }
+    const messages = [...room.state.messages];
     Object.defineProperty(messages, "archivedLookup", { value: id => this.archivedMessage(roomId, id) });
+    cache.delete(roomId);
+    cache.set(roomId, { sequence: room.sequence, source: room.state.messages, view: messages });
+    while (cache.size > REDACTION_VIEW_CACHE_MAX_ROOMS) cache.delete(cache.keys().next().value);
     return messages;
   }
 
@@ -2745,7 +2784,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
-  close() { this._projectionCache?.clear(); this.db.close(); }
+  close() { this._projectionCache?.clear(); this._redactionViewCache?.clear(); this.db.close(); }
   // MSG-0: drop parsed projections when a write transaction commits or rolls
   // back, so a parse of uncommitted bytes cannot outlive the transaction.
   _dropProjectionCache() { this._projectionCache?.clear(); }

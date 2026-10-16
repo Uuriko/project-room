@@ -921,7 +921,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (lagging()) { lag(); return; }
       const backlog = res.writableLength;
       try {
-        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
+        // PERF-10X L12 (VIS-C): an idle tick's page is empty, and building
+        // the redaction view costs O(room messages) even then — at ~100
+        // streams that spread was the pump's dominant JS work. Fetch the
+        // page first and skip the view entirely when there is nothing to
+        // redact; redactEventPage only reads the view for page events.
+        const page = store.eventsAfter(token, roomId, cursor, 100, binding);
+        const batch = page.events.length ? redactEventPage(page, store.redactionMessages(roomId)) : page;
         if (!batch.events.length) res.write(": connected transport only\n\n");
         let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
