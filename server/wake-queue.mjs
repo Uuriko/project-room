@@ -277,10 +277,14 @@ export class WakeQueue {
       // one receipt per breach, because the matching resume stays capped and
       // a no-op re-pause of an already-paused member is refused.
       if (existing) this.receiptCapacity(roomId, subject);
-      // R327-1: record who holds the pause and at what role. A governor
-      // (owner / manage_members) pausing a member that paused itself hardens
-      // the pause to governor-held; a self-pause stays the member's own.
-      const role = this.mayGovernWakes(auth, roomId) ? "governor" : "self";
+      // R327-1: record who holds the pause and at what role. The role
+      // follows the ACT, not the actor's powers: a member pausing itself
+      // (governor included) sets a self-held pause that stays self-resumable
+      // even if its powers are later revoked. A governor pausing another
+      // member hardens the pause to governor-held (subject() already gates
+      // that on owner / manage_members), and an existing self-pause stays
+      // hardened once a governor has taken it over.
+      const role = subject === auth.member.id ? "self" : this.mayGovernWakes(auth, roomId) ? "governor" : "self";
       let hardened = false;
       if (!existing) {
         this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, subject, now, request.reason);
