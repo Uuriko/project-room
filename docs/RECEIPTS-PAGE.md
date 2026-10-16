@@ -27,6 +27,20 @@ Every entry links to its `/receipts/<id>` record. No payment is proved on
 the proof page: bounty credit movements are proved by signed lot receipts,
 which are member-gated and have no public page.
 
+## Replay
+
+Each proof entry and each receipt page also carries a replay: the same
+public record as an ordered event list (`timeline` in the JSON twins) —
+posted, submitted, merged, verified, settled, in the order the record
+shows. Every step is a fragment link (`#t-<receiptId>-<step>`), so a link
+can land a reader on one step, below the entry's verdict. The replay
+derives only from fields the static views already serve (plus a
+public-work task's own creation time, from the public board's tables);
+it reads no member-side record and exposes no new actor or payload. A
+lot's replay lives on its own receipt record — lots stay off the proof
+page — and shows the bounty's posting, its settlement verdict, and the
+lot's ledger movements in journal order.
+
 ## What is public
 
 - Public-work receipts are already public. They stay on this page.
