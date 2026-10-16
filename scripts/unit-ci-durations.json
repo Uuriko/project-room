@@ -842,6 +842,7 @@
   "tests/receipt-detail-honesty.test.js": 1000,
   "tests/receipt-prose-quality.test.js": 4584,
   "tests/receipt-search.test.js": 99551,
+  "tests/receipts-cursor-hidden.test.js": 4000,
   "tests/receipts-live-filter.test.js": 1085,
   "tests/receipts-route.test.js": 17378,
   "tests/recipe-preview.test.js": 4715,
