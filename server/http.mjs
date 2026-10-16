@@ -83,7 +83,8 @@ import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
-import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./receipts-live.mjs";
+import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
+import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
 import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
@@ -1987,15 +1988,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const receipt = publicReceiptById(store, receiptDetail[1]);
           if (!receipt) reject(404, "not_found", "Not found");
           res.setHeader("Link", publicPageLinks(url, `/receipts/${receipt.id}`));
+          // Verify at read time (?verify=1, GET only): re-run the receipt's
+          // checks now — source record, artifact/journal hashes, and the
+          // linked pull request re-fetched from GitHub through the same
+          // fetch/token seams as the claim poll. A verify costs a GitHub
+          // call, so it has its own small bucket; a failed run degrades to
+          // the plain stored record, never an error page.
+          let verification = null;
+          if (req.method === "GET" && url.searchParams.get("verify") === "1") {
+            rate(`receipt-verify:${remoteAddress}`, 10);
+            verification = await verifyPublicReceipt(store, receipt, {
+              fetchImpl: fetchPullRequest ?? fetch,
+              token: githubToken === undefined ? githubTokenFromEnv(globalThis.process?.env ?? {}) : githubToken,
+            }).catch(() => null);
+          }
           if (receiptDetail[2]) {
-            const body = Buffer.from(JSON.stringify(receiptJson(receipt)));
+            const body = Buffer.from(JSON.stringify(receiptJson(receipt, verification)));
             res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Content-Length": body.length });
             return res.end(req.method === "HEAD" ? undefined : body);
           }
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
           res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
           // JDOT-PUBLIC-CSP-RUM end
-          const html = Buffer.from(renderReceiptDetailHtml(receipt));
+          const html = Buffer.from(renderReceiptDetailHtml(receipt, { verification }));
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
           return res.end(req.method === "HEAD" ? undefined : html);
         }
