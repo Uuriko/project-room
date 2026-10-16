@@ -475,10 +475,10 @@ export function pendingOutcome(action, title) {
 // in-place retry; the claim itself must be checked before resubmitting).
 export function boardActionErrorNote(error, refreshed = true) {
   if (error?.status) return error.message || "Could not update the claim.";
-  if (refreshed === "kept") return "The connection was interrupted, so this change could not be confirmed. Your entries were kept — check the claim before trying again.";
+  if (refreshed === "kept") return uiText("board.action.error.unconfirmed.kept");
   return refreshed
-    ? "The connection was interrupted, so this change could not be confirmed. The board was refreshed — check the claim before trying again."
-    : "The connection was interrupted, so this change could not be confirmed, and the board could not be refreshed. Reload the board before trying again.";
+    ? uiText("board.action.error.unconfirmed.refreshed")
+    : uiText("board.action.error.unconfirmed.unrefreshed");
 }
 
 function filterBarHtml(filter = {}) {
