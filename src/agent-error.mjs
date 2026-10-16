@@ -712,15 +712,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_arguments") {
-      const reaction = /missing active|Invalid reaction choice/.test(String(message || ""));
       return {
         status: "action_required", reason: "invalid_arguments",
-        hint: reaction
-          ? "Supply messageId, reaction, and active (true or false)."
-          : "Fix the named fields. This is invalid input, not a work conflict.",
-        next: [command(reaction
-          ? "Resend message.reaction_set with messageId, reaction, and active."
-          : "Correct the named fields and resend.")]
+        hint: "Fix the named fields. This is invalid input, not a work conflict.",
+        next: [command("Correct the named fields and resend.")]
       };
     }
     if (reasonCode === "invalid_invitation" && /agent-invites/.test(String(message || ""))) {
