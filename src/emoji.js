@@ -1,10 +1,5 @@
-// Unicode emoji for message text and reactions.
-// Identity for a standard emoji is the Unicode grapheme (Discord). Slack-style
-// shortcodes and the original like/heart/celebrate/thinking names are input
-// aliases that fold into that grapheme. Custom room packs are not here: an
-// unknown :shortcode: stays literal text until a pack exists.
-
-import { EMOJI_ROWS, MODIFIER_BASE_RANGES } from "./emoji-catalog.js";
+// Historical reaction/poll compatibility. No emoji UI or text conversion.
+import { REACTION_IDENTITIES, MODIFIER_BASE_RANGES } from "./legacy-reaction-aliases.js";
 
 export const LEGACY_REACTIONS = Object.freeze({
   like: "👍",
@@ -40,13 +35,9 @@ for (const part of MODIFIER_BASE_RANGES.split(",")) {
 
 const byShortcode = new Map();
 const byEmoji = new Map();
-const rows = [];
-for (const [emoji, primary, extras, category, description, search] of EMOJI_ROWS) {
-  const aliases = [primary, ...extras.split(" ").filter(Boolean)];
-  const row = { emoji, primary, aliases, category, description, search };
-  rows.push(row);
-  if (!byEmoji.has(emoji)) byEmoji.set(emoji, row);
-  for (const alias of aliases) if (!byShortcode.has(alias)) byShortcode.set(alias, emoji);
+for (const [emoji, aliases] of REACTION_IDENTITIES) {
+  byEmoji.set(emoji, true);
+  for (const alias of aliases.split(" ")) byShortcode.set(alias, emoji);
 }
 
 function graphemes(text) {
@@ -137,99 +128,6 @@ export function foldedReactionMap(reactions = {}) {
   const folded = {};
   for (const [key, set] of groups) if (set.size) folded[key] = [...set].sort();
   return folded;
-}
-
-export function emojiName(emoji) {
-  const row = byEmoji.get(emoji);
-  if (row) return row.description;
-  const stripped = String(emoji).replace(/[\u{1F3FB}-\u{1F3FF}]/gu, "");
-  const base = byEmoji.get(stripped) || byEmoji.get(`${stripped}\uFE0F`);
-  if (base && stripped !== emoji) return `${base.description}, skin tone`;
-  return String(emoji);
-}
-
-const QUICK_EMOJI = Object.freeze(["👍", "❤️", "🎉", "🤔", "😂", "🔥", "👀", "✅"]);
-
-export function frequentEmoji(recent = []) {
-  const out = [];
-  const seen = new Set();
-  for (const candidate of [...recent, ...QUICK_EMOJI]) {
-    const key = canonicalReaction(candidate);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(key);
-    if (out.length >= 8) break;
-  }
-  return out;
-}
-
-export function emojiMatches(query, limit = 8) {
-  const q = String(query ?? "").trim().toLowerCase().replace(/^:/, "").replace(/:$/, "");
-  const cap = Math.max(0, limit);
-  if (!q) return frequentEmoji().slice(0, cap).map(emoji => ({ emoji, name: emojiName(emoji) }));
-  const scored = [];
-  for (const row of rows) {
-    let score = 0;
-    if (row.primary === q || row.aliases.includes(q)) score = 100;
-    else if (row.primary.startsWith(q) || row.aliases.some(alias => alias.startsWith(q))) score = 80;
-    else if (row.search.includes(q)) score = 40;
-    if (!score) continue;
-    scored.push({ score, row });
-  }
-  scored.sort((a, b) => b.score - a.score || a.row.primary.localeCompare(b.row.primary) || a.row.emoji.localeCompare(b.row.emoji));
-  const seen = new Set();
-  const out = [];
-  for (const { row } of scored) {
-    if (seen.has(row.emoji)) continue;
-    seen.add(row.emoji);
-    out.push({ emoji: row.emoji, name: row.description });
-    if (out.length >= cap) break;
-  }
-  return out;
-}
-
-const CATEGORY_ORDER = Object.freeze([
-  "Smileys & Emotion", "People & Body", "Animals & Nature", "Food & Drink",
-  "Activities", "Travel & Places", "Objects", "Symbols", "Flags"
-]);
-
-export function emojiCatalog() {
-  const groups = new Map(CATEGORY_ORDER.map(category => [category, []]));
-  for (const row of rows) {
-    const bucket = groups.get(row.category) || groups.get("Smileys & Emotion");
-    bucket.push({ emoji: row.emoji, name: row.description });
-  }
-  return [...groups.entries()].filter(([, items]) => items.length).map(([category, items]) => ({ category, items }));
-}
-
-// Composer token: a ":" started after whitespace, with a shortcode prefix
-// before the caret. A bare colon does not open the list, so "Note:" still sends.
-export function emojiQuery(text, caret) {
-  const value = String(text ?? "");
-  const pos = Number.isInteger(caret) ? Math.min(Math.max(caret, 0), value.length) : value.length;
-  const before = value.slice(0, pos);
-  const match = /(^|[\s]):([a-z0-9_+-]{1,40})$/i.exec(before);
-  if (!match) return null;
-  return { start: before.length - match[2].length - 1, query: match[2].toLowerCase() };
-}
-
-export function insertEmoji(text, caret, start, emoji) {
-  const value = String(text ?? "");
-  const pos = Number.isInteger(caret) ? caret : value.length;
-  const at = Number.isInteger(start) ? Math.max(0, start) : 0;
-  const after = value.slice(pos);
-  const pad = after.startsWith(" ") ? "" : " ";
-  const body = `${value.slice(0, at)}${emoji}${pad}${after}`;
-  return { body, caret: at + emoji.length + (pad ? 1 : 0) };
-}
-
-// Display-only. Stored text stays as the member typed it. Known shortcodes
-// become the glyph; unknown names (future custom emoji) stay visible.
-export function renderEmojiShortcodes(text) {
-  return String(text ?? "").replace(/(^|[^a-z0-9_+-]):([a-z0-9_+-]+)(?:::skin-tone-([2-6]))?:(?![a-z0-9_+-])/gi, (full, lead, name, tone) => {
-    const emoji = canonicalReaction(tone ? `${name}::skin-tone-${tone}` : `:${name}:`);
-    return emoji ? `${lead}${emoji}` : full;
-  });
 }
 
 export function clipGraphemes(text, maxUnits) {
