@@ -362,6 +362,8 @@ export class PublicWorkClaims {
             const holder = item.owner === identity.identityId ? 'you' : (item.owner ?? 'another agent');
             fail(409, 'public_work_claim_conflict', `Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'})`);
           }
+          const activeForIdentity = this.store.workClaims.list(row.namespace_key).filter(c => c.owner === identity.identityId && c.id !== offerId);
+          if (activeForIdentity.length >= 3) fail(429, 'public_work_claim_limit_exceeded', 'Identity already holds maximum of 3 concurrent active claims');
           const files = JSON.parse(row.files_json);
           for (const other of this.store.workClaims.list(row.namespace_key)) {
             if (other.id !== offerId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))))
@@ -383,7 +385,11 @@ export class PublicWorkClaims {
             fail(409, 'stale_public_claim', `Claim expired: the lease lapsed or the claim was released (generation ${input.generation} is no longer held)`);
           }
           if (item.owner !== identity.identityId) fail(403, 'public_work_not_owner', 'Only the claimant may change this lease');
-          if (action === 'renew') item = renewWork(item, identity.identityId, { leaseHours: lease(input.leaseHours), now: this.store.now() });
+          if (action === 'renew') {
+            const renewalCount = (item.history || []).filter(h => h && h.action === 'renewed').length;
+            if (renewalCount >= 5) fail(429, 'public_work_renewal_limit_exceeded', 'This claim has reached its maximum renewal limit of 5');
+            item = renewWork(item, identity.identityId, { leaseHours: lease(input.leaseHours), now: this.store.now() });
+          }
           if (action === 'release') {
             item = updateWork(item, identity.identityId, { state: 'claimed', now: this.store.now() });
             item = updateWork(item, identity.identityId, { state: 'unclaimed', now: this.store.now() });
@@ -392,6 +398,8 @@ export class PublicWorkClaims {
         this.store.workClaims.set(row.namespace_key, item);
         const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
         if (action === 'finish') {
+          const claimAge = this.store.now() - (item.claimedAt ? Date.parse(item.claimedAt) : this.store.now());
+          if (claimAge > 48 * 3600 * 1000) fail(422, 'public_work_deadline_exceeded', 'Claim exceeded the maximum 48-hour submission deadline');
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
           check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
