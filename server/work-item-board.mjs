@@ -77,6 +77,32 @@ export function boardClaimId(workItemId) {
   return `_h${createHash("sha256").update(raw).digest("hex").slice(0, 40)}`;
 }
 
+// B-4' Phase 0 slice 3b: board-first brief resolution for reader
+// surfaces. A reader that projects a work item's brief resolves
+// definitionOfDone + mode from the item's board row when a row exists
+// for it (the board is the surviving noun; Phase 3 retires item reads),
+// and falls back to the item when there is no row — proposed items have
+// no card, so the item is their only source, correct until Phase 2
+// gives proposed work a row. A row "wins" per field only when it
+// actually carries that field as a string; a null board field never
+// erases an item brief.
+export function boardRowForItem(store, roomId, workItemId) {
+  const registry = store?.workClaims;
+  if (!registry || typeof registry.get !== "function") return null;
+  if (typeof roomId !== "string" || roomId.length === 0) return null;
+  if (typeof workItemId !== "string" || workItemId.length === 0) return null;
+  try { return registry.get(roomId, boardClaimId(workItemId)); } catch { return null; }
+}
+export function briefForWorkItem(item, boardRow = null) {
+  return {
+    definitionOfDone: boardRow && typeof boardRow.definitionOfDone === "string" ? boardRow.definitionOfDone : (item?.definitionOfDone ?? null),
+    mode: boardRow && typeof boardRow.mode === "string" ? boardRow.mode : (item?.mode ?? null),
+  };
+}
+export function boardBriefForItem(store, roomId, item) {
+  return briefForWorkItem(item, boardRowForItem(store, roomId, item?.id));
+}
+
 const iso = ms => new Date(ms).toISOString();
 const isoOrNull = value => (typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null);
 const msOf = value => (typeof value === "string" ? Date.parse(value) : Number.NaN);

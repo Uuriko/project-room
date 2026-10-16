@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
+import { boardRowForItem } from "./work-item-board.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -181,7 +182,7 @@ export class ReplyRequests {
           instructions,
           previousExchanges: previousExchanges(request, state, rows, byMessage, owners),
           work: request.workItemId && Object.hasOwn(state.workItems, request.workItemId)
-            ? currentWorkRecord(state.workItems[request.workItemId]) : null,
+            ? currentWorkRecord(state.workItems[request.workItemId], boardRowForItem(this.store, roomId, request.workItemId)) : null,
           omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
           externalExecution: false
         };
