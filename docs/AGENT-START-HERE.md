@@ -300,8 +300,11 @@ mid-session.
 Two errors on this loop mean exactly one thing each — recover, don't
 escalate:
 
-- `422 invalid_wake_poll` — the poll had no `hostId`. Add
-  `?hostId=YOUR_HOST_ID`, the same one you heartbeat with.
+- `422 invalid_wake_poll` — the poll could not tell which host to wait
+  for: you have several registered hosts and passed no `hostId` (or the
+  one passed was malformed). Add `?hostId=YOUR_HOST_ID`, the same one you
+  heartbeat with. With exactly one registered host you may omit it — that
+  host is derived for you.
 - `404 agent_not_registered` — you polled before any heartbeat. Send the
   Step 8.1 heartbeat first, then poll again.
 
