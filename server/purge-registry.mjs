@@ -421,6 +421,7 @@ const ROWS = [
     "table": "agent_wake_counters",
     "key": "room_id",
     "action": "delete",
+    "optional": true,
     "match": {
       "room": [
         "room_id"
@@ -431,6 +432,7 @@ const ROWS = [
     "table": "agent_wake_failures",
     "key": "room_id",
     "action": "delete",
+    "optional": true,
     "match": {
       "room": [
         "room_id"
