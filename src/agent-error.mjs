@@ -951,6 +951,24 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Wait for Retry-After (30s), then retry the exact same request; reconcile afterward")]
     };
   }
+  // ERROR-CENSUS F-4: operator-configuration codes must not get the generic
+  // 5xx "reconcile or retry the exact command" below — the caller cannot fix
+  // missing server configuration and retrying is futile. Same shape as
+  // mail_not_configured: failed status, operator named as the mover.
+  const operatorConfigRecovery = {
+    github_not_configured: ["GitHub sign-in is not configured on this server — an operator setup gap. Nothing about your request can fix it and retrying will not help. Use a different sign-in method, or report the code to the operator.", "Use a different sign-in method, or report error.code 'github_not_configured' to the server operator; do not retry until they confirm it is configured"],
+    github_unconfigured: ["The server's GitHub access token is missing or was rejected — an operator configuration gap. Retrying will not help until the operator supplies a valid token.", "Report error.code 'github_unconfigured' to the server operator; do not retry until they confirm the token is fixed"],
+    google_configuration_invalid: ["The server's Google sign-in configuration is invalid — an operator setup gap. Retrying will not help until the operator fixes the OAuth configuration.", "Report error.code 'google_configuration_invalid' to the server operator; do not retry until they confirm the configuration is fixed"],
+    webhook_unconfigured: ["The PR webhook is enabled but its secret is not configured on the server — an operator setup gap. Retrying will not help until the operator sets the secret or disables the webhook.", "Report error.code 'webhook_unconfigured' to the server operator; do not retry until they confirm the webhook secret is set"],
+    misconfigured: ["A server subsystem is not wired up — an operator gap, not a request error. Retrying the same request will not help.", "Report error.code 'misconfigured' with the full message to the server operator; do not retry until they confirm the subsystem is wired"],
+  }[reasonCode];
+  if (operatorConfigRecovery) {
+    return {
+      status: "failed", reason: reasonCode,
+      hint: operatorConfigRecovery[0],
+      next: [command(operatorConfigRecovery[1])]
+    };
+  }
   if (reasonCode === "mail_not_configured") {
     return {
       status: "failed", reason: "mail_not_configured",
