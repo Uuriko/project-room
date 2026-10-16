@@ -91,6 +91,15 @@ export function renderReceiptDetailHtml(receipt) {
   const pr = receipt.pullRequest
     ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(receipt.pullRequest)}</a></dd></div>`
     : "";
+  // A paid work receipt names its payout lot (#3781, read model), so a
+  // stranger can walk from the proof of work to the proof of payment.
+  // The settlement block carries the journal row's own amount and state.
+  const payout = receipt.lotId ? (() => {
+    const s = receipt.settlement ?? {};
+    const amount = typeof s.amountCredits === "number" && Number.isFinite(s.amountCredits) ? ` · ${escapeHtml(s.amountCredits)} credits` : "";
+    const state = s.lotState ? ` · ${escapeHtml(s.lotState)}` : "";
+    return `<div><dt>Payout lot</dt><dd><a href="/receipts/${escapeHtml(receipt.lotId)}">${escapeHtml(receipt.lotId)}</a>${amount}${state}</dd></div>`;
+  })() : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
@@ -147,7 +156,7 @@ export function renderReceiptDetailHtml(receipt) {
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${hashes}${lot}
+${pr}${merged}${hashes}${payout}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
@@ -171,6 +180,11 @@ const publicJson = receipt => ({
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.lot ? { lot: receipt.lot } : {}),
+  // The work receipt's payout cross-reference (#3781): the read model
+  // sets these two fields on a paid work receipt only; a receipt with
+  // no journal lot row carries neither, and none is forged here.
+  ...(receipt.lotId ? { lotId: receipt.lotId } : {}),
+  ...(receipt.settlement ? { settlement: receipt.settlement } : {}),
 });
 
 export function receiptsListJson(page) {
