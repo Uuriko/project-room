@@ -861,6 +861,12 @@ export function diffRoomWorkItems(store, roomId, { nowMs = Date.now() } = {}) {
 export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force = false } = {}) {
   const aggregate = { version: WORK_ITEM_BOARD_BACKFILL_VERSION, rooms: 0, items: 0, created: 0, updated: 0, unchanged: 0, diverged: [], errors: [] };
   store.db.exec(WORK_ITEM_BOARD_BACKFILL_SCHEMA);
+  // The divergence snapshot table is this pass's sibling bookkeeping:
+  // create it here, alongside the marker table, not only when a room's
+  // snapshot is recorded — a store that has run the pass then always has
+  // both lazy tables, which is what the purge registry's optional entry
+  // and the health reader assume.
+  store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
   const markers = new Map(store.db.prepare(`SELECT room_id, version FROM ${WORK_ITEM_BOARD_BACKFILL_TABLE}`).all().map(row => [row.room_id, row.version]));
   const roomIds = store.db.prepare("SELECT id FROM rooms").all().map(row => row.id);
   for (const roomId of roomIds) {
