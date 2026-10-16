@@ -18,7 +18,7 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
@@ -961,6 +961,54 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
     });
   }
   return closed;
+}
+
+// #3739: the scheduler-side half of the sweep above. The sweep's only
+// caller is the claim-prs tick, and that job wakes on due probes (an open
+// pull request, an autolink candidate) — in a store where no pull request
+// is waiting it never woke, so the sweep was unreachable however old
+// unclaimed items got. This probe gives the job a wake time for the sweep
+// itself: the earliest dormancy instant (claimUpdatedAt +
+// STALE_UNCLAIMED_DAYS, the same max(last history stamp, updatedAt) the
+// dormancy predicate reads) across unclaimed, unpinned items in rooms
+// that opted in — never-sweep items and unknown-age items can never be
+// closed, so they never schedule a wake. When the previous pass ran
+// inside STALE_SWEEP_INTERVAL_MS the wake defers to that interval, so a
+// backlog larger than one batch drains on the sweep's designed cadence
+// instead of re-waking every scheduler tick. Null when no opted-in room
+// holds a candidate. The sweep re-checks every item with isDormantClaim;
+// this probe only decides whether the job wakes.
+export function staleSweepDueAt(store, _nowMs) {
+  if (!store?.db || !store.workClaims) return null;
+  let row;
+  try {
+    row = store.db.prepare(`SELECT MIN(CAST(ROUND(unixepoch(activity, 'subsec') * 1000) AS INTEGER)) AS activityMs
+      FROM (
+        SELECT MAX(
+            COALESCE(json_extract(item_json, '$.data.updatedAt'), json_extract(item_json, '$.updatedAt'), ''),
+            COALESCE(json_extract(item_json, '$.data.history[#-1].at'), json_extract(item_json, '$.history[#-1].at'), '')
+          ) AS activity
+        FROM work_claims
+        JOIN work_claim_config ON work_claim_config.room_id = work_claims.room_id
+        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1
+          AND COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]'))
+            WHERE LOWER(CAST(value AS TEXT)) = 'never-sweep'
+          )
+      )`).get();
+  } catch {
+    // Fail soft like the scheduler's other due probes (jobs.mjs read()):
+    // a probe error must never disable the whole claim-prs job, pull
+    // requests included. The probe's SQL is pinned by unit tests against
+    // a real store, so a regression there fails loudly in tests instead.
+    return null;
+  }
+  if (!row || row.activityMs == null) return null;
+  let due = Number(row.activityMs) + STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
+  const last = lastStaleSweep.get(store);
+  if (typeof last === "number" && Number.isFinite(last)) due = Math.max(due, last + STALE_SWEEP_INTERVAL_MS);
+  return due;
 }
 
 // Settle every live claim linked to a closing pull_request webhook payload.
