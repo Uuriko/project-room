@@ -316,3 +316,59 @@ export async function writeDailyBackup(env, room, now = new Date()) {
   const manifest = await writeKvBackup(kv, key, body, { now: new Date(now).getTime() });
   return { wrote: key, target: "kv", parts: manifest.parts.length, bytes: manifest.bytes };
 }
+
+// The ceiling the daily backup's size is measured against: the export is a
+// single stream committed under one day key, and the store path accepts at
+// most this many bytes in one request body.
+export const SINGLE_BODY_CAP_BYTES = 100_000_000;
+
+// The latest backup measurement, for the operator status surface. Walks
+// back from today over the day keys and reads the two most recent COMPLETE
+// backups (a KV manifest at the current version, or an R2 object that
+// passes the same verification the writer requires). Growth — and so the
+// margin in days to the cap — is measured between those two backups, never
+// assumed; with fewer than two, the margin is null and the tile says so.
+// Returns null when no backup binding is configured or none is found.
+export async function readLatestBackupStatus(env, { now = new Date(), maxDaysBack = 10 } = {}) {
+  const bucket = backupBucket(env);
+  const kv = bucket ? null : backupKv(env);
+  if (!bucket && !kv) return null;
+  const found = [];
+  for (let back = 0; back <= maxDaysBack && found.length < 2; back++) {
+    const key = backupObjectKey(new Date(now.getTime() - back * 86_400_000));
+    if (kv) {
+      const raw = await kv.get(key).catch(() => null);
+      if (raw == null || !currentManifest(raw)) continue;
+      try {
+        const manifest = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw));
+        if (Number.isFinite(manifest.bytes) && typeof manifest.createdAt === "string") {
+          found.push({ key, bytes: manifest.bytes, at: manifest.createdAt, target: "kv" });
+        }
+      } catch { /* a torn manifest is not a measurement */ }
+      continue;
+    }
+    const head = await bucket.head(key).catch(() => null);
+    if (!head || !verifiedR2Backup(head)) continue;
+    const bytes = Number(head.customMetadata?.bytes ?? head.size);
+    if (!Number.isFinite(bytes)) continue;
+    found.push({
+      key, bytes, target: "r2",
+      at: head.uploaded instanceof Date ? head.uploaded.toISOString()
+        : typeof head.uploaded === "string" ? head.uploaded : null
+    });
+  }
+  if (!found.length) return null;
+  const [latest, previous] = found;
+  let growthBytesPerDay = null;
+  if (previous && latest.at && previous.at) {
+    const days = (Date.parse(latest.at) - Date.parse(previous.at)) / 86_400_000;
+    if (days > 0) growthBytesPerDay = Math.round(((latest.bytes - previous.bytes) / days) * 100) / 100;
+  }
+  const marginDays = growthBytesPerDay > 0
+    ? Math.round(((SINGLE_BODY_CAP_BYTES - latest.bytes) / growthBytesPerDay) * 10) / 10 : null;
+  return {
+    key: latest.key, bytes: latest.bytes, at: latest.at, target: latest.target,
+    previousBytes: previous?.bytes ?? null, previousAt: previous?.at ?? null,
+    growthBytesPerDay, singleBodyCapBytes: SINGLE_BODY_CAP_BYTES, marginDays
+  };
+}
