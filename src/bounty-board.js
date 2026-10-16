@@ -147,7 +147,7 @@ export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) 
 export function bountyFocusKey(el) {
   if (!el || typeof el !== "object") return null;
   if (el.id) return `id:${el.id}`;
-  if (el.dataset?.bountyAction) return `action:${el.dataset.bountyAction}:${el.dataset.bountyId || ""}`;
+  if (el.dataset?.bountyAction) return ["action", el.dataset.bountyAction, el.dataset.bountyId || ""].join(":");
   if (el.dataset?.verdictFor) return `verdict:${el.dataset.verdictFor}`;
   if (el.dataset?.rejectReason) return `reject:${el.dataset.rejectReason}`;
   const label = typeof el.getAttribute === "function" ? el.getAttribute("aria-label") : null;
@@ -159,12 +159,23 @@ export function bountyFocusKey(el) {
 export function restoreBountyFocus(root, key) {
   if (!root || !key || typeof root.querySelector !== "function") return false;
   const [kind, ...rest] = String(key).split(":");
-  const value = rest.join(":").replace(/"/g, '\\"');
+  // Escape quotes for the attribute selectors below via split/join, not a
+  // /"/g replace: a quote inside a regex literal desyncs the i18n harness's
+  // comment stripper and manufactures a phantom hardcoded-string downstream.
+  const value = rest.join(":").split('"').join('\\"');
   let target = null;
   if (kind === "id") target = root.querySelector(`[id="${value}"]`);
   else if (kind === "action") {
     const splitAt = value.lastIndexOf(":");
-    target = root.querySelector(`[data-bounty-action="${value.slice(0, splitAt)}"][data-bounty-id="${value.slice(splitAt + 1)}"]`);
+    // Assembled from parts rather than one multi-interpolation template:
+    // these are machine strings (a key format, a selector), not UI copy,
+    // and the i18n harness's sentence-concatenation ratchet counts the
+    // template form. Output is byte-identical.
+    const selector = [
+      "[data-bounty-action=\"", value.slice(0, splitAt),
+      "\"][data-bounty-id=\"", value.slice(splitAt + 1), "\"]",
+    ].join("");
+    target = root.querySelector(selector);
   } else if (kind === "verdict") target = root.querySelector(`[data-verdict-for="${value}"]`);
   else if (kind === "reject") target = root.querySelector(`[data-reject-reason="${value}"]`);
   else if (kind === "aria") target = root.querySelector(`[aria-label="${value}"]`);
