@@ -1,10 +1,10 @@
 {
   "version": 1,
   "actor": "jill-dot",
-  "requestId": "jill-dot-status-20261016221906946",
-  "at": "2026-10-16T22:19:06.946Z",
-  "wave": "Board visibility #3826 and reviewer exact retry #3829; hosted qualification in progress",
+  "requestId": "jill-dot-status-20261016223730479",
+  "at": "2026-10-16T22:37:30.479Z",
+  "wave": "Board visibility #3826 and reviewer exact retry #3829: hosted qualification passed; ready for integration",
   "next-landings": [],
-  "holds": "No live Room Board lease or merge slot verified from this host. PR #3826 head b34dacaad305a01b8beecf8922619cbda75fd83e and draft #3829 head e795945c532e02dbe231554c0eca99029fc509f3 await terminal CI and integration coordination. #3803 merged 0de2a017dd4f754e552db67c6539b7729ca18cda. Status only; not a claim.",
+  "holds": "No live Room Board lease or merge slot verified from this host. Ready PR #3826 @ b34dacaad305a01b8beecf8922619cbda75fd83e and #3829 @ e795945c532e02dbe231554c0eca99029fc509f3 await landing-owner coordination. Both exact-head test/browser/Workers/coverage gates passed. #3803 merged 0de2a017dd4f754e552db67c6539b7729ca18cda. No production claim. Status only, not a lease.",
   "main-tip-verified": "4963e67cd938cfc3bfcb343b95a298c70d0cbc3a source read; main CI/deployment not independently qualified in this status"
 }
