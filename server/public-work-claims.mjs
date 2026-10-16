@@ -93,7 +93,7 @@ export const PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS = 60000;
 const PUBLIC_WORK_IDENTITY_RATE_KEYS = 2000;
 
 export class PublicWorkClaims {
-  constructor(store) { this.store = store; this.db = store.db; this.identityRateBuckets = new Map(); }
+  constructor(store) { this.store = store; this.db = store.db; this.identityRateBuckets = new Map(); this._starterPoolMemo = null; }
   // The one per-identity public-work claim ceiling (#3271): the bucket
   // lives here so every door counts against the same state, and the doors
   // invoke it — the REST act route and the MCP public-work handler before
@@ -220,9 +220,73 @@ export class PublicWorkClaims {
   // #3530 keeper surface: the starter pool's state in the same terms the
   // public board serves. `due` lists the anchored seeds whose latest
   // round is fully submitted — the only seeds a reseed may advance.
+  //
+  // PERF-10X L11 (VIS-C): this computation costs 12 statements on an
+  // empty board (more per listed task), and the job-alarm scan calls it
+  // on EVERY request through public-work-reseed's enabled(). The result
+  // is memoized per instance; in production the instance is
+  // store.publicWorkClaims, built once per DO wake, so the memo's
+  // lifetime is exactly one wake. The memo key enumerates every input
+  // the computation reads:
+  //  - Rows: the computation touches public_work_tasks, project_offers,
+  //    rooms, public_unpublish, public_work_receipts and work_claims.
+  //    Any INSERT/UPDATE/DELETE anywhere in the database advances
+  //    SQLite's total_changes() counter on this connection, so a moved
+  //    counter invalidates (it is monotonic and never rolls back, so a
+  //    rolled-back write over-invalidates too — it can never leave a
+  //    stale key matching). Unrelated writes cost one recompute, never
+  //    a stale answer.
+  //  - Schema: available() branches on the existence of
+  //    public_work_tasks, the one schema fact read here; it is folded
+  //    into the same probe statement. (The other input tables' existence
+  //    is construction-time schema — the store migrates/verifies before
+  //    the first gate call in a wake, and each wake builds a fresh
+  //    instance with an empty memo.)
+  //  - Time: packet()/_starterTaskState() derive claim state from
+  //    store.now() via releaseExpired(), so a claimed task turns
+  //    claimable when its lease lapses with no write at all. The
+  //    compute pass records the earliest live lease expiry among the
+  //    board's claims, and the memo is valid only for now in
+  //    [computedAt, nextLeaseExpiry). A compute that straddles an
+  //    expiry is not memoized at all.
+  // A status computed inside a transaction is never memoized: it may
+  // reflect uncommitted rows whose rollback total_changes() cannot
+  // undo, so a later key match could resurrect them.
   starterPoolStatus() {
-    if (!this.available()) return { available: false, anchored: 0, claimable: 0, due: [] };
-    const claimable = this.list({ limit: 100 }).claimableCount;
+    const key = this._starterPoolMemoKey();
+    const computedAt = this.store.now();
+    const memo = this._starterPoolMemo;
+    if (memo && key && memo.key.changes === key.changes && memo.key.hasTasks === key.hasTasks
+      && computedAt >= memo.computedAt
+      && (memo.nextLeaseExpiry === null || computedAt < memo.nextLeaseExpiry)) {
+      return { ...memo.status, due: [...memo.status.due] };
+    }
+    const { status, nextLeaseExpiry } = this._computeStarterPoolStatus(computedAt);
+    const settledAt = this.store.now();
+    if (key && !this.db.isTransaction && settledAt >= computedAt
+      && (nextLeaseExpiry === null || nextLeaseExpiry > settledAt)) {
+      this._starterPoolMemo = {
+        key, computedAt, nextLeaseExpiry,
+        status: { ...status, due: [...status.due] }
+      };
+    }
+    return status;
+  }
+  // One statement: the database change counter plus the existence of
+  // the one table available() branches on. Null when the probe is
+  // unavailable (an unusual db handle), which disables the memo.
+  _starterPoolMemoKey() {
+    try {
+      const row = this.db.prepare(`SELECT total_changes() AS changes,
+        EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_tasks') AS has_tasks`).get();
+      if (!row || !Number.isSafeInteger(row.changes)) return null;
+      return { changes: row.changes, hasTasks: Boolean(row.has_tasks) };
+    } catch { return null; }
+  }
+  _computeStarterPoolStatus(sinceMs) {
+    if (!this.available()) return { status: { available: false, anchored: 0, claimable: 0, due: [] }, nextLeaseExpiry: null };
+    const page = this.list({ limit: 100 });
+    const claimable = page.claimableCount;
     const due = [];
     let anchored = 0;
     for (const baseId of PUBLIC_WORK_STARTER_SEED_IDS) {
@@ -231,7 +295,27 @@ export class PublicWorkClaims {
       anchored++;
       if (this._starterTaskState(family.at(-1).row) === 'submitted') due.push(baseId);
     }
-    return { available: true, anchored, claimable, due };
+    // The next moment time alone can change this status: the earliest
+    // lease expiry, after sinceMs, among claims the board still counts
+    // as held. A full page (nextCursor set) may hide held claims past
+    // the slice, so that case asks the claim rows directly.
+    let nextLeaseExpiry = null;
+    const consider = at => {
+      if (Number.isFinite(at) && at > sinceMs && (nextLeaseExpiry === null || at < nextLeaseExpiry)) nextLeaseExpiry = at;
+    };
+    if (page.nextCursor === null) {
+      for (const task of page.tasks) {
+        if (task.claim?.state === 'claimed' && task.claim.leaseExpiresAt) consider(Date.parse(task.claim.leaseExpiresAt));
+      }
+    } else {
+      const rows = this.db.prepare(`SELECT COALESCE(json_extract(item_json, '$.data.leaseExpiresAt'), json_extract(item_json, '$.leaseExpiresAt')) AS expires
+        FROM work_claims
+        WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) IN ('claimed', 'in_progress', 'blocked')
+          AND COALESCE(json_extract(item_json, '$.data.leaseExpiresAt'), json_extract(item_json, '$.leaseExpiresAt')) IS NOT NULL
+          AND EXISTS (SELECT 1 FROM public_work_tasks t WHERE t.namespace_key = work_claims.room_id AND t.offer_id = work_claims.claim_id)`).all();
+      for (const row of rows) consider(Date.parse(row.expires));
+    }
+    return { status: { available: true, anchored, claimable, due }, nextLeaseExpiry };
   }
   _starterFamily(baseId) {
     const rows = this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=? OR offer_id LIKE ?').all(baseId, `${baseId}-r%`);
