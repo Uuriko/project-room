@@ -220,7 +220,7 @@ test("an ownerless room refuses a non-member and a member without a claim profil
   assert.equal(allowed.value.owner, null);
 });
 
-test("CI state changes are stored, receipted, and wake the owner on failure", async t => {
+test("CI state changes are stored, receipted, and the failure wake is a counted loss for the unlinked claimant (#3266)", async t => {
   const phase = { failure: false };
   const { store, call, coordKey } = await fixture(t, { phase });
   const created = await call(coordKey, "/work-claims", {
@@ -239,6 +239,7 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
     .filter(entry => entry.type === "work_claim.updated" && entry.data.workClaim === "ci-1");
   assert.ok(events().some(entry => entry.data.reason === "ci_changed" && entry.data.ciState === "pending"));
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("coord").n, 0);
+  const acctBefore = store.agentHeartbeats.accounting({ roomId: "commons" });
   phase.failure = true;
   store.workClaims.set("commons", {
     ...pendingItem,
@@ -250,12 +251,16 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   assert.equal(failedItem.ci.state, "failure");
   assert.equal(failedItem.ci.url, "https://example.com/ci");
   assert.ok(events().some(entry => entry.data.reason === "ci_changed" && entry.data.ciState === "failure"));
-  const wake = store.db.prepare("SELECT kind, message_id FROM agent_wake_signals WHERE agent_id=?").get("coord");
-  assert.equal(wake.kind, "mention");
-  assert.match(wake.message_id, /ci-1:ci:failure/);
+  // #3266: coord has no identity link, so no identity-scoped door could
+  // ever drain a wake addressed to them — the failure wake is a counted,
+  // journaled loss, not a phantom signal row parked under the memberId.
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("coord").n, 0);
+  const acctAfter = store.agentHeartbeats.accounting({ roomId: "commons" });
+  assert.equal(acctAfter.byStore.signals.suppressed_no_identity - acctBefore.byStore.signals.suppressed_no_identity, 1);
+  assert.equal((acctAfter.failures.byReason.no_identity_link ?? 0) - (acctBefore.failures.byReason.no_identity_link ?? 0), 1);
 });
 
-test("review records refuse the owner and a chat agent, and a changes request wakes the owner", async t => {
+test("review records refuse the owner and a chat agent; the changes-request wake is a counted loss for the unlinked owner (#3266)", async t => {
   const { call, ownerKey, coordKey, chatKey, store } = await fixture(t);
   assert.equal((await call(ownerKey, "/work-claims", { id: "rev-1", title: "Review me" })).status, 201);
   assert.equal((await call(ownerKey, "/work-claims/rev-1/claim", {})).status, 200);
@@ -265,6 +270,7 @@ test("review records refuse the owner and a chat agent, and a changes request wa
   const chatReview = await call(chatKey, "/work-claims/rev-1/review", { verdict: "comment", summary: "from chat" });
   assert.equal(chatReview.status, 403);
   assert.equal(chatReview.value.error.code, "work_claims_not_permitted");
+  const acctBefore = store.agentHeartbeats.accounting({ roomId: "commons" });
   const review = await call(coordKey, "/work-claims/rev-1/review", {
     verdict: "changes_requested", summary: "rename the helper", url: "https://example.com/notes"
   });
@@ -276,9 +282,12 @@ test("review records refuse the owner and a chat agent, and a changes request wa
     .map(row => JSON.parse(row.body))
     .find(entry => entry.data?.workClaim === "rev-1" && entry.data?.verdict === "changes_requested");
   assert.equal(event.data.reason, "reviewed");
-  const wake = store.db.prepare("SELECT kind FROM agent_wake_signals WHERE agent_id=?").get("owner");
-  assert.equal(wake.kind, "mention");
-  assert.match(store.db.prepare("SELECT message_id FROM agent_wake_signals WHERE agent_id=?").get("owner").message_id, /^work-claim:rev-1:review:/);
+  // #3266: the owner has no identity link, so the changes-request wake has
+  // no addressable door — a counted, journaled loss, not a phantom row.
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, 0);
+  const acctAfter = store.agentHeartbeats.accounting({ roomId: "commons" });
+  assert.equal(acctAfter.byStore.signals.suppressed_no_identity - acctBefore.byStore.signals.suppressed_no_identity, 1);
+  assert.equal((acctAfter.failures.byReason.no_identity_link ?? 0) - (acctBefore.failures.byReason.no_identity_link ?? 0), 1);
 });
 
 test("reviewed completion requires the named reviewer's latest explicit approval", async t => {
@@ -385,21 +394,26 @@ test("completion rechecks a reviewer's active membership and current review auth
   }
 });
 
-test("an unchanged latest review retry preserves its timestamp, basis, events, and wakes", async t => {
+test("an unchanged latest review retry preserves its timestamp, basis, events, and wake count", async t => {
   const f = await fixture(t);
   await startReviewedClaim(f, "retry-review", "distinct_member", { revision: "reviewed-revision" });
   const body = { verdict: "changes_requested", summary: "Add the missing validation", url: "https://example.com/review" };
+  const lostWakes = () => f.store.agentHeartbeats.accounting({ roomId: "commons" }).byStore.signals.suppressed_no_identity;
+  const lostBefore = lostWakes();
   const first = await f.call(f.coordKey, "/work-claims/retry-review/review", body);
   assert.equal(first.status, 200);
   const sequence = f.store.room("commons").sequence;
-  const wakes = f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n;
-  assert.equal(wakes, 1);
+  // #3266: the owner is unlinked, so the review's one wake attempt is a
+  // counted loss and no signal row exists; the retry must not re-attempt.
+  const wakes = lostWakes();
+  assert.equal(wakes - lostBefore, 1);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, 0);
   await new Promise(resolve => setTimeout(resolve, 5));
   const retry = await f.call(f.coordKey, "/work-claims/retry-review/review", body);
   assert.equal(retry.status, 200);
   assert.deepEqual(retry.value, first.value);
   assert.equal(f.store.room("commons").sequence, sequence);
-  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, wakes);
+  assert.equal(lostWakes(), wakes);
   assert.deepEqual(stripTrust((await f.call(f.ownerKey, "/work-claims/retry-review")).value.reviews), first.value.reviews);
 });
 
