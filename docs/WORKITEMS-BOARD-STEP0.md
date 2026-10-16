@@ -222,6 +222,23 @@ post-migration world) would report finished work that its owner has
 re-opened. A mapping for rework cannot be a field mapping: the board
 lifecycle itself refuses the transition.
 
+**Disposition (2026-10-16): repaired.** Appendix D §D.2 ruled this
+divergence a live proof-layer defect — escalate, repair, monitor;
+"tolerate" was not an available ruling. B-4′ Phase 0 slice 1 (#3607)
+implemented the transition-lite repair: a planner-classified `rework`
+row (board `done`, the item provably completed before, the item now
+mapping to a non-terminal state) reconciles to the mapped row with an
+explicit divergence-repair stamp after `state:done`, and in the sync a
+rework primary flows through the normal write/event path instead of
+the silent skip. `board_native` divergences (foreign-owner active
+claims, closed mismatches, unprovable cases) keep the refusal exactly —
+forcing those rows stays prohibited. A per-room divergence snapshot
+(the §D.2.3 monitor) counts both classes; zero is the only healthy
+value, and any non-zero reading re-opens the defect. The census
+divergence pin now records the repaired behavior; the deep contract
+(sync end-to-end, backfill repair, classification proof rules) is
+pinned in `tests/workitems-board-divergence.test.js`.
+
 ### 4.7 NOT orphaned (named derivations / acceptable homes)
 - Session counters `round_count / tool_calls / suspended_by`: no board
   field, by E6's ratified decision — sessions are event-derived and
