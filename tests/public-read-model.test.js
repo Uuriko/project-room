@@ -11,7 +11,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { START_ROOM_URL } from "../server/room-entry.mjs";
-import { PUBLIC_START_URL, backfillPublicReadModel } from "../server/public-read-model.mjs";
+import { PUBLIC_START_URL, backfillPublicReadModel, syncDirectoryCard } from "../server/public-read-model.mjs";
 
 const SENTINEL = "SENTINEL-private-9f3a-not-public";
 
@@ -332,4 +332,91 @@ test("public receipts JSON allows any origin and the public pages allow the anal
     assert.match(csp, /https:\/\/static\.cloudflareinsights\.com/);
     assert.match(csp, /https:\/\/cloudflareinsights\.com/);
   }
+});
+
+function directoryFixture(t, roomIds) {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-directory-counts-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  for (const id of roomIds) store.initialize(initialRoom(id));
+  return store;
+}
+
+function seedDirectoryCard(store, { agentId, identityId, roomId, memberId, memberName }) {
+  store.db.prepare("INSERT INTO identity_links (room_id, identity_id, member_id, linked_at) VALUES (?,?,?,1)")
+    .run(roomId, identityId, memberId);
+  store.db.prepare(`INSERT INTO public_rooms
+    (slug, title, purpose, humans, agents, names_json, tasks_json, members_json, receipts_enabled, join_mode, join_token, owner_member_id, set_at, updated_at)
+    VALUES (?, ?, '', 0, 1, '[]', '[]', ?, 1, 'open', NULL, NULL, NULL, '2026-10-01T00:00:00.000Z')`)
+    .run(roomId, roomId, JSON.stringify([{ id: memberId, name: memberName }]));
+  store.db.prepare(`INSERT INTO agent_directory_cards
+    (agent_id, card_json, visibility, owner_identity_id, published_at, updated_at, withdrawn)
+    VALUES (?, ?, 'public', ?, 1, 1, 0)`)
+    .run(agentId, JSON.stringify({ name: agentId }), identityId);
+}
+
+function seedCountedReceipt(store, { id, source = "work-claim", origin, room = origin, agents }) {
+  store.db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES (?, 'T', ?, ?, ?, NULL, ?, '[]', NULL, NULL, '[]', '2026-10-01T00:00:00.000Z', ?)`)
+    .run(id, source, origin, room, JSON.stringify(agents), PUBLIC_START_URL);
+}
+
+const directoryReceiptCount = (store, agentId) => {
+  syncDirectoryCard(store, agentId);
+  return store.db.prepare("SELECT receipt_count AS n FROM public_directory_entries WHERE agent_id=?").get(agentId)?.n;
+};
+
+test("directory receipt_count credits only receipts a public reader can see", t => {
+  const store = directoryFixture(t, ["count-room", "quiet-room", "taken-room", "task-room", "task-quiet-room"]);
+  const identityId = store.identities.create("Counter").identityId;
+  seedDirectoryCard(store, { agentId: "counter-agent", identityId, roomId: "count-room", memberId: "member-1", memberName: "Counter" });
+  // A second link, so the name-credit cases below sit in a linked room and
+  // only the room's visibility decides whether they count.
+  store.db.prepare("INSERT INTO identity_links (room_id, identity_id, member_id, linked_at) VALUES ('quiet-room', ?, 'member-q', 1)").run(identityId);
+  store.db.prepare(`INSERT INTO public_rooms
+    (slug, title, purpose, humans, agents, names_json, tasks_json, members_json, receipts_enabled, join_mode, join_token, owner_member_id, set_at, updated_at)
+    VALUES ('quiet-room', 'quiet-room', '', 0, 1, '[]', '[]', ?, 1, 'open', NULL, NULL, NULL, '2026-10-01T00:00:00.000Z')`)
+    .run(JSON.stringify([{ id: "member-q", name: "Counter" }]));
+  const hex = n => `wcr_${String(n).padStart(32, "0")}`;
+  seedCountedReceipt(store, { id: hex(1), origin: "count-room", agents: [identityId] });      // visible, identity-id credit
+  seedCountedReceipt(store, { id: hex(2), origin: "count-room", agents: ["counter-agent"] }); // visible, agent-id credit
+  seedCountedReceipt(store, { id: hex(3), origin: "count-room", agents: [identityId] });      // operator-unpublished below
+  seedCountedReceipt(store, { id: hex(4), origin: "taken-room", agents: [identityId] });      // whole room unpublished below
+  seedCountedReceipt(store, { id: hex(5), origin: "quiet-room", agents: [identityId] });      // owner toggle off below
+  seedCountedReceipt(store, { id: hex(6), origin: "quiet-room", agents: ["Counter"] });       // name credit, owner toggle off
+  // Public-work receipts carry a namespace origin; the owning room resolves
+  // through the task record, as in receipts-live.
+  const seedPublicWork = (receiptId, offerId, roomId) => {
+    seedCountedReceipt(store, { id: receiptId, source: "public-work", origin: `ns-${offerId}`, room: null, agents: [identityId] });
+    store.db.prepare(`INSERT INTO public_work_tasks (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
+      VALUES (?, ?, ?, 1, 'https://example.com/r', 'main', '[]', 0, 1)`).run(offerId, `ns-${offerId}`, roomId);
+    store.db.prepare(`INSERT INTO public_work_receipts (receipt_id, offer_id, namespace_key, generation, identity_id, artifact_text, artifact_sha256, artifact_bytes, receipt_json, created_at)
+      VALUES (?, ?, ?, 0, ?, 'x', ?, 1, '{}', 1)`).run(receiptId, offerId, `ns-${offerId}`, identityId, "0".repeat(64));
+  };
+  seedPublicWork(`pwr_${"7".padStart(32, "0")}`, "offer-visible", "task-room");
+  seedPublicWork(`pwr_${"8".padStart(32, "0")}`, "offer-quiet", "task-quiet-room");
+  store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('receipt', ?, 1, 'op')").run(hex(3));
+  store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', 'taken-room', 1, 'op')").run();
+  for (const roomId of ["quiet-room", "task-quiet-room"]) {
+    store.db.prepare(`INSERT INTO room_directory_settings (room_id, discoverable, listed_at, updated_at, opportunities_enabled, public_receipts)
+      VALUES (?, 0, NULL, 1, 1, 0)`).run(roomId);
+  }
+  assert.equal(directoryReceiptCount(store, "counter-agent"), 3);
+});
+
+test("directory receipt_count does not cross-credit agents who share a display name", t => {
+  const store = directoryFixture(t, ["ada-room-a", "ada-room-b", "ada-room-c"]);
+  const idA = store.identities.create("First Ada").identityId;
+  const idB = store.identities.create("Second Ada").identityId;
+  seedDirectoryCard(store, { agentId: "ada-a", identityId: idA, roomId: "ada-room-a", memberId: "member-a", memberName: "Ada" });
+  seedDirectoryCard(store, { agentId: "ada-b", identityId: idB, roomId: "ada-room-b", memberId: "member-b", memberName: "Ada" });
+  const hex = n => `wcr_${String(n).padStart(32, "0")}`;
+  seedCountedReceipt(store, { id: hex(1), origin: "ada-room-a", agents: ["Ada"] });  // A's pre-linking receipt, name only
+  seedCountedReceipt(store, { id: hex(2), origin: "ada-room-b", agents: ["Ada"] });  // B's pre-linking receipt, name only
+  seedCountedReceipt(store, { id: hex(3), origin: "ada-room-a", agents: [idA] });     // A by identity id
+  seedCountedReceipt(store, { id: hex(4), origin: "ada-room-b", agents: [idB] });     // B by identity id
+  seedCountedReceipt(store, { id: hex(5), origin: "ada-room-c", agents: ["Ada"] });   // same name, a room neither is linked to
+  assert.equal(directoryReceiptCount(store, "ada-a"), 2);
+  assert.equal(directoryReceiptCount(store, "ada-b"), 2);
 });
