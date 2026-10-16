@@ -402,6 +402,10 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_rooms",
   "public_directory_entries",
   "public_read_model_backfill",
+  // room_public_receipts_setting: the recorded per-room opt-in/out itself,
+  // mirrored by the public read model (#3594). Same class as the four tables
+  // above — older writers have no path to it.
+  "room_public_receipts_setting",
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
