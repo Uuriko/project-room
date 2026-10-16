@@ -76,6 +76,7 @@ optional.push("src/room-layout.js", "src/member-display-names.js");
 optional.push("src/needs-attention.js", "src/updates-ui.js"); // #662: owner "needs your attention" card (imported by src/app.js)
 optional.push("src/owner-cockpit.js"); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
 optional.push("src/emoji.js", "src/legacy-reaction-aliases.js"); // reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
+optional.push("src/emoji-catalog.js"); // Historical source packages only; removed from current public assets.
 optional.push("src/display-name-guard.js"); // Member display-name admission (imported by src/events.js and re-exported by server/display-name-guard.mjs)
 optional.push("src/presence-state.js"); // #660: pure presence/working-state derivation (imported by server/store.mjs)
 optional.push("client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
