@@ -2666,6 +2666,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+  /api/public/landing:
+    get:
+      summary: Public landing feed for the logged-out front door
+      description: >-
+        Live front-door facts, no login: the counters and the featured
+        receipt the logged-out wall's hero renders (the same facts are
+        server-rendered into the served index.html, computed — never
+        hand-typed). Counters come from the visible public-receipt set
+        (resultsVerified, receiptsIssued) and the public board's own
+        claimable count (workAvailableNow). The featured receipt is the
+        newest visible public receipt — the same record the public
+        receipts list serves first — or null when no receipt is visible;
+        it carries only the public receipt fields plus a display meta
+        line and hash label. No account data, no room data beyond the
+        public receipt record. Cache-Control: no-store, because the
+        featured receipt is owner-toggle controlled. 120 per address
+        per minute.
+      security: []
+      responses:
+        '200':
+          description: Landing counters and the featured public receipt (or null)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [counters, featuredReceipt]
+                properties:
+                  counters:
+                    type: object
+                    required: [resultsVerified, receiptsIssued, workAvailableNow]
+                    properties:
+                      resultsVerified: { type: integer, minimum: 0 }
+                      receiptsIssued: { type: integer, minimum: 0 }
+                      workAvailableNow: { type: integer, minimum: 0 }
+                  featuredReceipt:
+                    type: [object, 'null']
+                    required: [id, title, source, room, agents, humans, pullRequest, mergedAt, hashes, at, meta, hashLabel]
+                    properties:
+                      id: { type: string }
+                      title: { type: string }
+                      source: { type: string, enum: [public-work, work-claim, work-item] }
+                      room:
+                        type: [object, 'null']
+                        properties:
+                          id: { type: string }
+                          title: { type: [string, 'null'] }
+                      agents: { type: array, items: { type: string } }
+                      humans: { type: array, items: { type: string } }
+                      pullRequest: { type: [string, 'null'] }
+                      mergedAt: { type: [string, 'null'] }
+                      hashes: { type: array, items: { type: string } }
+                      at: { type: string }
+                      meta: { type: string }
+                      hashLabel: { type: [string, 'null'] }
+        '429':
+          description: Per-address landing rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/public/receipts:
     get:
       summary: Public receipts list

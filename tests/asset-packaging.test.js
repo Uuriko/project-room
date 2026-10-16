@@ -18,6 +18,7 @@ import { templateAssetPaths, generatedAgentPages } from '../server/public-assets
 const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { buildLandingFeed, renderLandingHtml } from '../server/landing-page.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'room-assets-'));
@@ -75,7 +76,17 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   for (const path of assetPaths.filter(file => !absentGenerated(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+    const packaged = await readFile(new URL('../' + path, import.meta.url));
+    // index.html is the one packaged asset the server deliberately
+    // transforms at serve time: the landing hero's facts are
+    // server-rendered into the raw HTML (#3548, charter D5). Its served
+    // bytes must equal exactly that transform of the packaged shell —
+    // the same exactness, stated against the designed output. Every
+    // other asset is served byte-identical to the package.
+    const expected = path === 'index.html'
+      ? Buffer.from(renderLandingHtml(packaged.toString('utf8'), buildLandingFeed(store)), 'utf8')
+      : packaged;
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):
   // the server answers 404 for them, never a 500.

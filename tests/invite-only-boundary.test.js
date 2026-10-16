@@ -140,6 +140,10 @@ const PROBES = {
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
+  // Landing feed (#3548): the logged-out front door's live counters and
+  // featured receipt; public by design, built only from the visible
+  // public-receipt set and the public board; answers 200 anonymously.
+  "GET /api/public/landing": [undefined, 200],
   // Public opportunity feed (v2): read-only open-work discovery across
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.

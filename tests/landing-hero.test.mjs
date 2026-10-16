@@ -152,7 +152,7 @@ test("product and agent guides remain available away from the entry", async t =>
 // credentials — the same fixture shape as tests/github-oauth-http.test.js).
 const fixtureGithubFetch = async url => {
   if (url === "https://github.com/login/oauth/access_token") {
-    return Response.json({ access_token: "gho_fixturetoken", token_type: "bearer", scope: "read:user user:email" });
+    return Response.json({ access_token: "gho_fixturetoken", token_type: "bearer", scope: "read:user user:email" }); // secrets-allowlist (fixture value, not a credential)
   }
   if (url === "https://api.github.com/user") return Response.json({ id: 424242, login: "octofixture" });
   if (url === "https://api.github.com/user/emails") {
@@ -165,7 +165,7 @@ test("GitHub reports configured-but-unverified until a real sign-in completes", 
   const f = createAcceptanceFixture();
   t.after(() => rmSync(f.directory, { recursive: true, force: true }));
   const origin = await serve(t, f.store, {
-    githubAuth: { clientId: "Iv1.fixtureclientid0000", clientSecret: "fixture-secret-never-real", fetchImpl: fixtureGithubFetch },
+    githubAuth: { clientId: "Iv1.fixtureclientid0000", clientSecret: "fixture-secret-never-real", fetchImpl: fixtureGithubFetch }, // secrets-allowlist (fixture value, not a credential)
   });
   const options = async () => (await (await fetch(`${origin}/api/auth/signin-options`)).json()).providers.github;
   assert.deepEqual(await options(), { configured: true, verified: false });

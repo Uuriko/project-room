@@ -111,7 +111,12 @@ async function magicLinkReuse(t) {
   const form = await openMagicSignin(other);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
-  await other.getByText(/check/i).first().waitFor();
+  // Wait until the sent view itself is on screen (the magic-code form,
+  // "Check <email> for your sign-in link."). A bare /check/i text match
+  // also hits the landing hero's "anyone can check" subhead (#3548),
+  // which is visible before the submit completes and raced this wait
+  // into reading the mailbox before the link was mailed.
+  await other.locator('[data-signin-form="magic-code"]').waitFor({ state: "visible" });
   const mail = f.mailTo(email);
   assert.ok(mail?.link && !mail.purpose, "a sign-in link was mailed");
   const phone = await f.open(PHONE);
