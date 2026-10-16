@@ -9,7 +9,19 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
-import { clipGraphemes } from "./emoji.js";
+// Clip to at most maxUnits UTF-16 units without splitting a grapheme.
+const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
+function clipGraphemes(text, maxUnits) {
+  const value = String(text ?? "");
+  const limit = Number.isInteger(maxUnits) ? maxUnits : value.length;
+  if (value.length <= limit) return value;
+  let taken = 0;
+  for (const { segment } of graphemes.segment(value)) {
+    if (taken + segment.length > limit) break;
+    taken += segment.length;
+  }
+  return value.slice(0, taken);
+}
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
@@ -2297,7 +2309,7 @@ function renderMessages() {
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
   const focusedRect = focused?.getBoundingClientRect();
   const focusedOnScreen = Boolean(focusedRect && focusedRect.bottom > 0 && focusedRect.top < innerHeight);
-  const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
+  const focusAction = focused?.dataset.messageAction;
   const focusedFeedback = focused?.closest(".draft-feedback");
   // A control inside a work card is restored by setTimelineWorkNode when that
   // card is re-rendered, but the interleave can then move the card, and moving
@@ -2365,8 +2377,8 @@ function renderMessages() {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
         const next = document.createElement("div"); next.innerHTML = html;
-        // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        // Reply counts change independently; the selected message text stays put.
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
           if (selector === ".message-files") {
             if (!after) before?.remove();
@@ -2466,7 +2478,7 @@ function renderMessages() {
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
     const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
-      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
+      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction);
     const target = replacement;
     target?.focus({ preventScroll: true });
   }
@@ -2499,10 +2511,9 @@ function draftFeedbackHTML(message) {
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 // UI calming #2: per-message actions collapse to Reply + replies-count inline;
-// Add reaction, Save as result, Pin, Make this work, Record decision and
+// Save as result, Pin, Make this work, Record decision and
 // moderation move into one keyboard- and hover-reachable "⋯" overflow menu.
-// Reactions otherwise surface only through a long-press / right-click sheet
-// (Slack/Discord style) — no always-visible picker. Every action keeps its
+// Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
 function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
@@ -4663,7 +4674,7 @@ function roomActionEntries() {
     { id: "mentions", label: "Mentions", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true, always: true },
     { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
     { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
-    { id: "activity", label: "Activity", words: "activity mentions replies reactions feed unread", always: true },
+    { id: "activity", label: "Activity", words: "activity mentions replies feed unread", always: true },
     { id: "later", label: "Saved for later", words: "later saved bookmarks read later", always: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
@@ -6591,15 +6602,15 @@ function scheduleNotifications(delay) {
 }
 // ---- Attention: activity feed, read horizons, saved messages ------------------
 // Write-time personal feed (server/activity.mjs): mentions, replies, thread
-// replies, and reactions fanned out per recipient with their own read state.
-// The Activity dialog pages newest-first with All/Mentions/Replies/Threads/
-// Reactions filters; opening an item jumps to the message and marks it read.
+// replies, and thread replies fanned out per recipient with their own read
+// state. The Activity dialog pages newest-first with All/Mentions/Replies/
+// Threads filters; opening an item jumps to the message and marks it read.
 let savedMessageIds = new Set(), savedIdsBusy = false;
 let activityFilter = "", activityItems = [], activityBefore = null, activityHasMore = false, activityBusy = false, activitySerial = 0;
 let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
-const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in", reaction: "reacted to your message" };
+const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in" };
 let horizonAdvanceTimer = null;
 function nearBottomOfList() {
   const list = $("#message-list");
@@ -6805,7 +6816,7 @@ async function loadActivity(reset) {
     activityBefore = activityItems.length ? activityItems[activityItems.length - 1].id : null;
     activityHasMore = result.hasMore;
     renderActivity();
-    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions, replies, and reactions will appear.");
+    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions and replies will appear.");
   } catch (error) {
     if (serial === activitySerial && generation === client.generation) setText("#activity-status", `Couldn't load activity: ${error.message}`);
   } finally {
@@ -7231,7 +7242,6 @@ const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberI
 const BRIEF_GROUP_LABELS = { outcome: "Results", question: "Asked of you", blocker: "Blockers", decision: "Decisions", other: "Other updates" };
 function briefEventTarget(event) {
   if (event.type === T.MESSAGE_POSTED) return { kind: "message", id: event.data.messageId || event.id };
-  if (event.type === T.MESSAGE_REACTION_SET) return { kind: "message", id: event.data.messageId };
   if (event.data.workItemId) return { kind: "work", id: event.data.workItemId };
   if ([T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(event.type) && event.data.memberId) return { kind: "member", id: event.data.memberId };
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
