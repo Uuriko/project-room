@@ -157,7 +157,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: unit-shard-evidence-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
@@ -221,7 +221,7 @@ jobs:
         # Readable through the GitHub API (check-run annotations, job summary) even when the raw log is not.
         if: always()
         run: node scripts/report-test-failures.mjs test-results/browser-junit-${{ matrix.shard }}-of-6.xml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: conversation-browser-evidence-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
@@ -306,7 +306,7 @@ jobs:
         env:
           WRANGLER_SEND_METRICS: "false"
         run: node ../scripts/worker-ci-build.mjs
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: cloudflare-browser-evidence
