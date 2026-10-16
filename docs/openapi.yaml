@@ -447,6 +447,7 @@ paths:
                     type:
                       - "string"
                       - "null"
+                    description: "Opaque versioned walk cursor (w1:<board-fingerprint>:<lastTaskId>). Pass it back unchanged as `after`; it is not a task id, and a bare task id restarts the walk instead of resuming it."
                   restarted:
                     type: "boolean"
                     description: "Present and true when the board changed mid-walk: this response is the walk's first page again; discard earlier pages and continue from this nextCursor."
