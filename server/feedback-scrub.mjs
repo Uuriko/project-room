@@ -20,8 +20,12 @@ const JWT_RE = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![
 // PEM private key blocks.
 const PEM_RE = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g;
 
-// Known vendor token prefixes.
-const TOKEN_PREFIX_RE = /\b(sk-|rk-|ghp_|gho_|ghu_|ghs_|xox[bap]-|AKIA|glpat-)[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
+// Known vendor token prefixes, plus this product's own credential shapes
+// (pri_ identity secrets, rak_ agent API keys, ga1. guest-agent tokens):
+// the tokens a reporter here is most likely to paste are our own, and the
+// intake contract above — raw auth material never reaches storage —
+// covers them first, not last (#3602).
+const TOKEN_PREFIX_RE = /\b(sk-|rk-|ghp_|gho_|ghu_|ghs_|xox[bap]-|AKIA|glpat-|pri_|rak_|ga1\.)[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
 
 // Whole-value high-entropy blob (a bare token pasted as the entire value).
 // 40+ chars of token alphabet. Deliberately does NOT match structured error
