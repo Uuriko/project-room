@@ -88,9 +88,10 @@ for (const mobile of [false, true]) {
     await button.waitFor({ state: "visible" });
     assert.equal(await button.textContent(), "Notify me of mentions and DMs");
     assert.equal(await page.locator("#notification-panel select").count(), 0);
-    assert.equal(await page.locator("#notification-panel input").count(), 2);
+    assert.equal(await page.locator("#notification-panel input").count(), 3);
     assert.equal(await page.locator("#human-push-pref-mention").isChecked(), true);
     assert.equal(await page.locator("#human-push-pref-dm").isChecked(), true);
+    assert.equal(await page.locator("#human-push-pref-decision").isChecked(), true);
     await button.click();
     await page.getByText("Mentions and DMs are on for this browser.", { exact: true }).waitFor();
     assert.equal(await button.isHidden(), true);
