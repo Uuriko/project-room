@@ -90,6 +90,51 @@ test("HTTP: manage members can lift a pause they did not set; the roster names t
   assert.deepEqual(roster.map(p => [p.memberId, p.pausedBy]), [], "the lifted row leaves the roster");
 });
 
+
+test("HTTP: a manage-members pause on itself stays self-held and self-resumable after the permission is revoked", async t => {
+  const f = await httpFixture(t);
+  const { EVENT_TYPES: T } = await import("../src/events.js");
+  const grant = (permissions) => {
+    const reviewer = f.store.room("commons").state.members.reviewer;
+    f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {
+      memberId: "reviewer", expectedMemberRevision: reviewer.revision, permissions, active: true,
+    } });
+  };
+  const reviewerPermissions = () => f.store.room("commons").state.members.reviewer.permissions ?? [];
+  grant([...new Set([...reviewerPermissions(), "manage_members"])]);
+  const self = await f.pause(f.keys.reviewer, "reviewer", "own maintenance");
+  assert.equal(self.status, 201, "the reviewer pauses itself");
+  assert.equal((await self.json()).receipt.heldBy, "self", "a member-set pause is self-held, not owner-held");
+  assert.equal(f.store.wakeQueue.heldByOf("commons", "reviewer"), "self");
+  grant(reviewerPermissions().filter(p => p !== "manage_members"));
+  const lift = await f.resume(f.keys.reviewer, "reviewer");
+  assert.equal(lift.status, 201, "revoking the permission cannot strand the member's own pause");
+  assert.equal((await lift.json()).receipt.wasPaused, true);
+  assert.equal((await (await f.inspect(f.keys.owner)).json()).pause, null);
+});
+
+test("HTTP: a governor pause over an existing self-set pause still hardens; the member cannot soften it back", async t => {
+  const f = await httpFixture(t);
+  await f.pause(f.keys.producer, "producer", "own maintenance");
+  const reviewer = f.store.room("commons").state.members.reviewer;
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: (await import("../src/events.js")).EVENT_TYPES.MEMBER_ACCESS_CHANGED, data: {
+    memberId: "reviewer", expectedMemberRevision: reviewer.revision,
+    permissions: [...new Set([...(reviewer.permissions ?? []), "manage_members"])], active: true,
+  } });
+  // A governor re-pausing ITSELF must not harden its own row.
+  const own = await f.pause(f.keys.reviewer, "reviewer", "own maintenance");
+  assert.equal((await own.json()).receipt.heldBy, "self", "a governor's self-pause is self-held");
+  // But a governor over another member's self-pause takes it over.
+  await f.pause(f.keys.reviewer, "producer", "review first");
+  assert.equal(f.store.wakeQueue.heldByOf("commons", "producer"), "owner");
+  await errorCode(await f.resume(f.keys.producer, "producer"), 403, "wake_pause_held_by_owner");
+  // And the member cannot soften the hardened row by re-pausing itself.
+  await f.pause(f.keys.producer, "producer", "own maintenance");
+  assert.equal(f.store.wakeQueue.heldByOf("commons", "producer"), "owner");
+  await errorCode(await f.resume(f.keys.producer, "producer"), 403, "wake_pause_held_by_owner");
+  assert.equal((await f.resume(f.keys.reviewer, "producer")).status, 201);
+});
+
 test("legacy pause row with no setter record fails closed", async t => {
   const f = await httpFixture(t);
   await f.pause(f.keys.owner, "producer", "inspecting");
