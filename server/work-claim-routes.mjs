@@ -1109,7 +1109,12 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if ((verifyCall || sendBackCall) && item.owner !== caller) {
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
     } else requireWriter();
-    requireEventBudget();
+    // #3546/#3747: the reviewer's verify is a review action, not a board
+    // write, so the board-write event-budget floor does not refuse it.
+    // The exit it lands is cap-exempt at the emit layer (#3747); refusing
+    // it here would leave a delivered, approved claim unverifiable in any
+    // room inside its budget reserve. Every other update keeps the floor.
+    if (!(verifyCall && item.owner !== caller)) requireEventBudget();
     // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
     // updates. The appendPullRequest variant binds its write to claimedAt +
     // history length; a plain update had no such binding, so a stale client
