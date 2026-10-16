@@ -8110,12 +8110,17 @@ const ready = (async () => {
   $("#board-dialog").addEventListener("close", () => {
     const opener = boardOpener; boardOpener = null;
     const closingEpoch = navigationBoardEpoch;
-    const focusAtClose = document.activeElement;
     setTimeout(() => {
-      // A reopen, a navigation epoch change, or a flow that already placed
-      // focus deliberately (work return, room switch) owns focus now.
+      // A reopen or a navigation epoch change owns focus now.
       if ($("#board-dialog").open || closingEpoch !== navigationBoardEpoch) return;
-      if (document.activeElement !== focusAtClose && document.activeElement !== document.body) return;
+      // The close event is delivered after the closing flow has run, so by
+      // now a flow that closed the board to show something (work navigation
+      // focuses the record it reveals, a room switch focuses its anchor)
+      // has already placed focus deliberately. Only stranded focus is ours
+      // to repair: the body, or an element left inside the closed dialog.
+      // Anything focused outside the dialog is owned by that flow.
+      const active = document.activeElement;
+      if (active && active !== document.body && !$("#board-dialog").contains(active)) return;
       const target = [opener, $("#tasks-board-open"), $("#conversation-title")].find(boardAnchorUsable);
       target?.focus({ preventScroll: true });
     }, 0);
