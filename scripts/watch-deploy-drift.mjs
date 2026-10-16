@@ -3,8 +3,11 @@
 // Drift means that revision is missing, is not an ancestor of the tip, or
 // the tip is ahead by more than --max-prs commits (default 5) or the first
 // of those commits is older than --max-hours (default 24). A matching
-// revision, or a lag inside both budgets, is not drift. An unhealthy probe
-// still fails. Exit 0 = no drift and healthy.
+// revision, or a lag inside both budgets, is not drift. Exit 0 = no drift:
+// the run fails on drift, a persistent door split, an incident window, or
+// a probe that could not structurally verify production. Job health from
+// /api/health/jobs is reported separately as jobs_health and never fails
+// this run — it has its own health surface and alarms (#3531).
 // Intended for cron/CI: `git fetch origin main` first, then run this.
 // /api/version (Durable Object) and /api/version/worker can briefly disagree
 // right after a deploy. A disagreement is given --settle-ms (default 0) to
@@ -87,6 +90,7 @@ const out = {
   lag: measured?.reason ?? null,
   drift,
   probe_verdict: report.verdict,
+  jobs_health: report.jobsHealth ?? null,
   door_revisions: { do: doors.doRev, worker: doors.workerRev },
   door_split: doorSplit,
   door_state: doorState,
@@ -96,4 +100,10 @@ console.log(JSON.stringify(out, null, 2));
 if (drift) console.error(`DRIFT: prod ${report.sourceRevision} lags ${REF} ${mainTip} (${measured.reason})`);
 if (doorSplit) console.error(`${doorState === "do-stale" ? "DO still on old revision" : "VERSION DOORS DISAGREE"}: /api/version ${doors.doRev} vs /api/version/worker ${doors.workerRev}`);
 if (out.incident_window) console.error("1101 WINDOW: do-rpc-fail signature present - docs/INCIDENT-1101-RUNBOOK.md");
+if (out.jobs_health && out.jobs_health.status !== "ok") {
+  console.error(`JOBS HEALTH (report only, does not fail the drift verdict): status=${out.jobs_health.status}${out.jobs_health.failing.length ? ` failing=${out.jobs_health.failing.join(",")}` : ""} - see /api/health/jobs`);
+}
+// The exit verdict covers only what this watcher owns: revision drift, a
+// persistent door split, an incident window, or a probe verdict too broken
+// to verify production. Job health is reported above, never gated here.
 process.exit(drift || doorSplit || out.incident_window || report.verdict !== "healthy" ? 1 : 0);

@@ -177,6 +177,33 @@ test("request shape is identical whether or not the email has an account", async
   assert.ok(store.db.prepare("SELECT count(*) AS n FROM account_magic_codes").get().n >= 2);
 });
 
+const throwingMailer = error => createMagicLinkMailer({ send: async () => { throw error; } });
+const providerRefusal = () => Object.assign(
+  new Error("magic link email failed to send (HTTP 422): {\"message\":\"The example.com domain is not verified\"}"),
+  { providerStatus: 422 });
+const providerOutage = () => Object.assign(
+  new Error("magic link email failed to send (HTTP 503)"), { providerStatus: 503 });
+
+test("provider refusal of the recipient still answers sent, indistinguishably (#3529)", async t => {
+  const { origin } = await startServer(t, throwingMailer(providerRefusal()));
+  const slot = await openSlot(origin);
+  for (const email of ["refused@example.com", "deliverable@example.org"]) {
+    const res = await requestCode(origin, slot, email);
+    assert.equal(res.status, 200, email);
+    assert.deepEqual(await res.json(), { status: "sent" }, "refused and delivered requests share one shape");
+  }
+});
+
+test("transient provider failure surfaces as a retryable 500, never a fake sent (#3529)", async t => {
+  const { origin } = await startServer(t, throwingMailer(providerOutage()));
+  const slot = await openSlot(origin);
+  const res = await requestCode(origin, slot, "during-outage@example.com");
+  assert.equal(res.status, 500);
+  const body = await res.json();
+  assert.equal(body.error.code, "internal_error");
+  assert.notEqual(body.status, "sent", "an outage is never reported as a delivered send");
+});
+
 test("per-email rate limit throttles repeat requests", async t => {
   const { origin } = await startServer(t);
   const slot = await openSlot(origin);

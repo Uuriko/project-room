@@ -37,7 +37,12 @@ async function postResendEmail({ apiKey, from, fetchFn, to, subject, text, html,
   if (!response.ok) {
     let detail = "";
     try { detail = (await response.text()).slice(0, 200); } catch { /* ignore */ }
-    throw new Error(`${label} failed to send (HTTP ${response.status})${detail ? `: ${detail}` : ""}`);
+    const error = new Error(`${label} failed to send (HTTP ${response.status})${detail ? `: ${detail}` : ""}`);
+    // Keep the provider status structured, not only inside the message
+    // text: the mailer seam classifies permanent refusals by it
+    // (isMailRecipientRefusal in server/magic-links.mjs).
+    error.providerStatus = response.status;
+    throw error;
   }
 }
 
