@@ -64,7 +64,10 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
   return result(requestId, value);
  } catch (error) {
   if (error instanceof ServiceError && error.status === 401) return mcpCallError(requestId, { reason: 'auth_required', tool: name, hint: 'Use your current saved identity secret in the Authorization bearer header; public contributions require no Room admission.' });
-  return result(requestId, error instanceof ServiceError ? { status: error.status, code: error.code, message: error.message }
+  return result(requestId, error instanceof ServiceError ? { status: error.status, code: error.code, message: error.message,
+   // #3650: field-naming refusals carry their refused-field lists on this
+   // door too, not only in the message text.
+   ...(error.detail?.fields ? { fields: error.detail.fields } : {}) }
    : { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
  }
 }

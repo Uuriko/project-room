@@ -144,6 +144,10 @@ const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/ve
 // server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
 const wikiReadApi = createWikiReadApi();
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
+// #3650: an invalid_public_work refusal names the fields it refused, in the
+// message and in error.detail.fields ({ missing, unexpected, invalid }) like
+// the domain refusals in server/public-work-claims.mjs.
+const rejectFields = (message, fields) => { const error = new ServiceError(422, "invalid_public_work", message); error.detail = { fields }; throw error; };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
 // a mailto URI. Anything else must already be mailto: or https:, with no
@@ -1824,7 +1828,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
       if (url.pathname === "/api/public-work/match") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        if ([...url.searchParams].length) reject(422, "invalid_public_work", "No matching query parameters accepted");
+        if ([...url.searchParams].length) { const refused = [...new Set(url.searchParams.keys())]; rejectFields(`No matching query parameters accepted (refused: ${refused.join(", ")})`, { missing: [], unexpected: refused, invalid: [] }); }
         rate(`public-work-match:${remoteAddress}`, 60);
         const secret = bearer(req);
         const input = await body(req);
@@ -1840,8 +1844,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
-        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
-        if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) reject(422, "invalid_public_work", "Unsupported query parameters");
+        const refusedParams = [...new Set([...url.searchParams.keys()].filter(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable"].includes(key) || url.searchParams.getAll(key).length !== 1))];
+        if (refusedParams.length) rejectFields(`Unsupported query parameters: ${refusedParams.join(", ")}`, { missing: [], unexpected: refusedParams, invalid: [] });
+        if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) rejectFields("Unsupported query parameters: claimable (must be 1 or true)", { missing: [], unexpected: [], invalid: ["claimable"] });
         const action = publicWorkTaskMatch?.[2];
         if (action) {
           if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
