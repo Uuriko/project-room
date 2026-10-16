@@ -3,8 +3,10 @@
 // The room store is SQLite (serializes writes), but the growth snapshot is a
 // plain JSON file: two server.mjs processes on one database race it
 // (last-writer-wins / torn write on concurrent shutdown). The lock is an
-// exclusive-create file next to the database holding the owner's PID; a stale
-// lock (dead PID or malformed content) is reclaimed exactly once. The lock
+// exclusive-create file next to the database holding the owner's PID and
+// process start ticks; a stale lock (dead PID, a live PID whose start ticks
+// prove it is a different process that reused the PID, or malformed content)
+// is reclaimed exactly once. The lock
 // holder keeps the fd open for the process lifetime and releases (close +
 // unlink) on graceful shutdown; a crash leaves a stale file that the next
 // boot reclaims via the PID-liveness check.
@@ -28,6 +30,39 @@ const lockError = (code, message) => {
 const pidAlive = pid => {
   try { process.kill(pid, 0); return true; }
   catch (error) { return error?.code === "EPERM"; }
+};
+
+// The holder's process start time (Linux /proc/<pid>/stat field 22, clock
+// ticks since boot). A bare pid is not an identity: after a crash the OS can
+// reassign the dead server's pid to an unrelated live process — most
+// reliably in containers, where the server often runs as a low pid and the
+// next boot's init/supervisor holds a low pid again — and a liveness-only
+// check then refuses every future boot (#3584). Start ticks are assigned
+// once per process lifetime, so a live pid whose start ticks differ from
+// the recorded ones is a different process that happens to share the pid.
+// Returns null where /proc is unavailable (non-Linux, restricted procfs):
+// callers then fall back to the liveness-only verdict rather than guessing.
+export function processStartTicks(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const afterComm = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    // afterComm[0] is field 3 (state); starttime is field 22 → index 19.
+    const ticks = Number(afterComm[19]);
+    return Number.isSafeInteger(ticks) && ticks >= 0 ? ticks : null;
+  } catch { return null; }
+}
+
+// True only when the recorded holder is plausibly still the process on the
+// database: pid alive AND, where both start-tick readings exist, identical.
+// A pid alive with different start ticks is a reused pid — the recorded
+// holder is dead and its lock is stale.
+const lockHolderAlive = existing => {
+  if (!pidAlive(existing.pid)) return false;
+  if (Number.isSafeInteger(existing.startTicks)) {
+    const liveTicks = processStartTicks(existing.pid);
+    if (liveTicks !== null) return liveTicks === existing.startTicks;
+  }
+  return true;
 };
 
 const readLock = lockPath => {
@@ -64,7 +99,7 @@ export function acquireInstanceLock(lockPath) {
       throw lockError("instance_lock_io", `instance lock: cannot create ${lockPath}: ${error?.message ?? error}`);
     }
     const existing = readLock(lockPath);
-    if (existing && pidAlive(existing.pid)) {
+    if (existing && lockHolderAlive(existing)) {
       throw lockError("instance_lock_held",
         `another project-room instance holds this database (pid ${existing.pid}, started ${existing.startedAt ?? "unknown"}); refusing to boot`);
     }
@@ -88,7 +123,7 @@ export function acquireInstanceLock(lockPath) {
     }
   }
   try {
-    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), startTicks: processStartTicks(process.pid) }));
   } catch (error) {
     try { closeSync(fd); } catch { /* never mask the write error */ }
     try { unlinkSync(lockPath); } catch { /* never mask the write error */ }
