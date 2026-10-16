@@ -14,9 +14,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { identityIdForWakeMember, memberIdForWakeIdentity } from "../server/wake-identity-resolution.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -156,4 +158,83 @@ test("a trial seat's webhook subscription receives room events; the DM fence bin
   assert.equal(deliveriesFor(guest.identity.identityId), 2, "guest subscription receives its own DM");
   assert.equal(deliveriesFor(linked.identityId), 2, "linked subscriber does not receive the guest's DM");
   assert.equal(deliveriesFor(stranger.identityId), 0, "non-member subscription still hears nothing");
+});
+
+// Direct unit coverage of the shared resolver itself (the end-to-end legs
+// above exercise it through the store/plugin surfaces): identity_links
+// first, guest_members fallback, room-scoped, and defensive against
+// pre-schema databases — a missing table reads as "no resolution".
+function resolverDb(t) {
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  db.exec(`
+    CREATE TABLE identity_links (
+      room_id TEXT NOT NULL, identity_id TEXT NOT NULL,
+      member_id TEXT NOT NULL, linked_at INTEGER NOT NULL);
+    CREATE TABLE guest_members (
+      member_id TEXT PRIMARY KEY, room_id TEXT NOT NULL,
+      guest_identity_id TEXT NOT NULL, tier TEXT NOT NULL,
+      invite_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+    INSERT INTO identity_links VALUES ('room-a', 'id-linked', 'mem-linked', 1);
+    INSERT INTO identity_links VALUES ('room-b', 'id-other-room', 'mem-other', 1);
+    INSERT INTO guest_members VALUES ('mem-guest', 'room-a', 'id-guest', 'contributor', 'inv-1', 1);
+    INSERT INTO guest_members VALUES ('mem-both', 'room-a', 'id-guest-shadowed', 'observer', 'inv-2', 1);
+    INSERT INTO identity_links VALUES ('room-a', 'id-linked-wins', 'mem-both', 1);
+  `);
+  return db;
+}
+
+test("resolver member -> identity: identity_links first, guest_members fallback", t => {
+  const db = resolverDb(t);
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-linked"), "id-linked",
+    "identity_links row resolves directly");
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-guest"), "id-guest",
+    "trial seat resolves through the guest_members fallback");
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-both"), "id-linked-wins",
+    "identity_links wins when a member appears in both tables");
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-absent"), null,
+    "a member in neither table does not resolve");
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-other"), null,
+    "resolution is room-scoped: another room's link does not leak");
+  assert.equal(identityIdForWakeMember(null, "room-a", "mem-linked"), null, "no db -> null");
+  assert.equal(identityIdForWakeMember(db, "", "mem-linked"), null, "no room -> null");
+  assert.equal(identityIdForWakeMember(db, "room-a", ""), null, "no member -> null");
+});
+
+test("resolver identity -> member: identity_links first, guest_members fallback", t => {
+  const db = resolverDb(t);
+  assert.equal(memberIdForWakeIdentity(db, "room-a", "id-linked"), "mem-linked",
+    "identity_links row resolves directly");
+  assert.equal(memberIdForWakeIdentity(db, "room-a", "id-guest"), "mem-guest",
+    "trial seat resolves through the guest_members fallback");
+  assert.equal(memberIdForWakeIdentity(db, "room-a", "id-guest-shadowed"), "mem-both",
+    "a shadowed guest identity still resolves to its guest seat");
+  assert.equal(memberIdForWakeIdentity(db, "room-a", "id-absent"), null,
+    "an identity in neither table does not resolve");
+  assert.equal(memberIdForWakeIdentity(db, "room-a", "id-other-room"), null,
+    "resolution is room-scoped: another room's identity does not leak");
+  assert.equal(memberIdForWakeIdentity(null, "room-a", "id-linked"), null, "no db -> null");
+  assert.equal(memberIdForWakeIdentity(db, "", "id-linked"), null, "no room -> null");
+  assert.equal(memberIdForWakeIdentity(db, "room-a", ""), null, "no identity -> null");
+});
+
+test("resolver on a pre-schema database reads as no resolution, never a throw", t => {
+  const bare = new DatabaseSync(":memory:");
+  t.after(() => bare.close());
+  assert.equal(identityIdForWakeMember(bare, "room-a", "mem-linked"), null,
+    "missing tables -> null (member -> identity)");
+  assert.equal(memberIdForWakeIdentity(bare, "room-a", "id-linked"), null,
+    "missing tables -> null (identity -> member)");
+
+  // Partial schema: identity_links exists, guest_members not yet created —
+  // a link miss must still read as no resolution, not a throw.
+  const partial = new DatabaseSync(":memory:");
+  t.after(() => partial.close());
+  partial.exec(`CREATE TABLE identity_links (
+    room_id TEXT NOT NULL, identity_id TEXT NOT NULL,
+    member_id TEXT NOT NULL, linked_at INTEGER NOT NULL);`);
+  assert.equal(identityIdForWakeMember(partial, "room-a", "mem-guest"), null,
+    "missing guest_members table -> null after a link miss");
+  assert.equal(memberIdForWakeIdentity(partial, "room-a", "id-guest"), null,
+    "missing guest_members table -> null after a link miss (reverse)");
 });
