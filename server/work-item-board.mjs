@@ -26,7 +26,7 @@ import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
 
-export const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
+export const WORK_ITEM_BOARD_BACKFILL_VERSION = 2;
 export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
 // Lazily created by this module on first use (the run-once/request_replays
 // pattern); registered in server/writer-fence.mjs lazyAdditiveTables.
@@ -469,6 +469,13 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     deliveryMode: existing?.deliveryMode ?? null,
     reviewPolicy: item.independentVerificationRequired === true ? "independent_principal"
       : (typeof item.verifierMemberId === "string" && item.verifierMemberId.length > 0 ? "distinct_member" : null),
+    // B-4' Phase 0 slice 2 (Appendix D §D.1 §4.2): decision-gate fields,
+    // carried verbatim from the item's STORED values (the reducer already
+    // computed them from room policy at propose time; never recompute here).
+    // Same names/semantics as the item fields so the #3342 decisions inbox
+    // (PR #3572 decisionFacts) can re-point at the board 1:1.
+    ownerDecisionRequired: item.ownerDecisionRequired === true,
+    humanDecisionMakerId: typeof item.humanDecisionMakerId === "string" && item.humanDecisionMakerId.length > 0 ? item.humanDecisionMakerId : null,
     reviewedBy: reviewsMerged.length > 0 ? reviewsMerged[reviewsMerged.length - 1].memberId : null,
     attestations: attestationsMerged,
     tags: [...tags].slice(0, 32),
@@ -561,6 +568,8 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     leaseExpiresAt: null,
     deliveryMode: null,
     reviewPolicy: null,
+    ownerDecisionRequired: false,
+    humanDecisionMakerId: null,
     reviewedBy: null,
     attestations: [],
     tags: [],

@@ -288,6 +288,22 @@ const optionalId = (value, what) => {
   if (value === undefined || value === null || value === "") return null;
   return idOf(value, what, 256);
 };
+// Member-id reference on a claim row (B-4' Phase 0 board fields): a member
+// id string of 1..128 characters, or null when the row names nobody.
+const memberRefOf = (value, what) => {
+  if (value === undefined || value === null || value === "") return null;
+  check(typeof value === "string" && value.length >= 1 && value.length <= 128, `${what} must be 1..128 characters or null`);
+  return value;
+};
+const decisionGateOf = value => {
+  if (value.ownerDecisionRequired !== undefined && value.ownerDecisionRequired !== null) {
+    check(typeof value.ownerDecisionRequired === "boolean", "ownerDecisionRequired must be a boolean");
+  }
+  return {
+    ownerDecisionRequired: value.ownerDecisionRequired === true,
+    humanDecisionMakerId: memberRefOf(value.humanDecisionMakerId, "humanDecisionMakerId"),
+  };
+};
 const blobsOf = value => {
   check(Array.isArray(value), "blobs must be an array");
   check(value.length <= MAX_RECEIPT_BLOBS, `blobs must hold at most ${MAX_RECEIPT_BLOBS} pointers`);
@@ -524,6 +540,7 @@ export const workOf = value => {
   const kind = kindOf(value.kind);
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
+  const decisionGate = decisionGateOf(value);
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
@@ -534,6 +551,7 @@ export const workOf = value => {
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
+    ...decisionGate,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
