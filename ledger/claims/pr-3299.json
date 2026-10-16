@@ -1,13 +1,13 @@
 {
   "version": 1,
   "actor": "jill",
-  "requestId": "claim-2026-10-16T20-46-30Z-jill-ffde",
-  "kind": "merge-slot",
+  "requestId": "claim-2026-10-16T20-46-52Z-jill-67c2",
+  "kind": "release",
   "prs": [
     3299
   ],
-  "claimed-at": "2026-10-16T20:46:30Z",
-  "heartbeat": "2026-10-16T20:46:30Z",
-  "expires": "2026-10-16T21:31:30Z",
-  "note": "bootstrap test"
+  "claimed-at": "2026-10-16T20:46:52Z",
+  "heartbeat": "2026-10-16T20:46:52Z",
+  "expires": "2026-10-16T21:31:52Z",
+  "note": "bootstrap test — releasing the WS-3b bootstrap claim; ledger round-trip complete"
 }
