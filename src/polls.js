@@ -1,6 +1,7 @@
 // src/polls.js — Poll message helpers. A poll is a message with kind "poll"
 // carrying a poll payload { question, options: [{ label, emoji }], allowMultiple }.
-// Votes are ordinary message.reaction_set events on an option's emoji; this
+// Votes are poll.voted { messageId, option, active } events stored as
+// message.pollVotes; this
 // module validates poll creation, assigns the option emojis, and aggregates
 // the visible votes. Pure: no store, no HTTP, no side effects.
 export const POLL_MIN_OPTIONS = 2;
@@ -56,9 +57,8 @@ export function pollTally(message) {
   if (!message || typeof message !== "object" || message.kind !== "poll") return null;
   const poll = message.poll;
   if (!poll || !Array.isArray(poll.options)) return null;
-  const reactions = message.reactions && typeof message.reactions === "object" ? message.reactions : {};
-  const results = poll.options.map(option => {
-    const voters = Array.isArray(reactions[option.emoji]) ? [...reactions[option.emoji]] : [];
+  const results = poll.options.map((option, i) => {
+    const voters = Array.isArray(message.pollVotes?.[i]) ? [...message.pollVotes[i]] : [];
     return { label: option.label, emoji: option.emoji, votes: voters.length, voters };
   });
   return { question: poll.question, allowMultiple: poll.allowMultiple === true, results, total: results.reduce((sum, r) => sum + r.votes, 0) };

@@ -52,6 +52,7 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
   MESSAGE_REACTION_SET: "message.reaction_set",
+  POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
   CHANNEL_CREATED: "channel.created",
@@ -615,6 +616,7 @@ export function applyEvent(current, incoming) {
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
     [EVENT_TYPES.CHANNEL_CREATED]: createChannel,
@@ -1570,6 +1572,28 @@ function setMessageReaction(state, incoming) {
       }
     }
   }
+}
+
+// Polls: poll.voted { messageId, option, active } records one member's vote
+// on option index `option`. Votes live on the message as pollVotes, an array
+// of sorted member-id lists aligned with poll.options. Single-choice polls
+// move the vote; allowMultiple polls keep the others.
+function votePoll(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  requireFields(incoming.data, ["messageId", "option", "active"]);
+  const { messageId, option, active } = incoming.data;
+  const message = state.messages.find(m => m.id === messageId);
+  if (!message) throw new Error("Vote must reference a message in this Room");
+  if (message.deletedAt) throw new Error("Message was deleted");
+  if (message.kind !== "poll" || !Array.isArray(message.poll?.options)) throw new Error("Vote must reference a poll");
+  if (!Number.isInteger(option) || option < 0 || option >= message.poll.options.length || typeof active !== "boolean") throw new Error("Invalid poll vote");
+  const votes = message.poll.options.map((_, i) => Array.isArray(message.pollVotes?.[i]) ? message.pollVotes[i] : []);
+  message.pollVotes = votes.map((voters, i) => {
+    const set = new Set(voters);
+    if (i === option) { if (active) set.add(actor.id); else set.delete(actor.id); }
+    else if (active && message.poll.allowMultiple !== true) set.delete(actor.id);
+    return [...set].sort();
+  });
 }
 
 function proposeWork(state, incoming) {
