@@ -395,16 +395,25 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     // Working/blocked without a live lease: the accountable member is
     // doing (or stuck on) the work. Read-mode items never hold claims;
     // their owner + start time come from the item and its start event.
+    // #3711: this branch is only reached when the item's claim is NOT
+    // live at nowMs, so its lease timing must not be copied onto the
+    // row. A copied expiry that is already past makes the board's own
+    // lease sweep release a row the item door still shows as held; the
+    // next sync then re-projects it held, and the row oscillates
+    // in_progress <-> unclaimed — one lease_expired event + wake per
+    // cycle, plus an unclaimed window in which a second member can
+    // claim the card natively and diverge the row for good. The kernel's
+    // own lease-free shape is leaseStartAt/leaseExpiresAt both null
+    // (claimWork/renewWork), and a lease-free row is never swept, so the
+    // projection carries the claim's identity (owner, claimedAt) with
+    // no lease at all.
     owner = item.claim?.holderId ?? item.accountableMemberId ?? null;
     if (item.claim) {
       claimedAt = isoOrNull(item.claim.acquiredAt);
-      leaseStartAt = isoOrNull(item.claim.renewedAt ?? item.claim.acquiredAt);
-      leaseExpiresAt = isoOrNull(item.claim.expiresAt);
     } else {
       const started = (facts?.events ?? []).findLast(event => event.type === "work.started");
       claimedAt = isoOrNull(started?.at) ?? isoOrNull(item.updatedAt);
     }
-    if (state === "in_progress" && !item.claim) { leaseStartAt = null; leaseExpiresAt = null; }
   } else if (state === "done") {
     owner = item.claim?.holderId ?? item.accountableMemberId ?? null;
     if (item.claim) {
