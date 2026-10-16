@@ -183,12 +183,6 @@ function validRoomArgs(name, args) {
     return idOk && messageOk && replyOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
-  if (name === "room_react") {
-    const idOk = args.id === undefined || validId(args.id);
-    const activeOk = args.active === undefined || typeof args.active === "boolean";
-    return idOk && activeOk && validId(args.messageId)
-      && typeof args.reaction === "string" && args.reaction.trim().length > 0 && args.reaction.length <= 64;
-  }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
     const sortOk = args.sort === undefined || args.sort === "curiosity";
@@ -554,11 +548,6 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }) };
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
-  }
-  if (name === "room_react") {
-    const id = args.id ?? randomUUID();
-    const data = { messageId: args.messageId, reaction: args.reaction, active: args.active !== false };
-    return commandReceipt(store, secret, roomId, { id, type: "message.reaction_set", data }, "reacted");
   }
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
@@ -983,7 +972,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_create", "room_join",
   "squads_create", "squads_update_members", "squads_disband",
-  "room_post_message", "room_react",
+  "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
