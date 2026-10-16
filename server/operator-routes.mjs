@@ -58,7 +58,7 @@ export function createOperatorRoutes({ store, json, reject, body, rate, statusPr
       return true;
     }
     if (path === "/api/operator/status-surface") {
-      json(res, 200, await collectStatusSurface({ providers: statusProviders ?? {} }));
+      json(res, 200, await collectStatusSurface({ store, providers: statusProviders ?? {} }));
       return true;
     }
     const main = url.searchParams.get("main");
