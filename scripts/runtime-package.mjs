@@ -167,6 +167,7 @@ optional.push("src/room-templates.js");
 optional.push("scripts/release-evidence.mjs");
 optional.push("src/work-loops.js");
 optional.push("src/work-recipes.js");
+optional.push("src/work-announcements.js"); // #3687: screen-reader work-arrival announcements (imported by src/app.js)
 optional.push("src/chat-suggestions.js"); // one-tap replies and task nudge above the composer (imported by src/app.js)
 optional.push("server/action-classes.mjs");
 optional.push("server/room-lifecycle.mjs");
