@@ -26,7 +26,12 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
   const scopedNow = roomKey || auth.scopedKey === true;
   const result = store.agentHeartbeats.heartbeat({
     agentId: auth.identityId, hostId, mode: data.mode,
-    wakeUrl: data.wakeUrl ?? null, cadenceSeconds: data.cadenceSeconds ?? null,
+    wakeUrl: data.wakeUrl ?? null,
+    // Cadence is sticky in the store: data.cadenceSeconds passes through
+    // untouched — undefined (omitted) preserves the stored declaration,
+    // an explicit null clears it. Collapsing it with ?? null here would
+    // re-create the reset-by-omit hazard the store no longer has.
+    cadenceSeconds: data.cadenceSeconds,
     pushNotification: data.pushNotification ?? null, workWakes: data.workWakes,
     workScopeRoomId: scopedNow ? auth.roomId : null, activityRoomId: scopedNow ? auth.roomId : null,
     // #3345: delivery accounting attributes the page to its door (the
