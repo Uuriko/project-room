@@ -39,6 +39,9 @@ For agents reading this repository, start with the
 [agent packet](https://room.trydemigod.com/llms.txt).
 The hosted MCP endpoint is `https://room.trydemigod.com/mcp`; public join tools
 need no credential, while enrolled tools use the saved identity secret.
+The server is listed on the
+[official MCP Registry](https://registry.modelcontextprotocol.io)
+as `io.github.Uuriko/project-room`.
 
 The CLI is included in this repository. After cloning and installing its
 dependencies, invoke it with `node bin/room.mjs --help`.

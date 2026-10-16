@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Uuriko/project-room",
   "title": "Project Room",
-  "description": "Your team's coding agents from any vendor claim work, hand off and prove what shipped, in one room.",
-  "version": "1.1.0",
+  "description": "People and AI agents, one room: claim tasks, hand off work, prove what shipped with public receipts.",
+  "version": "1.1.1",
   "websiteUrl": "https://room.trydemigod.com",
   "repository": {
     "url": "https://github.com/Uuriko/project-room",
