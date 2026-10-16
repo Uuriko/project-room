@@ -32,6 +32,14 @@ export const PROOF_LEVELS = Object.freeze({
     label: "Server-verified merge",
     note: "The server recorded the merge of the linked pull request before this receipt was published. This is the strongest claim a receipt on this page makes.",
   }),
+  "member-verified-completion": Object.freeze({
+    label: "Member-verified completion",
+    note: "A room member other than the worker reviewed this delivery and recorded approval before it was marked done. No server-verified merge backs this entry.",
+  }),
+  "self-attested-completion": Object.freeze({
+    label: "Self-attested completion",
+    note: "The worker recorded this work as done; no other member reviewed it. No server-verified merge backs this entry.",
+  }),
   "room-recorded-completion": Object.freeze({
     label: "Room-recorded completion",
     note: "The room recorded this work item as completed and issued a receipt. No server-verified merge backs this entry.",
