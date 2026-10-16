@@ -14,7 +14,7 @@ import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, 
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
@@ -3595,7 +3595,7 @@ async function submit(form, fn, { failureHint } = {}) {
   try { await fn(current); }
   catch (error) {
     if (!current()) return;
-    const text = `${requestFailureMessage(error)}. ${failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again.")}`;
+    const text = failureTextWithHint(error, failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
     // silent so a screen reader announces the failure exactly once.
@@ -5474,7 +5474,7 @@ async function setMute(memberId, muted) {
     if (generation !== client.generation || !state) return;
     notice(muted ? `${target.displayName} muted for you. Their messages are hidden here until you unmute; nobody else is affected.` : `${target.displayName} unmuted.`);
   } catch (error) {
-    if (generation === client.generation && state) notice(`${requestFailureMessage(error)}. Your mute choice was not changed.`, true);
+    if (generation === client.generation && state) notice(failureTextWithHint(error, "Your mute choice was not changed."), true);
   }
 }
 $("#presence-list").addEventListener("click", e => {
@@ -5531,7 +5531,7 @@ function loadReports() {
     reportsSequence = sequence; reportsGeneration = generation;
     renderReports(result.reports);
   }).catch(error => {
-    if (generation === client.generation && state) setFormStatus($("#report-list-status"), `${requestFailureMessage(error)}. Open this section again to retry.`, true);
+    if (generation === client.generation && state) setFormStatus($("#report-list-status"), failureTextWithHint(error, "Open this section again to retry."), true);
   }).finally(() => { reportsFlight = null; });
 }
 function renderReports(reports) {
