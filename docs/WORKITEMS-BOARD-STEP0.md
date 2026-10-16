@@ -97,6 +97,9 @@ last three carry state with no board field (§4.5).
   `server/needs-me.mjs`, `server/public-read-model.mjs`.
 - **Attention:** `server/inbox.mjs`, `server/notifications.mjs`,
   `server/updates.mjs`, `server/owner-attention.mjs`,
+  `server/owner-overview.mjs` (Owner Cockpit slice 1, PR #3572 —
+  read-only cross-room fan-out over the per-room attention readers;
+  recorded 2026-10-16),
   `server/reminders.mjs`, `server/reply-requests.mjs`,
   `server/return-brief.mjs`, `src/reminders.js`, `src/reply-requests.js`.
 - **Work surfaces (server):** `server/work-context.mjs`,

@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { AccessRequests } from "../server/access-requests.mjs";
+import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { MemberPermissionRequests } from "../server/member-permission-requests.mjs";
+import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "../server/routes/member-permissions.mjs";
 
 // These real HTTP/store cases own the room-authenticated member contract.
@@ -231,4 +232,34 @@ test("a member without membership administration cannot decide a permission upgr
   assert.equal(refused.body.error.code, "access_denied");
   assert.deepEqual(f.store.roomAuthority("commons").members[f.memberId].permissions, [],
     "the requester's permissions are unchanged");
+});
+
+// #3745: the member create path shares the join path's cap and its lazy
+// expiry. With no reader materializing expiry, a member's lapsed upgrade
+// rows consumed the cap forever; the create now expires the caller's own
+// lapsed rows before counting. Service-level so the clock (backdating)
+// and the rate limiter are both under the test's control.
+test("lapsed member pendings are expired on create and do not consume the cap (#3745)", t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  const owner = store.issueAccessKey("commons", "owner");
+  const identity = store.identities.create("Member Requester");
+  store.identities.link(owner, "commons", { identityId: identity.identityId, permissions: [] });
+  const access = new AccessRequests(store, {
+    rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 })
+  });
+  const memberRequests = new MemberPermissionRequests(access, 5);
+  t.after(() => store.close());
+  const ask = requestId => memberRequests.request(identity.secret, "commons",
+    { permissions: ["accept_work"], requestId });
+  for (let i = 0; i < 5; i++) assert.equal(ask(`mp_lapse_${i}`).status, "pending");
+  // Past the TTL with no reader: the rows are still stored pending.
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(Date.now() - REQUEST_TTL_MS - 1000);
+  assert.equal(ask("mp_lapse_new").status, "pending");
+  assert.equal(store.db.prepare(
+    "SELECT count(*) AS n FROM access_requests WHERE status='expired'").get().n, 5);
+  // Live pendings still refuse at the cap exactly as before.
+  for (let i = 0; i < 4; i++) assert.equal(ask(`mp_live_${i}`).status, "pending");
+  assert.throws(() => ask("mp_live_over"), err => err.code === "too_many_requests");
 });
