@@ -59,7 +59,7 @@ signed evidence or checks (§4.4).
 ## 2. Census — every live reader and writer
 
 Method: full-text scan for `workItems` over the shipped tree at the Step 0
-base, pinned file-by-file in the Step 0 census test (56 files under
+base, pinned file-by-file in the Step 0 census test (55 files under
 `server/` + `src/`; outside those trees: `client/` 2, `machine/` 1,
 `cloudflare/` 4 check/fixture files, `scripts/` ≈60 operational and
 browser-check scripts that consume the client/store shapes).
@@ -83,7 +83,7 @@ test). Work-mutating events **not** synced: `work.proposed` (deliberate,
 §1), `work.help_updated`, `work.public_set`, `work.halt_cleared` — the
 last three carry state with no board field (§4.5).
 
-### Readers, by family (all 56 pinned sites)
+### Readers, by family (all 55 pinned sites)
 
 - **Kernel/reducer:** `src/events.js`, `src/workflow.js`,
   `src/work-item-session.js`, `server/claim-scopes.mjs`.
@@ -117,7 +117,7 @@ last three carry state with no board field (§4.5).
 
 Direct `state.workItems` reads concentrate in `server/store.mjs` (≈42
 sites: validation, search, sessions, integrity) and `src/app.js` (≈40: the
-human work surface). Reader migration is therefore not 56 equal jobs: the
+human work surface). Reader migration is therefore not 55 equal jobs: the
 long tail reads one or two fields (usually lifecycle state, receipt, or
 help), and the two hubs read everything.
 
