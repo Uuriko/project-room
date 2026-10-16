@@ -8,7 +8,9 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { mentionHtml } from "../src/conversation.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiQuery, insertEmoji, isSingleEmoji, renderEmojiShortcodes, MAX_REACTIONS_PER_MESSAGE } from "../src/emoji.js";
+import { canonicalReaction, clipGraphemes, isSingleEmoji, MAX_REACTIONS_PER_MESSAGE } from "../src/emoji.js";
+
+import { REACTION_IDENTITIES } from "../src/legacy-reaction-aliases.js";
 
 const HEART = "\u2764\uFE0F";
 const LIKE = "\u{1F44D}";
@@ -35,7 +37,7 @@ function room(t) {
   return { store, owner, human, agent, send };
 }
 
-test("unicode emoji in a message body round-trips and shortcodes render without breaking mentions", t => {
+test("unicode emoji in a message body round-trips and shortcodes stay literal without breaking mentions", t => {
   const f = room(t);
   const body = `Ship it ${TONED} ${FAMILY} ${FLAG}`;
   f.send(f.human, T.MESSAGE_POSTED, { messageId: "glyph", body });
@@ -46,11 +48,9 @@ test("unicode emoji in a message body round-trips and shortcodes render without 
   assert.match(html, new RegExp(TONED));
   assert.match(html, new RegExp(FAMILY));
   assert.match(html, new RegExp(FLAG));
-  assert.match(html, new RegExp(FIRE));
+  assert.match(html, /:fire:/);
   assert.match(html, /:not_a_real_emoji_zzz:/);
   assert.equal(html.includes("<script>"), false);
-  assert.equal(renderEmojiShortcodes(":smile:"), "😄");
-  assert.equal(renderEmojiShortcodes("note: not a shortcode"), "note: not a shortcode");
   assert.equal(clipGraphemes(`xx${FLAG}`, 3), "xx");
   assert.equal(clipGraphemes(FLAG, 2), "");
 });
@@ -99,7 +99,7 @@ test("reaction identity is the unicode glyph; legacy names and shortcodes are al
 test("a message accepts one reaction per member per emoji and stops at the distinct cap", t => {
   const f = room(t);
   f.send(f.human, T.MESSAGE_POSTED, { messageId: "topic", body: "cap" });
-  const glyphs = emojiCatalog().flatMap(group => group.items.map(item => item.emoji));
+  const glyphs = REACTION_IDENTITIES.map(([glyph]) => glyph);
   const distinct = [];
   for (const glyph of ["👍", "❤️", "🎉", "🤔", "😂", "🔥", "👀", "✅", ...glyphs]) {
     if (distinct.includes(glyph)) continue;
@@ -118,17 +118,4 @@ test("a message accepts one reaction per member per emoji and stops at the disti
   f.send(f.agent, T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: distinct[0], active: true });
   const shared = f.store.snapshot(f.owner, "commons").state.messages.find(m => m.id === "topic").reactions[distinct[0]];
   assert.deepEqual(shared, ["agent", "human"]);
-});
-
-test("composer :shortcode query inserts the glyph and leaves @mentions alone", () => {
-  const found = emojiQuery("hello :fir", 11);
-  assert.equal(found.query, "fir");
-  assert.equal(emojiQuery("Note:", 5), null);
-  assert.equal(emojiQuery("hi @Maya", 8), null);
-  const matches = emojiMatches("fir", 8);
-  assert.equal(matches[0].emoji, FIRE);
-  const inserted = insertEmoji("hello :fir", 11, found.start, matches[0].emoji);
-  assert.equal(inserted.body, `hello ${FIRE} `);
-  assert.equal(inserted.body.includes(":fir"), false);
-  assert.equal(emojiMatches("zzzz-not-emoji", 8).length, 0);
 });
