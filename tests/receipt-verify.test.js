@@ -7,9 +7,9 @@
 //     matching what the server itself actually checked;
 //   - a tampered stored row, journal entry, chain link, or artifact
 //     flips the verdict to contradicted;
-//   - the linked pull request's live GitHub state is named under
-//     not-checked — this slice never lets a verdict silently cover a
-//     check it did not run (the live re-fetch is the next slice);
+//   - a check that cannot run (GitHub unreachable, stubbed down here)
+//     is reported not-checked and the verdict drops to partially
+//     verifiable — never silently covered, never failed;
 //   - a source that no longer yields the receipt (backing record
 //     pruned) reads as no-longer-verifiable, not a contradiction.
 // Seams: the real BountyEscrow state machine drives the lot ledger and
@@ -33,7 +33,9 @@ import { verifyPublicReceipt } from "../server/receipt-verify.mjs";
 const NOW = 1_786_100_000_000;
 const PR_URL = "https://github.com/Uuriko/project-room/pull/2099";
 const check = (verification, id) => verification.checks.find(entry => entry.id === id);
-const verify = (store, id) => verifyPublicReceipt(store, publicReceiptById(store, id), { nowMs: NOW });
+const downFetch = async () => { throw new Error("network down"); };
+const verify = async (store, id, fetchImpl = downFetch) =>
+  verifyPublicReceipt(store, publicReceiptById(store, id), { fetchImpl, nowMs: NOW });
 
 // --- bounty lot: the escrow ledger is the source ---------------------------
 
@@ -81,7 +83,7 @@ test("lot: a clean settled lot re-validates its ledger chain", async () => {
   const { store, lotId } = settledLot();
   const receipt = publicReceiptById(store, lotId);
   assert.ok(receipt, "fixture lot resolves");
-  const verification = verifyPublicReceipt(store, receipt, { nowMs: NOW });
+  const verification = await verifyPublicReceipt(store, receipt, { nowMs: NOW });
   assert.equal(verification.verdict, "record-checked");
   assert.equal(verification.checkedAt, new Date(NOW).toISOString());
   assert.equal(check(verification, "journal").status, "pass");
@@ -92,7 +94,7 @@ test("lot: a tampered journal entry flips the verdict to contradicted", async ()
   const { db, store, lotId } = settledLot();
   const entry = db.prepare("SELECT entry_id FROM bounty_journal WHERE lot_id=? ORDER BY seq LIMIT 1").get(lotId);
   db.prepare("UPDATE bounty_journal SET amount = amount + 1000 WHERE entry_id=?").run(entry.entry_id);
-  const verification = verify(store, lotId);
+  const verification = await verify(store, lotId);
   assert.equal(check(verification, "journal").status, "contradicted");
   assert.match(check(verification, "journal").detail, /altered after it was written/);
   assert.equal(verification.verdict, "contradicted");
@@ -105,7 +107,7 @@ test("lot: a rewritten predecessor hash breaks the chain link check", async () =
     .get(ROOM, first.account_id, first.seq);
   assert.ok(prev, "the lot's first entry has a chain predecessor in this fixture");
   db.prepare("UPDATE bounty_journal SET hash=? WHERE entry_id=?").run("f".repeat(64), prev.entry_id);
-  const verification = verify(store, lotId);
+  const verification = await verify(store, lotId);
   assert.equal(check(verification, "journal").status, "contradicted");
   assert.match(check(verification, "journal").detail, /chain is broken/);
   assert.equal(verification.verdict, "contradicted");
@@ -129,20 +131,21 @@ function serveClaimRoom(t) {
   return { store, claim, receiptId };
 }
 
-test("work claim: a clean record re-validates; the live pull state is named not-checked", async t => {
+test("work claim: a clean record re-validates; an unreachable GitHub leaves it partially verifiable", async t => {
   const { store, receiptId } = serveClaimRoom(t);
-  const verification = verify(store, receiptId);
-  assert.equal(verification.verdict, "record-checked");
+  const verification = await verify(store, receiptId);
   assert.equal(check(verification, "source-record").status, "pass");
+  assert.equal(check(verification, "pull-request").status, "not-checked");
+  assert.equal(verification.verdict, "partially-verifiable",
+    "a check that could not run is never silently covered by the verdict");
   assert.deepEqual(verification.scope.checked, ["Source record"]);
-  assert.ok(verification.scope.notChecked.includes("The linked pull request's current state on GitHub"),
-    "the local slice names the check it did not run instead of covering it");
+  assert.ok(verification.scope.notChecked.includes("Pull request on GitHub"));
 });
 
 test("work claim: a tampered stored row contradicts its source", async t => {
   const { store, receiptId } = serveClaimRoom(t);
   store.db.prepare("UPDATE public_receipts SET title='Forged title' WHERE id=?").run(receiptId);
-  const verification = verify(store, receiptId);
+  const verification = await verify(store, receiptId);
   assert.equal(check(verification, "source-record").status, "contradicted");
   assert.match(check(verification, "source-record").detail, /title/);
   assert.equal(verification.verdict, "contradicted");
@@ -174,13 +177,13 @@ function servePublicWork(t) {
 
 test("public work: record + artifact re-validate; a forged artifact contradicts", async t => {
   const { store, receiptId } = servePublicWork(t);
-  const clean = verify(store, receiptId);
+  const clean = await verify(store, receiptId);
   assert.equal(check(clean, "source-record").status, "pass");
   assert.equal(check(clean, "artifact").status, "pass");
   assert.equal(clean.verdict, "record-checked");
 
   store.db.prepare("UPDATE public_work_receipts SET artifact_text='forged after the fact' WHERE receipt_id=?").run(receiptId);
-  const forged = verify(store, receiptId);
+  const forged = await verify(store, receiptId);
   assert.equal(check(forged, "artifact").status, "contradicted");
   assert.equal(forged.verdict, "contradicted");
 });
@@ -188,7 +191,7 @@ test("public work: record + artifact re-validate; a forged artifact contradicts"
 test("public work: a pruned delivery record is no longer verifiable", async t => {
   const { store, receiptId } = servePublicWork(t);
   store.db.prepare("DELETE FROM public_work_receipts WHERE receipt_id=?").run(receiptId);
-  const verification = verify(store, receiptId);
+  const verification = await verify(store, receiptId);
   assert.equal(check(verification, "source-record").status, "missing");
   assert.equal(verification.verdict, "no-longer-verifiable");
 });

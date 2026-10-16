@@ -59,6 +59,10 @@ function githubToken(env) {
   return null;
 }
 
+// Receipt verification (server/receipt-verify.mjs) resolves its GitHub
+// token exactly the way the poll does — one token source for both.
+export { githubToken as githubTokenFromEnv };
+
 function githubHeaders(token) {
   const headers = {
     Accept: "application/vnd.github+json",

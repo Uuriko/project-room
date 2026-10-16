@@ -7,17 +7,21 @@
 // every check the server can run itself: source-record (the record is
 // re-derived from its current source and compared field by field),
 // artifact (a public-work receipt's stored artifact still hashes to the
-// sha256 the record carries), and journal (a bounty lot's escrow entries
-// are re-hashed and their per-account chain links re-checked — the same
-// core the conservation audit uses, journalEntryHash in bounty-escrow).
-// The linked pull request's live GitHub state joins in the follow-up
-// slice; until then it is named under not-checked wherever a receipt
-// carries one, so no verdict here silently covers it. The verdict never
-// outruns the checks, and no human is asked to compare a hash by eye.
+// sha256 the record carries), journal (a bounty lot's escrow entries are
+// re-hashed and their per-account chain links re-checked — the same core
+// the conservation audit uses, journalEntryHash in bounty-escrow), and
+// pull-request (the linked pull request is re-fetched from GitHub and
+// its current state compared with the merge the record claims). The
+// verdict never outruns the checks: a check that could not run is named
+// under not-checked with its reason, and no human is asked to compare a
+// hash by eye — hashes stay machine-side.
+import { parsePullRequestUrl, pullRequestOutcomeFromApi } from "./claim-coordination.mjs";
 import { journalEntryHash } from "./bounty-escrow.mjs";
 import { rederivePublicReceipt } from "./public-read-model.mjs";
 
 export const RECEIPT_VERIFICATION_SCHEMA = "project-room-receipt-verification/1";
+
+const MAX_BODY_CHARS = 65_536;
 
 // What no check here even attempts — stated so ran checks can't borrow scope.
 const NEVER_CHECKED = [
@@ -82,10 +86,76 @@ function checkJournal(store, receipt) {
     detail: `${entries.length} ledger ${entries.length === 1 ? "entry" : "entries"} re-hashed just now; every hash and chain link matches.` }];
 }
 
+async function checkPullRequest(receipt, { fetchImpl, token }) {
+  const label = "Pull request on GitHub";
+  const base = { id: "pull-request", label };
+  const parsed = parsePullRequestUrl(receipt.pullRequest);
+  if (!parsed) {
+    return { ...base, status: "not-checked",
+      detail: "The recorded link is not a GitHub pull request URL, so there is nothing to re-fetch." };
+  }
+  const [owner, name] = parsed.repo.split("/");
+  const endpoint = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${parsed.number}`;
+  const headers = { Accept: "application/vnd.github+json", "User-Agent": "project-room-receipt-verify",
+    "X-GitHub-Api-Version": "2022-11-28" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let response;
+  try {
+    response = await fetchImpl(endpoint, { headers, signal: AbortSignal.timeout(5000) });
+  } catch {
+    return { ...base, status: "not-checked", detail: "GitHub could not be reached just now, so the pull request was not re-checked." };
+  }
+  if (response.status === 404) {
+    return { ...base, status: "contradicted", detail: `GitHub reports no pull request #${parsed.number} in ${parsed.repo}.` };
+  }
+  if (response.status === 401 || response.status === 403 || response.status === 429) {
+    return { ...base, status: "not-checked",
+      detail: "GitHub declined the re-check (rate limit or authorization), so the pull request was not re-checked." };
+  }
+  if (!response.ok) {
+    return { ...base, status: "not-checked", detail: `GitHub answered ${response.status}, so the pull request was not re-checked.` };
+  }
+  let body = null;
+  try {
+    const text = typeof response.text === "function" ? await response.text() : JSON.stringify(await response.json());
+    if (text.length <= MAX_BODY_CHARS) body = JSON.parse(text);
+  } catch { body = null; }
+  if (!body) {
+    return { ...base, status: "not-checked", detail: "GitHub's answer could not be read, so the pull request was not re-checked." };
+  }
+  const outcome = pullRequestOutcomeFromApi(body);
+  if (outcome === "merged") {
+    const at = typeof body.merged_at === "string" ? ` at ${body.merged_at}` : "";
+    const sha = typeof body.merge_commit_sha === "string" && /^[0-9a-f]{40}$/.test(body.merge_commit_sha)
+      ? ` (merge commit ${body.merge_commit_sha.slice(0, 12)})` : "";
+    return { ...base, status: "pass", detail: `GitHub reports pull request #${parsed.number} merged${at}${sha}.` };
+  }
+  // A merge is claimed only when the record carries mergedAt; for a
+  // receipt that merely links the pull (a work item's evidence), the
+  // current state is reported as a fact, not scored against a claim the
+  // record never made.
+  if (!receipt.mergedAt) {
+    return { ...base, status: "observed",
+      detail: `GitHub reports pull request #${parsed.number} ${outcome === "closed" ? "closed without merging" : "still open"}. This record claims no merge.` };
+  }
+  return { ...base, status: "contradicted",
+    detail: outcome === "closed"
+      ? `GitHub reports pull request #${parsed.number} closed without merging — the merge this record shows did not happen there.`
+      : `GitHub reports pull request #${parsed.number} still open — not merged, as this record shows.` };
+}
+
 const VERDICTS = {
+  "server-verified": {
+    label: "Server-verified",
+    summary: "The server re-checked this record just now: the source record still matches, and GitHub confirms the merge.",
+  },
   "record-checked": {
     label: "Record re-checked",
     summary: "The server re-checked this record just now against its source, and everything it ran still matches.",
+  },
+  "partially-verifiable": {
+    label: "Partially verifiable",
+    summary: "Most of this record re-checked clean, but at least one check could not run — what was not checked is listed below.",
   },
   "contradicted": {
     label: "Contradicted",
@@ -97,16 +167,25 @@ const VERDICTS = {
   },
 };
 
-// Re-run every local check the server can run on one public receipt, now.
+// Re-run every check the server can run on one public receipt, now.
 // `receipt` is the public shape (server/receipts-live.mjs publicReceiptById).
-export function verifyPublicReceipt(store, receipt, { nowMs = Date.now() } = {}) {
+// fetchImpl/token are injected the same way claim-pr-sync's are, so tests
+// and the Worker resolve GitHub access identically.
+export async function verifyPublicReceipt(store, receipt, { fetchImpl = fetch, token = null, nowMs = Date.now() } = {}) {
   const checks = receipt.source === "bounty-lot"
     ? checkJournal(store, receipt)
     : checkSourceRecord(store, receipt);
+  if (receipt.pullRequest) checks.push(await checkPullRequest(receipt, { fetchImpl, token }));
 
   const contradicted = checks.some(check => check.status === "contradicted");
   const missing = checks.some(check => check.status === "missing");
-  const verdict = contradicted ? "contradicted" : missing ? "no-longer-verifiable" : "record-checked";
+  const notChecked = checks.some(check => check.status === "not-checked");
+  let verdict;
+  if (contradicted) verdict = "contradicted";
+  else if (missing) verdict = "no-longer-verifiable";
+  else if (notChecked) verdict = "partially-verifiable";
+  else if (receipt.mergedAt) verdict = "server-verified";
+  else verdict = "record-checked";
 
   const meta = VERDICTS[verdict];
   return {
@@ -118,8 +197,11 @@ export function verifyPublicReceipt(store, receipt, { nowMs = Date.now() } = {})
     summary: meta.summary,
     checks,
     scope: {
-      checked: checks.map(check => check.label),
-      notChecked: [...(receipt.pullRequest ? ["The linked pull request's current state on GitHub"] : []), ...NEVER_CHECKED],
+      checked: checks.filter(check => check.status !== "not-checked").map(check => check.label),
+      notChecked: [
+        ...checks.filter(check => check.status === "not-checked").map(check => check.label),
+        ...NEVER_CHECKED,
+      ],
       by: "the Project Room server, at read time",
     },
   };
