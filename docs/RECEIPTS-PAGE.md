@@ -52,8 +52,10 @@ carries:
   (`hash_only`): not an acceptance, not a payment.
 
 Every entry links to its `/receipts/<id>` record. No payment is proved on
-the proof page: bounty credit movements are proved by signed lot receipts,
-which are member-gated and have no public page.
+the proof page: bounty credit movements are recorded by lot receipts,
+which never appear as proof-page entries. A lot receipt's own detail page
+is public only under the same owner receipts setting as every other
+receipt, and its share surfaces follow that same gate.
 
 The proof page carries the same share layer as a receipt: JSON-LD
 (`CollectionPage` with an `ItemList` mirroring the visible entries and
