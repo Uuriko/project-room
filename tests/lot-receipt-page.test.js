@@ -209,6 +209,96 @@ test("the directory toggle and operator unpublish hide a lot receipt", () => {
   assert.ok(publicReceiptById(store, lotId));
 });
 
+// --- Cross-references (#3781): work receipt <-> payout lot ------------------
+//
+// A settled public-work bounty leaves two public artifacts: the worker's
+// pwr_ work receipt (a stored public_receipts row) and the payout lot
+// receipt (composed at read time from bounty_journal). The settlement
+// layer stamps the work receipt id on the payout movement's journal
+// entries — the same two-entry stamping _issueReceipt performs for signed
+// receipts — and each read must name the other artifact, so a stranger can
+// walk from the proof of work to the proof of payment and back. A receipt
+// or lot without the counterpart stays exactly as it was: no lot fields on
+// the receipt, a null workReceiptId on the lot.
+
+const PWR_ID = `pwr_${"ab".repeat(32)}`;
+
+function seedPublicReceipts(db) {
+  db.exec(`CREATE TABLE IF NOT EXISTS public_receipts (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL,
+    origin_room_id TEXT, room_id TEXT, room_title TEXT,
+    agents_json TEXT NOT NULL, humans_json TEXT NOT NULL,
+    pull_request TEXT, merged_at TEXT, hashes_json TEXT NOT NULL,
+    at TEXT NOT NULL, start_href TEXT NOT NULL)`);
+}
+
+function insertWorkReceipt(db, id, title = "Write the migration guide") {
+  seedPublicReceipts(db);
+  db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES (?, ?, 'public-work', NULL, NULL, NULL, '[]', '[]', NULL, NULL, '[]', '2026-10-01T00:00:00.000Z', 'https://room.trydemigod.com/?start=room')`)
+    .run(id, title);
+}
+
+// Drive a bounty to paid, then stamp the work receipt id on the payout
+// movement's journal entries, as the settlement layer does, and store the
+// matching public work receipt.
+function runToPaidCrossReferenced(escrow, db) {
+  const bounty = runToPaid(escrow);
+  const lotId = lotOfKind(db, bounty.bountyId, "payout");
+  db.prepare("UPDATE bounty_journal SET receipt_id=? WHERE room_id=? AND lot_id=? AND kind='payout'")
+    .run(PWR_ID, ROOM, lotId);
+  insertWorkReceipt(db, PWR_ID);
+  return { bounty, lotId };
+}
+
+test("a settled work receipt names its payout lot, and the lot names the receipt back", () => {
+  const { escrow, db, store } = makeEscrow();
+  const { lotId } = runToPaidCrossReferenced(escrow, db);
+
+  const receipt = publicReceiptById(store, PWR_ID);
+  assert.ok(receipt, "the stored work receipt must resolve");
+  assert.equal(receipt.lotId, lotId);
+  assert.equal(receipt.settlement.lotId, lotId);
+  // The payout movement moves 9.9 of the 10 credits to the worker; the
+  // settlement block reports the stamped journal row's own amount and
+  // lot state.
+  assert.equal(receipt.settlement.amountCredits, 9.9);
+  const stamped = db.prepare(
+    "SELECT lot_state FROM bounty_journal WHERE receipt_id=? ORDER BY seq LIMIT 1").get(PWR_ID);
+  assert.equal(receipt.settlement.lotState, stamped.lot_state);
+
+  const lot = publicReceiptById(store, lotId);
+  assert.ok(lot, "the payout lot must resolve");
+  assert.equal(lot.lot.workReceiptId, PWR_ID);
+  // The linkage also survives the JSON serialization the routes serve.
+  assert.equal(receiptJson(lot).lot.workReceiptId, PWR_ID);
+});
+
+test("a work receipt with no journal lot row gains no lot fields", () => {
+  const { escrow, db, store } = makeEscrow();
+  runToPaid(escrow); // a settled ledger exists, but nothing references this receipt
+  const orphanId = `pwr_${"ef".repeat(32)}`;
+  insertWorkReceipt(db, orphanId);
+  const receipt = publicReceiptById(store, orphanId);
+  assert.ok(receipt, "the receipt itself still resolves");
+  assert.equal(receipt.title, "Write the migration guide");
+  assert.equal(receipt.lotId, undefined);
+  assert.equal("settlement" in receipt, false);
+});
+
+test("a lot whose entries carry no work receipt id reports workReceiptId null", () => {
+  const { escrow, db, store } = makeEscrow();
+  const bounty = runToPaid(escrow);
+  const lotId = lotOfKind(db, bounty.bountyId, "payout");
+  const lot = publicReceiptById(store, lotId);
+  assert.ok(lot);
+  assert.equal(lot.lot.workReceiptId, null);
+  // The signed bounty receipt linkage is untouched.
+  assert.equal(lot.lot.signedReceiptIds.length, 1);
+  assert.match(lot.lot.signedReceiptIds[0], /^room-bounty-receipt:pr:/);
+});
+
 test("other receipt shapes gain no lot field", () => {
   const json = receiptJson({
     schema: "project-room-public-receipt/1", id: `pwr_${"cd".repeat(32)}`, title: "Public task",
