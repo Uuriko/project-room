@@ -1,13 +1,28 @@
 {
-  "version": 1,
+  "schema": "coord-claim/v1",
+  "claimId": "clm_0bad995be4b4",
   "actor": "jill",
-  "requestId": "claim-2026-10-16T20-46-52Z-jill-67c2",
-  "kind": "release",
+  "kind": "merge-slot",
+  "pr": 3299,
   "prs": [
     3299
   ],
-  "claimed-at": "2026-10-16T20:46:52Z",
+  "status": "closed",
+  "claimedAt": "2026-10-16T20:46:30Z",
   "heartbeat": "2026-10-16T20:46:52Z",
-  "expires": "2026-10-16T21:31:52Z",
-  "note": "bootstrap test — releasing the WS-3b bootstrap claim; ledger round-trip complete"
+  "expires": "2026-10-16T20:46:52Z",
+  "note": "bootstrap test — releasing the WS-3b bootstrap claim; ledger round-trip complete",
+  "closedAt": "2026-10-16T20:46:52Z",
+  "history": [
+    {
+      "action": "claim",
+      "at": "2026-10-16T20:46:30Z",
+      "requestId": "claim-2026-10-16T20-46-30Z-jill-ffde"
+    },
+    {
+      "action": "release",
+      "at": "2026-10-16T20:46:52Z",
+      "requestId": "claim-2026-10-16T20-46-52Z-jill-67c2"
+    }
+  ]
 }
