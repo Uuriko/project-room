@@ -23,7 +23,7 @@ import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { escapeHtml } from "./receipts-page.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
 import { queryRoomProof } from "./receipts-live.mjs";
-import { PROOF_LEVELS } from "./receipt-share.mjs";
+import { PROOF_LEVELS, jsonLdScriptTag } from "./receipt-share.mjs";
 
 export { PROOF_LEVELS };
 
@@ -49,8 +49,11 @@ a{color:var(--blue)}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 img,svg,table{max-width:100%}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
+  const ogImageAlt = ogAlt ? `
+<meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
+<meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -62,12 +65,12 @@ function head({ title, description, path }) {
 <meta property="og:url" content="${escapeHtml(canonical)}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image" content="${escapeHtml(ogImage)}">${ogImageAlt}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
-<meta name="twitter:image" content="${OG_IMAGE}">
-<style>${pageStyle()}</style>
+<meta name="twitter:image" content="${escapeHtml(ogImage)}">
+${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
@@ -155,7 +158,34 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
   }).join("") || `<p>No published results yet. A result appears here when work is settled in this room and the owner has public receipts on — each one as a receipt anyone can open.</p>`;
   const next = nextCursor ? `<p><a href="/r/${escapeHtml(slug)}/proof?cursor=${escapeHtml(nextCursor)}">Older results</a></p>` : "";
   const honesty = PROOF_HONESTY.map(line => `<li>${escapeHtml(line)}</li>`).join("");
-  const html = `${head({ title: `${room.title} — proof of work`, description, path: `/r/${slug}/proof` })}
+  // Structured data mirrors this page's visible entries — same titles,
+  // same level labels, same level notes — so a machine quoting the page
+  // quotes what a reader sees (distribution research R4).
+  const jsonLd = jsonLdScriptTag({
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: `${room.title} — proof of work`,
+    url: `${ROOM_ORIGIN}/r/${slug}/proof`,
+    description,
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: entries.map((entry, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        name: entry.title,
+        url: `${ROOM_ORIGIN}${entry.receiptHref}`,
+        description: `${entry.proofLabel} — ${PROOF_LEVELS[entry.proofLevel].note}`,
+      })),
+    },
+  });
+  const html = `${head({
+    title: `${room.title} — proof of work`,
+    description,
+    path: `/r/${slug}/proof`,
+    jsonLd,
+    ogImage: `${ROOM_ORIGIN}/r/${slug}/proof/og.png`,
+    ogAlt: description,
+  })}
 <body><header><p><a href="/">Project Room</a> · <a href="/r/${escapeHtml(slug)}">${escapeHtml(room.title)}</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(room.title)} — proof of work</h1>

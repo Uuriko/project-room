@@ -3,7 +3,7 @@
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptJsonLd, receiptProvenNote, verdictLineOf } from "./receipt-share.mjs";
+import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptProvenNote, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -30,6 +30,9 @@ a{color:var(--blue)}
 .meta{color:var(--muted);font-size:.9rem}
 .receipt-next{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
 .receipt-next p{margin:0}
+.share{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
+.share h2{font-size:1.1rem;margin:0 0 .5rem}
+.share code{overflow-wrap:anywhere;word-break:break-word}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}`;
@@ -83,6 +86,23 @@ ${next}
 </main>
 <footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
 </body></html>`;
+}
+
+// The share block. The pre-filled text is shown verbatim — what gets
+// posted is exactly what the page says — and the share targets are plain
+// anchors, because these pages are script-free. The badge embed is the
+// worker's copy-paste path into READMEs and portfolios. This renders only
+// for a receipt that already resolved as public through receipts-live.
+function shareSection(receipt) {
+  const links = receiptShareLinks(receipt);
+  return `<section class="share" aria-label="Share this receipt">
+<h2>Share this receipt</h2>
+<p class="meta">${escapeHtml(links.text)}</p>
+<p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
+<p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
+<p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
+<p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
+</section>`;
 }
 
 export function renderReceiptDetailHtml(receipt) {
@@ -159,6 +179,7 @@ ${pr}${merged}${hashes}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+${shareSection(receipt)}
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
