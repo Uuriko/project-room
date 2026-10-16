@@ -5,11 +5,15 @@
 import { describe, test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
 import { JOBS } from "../server/jobs.mjs";
 import { SOURCE_REVISION } from "../server/version.mjs";
 import { createOperatorRoutes } from "../server/operator-routes.mjs";
 import {
-  buildStatusSurface, collectStatusSurface, readWorkerDoorRevision
+  buildStatusSurface, collectStatusSurface, readWorkerDoorRevision, burnState, INTEGRITY_STEP_NAMES
 } from "../server/operator-status-surface.mjs";
 
 const NOW = Date.parse("2026-10-15T12:00:00.000Z");
@@ -207,5 +211,136 @@ describe("operator route gate", () => {
     assert.equal(calls.json[0].status, 200);
     assert.equal(calls.json[0].payload.schema, "room.operator-status/1");
     assert.equal(calls.json[0].payload.jobs.rows.length, JOBS.length);
+  });
+});
+
+describe("backup tile", () => {
+  test("recorded measurement passes through with its margin", () => {
+    const backup = { bytes: 89_650_000, at: ISO(NOW - 86_400_000), key: "room-backups/2026-10-14.ndjson",
+      target: "kv", growthBytesPerDay: 4_000_000, singleBodyCapBytes: 100_000_000, marginDays: 2.6 };
+    const surface = buildStatusSurface({ jobs: healthyJobs, backup, now: NOW });
+    assert.equal(surface.backup.state, "recorded");
+    assert.equal(surface.backup.bytes, 89_650_000);
+    assert.equal(surface.backup.marginDays, 2.6);
+  });
+
+  test("never measured renders not-recorded, not zero", () => {
+    const surface = buildStatusSurface({ jobs: healthyJobs, backup: null, now: NOW });
+    assert.equal(surface.backup.state, "not-recorded");
+    assert.equal(surface.backup.bytes, null);
+    assert.equal(surface.backup.marginDays, null);
+  });
+});
+
+describe("store-backed tiles", () => {
+  let directory, store;
+  before(() => {
+    directory = mkdtempSync(join(tmpdir(), "status-surface-"));
+    store = new RoomStore(join(directory, "room.sqlite"));
+  });
+  after(() => { store?.close?.(); rmSync(directory, { recursive: true, force: true }); });
+
+  test("never-ran: a null store renders integrity and board as not-recorded", () => {
+    const surface = buildStatusSurface({ store: null, jobs: healthyJobs, now: NOW });
+    assert.equal(surface.integrity.state, "not-recorded");
+    assert.equal(surface.integrity.cursor, null);
+    assert.equal(surface.integrity.snapshot.verifiedAt, null);
+    assert.equal(surface.integrity.outstandingFailures, null);
+    assert.equal(surface.integrity.lastFailingRoom, null);
+    assert.equal(surface.integrity.lastFailingRoomState, "not-recorded");
+    assert.equal(surface.board.state, "not-recorded");
+    assert.equal(surface.board.claimableCount, null);
+  });
+
+  test("healthy: the deferred-batch cursor names the next step, board is empty", async () => {
+    const preBatch = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
+    await store.runDeferredIntegrityBatch();
+    const surface = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
+    assert.ok(surface.integrity.cursor, "cursor exists after a batch ran");
+    assert.equal(surface.integrity.cursor.stepsTotal, 11);
+    assert.equal(surface.integrity.cursor.nextStepName, INTEGRITY_STEP_NAMES[surface.integrity.cursor.nextStepIndex]);
+    if (preBatch.integrity.cursor) {
+      assert.equal(surface.integrity.cursor.nextStepIndex, (preBatch.integrity.cursor.nextStepIndex + 2) % 11);
+    }
+    assert.equal(surface.board.state, "recorded");
+    assert.equal(surface.board.claimableCount, 0);
+  });
+
+  test("failing room: named from the failure record, message never republished", () => {
+    // The batch-isolation store (#3544) is not on this branch yet; create
+    // its table exactly as that change defines it to pin the composition.
+    store.db.exec(`CREATE TABLE IF NOT EXISTS integrity_failures (
+      step TEXT NOT NULL, record_id TEXT NOT NULL DEFAULT '', code TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '', failures INTEGER NOT NULL DEFAULT 1,
+      first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL,
+      PRIMARY KEY (step, record_id))`);
+    store.db.prepare(`INSERT INTO integrity_failures(step, record_id, code, message, failures, first_seen_at, last_seen_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?)`).run("messages_parity", "room-alpha", "parity_count_mismatch", "unredacted-body-detail", 3, NOW - 86_400_000, NOW - 3_600_000);
+    const surface = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
+    assert.equal(surface.integrity.state, "failing");
+    assert.equal(surface.integrity.outstandingFailures, 1);
+    assert.equal(surface.integrity.mostRecentFailure.step, "messages_parity");
+    assert.equal(surface.integrity.mostRecentFailure.code, "parity_count_mismatch");
+    assert.equal(surface.integrity.mostRecentFailure.lastSeenAt, ISO(NOW - 3_600_000));
+    assert.equal(surface.integrity.lastFailingRoom, "room-alpha");
+    assert.equal(surface.integrity.lastFailingRoomState, "recorded");
+    assert.ok(!JSON.stringify(surface).includes("unredacted-body-detail"), "stored failure messages stay in the store");
+  });
+
+  test("a newer non-room-scoped failure leaves the failing room unnamed", () => {
+    store.db.prepare(`INSERT INTO integrity_failures(step, record_id, code, message, failures, first_seen_at, last_seen_at)
+      VALUES(?, ?, ?, ?, ?, ?, ?)`).run("inbox", "inv-9", "inbox_receipt_mismatch", "", 1, NOW - 60_000, NOW - 60_000);
+    const surface = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
+    assert.equal(surface.integrity.outstandingFailures, 2);
+    assert.equal(surface.integrity.mostRecentFailure.step, "inbox");
+    assert.equal(surface.integrity.lastFailingRoom, null);
+    assert.equal(surface.integrity.lastFailingRoomState, "not-room-scoped");
+  });
+});
+
+describe("behaviour tile (SLIs)", () => {
+  test("burn grammar: 2x alerts, 10x pages, no budget means no burn", () => {
+    assert.equal(burnState(null), null);
+    assert.equal(burnState(Number.NaN), null);
+    assert.equal(burnState(0.5), "within-budget");
+    assert.equal(burnState(1.99), "within-budget");
+    assert.equal(burnState(2), "alert");
+    assert.equal(burnState(9.9), "alert");
+    assert.equal(burnState(10), "page");
+  });
+
+  test("unmeasurable SLIs render not-recorded with their named gaps", () => {
+    const surface = buildStatusSurface({ store: null, jobs: healthyJobs, now: NOW });
+    const byId = new Map(surface.behaviour.slis.map(sli => [sli.id, sli]));
+    for (const id of ["task-success", "tool-accuracy", "cost-per-task", "policy-compliance"]) {
+      const sli = byId.get(id);
+      assert.ok(sli, id);
+      assert.equal(sli.budget, null, id);
+      assert.equal(sli.burnRate, null, id);
+      assert.equal(sli.burnState, null, id);
+      assert.ok(typeof sli.gap === "string" && sli.gap.length > 20, id);
+    }
+    assert.equal(surface.behaviour.windowDays, 30);
+  });
+
+  test("cost-per-task observes approved lots inside the window only", () => {
+    const directory = mkdtempSync(join(tmpdir(), "status-surface-behaviour-"));
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    try {
+      const insert = store.db.prepare(`INSERT INTO bounty_journal(room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash)
+        VALUES('room-1', ?, 'acct-1', ?, 'settle', 'b-1', ?, 100, ?, 'p', ?)`);
+      insert.run("e-in-window", ISO(NOW - 86_400_000), "lot-a", "approved", "h1");
+      insert.run("e-in-window-2", ISO(NOW - 2 * 86_400_000), "lot-a", "approved", "h2");
+      insert.run("e-old", ISO(NOW - 40 * 86_400_000), "lot-b", "approved", "h3");
+      insert.run("e-locked", ISO(NOW - 86_400_000), "lot-c", "locked", "h4");
+      const surface = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
+      const sli = surface.behaviour.slis.find(candidate => candidate.id === "cost-per-task");
+      assert.equal(sli.state, "recorded");
+      assert.equal(sli.observed.approvedLots, 1);
+      assert.equal(sli.burnRate, null);
+    } finally {
+      store?.close?.();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
