@@ -40,7 +40,7 @@ graph TB
     READMODEL["server/public-read-model.mjs<br/>server/inbox-outbox.mjs"]
   end
   subgraph Work["Work coordination"]
-    WC["server/work-claims.mjs<br/>unclaimed→claimed→in_progress→blocked→done"]
+    WC["server/work-claims.mjs<br/>unclaimed→claimed→in_progress→blocked→delivered→done"]
     WCR["server/work-claim-routes.mjs"]
     WCE["server/work-claim-events.mjs<br/>work_claim.updated"]
     PRSYNC["server/claim-pr-sync.mjs<br/>GitHub PR poll + settle"]
@@ -135,7 +135,7 @@ sequenceDiagram
   participant GH as GitHub
 
   A->>R: claim / renew / update<br/>/api/rooms/{roomId}/work-claims
-  R->>W: state machine<br/>unclaimed→claimed→in_progress→blocked→done
+  R->>W: state machine<br/>unclaimed→claimed→in_progress→blocked→delivered→done
   W->>E: emit work_claim.updated<br/>(claim.acquired / claim.released / claim.renewed)
   A->>W: link claim to pull request
   loop per-minute cron + POST /api/rooms/{roomId}/work-claims/sweep
@@ -150,9 +150,12 @@ sequenceDiagram
 
 Details:
 
-- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`, `done`,
-  `closed` (`server/work-claims.mjs` `STATES`; `done` is immutable and carries
-  `deliveryMode`, `reviewedBy`, `tags`, `blobs`). Moves are one explicit table,
+- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`,
+  `delivered`, `done`, `closed` (`server/work-claims.mjs` `STATES`; `done` is
+  immutable and carries `deliveryMode`, `reviewedBy`, `tags`, `blobs`).
+  `delivered` is the finish state under a reviewed policy: the work occupies
+  it with its delivery bundle until the reviewer verifies it to `done` (or a
+  `changes_requested` review sends it back to `in_progress`). Moves are one explicit table,
   `CLAIM_LIFECYCLE` (state × verb → state). `closed` is terminal: open work
   retired without delivery by `close` (holder or claim manager) or `cancel`
   (the creator of an unclaimed item, or its holder) via

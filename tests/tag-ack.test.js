@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { deriveNotifications, SUGGESTED_ACK_REACTION } from "../server/notifications.mjs";
+import { deriveNotifications } from "../server/notifications.mjs";
 import { buildWakePing, WAKE_ACK_HINT, WAKE_PING_EVENT } from "../server/outbound-webhooks.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "../server/agent-heartbeats.mjs";
 
@@ -36,13 +36,12 @@ function derive({ messages, events, viewer = member }) {
 
 const mentionsOf = items => items.filter(item => item.kind === "mention");
 
-test("a mention is pending by default and suggests the like react", () => {
+test("a mention is pending by default", () => {
   const messages = [msg("m1", "owner", "Hey @Test Agent take a look")];
   const items = mentionsOf(derive({ messages, events: [posted(1, "m1", "owner", { body: "Hey @Test Agent take a look" })] }));
   assert.equal(items.length, 1);
   assert.equal(items[0].ackState, "pending");
-  assert.equal(items[0].suggestedAck, SUGGESTED_ACK_REACTION);
-  assert.equal(items[0].suggestedAck, "like");
+  assert.equal("suggestedAck" in items[0], false);
 });
 
 test("a reaction by the mentioned member acknowledges the mention", () => {
@@ -186,7 +185,7 @@ test("buildWakePing carries the ack hint additively", () => {
   assert.equal(payload.event, WAKE_PING_EVENT);
   assert.deepEqual(payload.signal, signal);
   assert.equal(payload.ackHint, WAKE_ACK_HINT);
-  assert.equal(payload.ackHint, "react 👍 to acknowledge");
+  assert.match(payload.ackHint, /heartbeat_ack/);
 });
 
 test("journaled pending-wake signals carry the ack hint", () => {

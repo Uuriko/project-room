@@ -496,6 +496,21 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     ci: existing?.ci ?? null,
     reviews: reviewsMerged,
     readingAcks: existing?.readingAcks ?? {},
+    // #3547 kernel fields: the canonical claim row carries them (workOf's
+    // output shape; the registry codec defaults missing ones to []/null),
+    // so a mapped row that omits them never equals its stored form and the
+    // board diff never converges. The work item cannot express a delivery
+    // bundle or the kernel's verification record, and its criteria live
+    // on the claim, so an existing row's values are preserved verbatim.
+    // #3684 added deliveryGeneration to the same shape (the claim round's
+    // own delivery counter; the codec defaults it to 0): same rule — the
+    // work item cannot express it, an existing row's counter is preserved
+    // verbatim (normalised exactly as workOf normalises it), and resetting
+    // it here would unbind approvals recorded against the live round.
+    acceptanceCriteria: Array.isArray(existing?.acceptanceCriteria) ? [...existing.acceptanceCriteria] : [],
+    delivery: existing?.delivery ?? null,
+    verification: existing?.verification ?? null,
+    deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0 ? existing.deliveryGeneration : 0,
   };
   if (historyOmitted > 0) row.historyOmitted = historyOmitted;
   if (existing?.deploy !== undefined && existing?.deploy !== null) row.deploy = existing.deploy;
@@ -585,6 +600,10 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     ci: null,
     reviews: [],
     readingAcks: {},
+    acceptanceCriteria: [],
+    delivery: null,
+    verification: null,
+    deliveryGeneration: 0,
   };
 }
 
