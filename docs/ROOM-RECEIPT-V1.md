@@ -210,5 +210,5 @@ aggregate “72% quality” field on the receipt.
 ## Stay-outs
 
 People rail · Done-chip chrome · Connect door HTML · Phase 0 #8 / #9 ·
-Quill trees · Compute Start · people-data · Potter keys · live API
+Quill trees · Compute Start · Potter keys · live API
 writer.
