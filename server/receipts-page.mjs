@@ -247,7 +247,8 @@ export function receiptsListJson(page) {
 
 export function receiptJson(receipt, verification = null) {
   // The verification (project-room-receipt-verification/1) rides the JSON
-  // shape only when a verify run produced it — readers can distinguish
-  // "checked just now" from "stored values" without parsing the verdict.
+  // shape only when a verify run produced it — readers can tell a fresh
+  // check ("checked just now") apart from stored values without parsing
+  // the verdict.
   return { ...publicJson(receipt), ...(verification ? { verification } : {}) };
 }
