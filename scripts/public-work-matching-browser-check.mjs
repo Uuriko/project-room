@@ -78,7 +78,7 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   assert.equal((await client.readReview(submitted.receipt)).review.state, 'accepted');
   if (width === 320) await visitor.reload(); else await visitor.locator('#refresh-offers').click();
   await visitor.locator('#contribution-artifact').waitFor();
-  assert.match(await visitor.locator('#contribution-status').textContent(), /Submitted/); assert.doesNotMatch(await visitor.locator('#contribution-status').textContent(), /review pending|Accepted|Private contributor feedback/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
+  assert.match(await visitor.locator('#contribution-status').textContent(), /Verified/); assert.doesNotMatch(await visitor.locator('#contribution-status').textContent(), /review pending|Accepted|Private contributor feedback/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
   assert.match(await visitor.locator('#contribution-artifact').textContent(), new RegExp(`${Buffer.byteLength(artifactText, 'utf8')} bytes`));
   assert.equal(await visitor.locator('#contribution-status script').count(), 0);
   if (process.env.ROOM_MATCH_SCREENSHOT_DIR) await visitor.locator('#contribution-status').screenshot({ path: `${process.env.ROOM_MATCH_SCREENSHOT_DIR}/public-contribution-result-${width}.png` });
