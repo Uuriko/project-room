@@ -28,7 +28,7 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
-  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
+  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -1021,18 +1021,18 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   const body = typeof data?.body === "string" ? data.body : "";
   const identityNames = db ? identityNamesForRoom(db, roomId) : {};
   for (const memberId of resolveMentionTargetsInText(members, identityNames, body, senderMemberId)) {
-    if (members[memberId]?.kind !== "agent") continue;
+    if (ownMember(members, memberId)?.kind !== "agent") continue;
     if (data?.toMemberId && data.toMemberId !== memberId) continue;
     if (!targets.has(memberId)) targets.set(memberId, "mention");
   }
   if (db) {
     for (const memberId of squadMentionTargets(db, roomId, body, senderMemberId, members, data?.toMemberId)) {
-      if (members[memberId]?.kind !== "agent") continue;
+      if (ownMember(members, memberId)?.kind !== "agent") continue;
       if (!targets.has(memberId)) targets.set(memberId, "squad-mention");
     }
   }
   const dmId = typeof data?.toMemberId === "string" ? data.toMemberId : "";
-  const dm = dmId ? members[dmId] : null;
+  const dm = dmId ? ownMember(members, dmId) ?? null : null;
   if (dm && dm.active !== false && dm.kind === "agent" && dmId !== senderMemberId && !targets.has(dmId)) {
     targets.set(dmId, "dm");
   }
@@ -1045,7 +1045,7 @@ function agentWakeTargets(state, senderMemberId, data, db = null, roomId = "") {
   if (replyToId && !dmId) {
     const repliedTo = (state?.messages ?? []).find(message => message.id === replyToId);
     const authorId = repliedTo?.authorId ?? "";
-    const author = authorId ? members[authorId] : null;
+    const author = authorId ? ownMember(members, authorId) ?? null : null;
     if (author && author.active !== false && author.kind === "agent" && authorId !== senderMemberId && !targets.has(authorId)) {
       targets.set(authorId, "mention");
     }
@@ -3401,7 +3401,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (!validId(roomId)) fail(422, "invalid_room", "Invalid Room id");
     const binding = this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, auth.account.id);
     if (!binding) fail(403, "access_denied", "This account has no membership in that Room");
-    const member = this.roomAuthority(roomId).members[binding.member_id];
+    const member = ownMember(this.roomAuthority(roomId).members, binding.member_id);
     if (!member || member.kind !== "human" || member.active === false) fail(403, "access_denied", "Active human Room membership required");
     this.verifyInvitedMembership(roomId, member);
     return { ...auth, member, roomId };
@@ -3436,7 +3436,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   ensureHumanAccountBinding(roomId, memberId, requestedAccountId = null, origin = "local-provisioning") {
     const members = this.room(roomId).state.members;
-    const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
+    const member = validId(memberId) && ownMember(members, memberId);
     if (!member || member.kind !== "human") fail(422, "invalid_account_binding", "Only a human Room member can bind to an account");
     if (requestedAccountId !== null && !validId(requestedAccountId)) fail(422, "invalid_account", "Invalid account id");
     const existing = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(roomId, memberId);
@@ -3480,7 +3480,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Inactive, and the last deactivation was the member's own act.
   memberSelfLeft(roomId, memberId, state) {
-    if (state.members[memberId]?.active !== false) return false;
+    if (ownMember(state.members, memberId)?.active !== false) return false;
     const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.memberId')=? ORDER BY sequence DESC LIMIT 1")
       .get(roomId, T.MEMBER_ACCESS_CHANGED, memberId);
     const lastEvent = last ? JSON.parse(last.body) : null;
@@ -3573,7 +3573,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
         const targetAccount = this.db.prepare("SELECT active FROM accounts WHERE id=?").get(row.intended_account_id);
         const issuerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
-        const issuerMember = room.members?.[row.issuer_member_id];
+        const issuerMember = ownMember(room.members, row.issuer_member_id);
         // Agent-issued invitations carry no account: they were minted under the
         // owner's identity bearer, so authority rests on the member still
         // being active, unrevised, and still the room owner. Ordinary
@@ -3599,7 +3599,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         status,
         memberId: row.intended_member_id,
         permissions: JSON.parse(row.intended_permissions_json),
-        invitedByDisplayName: room.members?.[row.issuer_member_id]?.displayName ?? "Room administrator",
+        invitedByDisplayName: ownMember(room.members, row.issuer_member_id)?.displayName ?? "Room administrator",
         roomTitle: room.room?.title ?? "Project Room",
         roomPurpose: room.room?.purpose ?? "",
         memberCounts,
@@ -3713,7 +3713,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const issuerAccount = row.issuer_account_id === null ? null
         : this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.issuer_account_id);
       const issuerBinding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.issuer_member_id);
-      const issuerMember = room.state.members[row.issuer_member_id];
+      const issuerMember = ownMember(room.state.members, row.issuer_member_id);
       // Agent-issued invitations carry no account: authority rests on the
       // member still being active, unrevised, and still the room owner
       // (see previewInvitation). Ordinary invitations keep the account
@@ -3793,7 +3793,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   issueAccessKey(roomId, memberId, lifetimeMs = 7 * 86400000, accountId = null) {
     return this.transaction(() => {
       const members = this.room(roomId).state.members;
-      const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
+      const member = validId(memberId) && ownMember(members, memberId);
       if (!member || member.active === false) fail(403, "access_denied", "Active member required");
       if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Access keys expire within 30 days");
       if (member.kind === "human") {
@@ -3811,7 +3811,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   mintAccessKey(roomId, memberId, lifetimeMs = 7 * 86400000, accountId = null) {
     return this.transaction(() => {
       const members = this.room(roomId).state.members;
-      const member = validId(memberId) && Object.hasOwn(members, memberId) && members[memberId];
+      const member = validId(memberId) && ownMember(members, memberId);
       if (!member || member.active === false) fail(403, "access_denied", "Active member required");
       if (!Number.isSafeInteger(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > 30 * 86400000) fail(422, "invalid_expiry", "Access keys expire within 30 days");
       if (member.kind === "human") {
@@ -3840,7 +3840,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this.agentConnections.row(roomId, memberId)) fail(409, "managed_agent", "Replace this agent's key through its room connection");
     const count = this.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=?").get(roomId).n;
     if (count >= 5000) fail(409, "pilot_limit", "Credential retention limit reached; administrator maintenance required");
-    const member = this.room(roomId).state.members[memberId];
+    const member = ownMember(this.room(roomId).state.members, memberId);
     if (!member) fail(403, "access_denied", "Room member required");
     const account = member.kind === "human" ? this.ensureHumanAccountBinding(roomId, memberId) : null;
     if (account && !account.active) fail(403, "access_denied", "Active account required");
@@ -3914,7 +3914,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (roomId && row.room_id !== roomId) fail(403, "access_denied", "This credential does not grant access to that room");
     const members = this.roomAuthority(row.room_id).members;
-    const member = Object.hasOwn(members, row.member_id) && members[row.member_id];
+    const member = ownMember(members, row.member_id);
     if (!member || member.active === false) fail(403, "access_denied", "Room membership is inactive");
     this.verifyInvitedMembership(row.room_id, member);
     let account = null;
@@ -3964,7 +3964,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // so invite sessions can never mint admin rights.
   createJoinSession(roomId, memberId) {
     return this.transaction(() => {
-      const member = this.room(roomId).state.members[memberId];
+      const member = ownMember(this.room(roomId).state.members, memberId);
       if (!member || member.active === false) fail(403, "access_denied", "Room member required");
       if (member.kind !== "agent") fail(403, "access_denied", "Join sessions are for agent joins");
       const expiresAt = this.now() + 8 * 3600000;
@@ -4280,13 +4280,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
          FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
       ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
-      const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
+      const watching = new Set((watcherMemberIds ?? []).filter(memberId => ownMember(members, memberId)?.active !== false));
       // RC-2026-09-18-051: additive host presence for agent members.
       const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
       // #660: raw host status per member. status is "online"|"offline"|null
       // (null = no registered host); identityId is the linked agent identity.
       const hostStatusOf = memberId => {
-        const m = members[memberId];
+        const m = ownMember(members, memberId);
         if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
         const link = identityLinkOf.get(roomId, memberId);
         if (!link) return { identityId: null, status: null, lastSeenAt: null };
@@ -4466,7 +4466,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       const attach = message => ({
         ...message,
-        author: members[message.authorId]?.displayName ?? message.authorId,
+        author: ownMember(members, message.authorId)?.displayName ?? message.authorId,
         replies: (byParent.get(message.id) ?? []).map(attach)
       });
       return withContentTrust({ roomId, thread: stampThread(attach(root), auth.member.id) });
@@ -5038,7 +5038,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ? agentWakeTargetIds(room.state, auth.member.id, command.data, this.db, roomId)
           .filter(id => firstBlockedWakeTarget(room.state, auth.member.id, [id]))
         : [];
-      const target = room.state.members[command.data.memberId];
+      const target = ownMember(room.state.members, command.data.memberId);
       const endingAccess = command.type === T.MEMBER_ACCESS_CHANGED && target?.active === true && command.data.active === false
         && canonical(target.permissions) === canonical(command.data.permissions);
       const requestMode = command.type === T.MESSAGE_POSTED && replyPostMode(command.data);
@@ -5089,7 +5089,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // supersessions write board cards through the same mirror, so they use
       // the same rule: recording scope is a board write whoever performs it.
       if ([T.CLAIM_ACQUIRED, T.CLAIM_RELEASED, T.CLAIM_RENEWED, T.WORK_HANDOFF_RECORDED, T.WORK_SUPERSEDED].includes(command.type)) {
-        const actor = room.state.members?.[auth.member.id];
+        const actor = ownMember(room.state.members, auth.member.id);
         if (!mayWriteBoardClaims(actor, room.state.room?.ownerId)) {
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
@@ -5242,8 +5242,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // admission so previously accepted events remain replayable, including
         // exact command retries handled above before this validation.
         if (command.type === T.MEMBER_ADDED && command.data.referredBy != null) {
-          const referrer = Object.hasOwn(room.state.members, command.data.referredBy)
-            ? room.state.members[command.data.referredBy] : null;
+          const referrer = ownMember(room.state.members, command.data.referredBy) ?? null;
           if (!referrer || referrer.active === false) throw new Error("referredBy must be an active member");
         }
         if (requestMode === "respond") {
@@ -5470,7 +5469,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fanoutSpan.end();
       }
       const note = skippedWakes.length
-        ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
+        ? `Posted. Wake skipped for ${skippedWakes.map(id => ownMember(room.state.members, id)?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
@@ -5537,7 +5536,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const worker = session.worker_member_id;
       if (!worker) continue;
       if (senderMemberId !== worker && !mentioned.has(worker) && dmId !== worker) continue;
-      const actor = state.members?.[worker];
+      const actor = ownMember(state.members, worker);
       const can = actor && actor.active !== false && (
         (worker === item.accountableMemberId && memberCan(state, worker, "accept_work"))
         || memberCan(state, worker, "steer"));
@@ -5825,7 +5824,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         roomId, memberId: target,
         mentions: rows.map(r => ({
           messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
-          displayName: members[r.memberId]?.displayName ?? r.memberId,
+          displayName: ownMember(members, r.memberId)?.displayName ?? r.memberId,
           createdAt: new Date(r.createdAt).toISOString(),
           timeoutAt: new Date(r.timeoutAt).toISOString(),
           decidedAt: r.decidedAt === null ? null : new Date(r.decidedAt).toISOString(),
@@ -5844,7 +5843,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const members = this.room(roomId).state.members ?? {};
     return {
       roomId, messageEventId, memberId, state: row.state,
-      displayName: members[memberId]?.displayName ?? memberId,
+      displayName: ownMember(members, memberId)?.displayName ?? memberId,
       createdAt: new Date(row.createdAt).toISOString(),
       timeoutAt: new Date(row.timeoutAt).toISOString(),
       decidedAt: row.decidedAt === null ? null : new Date(row.decidedAt).toISOString(),
@@ -5871,7 +5870,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ).all(roomId, ...chunk);
       for (const row of rows) {
         const list = chips.get(row.messageEventId) ?? [];
-        list.push({ memberId: row.memberId, displayName: members[row.memberId]?.displayName ?? row.memberId, state: row.state });
+        list.push({ memberId: row.memberId, displayName: ownMember(members, row.memberId)?.displayName ?? row.memberId, state: row.state });
         chips.set(row.messageEventId, list);
       }
     }

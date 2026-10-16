@@ -35,12 +35,15 @@ export const RAW_TRANSACTION_EXEMPT = ["server/store.mjs", "server/analytics/tai
 export const RAW_MEMBERS_INDEX_ENFORCED = [
   "server/access-requests.mjs",
   "server/access-review.mjs",
+  "server/account-deletion.mjs",
   "server/agent-connections.mjs",
   "server/agent-rooms.mjs",
   "server/invitation-evidence.mjs",
   "server/member-permission-requests.mjs",
   "server/outside-agents.mjs",
+  "server/recovery.mjs",
   "server/room-lifecycle.mjs",
+  "server/store.mjs",
 ];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
