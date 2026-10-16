@@ -815,8 +815,19 @@ export function loadPublicRoom(store, slug) {
 }
 
 export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all()
-    .filter(row => !isUnpublished(store.db, "room", row.slug))
+  const rows = store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all();
+  // One batched takedown lookup for every room (was one isUnpublished
+  // SELECT per room — an N+1 that grew with the public-room count).
+  let unpublished;
+  try {
+    unpublished = new Set(store.db.prepare("SELECT target FROM public_unpublish WHERE kind='room'").all().map(row => row.target));
+  } catch {
+    // isUnpublished fails closed when the takedown state cannot be read;
+    // match it: a sitemap that cannot check takedowns lists no rooms.
+    return [];
+  }
+  return rows
+    .filter(row => !unpublished.has(row.slug))
     .map(row => ({
       slug: row.slug,
       setAt: row.set_at,
@@ -837,17 +848,73 @@ export function proofLevelOf(receipt) {
   return "room-recorded";
 }
 
-// Every public receipt that belongs to one room, newest first — the proof
-// page's row set. Same room attribution as roomPageReceipts: rows naming
+// The proof page's row set: public receipts that belong to one room,
+// newest first. Same room attribution as roomPageReceipts: rows naming
 // the room directly, plus the room's own work-claim / work-item receipts
 // (origin_room_id) which carry room_id only when the room is listed.
-// Operator unpublish applies here (HIDDEN_RECEIPT); the owner public-
-// receipts toggle is the receipts-live wrapper's job, like every other
-// public receipt read.
-export function roomProofRows(store, slug) {
+// Both hiding mechanisms apply in SQL, exactly as in queryPublicReceipts:
+// operator unpublish (HIDDEN_RECEIPT) and the owner public-receipts
+// toggle (OWNER_HIDDEN_RECEIPT, origin/task-room based — the same rooms
+// receipts-live's hiddenReceiptIds resolves for these rows). Applying
+// both here is what lets the page query carry a LIMIT: a row the page
+// must not serve can never occupy a page slot or a count.
+function proofWhere(store, slug) {
+  const visibility = ownerToggleReadable(store) ? [HIDDEN_RECEIPT, OWNER_HIDDEN_RECEIPT] : [HIDDEN_RECEIPT];
+  return {
+    where: [...visibility, "(room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))"].join(" AND "),
+    params: [slug, slug],
+  };
+}
+
+// One page of a room's proof rows. `limit` pushes into the SQL so a read
+// materializes at most `limit` rows (previously the whole room set was
+// loaded and sliced in JS); `after` is the keyset position of the last
+// row of the previous page ({ at, id }), in the ORDER BY at DESC, id ASC
+// order. With no limit this returns the room's full visible set.
+export function roomProofRows(store, slug, { limit = null, after = null } = {}) {
+  const { where, params } = proofWhere(store, slug);
+  const clauses = [where];
+  const allParams = [...params];
+  if (after && typeof after.at === "string" && typeof after.id === "string") {
+    clauses.push("(at < ? OR (at = ? AND id > ?))");
+    allParams.push(after.at, after.at, after.id);
+  }
+  let limitSql = "";
+  if (Number.isInteger(limit) && limit > 0) { limitSql = " LIMIT ?"; allParams.push(limit); }
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
-    WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
-    ORDER BY at DESC, id ASC`).all(slug, slug).map(rowToPublic);
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY at DESC, id ASC${limitSql}`).all(...allParams).map(rowToPublic);
+}
+
+// Exact proof-page counts over the same visible set roomProofRows pages
+// (a COUNT(*) aggregate, so the page never loads every row to count
+// them). The buckets mirror proofLevelOf: a work-claim receipt counts as
+// server-verified only with both a merge time and a pull request.
+export function roomProofCounts(store, slug) {
+  const { where, params } = proofWhere(store, slug);
+  const row = store.db.prepare(`SELECT COUNT(*) AS total,
+    COALESCE(SUM(CASE WHEN source='work-claim' AND merged_at IS NOT NULL AND merged_at <> ''
+      AND pull_request IS NOT NULL AND pull_request <> '' THEN 1 ELSE 0 END), 0) AS server_verified_merges,
+    COALESCE(SUM(CASE WHEN source='work-item' THEN 1 ELSE 0 END), 0) AS room_recorded_completions,
+    COALESCE(SUM(CASE WHEN source='public-work' THEN 1 ELSE 0 END), 0) AS artifact_hash_recorded
+    FROM public_receipts WHERE ${where}`).get(...params);
+  return {
+    total: row.total,
+    serverVerifiedMerges: row.server_verified_merges,
+    roomRecordedCompletions: row.room_recorded_completions,
+    artifactHashRecorded: row.artifact_hash_recorded,
+  };
+}
+
+// Resolve a proof-page cursor id to its keyset position, restricted to
+// the room's visible set: a hidden or foreign receipt is not a valid
+// pagination position (same 422 discipline as queryPublicReceipts, so a
+// cursor never confirms a hidden receipt exists or where it sits).
+export function roomProofCursor(store, slug, cursor) {
+  if (typeof cursor !== "string" || !cursor) return null;
+  const { where, params } = proofWhere(store, slug);
+  const row = store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${where} AND id=?`).get(...params, cursor);
+  return row ? { at: row.at, id: row.id } : null;
 }
 
 // Newest-first page of receipts that name this room. `after` is the last row
