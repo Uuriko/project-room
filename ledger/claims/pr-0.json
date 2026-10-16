@@ -7,11 +7,13 @@
   "prs": [
     0
   ],
-  "status": "live",
+  "status": "closed",
   "claimedAt": "2026-10-16T20:45:53.198Z",
-  "heartbeat": "2026-10-16T20:46:23.472Z",
-  "expires": "2026-10-16T21:31:23.472Z",
-  "note": "WS-3c tooling test claim (PR #0 = clearly test) on scratch issue",
+  "heartbeat": "2026-10-16T20:46:44.302Z",
+  "expires": "2026-10-16T20:46:44.302Z",
+  "note": "WS-3c tooling test release (PR #0 = clearly test)",
+  "landedSha": "0000000000000000000000000000000000000000",
+  "closedAt": "2026-10-16T20:46:44.302Z",
   "history": [
     {
       "action": "claim",
@@ -22,6 +24,12 @@
       "action": "heartbeat",
       "at": "2026-10-16T20:46:23.472Z",
       "requestId": "req_ws3c_hb_001"
+    },
+    {
+      "action": "release",
+      "at": "2026-10-16T20:46:44.302Z",
+      "requestId": "req_ws3c_rel_001",
+      "landedSha": "0000000000000000000000000000000000000000"
     }
   ]
 }
