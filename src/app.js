@@ -15,7 +15,7 @@ import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, 
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
@@ -24,6 +24,7 @@ import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
 import { createNeedsAttentionCard, installMemberPermissions } from "./needs-attention.js";
+import { createOwnerCockpit } from "./owner-cockpit.js";
 // JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
@@ -700,6 +701,14 @@ instructionsUI = installRoomInstructions({ client, getState: () => state, onSave
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention"), getState: () => state });
+// #3342: Owner Cockpit shell on the account home — cross-room Decisions +
+// Exceptions from /api/owner/overview. Decide actions execute against the
+// existing per-room decide endpoint with account-mode room credentials.
+const ownerCockpit = createOwnerCockpit({ accountClient, section: $("#owner-cockpit"), decide: async action => {
+  const session = accountClient.currentSession("deciding an access request", { authenticated: true });
+  return accountClient.request(action.path, { method: action.method, data: action.body, session,
+    headers: { "X-Project-Room-Auth": "account" } });
+} });
 const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
 // JDOT-MEMBER-PERMS-UI end
 // UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
@@ -1044,6 +1053,7 @@ async function confirmAccount() {
 async function loadAccountRooms(more = false) {
   const version = ++roomListVersion, owned = accountClient.session;
   if (!owned?.authenticated) return;
+  if (!more) ownerCockpit.refresh();
   if (!more) { roomListCursor = null; $("#account-rooms-list").replaceChildren(); }
   $("#account-rooms-more").hidden = true; $("#account-rooms-status").textContent = "Loading…";
   try {
@@ -3597,7 +3607,7 @@ async function submit(form, fn, { failureHint } = {}) {
   try { await fn(current); }
   catch (error) {
     if (!current()) return;
-    const text = `${requestFailureMessage(error)}. ${failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again.")}`;
+    const text = failureTextWithHint(error, failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
     // silent so a screen reader announces the failure exactly once.
@@ -5476,7 +5486,7 @@ async function setMute(memberId, muted) {
     if (generation !== client.generation || !state) return;
     notice(muted ? `${target.displayName} muted for you. Their messages are hidden here until you unmute; nobody else is affected.` : `${target.displayName} unmuted.`);
   } catch (error) {
-    if (generation === client.generation && state) notice(`${requestFailureMessage(error)}. Your mute choice was not changed.`, true);
+    if (generation === client.generation && state) notice(failureTextWithHint(error, "Your mute choice was not changed."), true);
   }
 }
 $("#presence-list").addEventListener("click", e => {
@@ -5533,7 +5543,7 @@ function loadReports() {
     reportsSequence = sequence; reportsGeneration = generation;
     renderReports(result.reports);
   }).catch(error => {
-    if (generation === client.generation && state) setFormStatus($("#report-list-status"), `${requestFailureMessage(error)}. Open this section again to retry.`, true);
+    if (generation === client.generation && state) setFormStatus($("#report-list-status"), failureTextWithHint(error, "Open this section again to retry."), true);
   }).finally(() => { reportsFlight = null; });
 }
 function renderReports(reports) {
