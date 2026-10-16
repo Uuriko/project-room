@@ -18,6 +18,7 @@ import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/
 import { growthCollector } from "../src/growth-emit.js";
 import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
 import { countExpiredUndecided, expireAccessRequests } from "./attention-aging.mjs";
+import { roomsWithEscalatedAsks, runOwnerAlertEscalation } from "./owner-alert-escalation.mjs";
 
 export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
@@ -357,7 +358,20 @@ export const JOBS = Object.freeze([
       const now = ctx.now?.() ?? Date.now();
       if (ctx.room?.expireAccessRequests) return ctx.room.expireAccessRequests({ now });
       const swept = expireAccessRequests(store, { now });
-      return { ...swept, expiredUndecidedTotal: countExpiredUndecided(store.db) };
+      // Charter B-3 step 3 (PR4): the owner-alert dispatcher (O2) is the
+      // escalation engine behind this doctrine — escalated asks raise
+      // alerts that dispatch through the decision push class, decided
+      // asks resolve their alerts, and unacknowledged critical alerts
+      // re-notify on the dispatcher's own sweep. Alerting never fails
+      // the expiry sweep above.
+      const alerts = { raised: 0, dispatched: 0, resolved: 0, escalated: 0, errors: 0 };
+      try {
+        for (const roomId of roomsWithEscalatedAsks(store, { now })) {
+          const tick = await runOwnerAlertEscalation(store, roomId, { now });
+          for (const key of Object.keys(alerts)) alerts[key] += tick[key] ?? 0;
+        }
+      } catch { alerts.errors += 1; }
+      return { ...swept, expiredUndecidedTotal: countExpiredUndecided(store.db), alerts };
     }
   }),
   defineJob({
