@@ -3,7 +3,7 @@
  *
  * A repeated key returns the ORIGINAL response instead of re-executing, which
  * makes timeout-retries safe for non-idempotent methods (D3 §1.1, same pattern
- * as relay's replay-guard). Only successful outcomes are cached: a
+ * as the deleted relay's replay-guard). Only successful outcomes are cached: a
  * no-response/timeout outcome must remain retryable under the same key.
  */
 export class IdempotencyCache {

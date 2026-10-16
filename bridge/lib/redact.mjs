@@ -1,5 +1,5 @@
 /**
- * bridge/lib/redact.mjs — secret redaction discipline (mirrors relay's redact.mjs).
+ * bridge/lib/redact.mjs — secret redaction discipline (mirrors the deleted relay's redact.mjs).
  *
  * Two layers:
  *  1. redactValue: deep redaction by KEY name (/authorization|bearer|token|.../)

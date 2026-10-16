@@ -32,7 +32,7 @@ const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 export default [
   { ignores: ["server/vendor/", "node_modules/", "**/node_modules/", "cloudflare/dist/", "test-results/", "coverage/", ".data/", ".tmp/"] },
   {
-    files: ["server.mjs", "bin/**/*.mjs", "cli/**/*.mjs", "server/**/*.mjs", "client/**/*.mjs", "scripts/**/*.{js,mjs}", "tests/**/*.{js,mjs}", "cloudflare/**/*.mjs", "deploy/**/*.mjs", "relay/**/*.mjs", "src/**/*.js", "*/src/**/*.js", "*/tests/**/*.js"],
+    files: ["server.mjs", "bin/**/*.mjs", "cli/**/*.mjs", "server/**/*.mjs", "client/**/*.mjs", "scripts/**/*.{js,mjs}", "tests/**/*.{js,mjs}", "cloudflare/**/*.mjs", "deploy/**/*.mjs", "src/**/*.js", "*/src/**/*.js", "*/tests/**/*.js"],
     plugins: { security },
     languageOptions: {
       ...languageOptions,
