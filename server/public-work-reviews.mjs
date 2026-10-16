@@ -1,14 +1,23 @@
+import { createHash } from 'node:crypto';
 import { validId, roomPolicy } from '../src/events.js';
 import { canonicalJson } from '../src/audit-receipts.mjs';
 import { ServiceError } from './service-error.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { PublicWorkSettlement } from './public-work-settlement.mjs';
+import { projectPublicWorkReceipt } from './public-read-model.mjs';
 
-// Private review is a separate fact. Submission bytes, public receipt, leases
-// and work gates are never changed here. For PAID tasks only, an accept/reject
-// decision additionally settles credits through the escrow rail
-// (server/public-work-settlement.mjs) in this same transaction; unpaid tasks
-// keep the historical feedback-only behavior exactly.
+// Private review is a separate fact. Submission bytes, leases and work
+// gates are never changed here. Two deliberate exceptions, both inside
+// this same transaction: (1) for PAID tasks only, an accept/reject
+// decision settles credits through the escrow rail
+// (server/public-work-settlement.mjs); unpaid tasks keep the historical
+// feedback-only behavior exactly. (2) An acceptance stamps the public
+// receipt's verified successor state (#3546: state / verification /
+// verified / executedChecks) — the submission bytes themselves are never
+// altered, and the stamp is derived entirely from the review fact
+// recorded here. A verify PASS additionally executes the platform's own
+// artifact-integrity check first: the stored bytes are re-hashed and
+// must match the hash the receipt was issued under.
 export const publicWorkReviewsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_reviews (
   receipt_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL
@@ -145,6 +154,27 @@ export class PublicWorkReviews {
           ...(current.verification ? { verificationVerdict: current.verification.verdict, verificationReviewerKind: current.verification.reviewerKind } : {}) } };
     });
   }
+  // #3546: acceptance is the public receipt's verified successor state.
+  // The receipt gains state "verified", the executed checks that ran
+  // (finish-time criteria coverage + verify-time artifact integrity), and
+  // the verification level they earn — "system_checked" only when at least
+  // one system-executed check is on record; an acceptance with no executed
+  // checks keeps its honest "hash_only" level under a verified state.
+  stampPublicReceiptVerified(receiptId, review) {
+    const row = this.db.prepare('SELECT receipt_json, artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
+    if (!row) return;
+    const receipt = JSON.parse(row.receipt_json);
+    const executed = new Map();
+    for (const entry of [...(receipt.executedChecks ?? []), ...(review.verification?.executedChecks ?? [])])
+      if (entry && typeof entry.name === 'string') executed.set(entry.name, entry);
+    receipt.state = 'verified';
+    receipt.executedChecks = [...executed.values()];
+    receipt.verification = receipt.executedChecks.length > 0 ? 'system_checked' : (receipt.verification ?? 'hash_only');
+    receipt.verified = { by: review.decision.actorId, at: review.decision.at,
+      reviewRevision: review.revision, passVerdict: review.verification?.verdict ?? null };
+    this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
+    projectPublicWorkReceipt(this.store, receipt, row.artifact_sha256);
+  }
   decide(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'decide', input); }
   verify(roomId, actorId, receiptId, input) { return this.mutate(roomId, actorId, receiptId, 'verify', input); }
   mutate(roomId, actorId, receiptId, action, input) {
@@ -181,8 +211,23 @@ export class PublicWorkReviews {
       if (current.revision !== input.expectedReviewRevision) fail(409, 'stale_review', 'Review changed; inspect it again');
       if (['accepted', 'rejected'].includes(current.state)) fail(409, 'review_final', 'Review decision is final');
       const at = new Date(this.store.now()).toISOString();
-      if (action === 'verify') current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint };
-      else {
+      if (action === 'verify') {
+        // #3547 executed evidence: a PASS is recorded only after the
+        // platform re-hashes the stored submission bytes itself and finds
+        // them identical to the hash the receipt was issued under. A
+        // mismatch means the stored artifact is not the submitted
+        // artifact — no reviewer verdict can paper over that.
+        let executedChecks;
+        if (input.verdict === 'PASS') {
+          const detail = this.db.prepare('SELECT artifact_text,artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
+          const recomputed = detail ? createHash('sha256').update(detail.artifact_text).digest('hex') : null;
+          if (!detail || recomputed !== detail.artifact_sha256 || recomputed !== scope.receipt.artifact.sha256)
+            fail(409, 'artifact_integrity_failed', 'Stored artifact bytes no longer match the submitted hash — verification cannot pass');
+          executedChecks = [{ name: 'artifact_integrity', result: 'pass', at }];
+        }
+        current.verification = { verdict: input.verdict, reviewerKind: scope.actor.kind, actorId, reason: input.reason, at, fingerprint: scope.fingerprint,
+          ...(executedChecks ? { executedChecks } : {}) };
+      } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
         current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
       }
@@ -194,8 +239,14 @@ export class PublicWorkReviews {
       // revision_requested and verify actions never settle, reviewer
       // silence never settles (the VIII.1 free-miss flip is John-gated and
       // not implemented), and unpaid tasks have no link and skip entirely.
+      // Settlement runs first: if it throws, the transaction aborts and
+      // neither the verdict nor the #3546 verified stamp is recorded. An
+      // acceptance then stamps the receipt's verified successor state in
+      // the same transaction; a rejection settles (full feeless refund)
+      // and never stamps.
       const settlement = action === 'decide' && ['accepted', 'rejected'].includes(input.decision)
         ? this.settlementService().settleOnVerdict(roomId, scope.receipt.taskId, { decision: input.decision, reason: input.reason }) : null;
+      if (action === 'decide' && input.decision === 'accepted') this.stampPublicReceiptVerified(receiptId, current);
       const outcome = this.view(scope);
       if (settlement) outcome.settlement = settlement;
       this.db.prepare('INSERT INTO public_work_review_requests VALUES (?,?,?,?,?)').run(roomId, actorId, input.requestId, encoded, JSON.stringify(outcome));

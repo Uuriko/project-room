@@ -1066,13 +1066,13 @@ function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "")
 // tests/schema-stamp-coverage.test.js pins a digest of each helper's source
 // to its label, so changing a helper without bumping its revision fails CI.
 export const ADDITIVE_SCHEMA_ENSURES = [
-  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@1"],
+  [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
   [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
-  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@2"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]

@@ -122,7 +122,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: queue, in: query, schema: { type: string, enum: [ready] }, description: Cannot be combined with state }
-        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] } }
+        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, schema: { type: string, maxLength: 2048 }, description: Opaque nextCursor from the same filter }
         - { name: view, in: query, schema: { type: string, enum: [summary] } }
@@ -5040,7 +5040,7 @@ paths:
             descending, then id. Pages from one board do not overlap.
         - name: state
           in: query
-          schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+          schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] }
           description: |
             Filter to one claim state. Cannot be combined with queue=ready.
             Cursors bind the state filter: a cursor from a different state
@@ -5103,6 +5103,11 @@ paths:
                 id: { type: string, description: Claim id, pattern: '[A-Za-z0-9_-]{1,128}' }
                 title: { type: string }
                 reviewPolicy: { type: string, enum: [self_attested, distinct_member, independent_principal] }
+                acceptanceCriteria:
+                  type: array
+                  items: { type: string, maxLength: 500 }
+                  maxItems: 32
+                  description: The criteria the delivery bundle must map at the delivered finish (#3546/#3547); the platform executes the coverage check itself at the verify step
                 note: { type: string }
                 tags:
                   type: array
@@ -5642,16 +5647,52 @@ paths:
                   properties:
                     state:
                       type: string
-                      enum: [claimed, in_progress, blocked, done, unclaimed]
-                      description: unclaimed = release the claim
+                      enum: [claimed, in_progress, blocked, delivered, done, unclaimed]
+                      description: unclaimed = release the claim; delivered = finish under a reviewed policy (the delivery bundle rides along), after which the reviewer verifies to done
                     note: { type: string }
+                    delivery:
+                      type: object
+                      required: [artifact, checks, criteria]
+                      additionalProperties: false
+                      properties:
+                        artifact:
+                          type: object
+                          required: [sha256]
+                          additionalProperties: false
+                          properties:
+                            kind: { type: string, maxLength: 64 }
+                            ref: { type: string, maxLength: 512 }
+                            sha256: { type: string, pattern: '^(sha256:)?[0-9a-f]{64}$' }
+                        checks:
+                          type: array
+                          maxItems: 32
+                          items:
+                            type: object
+                            required: [name, result]
+                            additionalProperties: false
+                            properties:
+                              name: { type: string, maxLength: 128 }
+                              result: { type: string, enum: [pass, fail, error, skipped] }
+                              detail: { type: string, maxLength: 512 }
+                        criteria:
+                          type: array
+                          maxItems: 32
+                          items:
+                            type: object
+                            required: [criterion, status]
+                            additionalProperties: false
+                            properties:
+                              criterion: { type: string, maxLength: 500 }
+                              status: { type: string, enum: [met, not_met, na] }
+                              evidenceRef: { type: string, maxLength: 512 }
+                      description: The delivery bundle recorded at the delivered finish (#3547). Required when the claim carries acceptanceCriteria or a non-self_attested review policy; the platform freezes its digest and re-checks it at the verify step
                     deliveryMode:
                       type: string
                       enum: [result, merged, production]
                       description: Only on the done transition
                     reviewedBy:
                       type: string
-                      description: Reviewing member id; only on the done transition. Non-self policies require this current authorized member's latest explicit approve via /review with a matching current basis
+                      description: Reviewing member id; only on the done transition. Under a non-self policy the verifying reviewer calls done from their own session on a delivered claim, so reviewedBy may only restate the caller's own id; their latest explicit approve via /review must carry a matching current basis
                     tags:
                       type: array
                       items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
@@ -11610,6 +11651,42 @@ paths:
         '409': { description: room_exists, pilot_limit, or idempotency_conflict }
         '422': { description: invalid_template or session_binding_required }
         '429': { description: rate_limited }
+  /api/owner/overview:
+    get:
+      summary: Cross-room owner overview — merged Decisions + Exceptions (Owner Cockpit slice 1, #3342)
+      description: |
+        Browser account-session route (account_session cookie plus
+        X-Session-Binding), the same auth funnel as GET /api/account-rooms.
+        Fans out over the rooms the account belongs to (50 per page, `after`
+        continuation) and merges the per-room #662 attention items plus open
+        bounty disputes into one Decisions queue, sorted oldest/risk first
+        (overdue, then time-to-consequence, then money at stake, then age),
+        each item carrying its roomId, age and a consequence-of-inaction
+        line. Rooms where the viewer is a manage_members admin but not the
+        owner contribute only their access_request items. Exceptions carry
+        deployment job health, budget stops, stale claims, disputes nearing
+        default, lapsed-undecided counts and per-room read failures. A room
+        whose read fails appears in roomErrors and as an Exceptions stub —
+        the response never fails because one room is broken, and totals are
+        labelled "N of M rooms" when a room was excluded. Cents and
+        milli-credits are never summed or co-displayed as one figure.
+      security:
+        - accountSession: []
+      parameters:
+        - name: window
+          in: query
+          required: false
+          schema: { type: string, enum: [24h, 7d, 30d], default: 7d }
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: "{ contractVersion: 1, generatedAt, window, viewer, rooms: { considered, included, label, nextCursor }, decisions: { total, waiting, overdue, oldestAgeMs, items }, exceptions: { total, items }, roomErrors }"
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+        '422': { description: invalid_overview_query, invalid_room or session_binding_required }
   /api/account/profile:
     get:
       summary: Read the account's profile
@@ -17506,7 +17583,7 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }

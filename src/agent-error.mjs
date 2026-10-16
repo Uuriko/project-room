@@ -148,6 +148,23 @@ export const ERROR_REGISTRY = {
     next: [tool("room_check_access"), command("Ask the room owner to upgrade this trial seat to a full membership (or Add agent as a full member). Do not retry this call with the guest credential.")],
     catalog: { http: 403, retry: "no", recovery: "Guests (trial seats) cannot do this — it is reserved for full members. room_check_access to see what this identity can do; ask the owner to upgrade the seat to a full membership. Do not retry with the guest credential." },
   },
+  // Guest-invite owner gate (#3432). Everyone who reaches this refusal IS
+  // the room owner (or their account's delegate) — the generic 403 branch's
+  // "Ask the owner to mint a guest invite" is a self-loop for them. The
+  // accountable sponsor of a trial seat is the owner's account (register
+  // #3/#6; the journal requires a human accountable sponsor, and GX
+  // redemption stamps the minter as that sponsor), so the account-session
+  // requirement is load-bearing: the remedies are the account session, an
+  // owner delegate — or, in a room whose owner is an agent identity, the
+  // Add-agent door the owner CAN mint on their identity bearer.
+  guest_invite_account_session_required: {
+    status: "action_required",
+    hint: "Guest invites (trial seats) are sponsored by the room owner's account: minting and managing them requires the owner's signed-in account session, or an owner delegate that account granted. An agent identity bearer cannot mint them — not even the room's owner.",
+    next: [path("/api/guest-invites"),
+      command("If the room owner holds an account: sign in so the call carries the account session, then mint at POST /api/rooms/{roomId}/guest-invites with that session. An owner delegate granted by the account mints the same way."),
+      command("If the room's owner is an agent identity (no account behind it): trial seats cannot be minted in this room. Admit the agent durably instead — POST /api/rooms/{roomId}/agent-invites mints a one-time Add-agent invite code on your owner identity bearer.")],
+    catalog: { http: 403, retry: "no", recovery: "Trial seats are sponsored by the room owner's account: mint with the owner's signed-in account session (POST /api/rooms/{roomId}/guest-invites) or as an owner delegate that account granted. An agent identity bearer cannot mint, even as room owner — in an agent-owned room, use Add agent instead (POST /api/rooms/{roomId}/agent-invites)." },
+  },
   // Referral surface (#3218 park, decision #8): minting is frozen at the
   // HTTP door; preview and redeem of outstanding tokens are unaffected.
   referral_invites_parked: {
@@ -195,6 +212,7 @@ const AX_NAMED_RECOVERIES = {
   access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
   account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
   active_members: ["The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner.", "Remove or transfer the active human members first."],
+  artifact_integrity_failed: ["The stored submission bytes no longer match the hash the receipt was issued under, so the platform's own re-hash check failed and no PASS was recorded. Do not retry the PASS; report the receipt id and this code to the room owner — the stored artifact itself is in question.", "Report the receipt id and this code to the room owner; do not retry the PASS."],
   assign_conflict: ["The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly.", "Ask the current assignee to release the thread, or force the takeover if that is the intent."],
   assign_not_assigned: ["Thread has no live assignment to release. Read the thread; there is nothing to release.", "Re-read the thread; no assignment exists to release."],
   assistant_attempt_changed: ["The execution changed. Read the shared request before controlling it; do not control the old attempt.", "Re-read the shared request and control the current attempt."],
@@ -231,6 +249,8 @@ const AX_NAMED_RECOVERIES = {
   cursor_not_found: ["No page exists at that cursor. Pass a messageId from a previous page, or restart without a cursor.", "Pass a messageId from a previous page as the cursor, or restart without one."],
   cursor_stale: ["The cursor is stale. Start the list again without a cursor.", "Start the list again without a cursor."],
   discussion_reset_required: ["Discussion changed. Discard all retained discussion text and the cursor or resume token; do not append a fresh read to stale cached text.", "Fetch the full scoped discussion with a fresh consistent read, without a cursor or resume token."],
+  delivery_check_failed: ["The platform's own executed check on the frozen delivery bundle failed — the message names which (bundle_integrity, criteria_coverage, or ci_settlement). The verify did not land. Fix the underlying delivery (or wait for CI to settle green) and have the holder re-deliver; do not retry the same verify against the same bundle.", "Fix the delivery or CI state named in the message, re-deliver, then verify again."],
+  delivery_incomplete: ["The delivery bundle is incomplete — the message names the missing part (artifact, checks, or a criteria mapping). Finish again with a complete bundle: an artifact with its sha256, at least one check, and a mapping for every acceptance criterion.", "Resend the finish with the complete delivery bundle the message names."],
   direct_send_settled: ["This send attempt already settled. Read its outcome; do not send again under this attempt.", "Read the settled send's outcome; do not resend."],
   dm_no_pending_request: ["There is no pending DM request in this direction. Nothing to approve; send a DM request first if you want consent.", "Send a DM consent request first, or post in the room."],
   dm_not_blocked: ["This member is not blocked — there is no block to change. Read the current DM state.", "Re-read the DM state; no block exists."],
@@ -322,6 +342,7 @@ const AX_NAMED_RECOVERIES = {
   wake_signal_fenced: ["Signals are claimed by another listener. Claim them again, then ack with the claiming fencing token.", "Claim the signals again, then ack with the claiming fencing token."],
   webhook_rotation_not_pending: ["No webhook rotation is pending — nothing to complete. Start a rotation first if one is needed.", "Start a webhook rotation first if one is needed."],
   work_claim_terminal: ["This work claim is in a terminal state — the action cannot apply. Read the current item; do not retry the action.", "Re-read the work item; its claim is terminal."],
+  work_not_delivered: ["Under a reviewed policy a claim cannot jump from in_progress to done. The holder first finishes it to delivered with its delivery bundle; the reviewer then verifies it to done from their own session.", "Finish the claim to delivered first (state \"delivered\" with the delivery bundle), then have the reviewer verify it to done."],
   work_resolved: ["This work is resolved; no reminder was scheduled. Nothing to do.", "Treat it as done; the work is resolved."],
 };
 

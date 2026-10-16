@@ -289,6 +289,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_identity_rotation_receipts",
+    "key": "identity_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "identity_id"
+      ]
+    }
+  },
+  {
     "table": "agent_invite_redeem_receipts",
     "key": "room_id",
     "action": "delete",
