@@ -423,7 +423,10 @@ test("hosted claim PR tool preserves API-key scope and current-owner authorizati
   const linked = await call(origin, "room_link_work_claim_pr", args, issue(["rooms:write"]));
   assert.equal(linked.body.result.isError, undefined);
   assert.equal(linked.value.pullRequests[0].url, args.pullRequest);
-  assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)), linked.value);
+  // #3661: reads derive pullRequest.settlement (never stored), so the read
+  // carries exactly one field the mutation response and stored record lack.
+  assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)),
+    { ...linked.value, pullRequest: { ...linked.value.pullRequest, settlement: "pending" } });
   store.command(owner.secret, roomId, { id: "archive-linked-room", type: "room.archived", data: { reason: "Complete" } });
   const archivedSequence = store.snapshot(owner.secret, roomId).sequence;
   const archived = await call(origin, "room_link_work_claim_pr", { ...args,

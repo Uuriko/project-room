@@ -11,6 +11,7 @@
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { recordWakeEvent } from "./wake-metrics.mjs";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
 import { ServiceError } from "./service-error.mjs";
@@ -105,12 +106,26 @@ function claimWakeSkip(store, roomId, memberId, actorId) {
 export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, actorId } = {}) {
   if (!store?.agentHeartbeats || typeof memberId !== "string" || typeof messageId !== "string") return null;
   const skipped = claimWakeSkip(store, roomId, memberId, actorId);
-  if (skipped) return { enqueued: false, skipped };
+  if (skipped) {
+    // #3345: designed suppressions are counted, not silent.
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "suppressed_policy", kind: "claim", subjectId: memberId });
+    return { enqueued: false, skipped };
+  }
   const parts = messageId.startsWith("work-claim:") ? messageId.split(":") : [];
   const derivedReason = reason ?? (parts.length >= 3 ? parts[2] : undefined);
   const workClaim = parts.length >= 2 ? parts[1] : undefined;
   const identityId = linkedIdentityId(store, roomId, memberId);
-  const agentId = identityId ?? memberId;
+  // #3266: no identity link means no identity-scoped door can ever read
+  // the signal. The old fallback enqueued under the bare memberId,
+  // parking undrainable rows that counted nowhere; now the attempt is a
+  // counted, journaled loss instead of phantom stock.
+  if (!identityId) {
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "suppressed_no_identity", kind: "claim", subjectId: memberId, reason: "no_identity_link" });
+    return { enqueued: false, skipped: "no_identity" };
+  }
+  const agentId = identityId;
   try {
     const result = store.agentHeartbeats.enqueueWake({ agentId, kind: "mention", roomId, messageId });
     if (result?.enqueued && identityId && store.agentPlugin?.deliverWakePing) {
@@ -123,6 +138,11 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
     }
     return result;
   } catch (error) {
+    // #3345: the swallow stays (a wake must never roll back the claim),
+    // but the loss is now journaled with an allowlisted reason — never
+    // the exception text — instead of existing only in a console line.
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "failed", kind: "claim", subjectId: memberId, reason: "enqueue_error" });
     console.error("work claim wake failed:", error?.message ?? error);
     return null;
   }
