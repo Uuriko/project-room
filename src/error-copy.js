@@ -10,16 +10,20 @@ import { uiText } from "./strings.js";
 // Exact set of server error codes covered by the catalog's `error.<code>`
 // keys (the UNKNOWN-ERROR fallthrough sweep).
 export const ERROR_KEYS = new Set([
+  "aborted",
   "access_rejected",
   "account_exists",
   "account_not_found",
+  "account_session_required",
   "account_state_unchanged",
   "active_members",
+  "already_inactive",
   "attachment_conflict",
   "attachment_not_found",
   "attachment_quota",
   "attachment_too_large",
   "attachment_unavailable",
+  "auth_required",
   "bond_active",
   "bond_not_found",
   "bond_proposed_by_peer",
@@ -76,6 +80,7 @@ export const ERROR_KEYS = new Set([
   "inbox_source_not_found",
   "inbox_source_origin_changed",
   "invalid_handoff_transition",
+  "invalid_passkey_origin",
   "invalid_referral",
   "invalid_request",
   "invalid_url",
