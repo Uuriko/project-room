@@ -18,6 +18,10 @@ export const DIRECTORY_PAGE_SIZE = 50;
 export const PUBLIC_BACKFILL_BATCH = 20;
 
 export const PUBLIC_READ_MODEL_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS public_receipts (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -354,8 +358,30 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const pageWas = publicPage(previous).enabled === true;
   const receiptsOn = publicReceipts(state).enabled === true;
   const receiptsWere = publicReceipts(previous).enabled === true;
-  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere) return;
+  // Lot receipts have no public_receipts row for an opt-out to delete, so
+  // the RECORDED receipts setting is mirrored into
+  // room_public_receipts_setting for the lot read: only a recorded off
+  // hides a lot, and "never recorded" must stay distinguishable from
+  // "recorded false". The setter bumps the recorded revision on every
+  // record, so an unchanged revision needs no write; a null previous
+  // (bootstrap, import, backfill) is an authoritative state and always
+  // re-mirrors.
+  const recorded = state.room.publicReceipts;
+  const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
+  const recordedWas = previous?.room?.publicReceipts ?? null;
+  const mirrorSetting = previous === null
+    || (hasRecorded && (!recordedWas || typeof recordedWas.enabled !== "boolean"
+      || recordedWas.revision !== recorded.revision));
+  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting) return;
   const write = () => {
+    if (mirrorSetting) {
+      if (hasRecorded) {
+        store.db.prepare(`INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?,?)
+          ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, recorded.enabled ? 1 : 0);
+      } else {
+        store.db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
+      }
+    }
     if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
     if (pageOn || pageWas || receiptsOn || receiptsWere) touchPublicWorkListing(store, state);
     if (pageOn) upsertPublicRoom(store, state, auth);
@@ -647,6 +673,11 @@ const finiteNumber = value => typeof value === "number" && Number.isFinite(value
 // failed, unverified, or split — every terminal path stamps one via
 // _recordSettlement). Before settlement, and for journal lots that are
 // not bounty movements (transfers carry no bounty_id), the id is a 404.
+// The owner's consent gates it like every other shape, through the
+// switches that can apply to a row-less record: operator unpublish,
+// the directory receipts toggle (receipts-live), and the room's own
+// recorded public-receipts setting — a RECORDED off hides the lot,
+// while a room that never recorded the setting is served by default.
 // Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
 export function publicLotReceiptById(store, id) {
   if (typeof id !== "string" || !LOT_RECEIPT_ID.test(id)) return null;
@@ -673,6 +704,15 @@ export function publicLotReceiptById(store, id) {
   const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
   if (!settlement || typeof settlement !== "object") return null;
   if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) return null;
+  // No public_receipts row exists for an opt-out to delete, so the
+  // recorded setting is read from its write-time mirror
+  // (syncRoomPublication). No row means the owner never recorded the
+  // setting, which is not an opt-out.
+  let settingRow = null;
+  try {
+    settingRow = store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
+  } catch { settingRow = null; } // a store without the read-model schema recorded no setting
+  if (settingRow && settingRow.enabled === 0) return null;
   let roomTitle = null;
   try {
     if (isListed(store, roomId)) {

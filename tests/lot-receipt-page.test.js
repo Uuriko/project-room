@@ -17,6 +17,9 @@
 //     non-bounty lots (transfers) still 404;
 //   - the room's public-receipts directory toggle and operator
 //     unpublish hide a lot receipt like any other shape;
+//   - the room's recorded public-receipts setting governs lots too:
+//     recording it off hides a lot receipt, recording it on serves
+//     it, and never recording it leaves the settled lot served;
 //   - other receipt shapes gain no lot field and stay unchanged.
 //
 // Seams: the real BountyEscrow state machine drives a real ledger
@@ -61,6 +64,8 @@ function seedReadTables(db) {
   CREATE TABLE IF NOT EXISTS room_public_settings (
     room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0);
   CREATE TABLE IF NOT EXISTS public_unpublish (kind TEXT, target TEXT);
+  CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS public_rooms (slug TEXT PRIMARY KEY, title TEXT);`);
 }
 
@@ -209,6 +214,22 @@ test("the directory toggle and operator unpublish hide a lot receipt", () => {
   assert.ok(publicReceiptById(store, lotId));
 });
 
+test("the room's recorded public-receipts setting hides a lot receipt", () => {
+  const { escrow, db, store } = makeEscrow();
+  const bounty = runToPaid(escrow);
+  const lotId = lotOfKind(db, bounty.bountyId, "payout");
+  assert.ok(publicReceiptById(store, lotId), "never recorded: the settled lot is served");
+
+  // The mirror row syncRoomPublication writes when the owner records
+  // room.public_receipts_set. Only a RECORDED off hides the lot; the
+  // end-to-end recording path is covered by the HTTP test below.
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 0)")
+    .run(ROOM);
+  assert.equal(publicReceiptById(store, lotId), null, "owner recorded public receipts off");
+  db.prepare("UPDATE room_public_receipts_setting SET enabled=1 WHERE room_id=?").run(ROOM);
+  assert.ok(publicReceiptById(store, lotId), "recording it back on restores the receipt");
+});
+
 test("other receipt shapes gain no lot field", () => {
   const json = receiptJson({
     schema: "project-room-public-receipt/1", id: `pwr_${"cd".repeat(32)}`, title: "Public task",
@@ -243,7 +264,8 @@ async function serveSettledRoom(t) {
   t.after(async () => { server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve)); store.close();
     rmSync(directory, { recursive: true, force: true }); });
-  return { origin: `http://127.0.0.1:${server.address().port}`, lotId: rejected.receipt.lotId };
+  return { origin: `http://127.0.0.1:${server.address().port}`, lotId: rejected.receipt.lotId,
+    store, ownerKey };
 }
 
 test("GET /receipts/<lotId> serves the settled lot page and JSON; unknown lots 404", async t => {
@@ -286,4 +308,24 @@ test("GET /receipts/<lotId> serves the settled lot page and JSON; unknown lots 4
   const list = await fetch(`${origin}/receipts`);
   assert.equal(list.status, 200);
   assert.doesNotMatch(await list.text(), /Fix the flaky export/);
+});
+
+test("recording the room's public-receipts setting off hides the lot page", async t => {
+  const { origin, lotId, store, ownerKey } = await serveSettledRoom(t);
+  const record = (id, enabled) => store.command(ownerKey, "commons",
+    { id, type: "room.public_receipts_set", data: { enabled } });
+
+  // The room never recorded the setting: the settled lot stays served.
+  assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 200);
+  record("pub-on", true);
+  assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 200,
+    "recorded on: still served");
+  record("pub-off", false);
+  assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 404,
+    "recorded off: the lot page hides like every other shape");
+  assert.equal((await fetch(`${origin}/receipts/${lotId}.json`)).status, 404,
+    "recorded off: the JSON twin hides too");
+  record("pub-on-again", true);
+  assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 200,
+    "recorded back on: served again");
 });
