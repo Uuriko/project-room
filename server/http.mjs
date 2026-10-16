@@ -5032,8 +5032,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const context = store.roomContext(selected.token, roomId, {
           sinceVersion: params.has("since_version") ? params.get("since_version") : null, expectedSessionBinding: fence
         });
-        if (context.not_modified) return json(res, 200, context);
-        return json(res, 200, { ...context, orient: buildOrient(store, roomId, viewerId, { text: false, token: selected.token, binding: fence }) });
+        // Context never embeds orient (C-01 ORIENT-FIX): embedding it made
+        // every changed poll pay the full orient payload and defeated the
+        // since_version/not_modified short-circuit this route exists for.
+        // Orient stays available via the explicit /orient route above.
+        return json(res, 200, context);
       }
       if (route === "bonds" && req.method === "GET") {
         return json(res, 200, { bonds: store.bonds.listForMember(roomId, auth.member.id) });
