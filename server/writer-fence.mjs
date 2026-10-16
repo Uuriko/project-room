@@ -505,7 +505,7 @@ const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);
 // workItems -> board claims backfill marker (server/work-item-board.mjs,
 // decision #10): purely additive, created lazily on first backfill pass;
 // older writers have no code path to it.
-const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill"]);
+const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill", "work_item_board_divergence"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
