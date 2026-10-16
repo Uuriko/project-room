@@ -1730,6 +1730,16 @@ const ROWS = [
     }
   },
   {
+    "table": "wake_queue_pause_by",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "web_fetch_cache_rooms",
     "key": "room_id",
     "action": "delete",
