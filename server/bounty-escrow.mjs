@@ -2311,7 +2311,9 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(!bounty.disputeId, "dispute_exists", "this bounty already has a dispute");
       check(bounty.state === "submitted" || bounty.state === "accepted", "invalid_state", `bounty is ${bounty.state}, not disputable`);
+      check(bounty.state !== "accepted" || bounty.challengeEndsMs === null || this.nowMs() <= bounty.challengeEndsMs, "challenge_window_closed", "challenge window has already closed for this accepted bounty");
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
+      check(Boolean(bounty.verifier), "undecidable_dispute", "cannot dispute a bounty with no designated verifier");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
@@ -2795,7 +2797,7 @@ export class BountyEscrow {
       if (bounty.disputeOpenedMs !== null && now - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS) {
         // Unresolved > 14d: permissionless finalize defaults to RELEASE.
         const signed = this._settleDispute(bounty, { outcome: "timeout-default", terminal: "timeout",
-          bondSnapshot: dispute.bondSnapshot, forfeitedBond: 0, actor });
+          bondSnapshot: dispute.bondSnapshot, forfeitedBond: dispute.bondSnapshot, actor });
         return { action: "released", signed };
       }
     }
