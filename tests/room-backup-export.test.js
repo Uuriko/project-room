@@ -321,7 +321,7 @@ test("a version 1 KV manifest for today is rewritten; a current one is kept", as
   await kv.put("room-backups/2026-10-08.ndjson", JSON.stringify({ kind: "room-backup-manifest", version: 1, parts: [] }), {});
   const wrote = await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when);
   assert.equal(wrote.wrote, "room-backups/2026-10-08.ndjson");
-  assert.equal(JSON.parse(kv.map.get("room-backups/2026-10-08.ndjson").value.toString()).version, 2);
+  assert.equal(JSON.parse(kv.map.get("room-backups/2026-10-08.ndjson").value.toString()).version, 3);
   assert.equal((await writeDailyBackup({ ROOM_BACKUPS_KV: kv }, room, when)).skipped, "exists");
 });
 

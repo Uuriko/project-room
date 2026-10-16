@@ -15,8 +15,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
+import { gunzipSync } from "node:zlib";
 import { replayNdjson } from "../server/room-export.mjs";
-import { backupObjectKey } from "../cloudflare/room-backup.mjs";
+import { BACKUP_COMPRESSION_GZIP, backupCompressionOf, backupObjectKey, isGzipBytes } from "../cloudflare/room-backup.mjs";
 
 export const DEFAULT_NAMESPACE_ID = "ee73a90c4e6749bb92ebe16fc57c117d";
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -26,9 +27,15 @@ export function kvGet(namespaceId, key, { wrangler = process.env.WRANGLER ?? "wr
 }
 
 // Reassembles a KV backup. `get(key)` returns the stored bytes (Buffer).
+// The stored bytes are verified against the manifest first (per part and
+// whole); a gzip manifest (version 3) is then decompressed transparently
+// and the NDJSON verified against the manifest's uncompressed size/hash.
+// A legacy version 2 manifest (no compression field) is raw NDJSON.
+// An unknown declared format is refused (backupCompressionOf).
 export function assembleKvBackup(manifestBytes, get) {
   const manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8"));
   if (manifest?.kind !== "room-backup-manifest" || !Array.isArray(manifest.parts) || !manifest.parts.length) throw new Error("Not a room backup manifest");
+  const compression = backupCompressionOf(manifest);
   const parts = manifest.parts.map(part => {
     const bytes = Buffer.from(get(part.key));
     if (bytes.byteLength !== part.bytes || sha256(bytes) !== part.sha256) throw new Error(`Backup part ${part.key} does not match its manifest`);
@@ -36,7 +43,15 @@ export function assembleKvBackup(manifestBytes, get) {
   });
   const whole = Buffer.concat(parts);
   if (whole.byteLength !== manifest.bytes || sha256(whole) !== manifest.sha256) throw new Error("Reassembled backup does not match its manifest");
-  return { manifest, ndjson: whole.toString("utf8") };
+  let ndjsonBytes = whole;
+  if (compression === BACKUP_COMPRESSION_GZIP) {
+    if (!isGzipBytes(whole)) throw new Error("Backup does not match its manifest: the stored bytes are not a gzip stream");
+    try { ndjsonBytes = gunzipSync(whole); }
+    catch (error) { throw new Error(`Backup does not match its manifest gzip stream (${error?.message ?? error})`); }
+    if (ndjsonBytes.byteLength !== manifest.uncompressedBytes || sha256(ndjsonBytes) !== manifest.uncompressedSha256)
+      throw new Error("Reassembled backup does not match its manifest uncompressed sha256");
+  }
+  return { manifest, ndjson: ndjsonBytes.toString("utf8") };
 }
 
 // Per-room summary of a restored store. Messages are room messages that are
@@ -99,7 +114,7 @@ async function main() {
   process.stdout.write(`${JSON.stringify({
     verified: result.verified, events: result.events, trailer: result.trailer, contentVerification: result.contentVerification, audit: result.audit, skippedTables: result.skippedTables, roomsInBackup: watermark.rooms?.length ?? null,
     backedUpAt: watermark.backedUpAt ? new Date(watermark.backedUpAt).toISOString() : null,
-    manifest: manifest && { key: manifest.key, bytes: manifest.bytes, parts: manifest.parts.length, sha256: manifest.sha256 },
+    manifest: manifest && { key: manifest.key, bytes: manifest.bytes, parts: manifest.parts.length, sha256: manifest.sha256, compression: manifest.compression ?? "none", uncompressedBytes: manifest.uncompressedBytes ?? manifest.bytes },
     rooms
   }, null, 2)}\n`);
 }

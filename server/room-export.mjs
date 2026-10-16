@@ -119,10 +119,55 @@ function* exportTableRows(db, table, columns, pageRows) {
   }
 }
 
+// Per-table byte tally of the exported NDJSON (PERF-10X CALL 1): every
+// daily backup self-censuses, so the per-table composition that used to
+// need a separate census run (09a-census) is recorded in the trailer of
+// every export. The shape mirrors the census tool's buckets — one
+// { rows, bytes } entry per table, bytes being the exact NDJSON line
+// bytes (line text plus its "\n") — with two deliberate differences:
+// the watermark line is counted on its own (the census tool's
+// "(watermark/trailer)" bucket), and the trailer line itself is not
+// counted, because the tally lives inside it (counting it would be
+// self-referential). So: sum(tables[].bytes) + watermarkBytes ===
+// totalBytes, and totalBytes + byteLength(trailer line) === the full
+// export's byte total. The tally is metadata only: no restore path
+// reads it to decide what to load.
+export function createExportByteTally() {
+  const tables = new Map();
+  let watermarkBytes = 0;
+  let totalBytes = 0;
+  return {
+    addWatermark(line) {
+      const bytes = Buffer.byteLength(line);
+      watermarkBytes += bytes;
+      totalBytes += bytes;
+    },
+    add(table, line) {
+      const bytes = Buffer.byteLength(line);
+      totalBytes += bytes;
+      let entry = tables.get(table);
+      if (!entry) {
+        entry = { rows: 0, bytes: 0 };
+        tables.set(table, entry);
+      }
+      entry.rows += 1;
+      entry.bytes += bytes;
+    },
+    finish() {
+      const out = {};
+      for (const [table, entry] of tables) out[table] = { rows: entry.rows, bytes: entry.bytes };
+      return { totalBytes, watermarkBytes, tables: out };
+    }
+  };
+}
+
 export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
-  yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
+  const tally = createExportByteTally();
+  const watermarkLine = JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
+  tally.addWatermark(watermarkLine);
+  yield watermarkLine;
   // #3325: pin every loadable table's content in the trailer, accumulated
   // over the sanitized rows exactly as they are yielded below.
   const digests = createTableDigests();
@@ -132,10 +177,12 @@ export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
     for (const row of exportTableRows(db, table, columns, pageRows)) {
       const sanitized = sanitizeRow(row);
       digests.add(table, sanitized);
-      yield JSON.stringify({ table, row: sanitized }) + "\n";
+      const line = JSON.stringify({ table, row: sanitized }) + "\n";
+      tally.add(table, line);
+      yield line;
     }
   }
-  yield JSON.stringify(exportTrailer(db, digests.finish())) + "\n";
+  yield JSON.stringify(exportTrailer(db, digests.finish(), tally.finish())) + "\n";
 }
 
 // End-of-stream integrity trailer. The watermark is taken before the first
@@ -151,7 +198,7 @@ export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
 // mid-stream fails the events foreign key, and any other room tear moves the
 // event count.
 const TRAILER_PAGE_ROWS = 2000;
-export function exportTrailer(db, tables = null) {
+export function exportTrailer(db, tables = null, byteTally = null) {
   // Keyset pages, not one .all(): a room with many events would otherwise hold
   // every row in memory at the end of each export. Pages use .all() because the
   // Durable Object database adapter has no iterate().
@@ -177,6 +224,9 @@ export function exportTrailer(db, tables = null) {
     trailer.version = 2;
     trailer.tables = tables;
   }
+  // The byte tally (see createExportByteTally) rides along as metadata;
+  // it never changes what a restore loads or verifies about the rows.
+  if (byteTally) trailer.byteTally = byteTally;
   return trailer;
 }
 
@@ -272,6 +322,24 @@ export function assertTrailerShape(record) {
         || !Number.isSafeInteger(entry.rows) || entry.rows < 0
         || typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.sha256)) throw malformed();
     }
+  }
+  // Byte tally, when present, must be internally consistent (its table
+  // bytes plus the watermark line are exactly its stated total). This is
+  // a shape check on metadata only; restores never load by the tally.
+  if (record.byteTally !== undefined) {
+    const tally = record.byteTally;
+    if (!tally || typeof tally !== "object" || Array.isArray(tally)) throw malformed();
+    if (!Number.isSafeInteger(tally.totalBytes) || tally.totalBytes < 0
+      || !Number.isSafeInteger(tally.watermarkBytes) || tally.watermarkBytes < 0) throw malformed();
+    if (!tally.tables || typeof tally.tables !== "object" || Array.isArray(tally.tables)) throw malformed();
+    let sum = tally.watermarkBytes;
+    for (const [table, entry] of Object.entries(tally.tables)) {
+      if (!IDENT.test(table) || !entry || typeof entry !== "object" || Array.isArray(entry)
+        || !Number.isSafeInteger(entry.rows) || entry.rows < 0
+        || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0) throw malformed();
+      sum += entry.bytes;
+    }
+    if (sum !== tally.totalBytes) throw malformed();
   }
 }
 
