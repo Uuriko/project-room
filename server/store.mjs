@@ -98,6 +98,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-i
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -5573,43 +5574,42 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // no identity link or no pending signals for the message is a no-op.
   // Defensive against pre-schema databases; never throws.
   ackWakesOnReaction(roomId, memberId, messageId) {
-    let link = null;
-    try {
-      link = this.db.prepare(
-        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-    } catch { return; }
-    if (!link?.identityId) return;
+    // #3764: resolve through the shared guest-aware resolver — a trial
+    // seat's reaction must ack its own wake exactly like a linked
+    // member's, or the signal re-fires on every poll forever.
+    const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+    if (!identityId) return;
     try {
       this.db.prepare(
         "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=? AND delivered_at IS NULL"
-      ).run(this.now(), link.identityId, roomId, messageId);
+      ).run(this.now(), identityId, roomId, messageId);
     } catch { /* pre agent_wake_signals schema: nothing to ack */ }
   }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
-    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     // Decision #25: trial seats receive mention wakes in their room. Guest
     // members are seated through guest_members, never identity_links, so
-    // the identity_links-only lookup silently dropped every trial-seat
-    // wake. Fall back to the guest seat's identity. Deliberately local to
-    // this fan-out: identityIdForMember (the work-wake resolver) keeps
-    // NOT resolving guests — work wakes stay excluded for trial seats.
-    const guestLinkOf = this.db.prepare("SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=? AND member_id=?");
+    // an identity_links-only lookup silently drops every trial-seat wake.
+    // Resolve through the shared guest-aware resolver
+    // (server/wake-identity-resolution.mjs), the same one the reaction-ack
+    // path and the webhook fan-out use. identityIdForMember (the work-wake
+    // resolver) deliberately keeps NOT resolving guests — work wakes stay
+    // excluded for trial seats.
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
-      if (!link) continue;
+      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+      if (!identityId) continue;
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
-        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+        agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
-        this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+        this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
+        this.agentHeartbeats.pushNotify({ identityId: identityId,
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }
