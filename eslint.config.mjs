@@ -40,6 +40,7 @@ export const RAW_MEMBERS_INDEX_ENFORCED = [
   "server/invitation-evidence.mjs",
   "server/member-permission-requests.mjs",
   "server/outside-agents.mjs",
+  "server/public-work-reviews.mjs",
   "server/room-lifecycle.mjs",
 ];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
