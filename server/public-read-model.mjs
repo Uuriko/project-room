@@ -689,7 +689,11 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     if (typeof cursor !== "string" || !cursor) {
       return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     }
-    const where = filter.clauses.length ? `WHERE ${filter.clauses.join(" AND ")} AND id=?` : "WHERE id=?";
+    // The cursor must name a receipt this list could serve: a hidden
+    // (operator-unpublished) row is not a valid pagination position —
+    // accepting it would confirm the hidden receipt exists and where it
+    // sits in the order (#3595). Same 422 as a never-existent id.
+    const where = filter.clauses.length ? `WHERE ${filter.clauses.join(" AND ")} AND id=? AND ${HIDDEN_RECEIPT}` : `WHERE id=? AND ${HIDDEN_RECEIPT}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
     if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";

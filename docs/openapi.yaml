@@ -11623,6 +11623,42 @@ paths:
         '409': { description: room_exists, pilot_limit, or idempotency_conflict }
         '422': { description: invalid_template or session_binding_required }
         '429': { description: rate_limited }
+  /api/owner/overview:
+    get:
+      summary: Cross-room owner overview — merged Decisions + Exceptions (Owner Cockpit slice 1, #3342)
+      description: |
+        Browser account-session route (account_session cookie plus
+        X-Session-Binding), the same auth funnel as GET /api/account-rooms.
+        Fans out over the rooms the account belongs to (50 per page, `after`
+        continuation) and merges the per-room #662 attention items plus open
+        bounty disputes into one Decisions queue, sorted oldest/risk first
+        (overdue, then time-to-consequence, then money at stake, then age),
+        each item carrying its roomId, age and a consequence-of-inaction
+        line. Rooms where the viewer is a manage_members admin but not the
+        owner contribute only their access_request items. Exceptions carry
+        deployment job health, budget stops, stale claims, disputes nearing
+        default, lapsed-undecided counts and per-room read failures. A room
+        whose read fails appears in roomErrors and as an Exceptions stub —
+        the response never fails because one room is broken, and totals are
+        labelled "N of M rooms" when a room was excluded. Cents and
+        milli-credits are never summed or co-displayed as one figure.
+      security:
+        - accountSession: []
+      parameters:
+        - name: window
+          in: query
+          required: false
+          schema: { type: string, enum: [24h, 7d, 30d], default: 7d }
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: "{ contractVersion: 1, generatedAt, window, viewer, rooms: { considered, included, label, nextCursor }, decisions: { total, waiting, overdue, oldestAgeMs, items }, exceptions: { total, items }, roomErrors }"
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+        '422': { description: invalid_overview_query, invalid_room or session_binding_required }
   /api/account/profile:
     get:
       summary: Read the account's profile

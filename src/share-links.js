@@ -86,6 +86,13 @@ export const canRetryInvitation = error => interrupted(error) || error?.status =
 export function requestFailureMessage(error) {
   return interrupted(error) || error instanceof SyntaxError ? "The connection was interrupted and the result could not be confirmed" : error.message;
 }
+// Join a failure message and a recovery hint into one sentence. The base may
+// already end with a period (service messages do; the interrupted text above
+// does not), so strip before joining — never "Try again in a moment.. Draft
+// kept." (#3597).
+export function failureTextWithHint(error, hint) {
+  return `${requestFailureMessage(error).replace(/[.\s]+$/, "")}. ${hint}`;
+}
 export function invitationFailureMessage(error) {
   if (interrupted(error)) {
     return "The connection was interrupted. We could not confirm the result. Your entries are kept; try again here to check or finish the same request.";
