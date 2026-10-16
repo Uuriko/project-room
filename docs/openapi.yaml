@@ -11048,7 +11048,9 @@ paths:
         `/api/agent-wakes/poll` without a public endpoint, with an optional
         HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
         a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
-        poll cadence; optional `pushNotification` (`{ url, token,
+        poll cadence — the declaration is sticky: omitting it keeps the
+        stored declaration, a number replaces it, and an explicit `null`
+        clears it; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
         pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
@@ -11078,7 +11080,7 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
-                cadenceSeconds: { type: number, exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat" }
+                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"

@@ -69,14 +69,49 @@ const pushFailuresOf = (hb, agentId = "ai_testagent", hostId = "host-1") => {
 test("heartbeat validates cadenceSeconds", t => {
   const { hb } = unit(t);
   for (const bad of [0, -5, NaN, Infinity, "300", null]) {
-    if (bad === null) continue; // null means "absent"
+    if (bad === null) continue; // null is the explicit clear, not an invalid value (pinned below)
     assert.throws(() => hb.heartbeat({ ...wakeable(), cadenceSeconds: bad }), err =>
       err instanceof HeartbeatError && err.status === 422 && /cadenceSeconds/.test(err.message), `cadence ${String(bad)}`);
   }
   const { host } = hb.heartbeat({ ...wakeable(), cadenceSeconds: 300 });
   assert.equal(host.cadenceSeconds, 300);
   const bare = hb.heartbeat({ ...wakeable("host-2") });
-  assert.equal(bare.host.cadenceSeconds, null, "absent cadence reads null");
+  assert.equal(bare.host.cadenceSeconds, null, "a host that never declared a cadence reads null");
+});
+
+test("cadence is sticky: omit preserves, a value replaces, explicit null clears", t => {
+  const { hb } = unit(t);
+  const storedCadence = () => hb.db.prepare(
+    "SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+    .get("ai_testagent", "host-1")?.cadenceSeconds ?? null;
+  const declared = hb.heartbeat({ ...wakeable(), cadenceSeconds: 300 });
+  assert.equal(declared.host.cadenceSeconds, 300);
+  // Rotation review P5-F2: a bare heartbeat (no cadenceSeconds key at all)
+  // used to reset the stored declaration to null, collapsing the host's
+  // presence window to the 180s default. Omission now preserves it —
+  // in the response, in the stored row, and in the presence read.
+  const bare = hb.heartbeat({ ...wakeable() });
+  assert.equal(bare.host.cadenceSeconds, 300, "omitted cadenceSeconds preserves the stored declaration");
+  assert.equal(storedCadence(), 300, "the stored row keeps the declaration");
+  assert.equal(bare.reachability.reachableUntil - bare.host.lastSeenAt, 450_000,
+    "the preserved cadence keeps its stretched window (300s x 1.5)");
+  assert.equal(hb.statusOf("ai_testagent").hosts.find(h => h.hostId === "host-1").cadenceSeconds, 300,
+    "presence reads the preserved declaration");
+  // An explicit value replaces the declaration.
+  const replaced = hb.heartbeat({ ...wakeable(), cadenceSeconds: 60 });
+  assert.equal(replaced.host.cadenceSeconds, 60);
+  assert.equal(storedCadence(), 60);
+  // An explicit null is the clear: back to no declaration and the
+  // 180s default window.
+  const cleared = hb.heartbeat({ ...wakeable(), cadenceSeconds: null });
+  assert.equal(cleared.host.cadenceSeconds, null, "explicit null clears the declaration");
+  assert.equal(storedCadence(), null, "the stored row is cleared");
+  assert.equal(cleared.reachability.reachableUntil - cleared.host.lastSeenAt, 180_000,
+    "a cleared cadence reads the 180s default window");
+  // Omission after a clear keeps it cleared — preserve means preserve
+  // the current state, not resurrect an earlier declaration.
+  const after = hb.heartbeat({ ...wakeable() });
+  assert.equal(after.host.cadenceSeconds, null);
 });
 
 test("heartbeat validates pushNotification shape", t => {

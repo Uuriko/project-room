@@ -314,14 +314,14 @@ function validWakeArgs(name, args) {
   if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification));
   }
   if (name === "wake_clear") return validHostId(args.hostId);
   if (name === "heartbeat_set") {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
@@ -711,7 +711,14 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
+    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
+    // value through untouched (omitted = preserve the stored declaration,
+    // a number = replace, explicit null = clear). wake_clear has no
+    // cadenceSeconds field by design, so it sends an explicit null —
+    // clearing the declaration is part of what "clear" means for this
+    // tool, now expressed as the documented clear instead of as the
+    // side effect of an omitted field.
+    const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
     // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
     // API key gets the same pull-only guard and host namespace as HTTP.
