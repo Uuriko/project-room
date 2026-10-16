@@ -1,5 +1,6 @@
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
+import { mcpResultText } from "./mcp-result-text.mjs";
 // Authenticated hosted MCP profile for the Room Worker.
 //
 // The public join tools stay on POST /mcp when no Authorization header is
@@ -67,9 +68,9 @@ function rpcError(message, code, text) {
   return { jsonrpc: "2.0", id, error: { code, message: text } };
 }
 
-function toolResult(value, isError = false) {
+function toolResult(value, isError = false, redactions = []) {
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text: mcpResultText(value, redactions) }],
     structuredContent: value,
     ...(isError ? { isError: true } : {})
   };
@@ -931,7 +932,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
+      // A minted invite code is a one-time credential: it rides in
+      // structuredContent only, never in the text block hosts log
+      // verbatim (issue #3750). room_run_action recurses into this same
+      // handler with the inner tool name, so it is covered here too.
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false,
+        name === "room_create_agent_invite" ? [{ secret: value?.code, where: "structuredContent.code" }] : []) };
     } catch (error) {
       const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
