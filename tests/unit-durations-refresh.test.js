@@ -8,10 +8,13 @@ import {
   refreshTable,
   serializeTable,
   loadReceipts,
+  cappedLowerBoundFiles,
+  MEASUREMENT_CAP_MS,
   PROVENANCE_KEY,
 } from "../scripts/refresh-unit-ci-durations.mjs";
 import { parseJunitFileDurations } from "../scripts/unit-ci.mjs";
 import { unmeasuredDefaultMs } from "../scripts/unit-shards.mjs";
+import { summarizePlan, tableAgeDays, truthFromReceipts } from "../scripts/unit-durations-report.mjs";
 
 // Fixture style mirrors tests/unit-shards.test.js: tmp dirs, no network.
 
@@ -169,6 +172,104 @@ test("junit parsing sums per-file testcase times and handles suite-grouped files
   });
   assert.deepEqual(parseJunitFileDurations(""), {});
   assert.deepEqual(parseJunitFileDurations("not xml at all"), {});
+});
+
+test("refresh: the 300s cap is a lower bound, not truth — unmeasured capped files are flagged, measured ones are uncapped", (t) => {
+  const files = ["tests/capped-stale.test.js", "tests/capped-measured.test.js", "tests/plain.test.js"];
+  const fixture = makeTree(t, {
+    files,
+    milliseconds: {
+      "tests/capped-stale.test.js": MEASUREMENT_CAP_MS,
+      "tests/capped-measured.test.js": MEASUREMENT_CAP_MS,
+      "tests/plain.test.js": 1000,
+    },
+  });
+  // A directly-measured value far above the old sentinel proves the
+  // detection is the value itself, not a name list.
+  assert.deepEqual(
+    cappedLowerBoundFiles(fixture.table.milliseconds),
+    ["tests/capped-measured.test.js", "tests/capped-stale.test.js"]
+  );
+  const receipts = [
+    { index: 1, runId: "run-9", revision: "rev-9", fileDurationsMs: { "tests/capped-measured.test.js": 18234 } },
+  ];
+  const { table, changed } = refreshTable(fixture.table, receipts, {
+    fileExists: (file) => files.includes(file),
+    date: "2026-10-16",
+  });
+  assert.equal(changed, true);
+  assert.equal(
+    table.milliseconds["tests/capped-measured.test.js"], 18234,
+    "a hosted per-testcase measurement replaces the capped sentinel outright"
+  );
+  assert.equal(
+    table.milliseconds["tests/capped-stale.test.js"], MEASUREMENT_CAP_MS,
+    "an unmeasured capped entry keeps its lower-bound value (nothing better exists yet)"
+  );
+  assert.deepEqual(table[PROVENANCE_KEY].uncappedFiles, ["tests/capped-measured.test.js"]);
+  assert.deepEqual(
+    table[PROVENANCE_KEY].cappedLowerBounds, ["tests/capped-stale.test.js"],
+    "only the still-unmeasured capped file is flagged as a lower bound"
+  );
+  // A file measured in this refresh is never flagged, even at the cap value.
+  assert.deepEqual(cappedLowerBoundFiles({ "tests/x.test.js": MEASUREMENT_CAP_MS }, new Set(["tests/x.test.js"])), []);
+});
+
+test("refresh: a generated twin's measurement is attributed to its wrapper test file", (t) => {
+  const wrapper = "tests/webhook-dispatch-store.test.js";
+  const generated = "tests/.webhook-dispatch-store.7eba6d40aa73d5f3.generated.mjs";
+  const files = [wrapper, "tests/plain.test.js"];
+  const fixture = makeTree(t, {
+    files,
+    milliseconds: { [wrapper]: 149653, "tests/plain.test.js": 1000 },
+  });
+  const receipts = [
+    { index: 1, runId: "run-10", revision: "rev-10", fileDurationsMs: { [generated]: 3084 } },
+  ];
+  const { table, changed } = refreshTable(fixture.table, receipts, {
+    fileExists: (file) => files.includes(file),
+    date: "2026-10-16",
+  });
+  assert.equal(changed, true);
+  assert.equal(table.milliseconds[wrapper], 3084,
+    "the wrapper takes the generated twin's measured time, not its stale weight");
+  assert.equal(table.milliseconds[generated], undefined,
+    "the generated path itself is not recorded (it does not exist in a fresh checkout)");
+  assert.equal(table[PROVENANCE_KEY].filesMeasured, 1);
+  // A non-twin missing file is still dropped, and an ambiguous twin (no
+  // existing sibling) attributes nowhere.
+  const orphan = refreshTable(fixture.table, [
+    { index: 1, runId: "run-11", revision: "rev-11", fileDurationsMs: { "tests/.nope.0123456789abcdef.generated.mjs": 5 } },
+  ], { fileExists: (file) => files.includes(file), date: "2026-10-16" });
+  assert.equal(orphan.table.milliseconds["tests/.nope.0123456789abcdef.generated.mjs"], undefined);
+});
+
+test("report: summarizePlan scores a plan against measured truth and tableAgeDays reads provenance", () => {
+  const plan = {
+    files: ["tests/a.test.js", "tests/b.test.js", "tests/c.test.js"],
+    shards: [
+      { index: 1, files: ["tests/a.test.js"], estimatedMs: 10000 },
+      { index: 2, files: ["tests/b.test.js", "tests/c.test.js"], estimatedMs: 20000 },
+    ],
+  };
+  const truth = new Map([["tests/a.test.js", 30000], ["tests/b.test.js", 10000], ["tests/c.test.js", 10000]]);
+  const summary = summarizePlan(plan, truth);
+  assert.equal(summary.estimatedSpread, 2);
+  assert.equal(summary.truthSpread, 1.5);
+  assert.deepEqual(summary.shards.map((s) => s.truthMs), [30000, 20000]);
+  assert.equal(summarizePlan(plan).truthSpread, null, "no truth, no truth spread");
+  assert.equal(tableAgeDays({ [PROVENANCE_KEY]: { date: "2026-10-09" } }, new Date("2026-10-16T12:00:00Z")), 7);
+  assert.equal(tableAgeDays({}, new Date("2026-10-16T12:00:00Z")), null);
+  // Truth scoring re-keys generated twins to their wrappers, like the refresh.
+  const receipts = [{
+    fileDurationsMs: {
+      "tests/.webhook-dispatch-store.7eba6d40aa73d5f3.generated.mjs": 3084,
+      "tests/a.test.js": 10,
+    },
+  }];
+  const truthMap = truthFromReceipts(receipts, (file) => file === "tests/webhook-dispatch-store.test.js" || file === "tests/a.test.js");
+  assert.equal(truthMap.get("tests/webhook-dispatch-store.test.js"), 3084);
+  assert.equal(truthMap.get("tests/a.test.js"), 10);
 });
 
 test("unmeasured default is the median of measured durations, floored at 5000ms", () => {
