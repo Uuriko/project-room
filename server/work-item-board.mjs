@@ -461,6 +461,16 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     // derivation is untouched; this field survives accepted-unclaimed,
     // where owner is null (the measured §4.2 orphan).
     accountableMemberId: typeof item.accountableMemberId === "string" && item.accountableMemberId.length > 0 ? item.accountableMemberId : null,
+    // B-4' Phase 0 slice 3a (Appendix D §D.1 §4.1): the work brief itself.
+    // `definitionOfDone` is carried under its own name, verbatim: the
+    // item/event path imposes no length cap on it (propose requires only
+    // a non-empty value), so the mapping carries the string whole —
+    // presence over truncation (recorded in the slice-3a PR body).
+    // `mode` is carried verbatim too, no rename: vocabulary stability
+    // where semantics are load-bearing (mode decides whether a scope
+    // claim is required).
+    definitionOfDone: typeof item.definitionOfDone === "string" && item.definitionOfDone.length > 0 ? item.definitionOfDone : null,
+    mode: item.mode === "read" || item.mode === "write" ? item.mode : null,
     ownerDecisionRequired: item.ownerDecisionRequired === true,
     humanDecisionMakerId: typeof item.humanDecisionMakerId === "string" && item.humanDecisionMakerId.length > 0 ? item.humanDecisionMakerId : null,
     reviewedBy: reviewsMerged.length > 0 ? reviewsMerged[reviewsMerged.length - 1].memberId : null,
@@ -558,6 +568,8 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     ownerDecisionRequired: false,
     humanDecisionMakerId: null,
     accountableMemberId: null,
+    definitionOfDone: null,
+    mode: null,
     reviewedBy: null,
     attestations: [],
     tags: [],
