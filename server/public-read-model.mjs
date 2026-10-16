@@ -581,6 +581,34 @@ const HIDDEN_RECEIPT = `NOT EXISTS (
      OR (u.kind='room' AND u.target=public_receipts.room_id)
      OR (u.kind='room' AND u.target=public_receipts.origin_room_id))`;
 
+// The owner half of hidden (#3595): a receipt also stays out when any room
+// it belongs to turned public receipts off (room_directory_settings
+// .public_receipts = 0, default 1). Resolved the way receipts-live resolves
+// the toggle — the origin room, plus the owning room of a public-work
+// receipt through its task record, since a pwr_ row's origin is a namespace
+// rather than a room id. Same predicate the directory receipt count uses.
+const OWNER_HIDDEN_RECEIPT = `NOT EXISTS (
+  SELECT 1 FROM room_directory_settings s
+  WHERE s.public_receipts = 0
+    AND (s.room_id = public_receipts.origin_room_id
+         OR s.room_id IN (
+           SELECT pwt.room_id FROM public_work_receipts pwr
+           JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+           WHERE pwr.receipt_id = public_receipts.id)))`;
+
+// A legacy store whose settings table predates the toggle column has no
+// private rooms by definition (the column's default is public), so the
+// owner-toggle clause applies only where the column can be read.
+function ownerToggleReadable(store) {
+  try {
+    store.db.prepare("SELECT public_receipts FROM room_directory_settings LIMIT 0").all();
+    return true;
+  } catch (error) {
+    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
+    return false;
+  }
+}
+
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
@@ -601,19 +629,30 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
   const filter = receiptFilter(room, needle);
+  // The rows this list could serve: filter matches, minus both kinds of
+  // hidden (operator-unpublished, owner-toggled-off). The page query and
+  // the cursor lookup apply the same set, so a served nextCursor always
+  // names a receipt a follow-up request may anchor on.
+  const visibility = ownerToggleReadable(store) ? [HIDDEN_RECEIPT, OWNER_HIDDEN_RECEIPT] : [HIDDEN_RECEIPT];
   let after = "";
   const afterParams = [];
   if (cursor != null) {
     if (typeof cursor !== "string" || !cursor) {
       return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     }
-    const where = filter.clauses.length ? `WHERE ${filter.clauses.join(" AND ")} AND id=?` : "WHERE id=?";
+    // The cursor must name a receipt this list could serve: a hidden row
+    // is not a valid pagination position — accepting it would confirm the
+    // hidden receipt exists and where it sits in the order (#3595). Both
+    // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
+    // owner public-receipts toggle (OWNER_HIDDEN_RECEIPT). Same 422 as a
+    // never-existent id.
+    const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
     if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
-  const clauses = [...filter.clauses, HIDDEN_RECEIPT];
+  const clauses = [...filter.clauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)

@@ -110,7 +110,7 @@ export const hostedRoomTools = [
     threadId: { type: "string", minLength: 1, maxLength: 160, description: "Omit to list threads. Set to read one thread." }
   }, ["roomId"])),
 
-  tool("room_put_file", "[paid: room-credits] 5 credits per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staged bytes are visible only to the uploader and expire after 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
+  tool("room_put_file", "[paid: room-cents] 5 cents per call. Stage a room file in room_attachments. data is canonical base64 with no whitespace, at most 1 MiB decoded. id is single-use: the same id, filename, mediaType, and bytes returns duplicate true. A different payload with that id conflicts and does not replace the bytes. Staged bytes are visible only to the uploader and expire after 24 hours. It does not post a chat message. Use room_commit_file to commit a staged file onto a message this identity posted. Executable filenames are refused. This is not an inbox or Gmail attachment.", schema({
     roomId: roomIdField,
     id: { ...idField, description: "Client attachment id. Stable across retries. Single-use in the room." },
     filename: { type: "string", minLength: 1, maxLength: 255 },
@@ -154,7 +154,7 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     inviteId: { type: "string", minLength: 1, maxLength: 64, description: "inviteId from room_list_agent_invites." }
   }, ["roomId", "inviteId"]), false),
-  tool("add_land_item", "[paid: room-credits] 1 credit per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
+  tool("add_land_item", "[paid: room-cents] 1 cent per call. Add a pull request to this room's land queue. Same call as POST /api/rooms/:roomId/add_land_item. repo is owner/name and prNumber is the pull request number. claimantMemberId defaults to the caller and must be an active member. Any member can add. The server reads head, mergeable, behind-main, and the required-check rollup. A missing GitHub token that the read requires returns github_unconfigured. This does not merge the pull request. Pass a stable requestId to make retries safe: the same key replays the original response.", schema({
     roomId: roomIdField,
     repo: { type: "string", minLength: 3, maxLength: 200, description: "GitHub repository as owner/name." },
     prNumber: { type: "integer", minimum: 1, maximum: 100000000 },

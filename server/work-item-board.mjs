@@ -31,6 +31,12 @@ export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
 // Lazily created by this module on first use (the run-once/request_replays
 // pattern); registered in server/writer-fence.mjs lazyAdditiveTables.
 export const WORK_ITEM_BOARD_BACKFILL_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_BACKFILL_TABLE} (room_id TEXT PRIMARY KEY, version INTEGER NOT NULL, at TEXT NOT NULL)`;
+export const WORK_ITEM_BOARD_DIVERGENCE_TABLE = "work_item_board_divergence";
+// Per-room divergence snapshot (Appendix D §D.2.3 monitor): persisted
+// whenever a backfill run or a sync plan computes diverged rows.
+// Zero is the only healthy value; any non-zero reading re-opens #3607.
+export const WORK_ITEM_BOARD_DIVERGENCE_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} (room_id TEXT PRIMARY KEY, diverged INTEGER NOT NULL, rework INTEGER NOT NULL, board_native INTEGER NOT NULL, at TEXT NOT NULL)`;
+export const DIVERGENCE_REPAIR_NOTE = "divergence repair: board reopened to match the work item; was done";
 
 const MAX_CLAIM_HISTORY = 200; // mirrors withHistory in server/work-claims.mjs
 const MAX_CHAIN = 20;
@@ -414,7 +420,19 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     }
   }
 
-  const { history, historyOmitted } = historyForWorkItem(item, facts);
+  let { history, historyOmitted } = historyForWorkItem(item, facts);
+  // Divergence-repair stamps are board-native history the event mapping
+  // cannot re-derive: preserve them from the existing row (in time
+  // order) so a repaired row is a fixed point of re-mapping — without
+  // this, the next sync/backfill would silently drop the reopen record.
+  for (const stamp of existing?.history ?? []) {
+    if (typeof stamp?.note !== "string" || !stamp.note.startsWith("divergence repair:")) continue;
+    if (history.some(entry => entry.at === stamp.at && entry.agentId === stamp.agentId && entry.action === stamp.action && entry.note === stamp.note)) continue;
+    const at = isoOrNull(stamp.at) ?? iso(nowMs);
+    const index = history.findIndex(entry => entry.at > at);
+    history.splice(index === -1 ? history.length : index, 0, { at, agentId: typeof stamp.agentId === "string" && stamp.agentId ? stamp.agentId : "system", action: stamp.action, note: stamp.note });
+  }
+  if (history.length > MAX_CLAIM_HISTORY) { const dropped = history.length - MAX_CLAIM_HISTORY; history = history.slice(dropped); historyOmitted += dropped; }
   const reviews = reviewsForWorkItem(item, facts);
   const attestations = attestationsForWorkItem(item, facts);
   const evidence = evidenceForWorkItem(item);
@@ -571,13 +589,54 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
 }
 
 const ACTIVE_STATES = new Set(["claimed", "in_progress", "blocked"]);
+const TERMINAL_BOARD_STATES = new Set(["done", "closed"]);
+
+// Divergence classes (Appendix D §D.2, #3607). `rework` is the one class
+// with a provable, transition-lite repair: the board says done, the item
+// provably completed before (a work.completed event in its facts, or a
+// receipt on the item), and the item now maps to a non-terminal state —
+// the §4.6 completed -> blocked rework. Everything else (foreign-owner
+// active claims, closed mismatches, unprovable cases) is `board_native`:
+// forcing those rows stays prohibited and the skip is preserved exactly.
+function provablyCompleted(item, facts) {
+  return (facts?.events ?? []).some(event => event.type === "work.completed")
+    || Boolean(item?.receipt) || (Array.isArray(item?.receiptHistory) && item.receiptHistory.length > 0);
+}
+export function classifyWorkItemBoardDivergence(current, mapped, item, facts) {
+  if (current?.state === "done" && !TERMINAL_BOARD_STATES.has(mapped?.state) && provablyCompleted(item, facts)) return "rework";
+  return "board_native";
+}
+
+// Transition-lite repair for a rework row: the mapped row (which already
+// carries the mapping's history stamps for the item's current state —
+// e.g. the state:blocked stamp from the reopening work.blocked event,
+// after the state:done stamp) plus one explicit repair stamp naming the
+// reopen a divergence repair. The done stamp stays: history is
+// append-only, and the stamps after it are what receipts must read.
+function reworkRepairRow(mapped, item, facts, nowMs) {
+  const reopen = [...(facts?.events ?? [])].reverse().find(event => event.type === "work.blocked");
+  const stamp = {
+    at: isoOrNull(reopen?.at) ?? isoOrNull(item?.updatedAt) ?? iso(nowMs),
+    agentId: typeof reopen?.actorId === "string" && reopen.actorId ? reopen.actorId : "system",
+    action: `state:${mapped.state}`, note: DIVERGENCE_REPAIR_NOTE,
+  };
+  if (mapped.history.some(entry => entry.at === stamp.at && entry.agentId === stamp.agentId && entry.action === stamp.action && entry.note === stamp.note)) return mapped;
+  const history = [...mapped.history, stamp];
+  const dropped = Math.max(0, history.length - MAX_CLAIM_HISTORY);
+  const row = { ...mapped, history: history.slice(dropped) };
+  const omitted = (mapped.historyOmitted ?? 0) + dropped;
+  if (omitted > 0) row.historyOmitted = omitted; else delete row.historyOmitted;
+  return row;
+}
 
 // Plan one room's backfill without writing: the rows the board should
 // hold for the room's work items, plus the items whose live board row
 // disagrees with the work item's own lifecycle (board-native divergence
 // — e.g. a mirrored card was claimed directly through the board door).
-// Diverged rows are never overwritten by the backfill; an operator (or
-// the item's next command, post-cutover) resolves them.
+// Board-native diverged rows are never overwritten by the backfill; an
+// operator (or the item's next command, post-cutover) resolves them.
+// Rework-class diverged rows are the sole exception: they enter the
+// write plan as a transition-lite repair (see reworkRepairRow).
 export function planWorkItemBoardBackfill({ items, events = [], existing = new Map(), nowMs = Date.now() } = {}) {
   const factsByItem = workItemEventFacts(events);
   const rows = new Map();
@@ -589,7 +648,12 @@ export function planWorkItemBoardBackfill({ items, events = [], existing = new M
     const mapped = boardClaimForWorkItem(item, factsByItem.get(item.id) ?? null, { nowMs, existing: current });
     if (!mapped) continue;
     if (current && isDiverged(current, mapped, item)) {
-      diverged.push({ workItemId: item.id, claimId, boardState: current.state, itemState: item.state });
+      const facts = factsByItem.get(item.id) ?? null;
+      const entry = { workItemId: item.id, claimId, boardState: current.state, itemState: item.state, class: classifyWorkItemBoardDivergence(current, mapped, item, facts) };
+      diverged.push(entry);
+      // Rework rows are repaired, not skipped; board_native rows stay
+      // excluded from the write plan (forcing them is prohibited).
+      if (entry.class === "rework") rows.set(claimId, reworkRepairRow(mapped, item, facts, nowMs));
       continue;
     }
     rows.set(claimId, mapped);
@@ -687,6 +751,43 @@ export function roomEvents(store, roomId) {
     .filter(Boolean);
 }
 
+// Persist one room's divergence snapshot from a computed diverged list.
+// The snapshot is the last computation's counts, split by class; a later
+// clean computation overwrites it with zeros. Zero is the only healthy
+// value.
+function recordWorkItemBoardDivergence(store, roomId, diverged, nowMs) {
+  if (!store?.db) return;
+  store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
+  const rework = (diverged ?? []).filter(entry => entry.class === "rework").length;
+  store.db.prepare(`INSERT INTO ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} (room_id, diverged, rework, board_native, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(room_id) DO UPDATE SET diverged=excluded.diverged, rework=excluded.rework, board_native=excluded.board_native, at=excluded.at`)
+    .run(roomId, (diverged ?? []).length, rework, (diverged ?? []).length - rework, iso(nowMs));
+}
+
+// Read the divergence snapshot: one room's last snapshot (or null when
+// none has been computed), or, without a roomId, the store aggregate
+// { divergedRooms, divergedRows, rework, boardNative, rooms } the health
+// surface reads. A store with no snapshot table yet reads as zero.
+export function workItemBoardDivergence(store, roomId = null) {
+  const empty = { divergedRooms: 0, divergedRows: 0, rework: 0, boardNative: 0, rooms: [] };
+  if (!store?.db) return roomId ? null : empty;
+  let exists = false;
+  try { exists = Boolean(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(WORK_ITEM_BOARD_DIVERGENCE_TABLE)); } catch { exists = false; }
+  if (!exists) return roomId ? null : empty;
+  const shape = row => ({ roomId: row.room_id, diverged: row.diverged, rework: row.rework, boardNative: row.board_native, at: row.at });
+  if (roomId) {
+    const row = store.db.prepare(`SELECT * FROM ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} WHERE room_id=?`).get(roomId);
+    return row ? shape(row) : null;
+  }
+  const rooms = store.db.prepare(`SELECT * FROM ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} ORDER BY room_id`).all().map(shape);
+  return {
+    divergedRooms: rooms.filter(room => room.diverged > 0).length,
+    divergedRows: rooms.reduce((sum, room) => sum + room.diverged, 0),
+    rework: rooms.reduce((sum, room) => sum + room.rework, 0),
+    boardNative: rooms.reduce((sum, room) => sum + room.boardNative, 0),
+    rooms,
+  };
+}
+
 export function backfillRoomWorkItems(store, roomId, { nowMs = Date.now(), dryRun = false } = {}) {
   const report = { roomId, items: 0, created: 0, updated: 0, unchanged: 0, diverged: [], errors: [] };
   const roomRow = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
@@ -695,15 +796,18 @@ export function backfillRoomWorkItems(store, roomId, { nowMs = Date.now(), dryRu
   try { state = JSON.parse(roomRow.projection); } catch { report.errors.push("projection_unparseable"); return report; }
   const items = Object.values(state?.workItems ?? {});
   report.items = items.length;
-  if (items.length === 0) return report;
+  if (items.length === 0) { if (!dryRun) recordWorkItemBoardDivergence(store, roomId, [], nowMs); return report; }
   const events = roomEvents(store, roomId);
   const existing = new Map(store.workClaims.list(roomId).map(row => [row.id, row]));
   const { rows, diverged } = planWorkItemBoardBackfill({ items, events, existing, nowMs });
   report.diverged = diverged;
+  // Snapshot the computed divergence (D.2.3 monitor). A dry run (the
+  // shadow diff) writes nothing, snapshot included.
+  if (!dryRun) recordWorkItemBoardDivergence(store, roomId, diverged, nowMs);
   const planErrors = [];
   for (const [claimId, mapped] of rows) {
     const current = existing.get(claimId) ?? null;
-    if (current && diverged.some(entry => entry.claimId === claimId)) continue;
+    if (current && diverged.some(entry => entry.claimId === claimId && entry.class !== "rework")) continue;
     try {
       // #3465: validate the mapped row through the state machine BEFORE
       // storing it. The registry's persisted-row codec decodes stored rows
@@ -757,6 +861,12 @@ export function diffRoomWorkItems(store, roomId, { nowMs = Date.now() } = {}) {
 export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force = false } = {}) {
   const aggregate = { version: WORK_ITEM_BOARD_BACKFILL_VERSION, rooms: 0, items: 0, created: 0, updated: 0, unchanged: 0, diverged: [], errors: [] };
   store.db.exec(WORK_ITEM_BOARD_BACKFILL_SCHEMA);
+  // The divergence snapshot table is this pass's sibling bookkeeping:
+  // create it here, alongside the marker table, not only when a room's
+  // snapshot is recorded — a store that has run the pass then always has
+  // both lazy tables, which is what the purge registry's optional entry
+  // and the health reader assume.
+  store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
   const markers = new Map(store.db.prepare(`SELECT room_id, version FROM ${WORK_ITEM_BOARD_BACKFILL_TABLE}`).all().map(row => [row.room_id, row.version]));
   const roomIds = store.db.prepare("SELECT id FROM rooms").all().map(row => row.id);
   for (const roomId of roomIds) {
@@ -807,6 +917,13 @@ export const WORK_ITEM_BOARD_SYNC_TYPES = new Set([
 
 const SYNC_ACTIVE = new Set(["claimed", "in_progress", "blocked"]);
 
+// #3747: the command types the command layer itself treats as cleanup at
+// pilot capacity (store.command's endingClaim / endingWork). Their whole
+// board footprint is a resolution, including a supersession's phantom
+// successor card, so the sync declares it to emitWorkClaimEvent and the
+// pilot caps do not refuse it mid-transaction.
+const RESOLUTION_SYNC_TYPES = new Set(["claim.released", "work.completed", "work.blocker_resolved", "work.superseded"]);
+
 function boardConfig(store, roomId) {
   const registry = store.workClaims;
   if (typeof registry.configFor === "function") return registry.configFor(roomId);
@@ -850,9 +967,14 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   const { rows, diverged } = planWorkItemBoardBackfill({
     items: Object.values(state.workItems ?? {}), events, existing, nowMs,
   });
-  // A diverged primary row is the board's own live state, not the item's
-  // to rewrite: leave the whole sync alone (mirror parity).
-  if (diverged.some(entry => entry.claimId === claimId)) return current;
+  // Surface the computed divergence (D.2.3 monitor) even when the sync
+  // below skips: the silent skip becomes a counted skip.
+  recordWorkItemBoardDivergence(store, roomId, diverged, nowMs);
+  // A board_native diverged primary row is the board's own live state,
+  // not the item's to rewrite: leave the whole sync alone (mirror
+  // parity). A rework primary is the exception: its repaired row is in
+  // the plan and flows through the normal write/event path below.
+  if (diverged.some(entry => entry.claimId === claimId && entry.class !== "rework")) return current;
   const mapped = rows.get(claimId) ?? null;
 
   // Caps, checked before any write so a refusal rolls the command back
@@ -872,13 +994,14 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // Write only rows that differ (unchanged rows stay untouched, so a
   // no-op command emits nothing). Events fire for the command's own
   // item, plus "created" for any phantom successor the plan produced.
+  const resolving = RESOLUTION_SYNC_TYPES.has(incoming.type);
   let primary = current;
   for (const [rowId, row] of rows) {
     const before = existing.get(rowId) ?? null;
     if (before && sameClaimRow(before, row)) { if (rowId === claimId) primary = row; continue; }
     registry.set(roomId, row);
     if (rowId === claimId) primary = row;
-    if (!before) emitWorkClaimEvent(store, roomId, { actorId, item: row, action: "created", atMs: nowMs });
+    if (!before) emitWorkClaimEvent(store, roomId, { actorId, item: row, action: "created", resolving, atMs: nowMs });
   }
   if (mapped && current && sameClaimRow(current, mapped)) return primary;
   if (mapped) {
@@ -888,7 +1011,7 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
         : incoming.type === "claim.renewed" ? "renewed"
           : incoming.type === "claim.released" ? "released"
             : "state_changed";
-    if (action) emitWorkClaimEvent(store, roomId, { actorId, item: mapped, action, atMs: nowMs });
+    if (action) emitWorkClaimEvent(store, roomId, { actorId, item: mapped, action, previousState: current?.state ?? null, resolving, atMs: nowMs });
   }
   return primary;
 }

@@ -255,11 +255,14 @@ test("plan: board-native fields survive reconciliation; diverged rows are report
   const foreign = new Map([["task-a", { ...boardClaimForWorkItem(claimed, factsFor([]), { nowMs: NOW }), state: "claimed", owner: "mallory" }]]);
   const foreignPlan = planWorkItemBoardBackfill({ items: [claimed], events: [], existing: foreign, nowMs: NOW });
   assert.equal(foreignPlan.rows.has("task-a"), false);
-  assert.deepEqual(foreignPlan.diverged, [{ workItemId: "task-a", claimId: "task-a", boardState: "claimed", itemState: "accepted" }]);
-  // A board-side completion the item has not reached: diverged.
+  assert.deepEqual(foreignPlan.diverged, [{ workItemId: "task-a", claimId: "task-a", boardState: "claimed", itemState: "accepted", class: "board_native" }]);
+  // A board-side completion the item has not reached: diverged, and
+  // board_native (no completion event / receipt proves a rework).
   const boardDone = new Map([["task-a", { ...boardClaimForWorkItem(claimed, factsFor([]), { nowMs: NOW }), state: "done" }]]);
   const boardDonePlan = planWorkItemBoardBackfill({ items: [item({ state: "working", claim: liveClaimFields() })], events: [], existing: boardDone, nowMs: NOW });
   assert.equal(boardDonePlan.diverged.length, 1);
+  assert.equal(boardDonePlan.diverged[0].class, "board_native");
+  assert.equal(boardDonePlan.rows.has("task-a"), false);
 });
 
 test("plan: re-planning over its own output is a fixed point (idempotency)", () => {

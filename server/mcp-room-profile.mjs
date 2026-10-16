@@ -660,6 +660,9 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
+    // #3265: the MCP heartbeat door carries the same truncation flag as
+    // the HTTP doors — heartbeat() computed it and this receipt dropped it.
+    more: result.more === true,
     next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {})
   };
 }
@@ -731,7 +734,7 @@ async function callWakeTool(store, secret, identity, name, args) {
       return store.transaction(() => {
         const auth = resolveAuth(null, MCP_WAKE_SCOPE);
         if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-        const result = heartbeatWithListener(store, auth, data);
+        const result = heartbeatWithListener(store, auth, data, { door: "mcp" });
         if (auth.scopedKey) result.host = { ...result.host, hostId: args.hostId };
         return heartbeatReceipt(agentId, result);
       });
@@ -749,7 +752,7 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.transaction(() => {
       const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
       if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null });
+      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null, door: "mcp" });
     });
   }
   if (name === "wake_pause") {
