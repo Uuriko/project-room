@@ -61,7 +61,11 @@ async function loadList(more = false, refreshSelection = false) {
     const incoming = result.offers.map(checkedOffer);
     if (flight !== listFlight) return;
     offers = [...new Map([...(more ? offers : []), ...incoming].map(offer => [offer.id, offer])).values()]; cursor = result.nextCursor;
-    paintList(); listStatus.textContent = offers.length ? '' : 'No open offers yet. Check back soon.';
+    paintList();
+    // Honest empty state: an empty board is a normal moment, not a dead
+    // end — point at the proof of finished work instead of "check back".
+    if (offers.length) listStatus.textContent = '';
+    else listStatus.innerHTML = 'No open tasks right now — <a href="/receipts">see work already done</a>.';
     if (refreshSelection && selectedId) await select(selectedId, { history: false, focus: false });
   } catch {
     if (flight !== listFlight || flight.signal.aborted) return;

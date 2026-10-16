@@ -65,7 +65,9 @@ test('public offers show exact trade/cash terms, keyboard detail and actual down
 
 test('empty and bounded pagination use actual persisted offers', { timeout: 45000 }, async t => {
   const f = await setup(t, { seeded: false }); await f.page.goto(`${f.origin}/offers`);
-  await f.page.locator('#list-status').filter({ hasText: 'No open offers yet' }).waitFor(); assert.equal(await f.page.locator('.offer-card').count(), 0);
+  await f.page.locator('#list-status').filter({ hasText: 'No open tasks right now' }).waitFor(); assert.equal(await f.page.locator('.offer-card').count(), 0);
+  // F6: the empty state is not a dead end — it links the receipts gallery.
+  assert.equal(await f.page.locator('#list-status a[href="/receipts"]').textContent(), 'see work already done');
   for (let i = 0; i < 21; i++) publish(f.store, `task-${String(i).padStart(2, '0')}`, { kind: 'unpaid' });
   await f.page.locator('#refresh-offers').click(); await f.page.locator('.offer-card').nth(19).waitFor(); assert.equal(await f.page.locator('.offer-card').count(), 20);
   await f.page.locator('#more-offers').click(); await f.page.locator('.offer-card').nth(20).waitFor(); assert.equal(await f.page.locator('#more-offers').isVisible(), false);
