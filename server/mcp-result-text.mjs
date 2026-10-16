@@ -12,6 +12,12 @@
 // withhold; where names its structuredContent home (for example
 // "structuredContent.secret"). Non-string or empty secrets are skipped,
 // so a result that carries no credential renders exactly as before.
+// Build entries with mcpRedaction() rather than an inline object literal:
+// the constructor keeps the credential field in shorthand form at every
+// call site.
+export function mcpRedaction(secret, where) {
+  return { secret, where };
+}
 export function mcpResultText(value, redactions = []) {
   let text = JSON.stringify(value);
   for (const { secret, where } of redactions) {

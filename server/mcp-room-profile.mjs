@@ -1,6 +1,6 @@
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
-import { mcpResultText } from "./mcp-result-text.mjs";
+import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 // Authenticated hosted MCP profile for the Room Worker.
 //
 // The public join tools stay on POST /mcp when no Authorization header is
@@ -938,7 +938,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       // verbatim (issue #3750). room_run_action recurses into this same
       // handler with the inner tool name, so it is covered here too.
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false,
-        name === "room_create_agent_invite" ? [{ secret: value?.code, where: "structuredContent.code" }] : []) };
+        name === "room_create_agent_invite" ? [mcpRedaction(value?.code, "structuredContent.code")] : []) };
     } catch (error) {
       const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
