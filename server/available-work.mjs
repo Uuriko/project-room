@@ -24,22 +24,20 @@
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { claimableBoardRows } from "./claim-coordination.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
 
-const usableClaim = item => Boolean(item) && !item.premiseFlag && !item.supersededBy;
-
-// The board-availability predicate, exported so needs-me can consume the
-// exact same test instead of its private copy (E1 PR-2). Returns the
-// claim rows from `board` (a store.workClaims.list() result) that are
-// claimable right now, in board order.
+// The board-availability predicate is claimableBoardRows in
+// claim-coordination.mjs — the ONE eligibility test, shared with the
+// board list's ready queue (readyClaims) so the two "what can I take?"
+// surfaces cannot disagree (#3713); needs-me consumes it through here
+// instead of a private copy (E1 PR-2). Returns the claim rows from
+// `board` (a store.workClaims.list() result) that are claimable right
+// now, in board order.
 export function availableBoardRows(board) {
   const list = Array.isArray(board) ? board : [];
-  const done = new Set(list.filter(item => usableClaim(item) && item.state === "done").map(item => item.id));
-  return list.filter(item => usableClaim(item)
-    && item.state === "unclaimed"
-    && (item.kind ?? "work") === "work"
-    && (item.dependsOn ?? []).every(dep => done.has(dep)));
+  return claimableBoardRows(list);
 }
 
 const boardItem = (roomId, item) => ({
