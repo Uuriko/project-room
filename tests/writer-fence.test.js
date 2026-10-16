@@ -48,12 +48,12 @@ test("schema upgrade preserves existing records and fences a previously opened c
   legacyStatement.run("fixture-account");
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 38);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 39);
     assert.deepEqual(current.db.prepare("SELECT * FROM accounts").all(), before);
     assert.doesNotThrow(() => verifyWriterFence(current.db));
     assert.equal(writerFenceDefinitions.length, (applicationTables.length - unfencedAdditiveTables.length) * 3,
       "the current fence covers every application table except intentionally-unfenced additive tables");
-    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v38|unsupported database writer/);
+    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v39|unsupported database writer/);
     current.createAccount("new-fixture-account");
     assert.equal(current.account("new-fixture-account").active, true);
   } finally { current.close(); earlier.close(); }
@@ -98,7 +98,7 @@ test("failure after fence installation rolls back its schema marker and all trig
 
 test("read-only audit does not upgrade a pre-fence database", t => {
   const filename = legacyFixture(t);
-  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v38/);
+  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v39/);
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try { assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5); }
   finally { inspected.close(); }
@@ -113,8 +113,8 @@ test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", 
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 38);
-    assert.throws(() => oldWrite.run(), /project_room_writer_v38|unsupported database writer/);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 39);
+    assert.throws(() => oldWrite.run(), /project_room_writer_v39|unsupported database writer/);
     current.createAccount("current-writer");
     assert.equal(current.account("current-writer").active, true);
   } finally { current.close(); earlier.close(); }
@@ -166,12 +166,18 @@ test("v7 to v9 preserves every existing table row and retires a pre-open v7 conn
   for (const { sql } of fenceDefinitions(7)) old.exec(sql);
   old.exec("PRAGMA user_version=7");
   const tables = old.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
-  const before = Object.fromEntries(tables.map(name => [name, old.prepare(`SELECT * FROM ${name}`).all()]));
+  // Compare the columns the v7 file actually has. Later migrations add
+  // columns (v39 events gains generated columns, a pure function of the
+  // stored body, which IS compared); a new column must not masquerade as
+  // a changed row, and no pre-existing column value may change.
+  const columns = Object.fromEntries(tables.map(name => [name, old.prepare(`PRAGMA table_info(${name})`).all().map(column => column.name)]));
+  const selectStored = (db, name) => db.prepare(`SELECT ${columns[name].map(column => `"${column}"`).join(", ")} FROM ${name}`).all();
+  const before = Object.fromEntries(tables.map(name => [name, selectStored(old, name)]));
   const cached = old.prepare("UPDATE accounts SET revision=revision WHERE id='fixture-account'"); cached.run();
   const current = new RoomStore(filename);
   try {
-    assert.deepEqual(Object.fromEntries(tables.map(name => [name, current.db.prepare(`SELECT * FROM ${name}`).all()])), before);
-    assert.throws(() => cached.run(), /project_room_writer_v38|unsupported database writer/);
+    assert.deepEqual(Object.fromEntries(tables.map(name => [name, selectStored(current.db, name)])), before);
+    assert.throws(() => cached.run(), /project_room_writer_v39|unsupported database writer/);
     assert.equal(current.db.prepare("SELECT count(*) n FROM private_reminders").get().n, 0);
   } finally { current.close(); old.close(); }
 });

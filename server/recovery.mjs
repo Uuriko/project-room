@@ -175,7 +175,14 @@ export function auditRecovery(store) {
     }
     requireState(byWork.size === 0);
     const contents = applicationTables.map(table => {
-      const rows = store.db.prepare(`SELECT * FROM ${table}`).all().map(canonical).sort();
+      // Stored columns only: PRAGMA table_info excludes generated columns
+      // (v39 events ev_*), which are a pure function of the stored body.
+      // Digesting them would change every upgraded database's audit digest
+      // without any stored byte changing, and would break the cross-version
+      // digest comparison the upgrade tests pin. Same convention as the
+      // export/restore column enumeration in room-export.mjs.
+      const columns = store.db.prepare(`PRAGMA table_info("${table}")`).all().map(column => `"${column.name}"`).join(", ");
+      const rows = store.db.prepare(`SELECT ${columns} FROM ${table}`).all().map(canonical).sort();
       return { table, rows: rows.length, sha256: digest(rows) };
     });
     return { contractVersion: 1, schemaVersion: STORE_SCHEMA_VERSION, platform,

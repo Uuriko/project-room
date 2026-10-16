@@ -40,12 +40,12 @@ export function primaryState(flags) {
 function lastEventsByActor(db, roomId, actorIds) {
   if (!actorIds.length) return new Map();
   // One grouped pass over the room's events, then one keyed read for the
-  // winning rows. No index on actor exists; the room_id primary-key prefix
-  // bounds the scan to this room.
-  const latest = db.prepare(`SELECT json_extract(body,'$.actorId') AS actor, max(sequence) AS seq FROM events
+  // winning rows. The pass resolves through events_room_actor (v39
+  // generated columns), so it no longer parses every body in the room.
+  const latest = db.prepare(`SELECT ev_actor_id AS actor, max(sequence) AS seq FROM events
     WHERE room_id=? GROUP BY actor`).all(roomId).filter(row => actorIds.includes(row.actor));
   if (!latest.length) return new Map();
-  const rows = db.prepare(`SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.at') AS at
+  const rows = db.prepare(`SELECT sequence AS seq, ev_type AS type, ev_at AS at
     FROM events WHERE room_id=? AND sequence IN (${latest.map(() => "?").join(",")})`).all(roomId, ...latest.map(row => row.seq));
   const bySeq = new Map(rows.map(row => [row.seq, row]));
   return new Map(latest.map(row => [row.actor, bySeq.get(row.seq) ?? null]));

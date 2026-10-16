@@ -448,7 +448,7 @@ function parityNumbers(db, roomId) {
   const projectionCount = db.prepare("SELECT COALESCE(json_array_length(projection, '$.messages'), 0) AS n FROM rooms WHERE id=?").get(roomId).n;
   const table = db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(seq), 0) AS lastSeq FROM messages WHERE room_id=?").get(roomId);
   const posted = db.prepare(`SELECT COALESCE(MAX(sequence), 0) AS lastSeq FROM events
-    WHERE room_id=? AND json_extract(body, '$.type')=?`).get(roomId, POSTED);
+    WHERE room_id=? AND ev_type=?`).get(roomId, POSTED);
   const archived = archiveMarker(db, roomId);
   return {
     projectionCount: projectionCount + archived.count,
@@ -501,7 +501,7 @@ function certifyMessagesParity(store) {
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
   const pinned = new Set((state.pins ?? []).map(pin => pin.messageId));
   const sequences = new Map();
-  for (const row of store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? ORDER BY sequence").all(roomId, POSTED)) {
+  for (const row of store.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND ev_type=? ORDER BY sequence").all(roomId, POSTED)) {
     for (const id of affectedMessageIds(JSON.parse(row.body))) if (!sequences.has(id)) sequences.set(id, row.sequence);
   }
   const archive = archiveMarker(store.db, roomId);

@@ -27,7 +27,11 @@ const schema = nativeSchema.map(row => {
 const fixture = [];
 for (const row of nativeSchema.filter(row => row.type === 'table')) {
   assert.match(row.name, /^[a-z_]+$/);
-  for (const value of store.db.prepare(`SELECT * FROM ${row.name}`).all()) {
+  // Stored columns only (PRAGMA table_info excludes generated columns):
+  // the Worker schema carries the v39 generated columns on events, and
+  // workerd rejects INSERTs that name them; they recompute from body.
+  const stored = store.db.prepare(`PRAGMA table_info(${row.name})`).all().map(column => column.name);
+  for (const value of store.db.prepare(`SELECT ${stored.map(name => `"${name}"`).join(', ')} FROM ${row.name}`).all()) {
     fixture.push({ table: row.name, columns: Object.keys(value), values: Object.values(value) });
   }
 }

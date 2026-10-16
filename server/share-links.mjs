@@ -521,8 +521,8 @@ export class ShareLinks {
       if (grant) state = { ...applyEventWithGrowth(state, grant, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + (grant ? 2 : 1);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, room.sequence + 1, incoming.id, JSON.stringify(incoming));
-      if (grant) this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, grant.id, JSON.stringify(grant));
+      this.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(row.room_id, room.sequence + 1, incoming.id, JSON.stringify(incoming));
+      if (grant) this.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(row.room_id, sequence, grant.id, JSON.stringify(grant));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)").run(row.room_id, memberId, auth.account.id, `invitation:${invitationId}`);
       this.store.markAccountHadRoom(auth.account.id);
@@ -543,7 +543,7 @@ export class ShareLinks {
   // stays out: the link is not a way around a removal.
   reactivateSelfLeft(row, memberId, auth, redemptionId) {
     const room = this.store.room(row.room_id), member = room.state.members[memberId];
-    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.memberId')=? ORDER BY sequence DESC LIMIT 1")
+    const last = this.db.prepare("SELECT body FROM events WHERE room_id=? AND ev_type=? AND ev_member_id=? ORDER BY sequence DESC LIMIT 1")
       .get(row.room_id, T.MEMBER_ACCESS_CHANGED, memberId);
     const lastEvent = last ? JSON.parse(last.body) : null;
     if (!lastEvent || lastEvent.data?.active !== false || lastEvent.actorId !== memberId) {
@@ -559,7 +559,7 @@ export class ShareLinks {
     const state = { ...applyEventWithGrowth(room.state, rejoin, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + 1;
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, rejoin.id, JSON.stringify(rejoin));
+    this.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(row.room_id, sequence, rejoin.id, JSON.stringify(rejoin));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
   }
   // A share link is an invite link: a first join credits the link's issuer on

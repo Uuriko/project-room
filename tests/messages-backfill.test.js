@@ -150,13 +150,13 @@ test("backfill replays initialize and importEvents, and a second pass does not a
 // persisted replay cursor. Existing old-version tests lack this column and
 // populated message backfill. Synthetic downgrade only; no production seam.
 test('v37 message records migrate lazily, replay populated cursors, and fence old writers', t => {
-  const directory = mkdtempSync(join(tmpdir(), 'project-room-message-v38-'));
+  const directory = mkdtempSync(join(tmpdir(), 'project-room-message-v39-'));
   const filename = join(directory, 'room.sqlite');
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const seed = new RoomStore(filename);
   seed.initialize([...initialRoom('commons'), messageEvent('commons', 'ev-legacy', T.MESSAGE_POSTED, {messageId:'legacy', body:'retained legacy text'}, 2)]);
   finish(seed);
-  for (const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v38_*'").all()) seed.db.exec(`DROP TRIGGER ${row.name}`);
+  for (const row of seed.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v39_*'").all()) seed.db.exec(`DROP TRIGGER ${row.name}`);
   if (seed.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) seed.db.exec('ALTER TABLE messages DROP COLUMN record_json');
   for (const {name,sql} of fenceDefinitions(37)) if (!seed.db.prepare("SELECT 1 FROM sqlite_master WHERE name=?").get(name)) seed.db.exec(sql);
   seed.db.exec('PRAGMA user_version=37');
@@ -167,9 +167,9 @@ test('v37 message records migrate lazily, replay populated cursors, and fence ol
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version,38);
+    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version,39);
     assert.equal(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json,null);
-    assert.throws(()=>oldWrite.run(),/project_room_writer_v38|unsupported database writer/);
+    assert.throws(()=>oldWrite.run(),/project_room_writer_v39|unsupported database writer/);
     assert.equal(current.checkMessagesParity().checked,0,'uncertified legacy rows are not ready');
     finish(current);
     assert.equal(JSON.parse(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json).body,'retained legacy text');

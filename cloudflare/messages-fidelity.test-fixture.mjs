@@ -27,7 +27,7 @@ export class MessageFidelityRoom {
       // This is test-only migration input; all production behavior below uses
       // the shared RoomStore and real Durable Object adapter.
       store.transaction(() => {
-        for (const row of this.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v38_*'").all()) this.db.exec(`DROP TRIGGER ${row.name}`);
+        for (const row of this.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v39_*'").all()) this.db.exec(`DROP TRIGGER ${row.name}`);
         this.db.exec('ALTER TABLE messages DROP COLUMN record_json');
         for (const { sql } of durableFenceDefinitions(37)) this.db.exec(sql);
         this.db.storage.sql.exec('DROP TABLE room_writer_permit');
@@ -40,7 +40,7 @@ export class MessageFidelityRoom {
     }
     if (path === '/resume-v38') {
       const { owner } = await request.json();
-      assert.equal(durableStorage.version(this.db), 38);
+      assert.equal(durableStorage.version(this.db), 39);
       assert.equal(this.db.prepare("SELECT record_json FROM messages WHERE message_id='message'").get().record_json, null);
       assert.equal(store.checkMessagesParity().checked, 0);
       finish(store);

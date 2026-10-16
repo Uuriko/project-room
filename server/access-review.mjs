@@ -47,12 +47,12 @@ export function listRoomIds(store) {
 // (the CLI in store mode) or has passed accessReviewOwner (the route).
 export function assembleAccessReview(store, roomId) {
   const { state } = store.room(roomId), now = store.now(), db = store.db;
-  const lastActivity = new Map(db.prepare(`SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+  const lastActivity = new Map(db.prepare(`SELECT ev_actor_id AS actor, max(ev_at) AS at
     FROM events WHERE room_id=? GROUP BY actor`).all(roomId).map(row => [row.actor, row.at]));
   const liveKeys = new Map(db.prepare(`SELECT member_id, count(*) AS n, max(expires_at) AS latest FROM credentials
     WHERE room_id=? AND kind='access' AND revoked=0 AND expires_at>? GROUP BY member_id`).all(roomId, now).map(row => [row.member_id, row]));
-  const joined = new Map(db.prepare(`SELECT json_extract(body,'$.data.memberId') AS member, min(json_extract(body,'$.at')) AS at
-    FROM events WHERE room_id=? AND json_extract(body,'$.type') IN ('member.added','member.joined_via_invitation') GROUP BY member`).all(roomId).map(row => [row.member, row.at]));
+  const joined = new Map(db.prepare(`SELECT ev_member_id AS member, min(ev_at) AS at
+    FROM events WHERE room_id=? AND ev_type IN ('member.added','member.joined_via_invitation') GROUP BY member`).all(roomId).map(row => [row.member, row.at]));
   const accounts = new Map(db.prepare("SELECT member_id, account_id FROM member_accounts WHERE room_id=?").all(roomId).map(row => [row.member_id, row.account_id]));
   const delegationRows = db.prepare(`SELECT identity_id AS identityId, granted_by AS grantedBy, granted_at AS grantedAt
     FROM membership_delegation_grants WHERE room_id=? AND revoked_at IS NULL ORDER BY granted_at ASC, identity_id ASC`).all(roomId);

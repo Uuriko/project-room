@@ -259,7 +259,7 @@ function appendRoomEvent(store, roomId, actorId, type, data) {
   try { next = applyEventOnRoom(current.state, incoming); }
   catch (error) { fail(409, "plan_changed", `Room changed during account deletion; request a fresh plan (${error.message})`); }
   const sequence = current.sequence + 1;
-  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+  store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   saveRoomProjection(store, roomId, sequence, next);
 }
 
@@ -343,7 +343,7 @@ function archivePersonalRoom(store, room) {
       at: new Date(store.now()).toISOString(), data: { reason: "Account deletion" },
     });
     const sequence = current.sequence + 1;
-    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(room.id, sequence, incoming.id, JSON.stringify(incoming));
+    store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(room.id, sequence, incoming.id, JSON.stringify(incoming));
     store.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(sequence, room.id);
   }
   rebuildRoom(store, room.id);
