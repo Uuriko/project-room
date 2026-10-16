@@ -28,10 +28,13 @@ export const STATUS_SURFACE_SCHEMA = "room.operator-status/1";
 // same order; the cursor stores the index of the next step to run.
 export const INTEGRITY_STEP_NAMES = Object.freeze(INTEGRITY_SUBCHECKS.slice(0, 11));
 
-// Steps whose isolated failures are recorded against a room id. The other
-// steps key their records by journal/invitation ids, so a "failing room"
+// Steps whose isolated failures record a room id in record_id by
+// construction (the INTEGRITY-NAMING lane's naming rule, from the
+// batch-isolation recorder): messages_backfill, messages_parity, and
+// help_history key their records by room; every other step keys by
+// journal/invitation ids or records nothing per-room, so a "failing room"
 // can only be named when the latest failure comes from one of these.
-const ROOM_RECORD_STEPS = new Set(["room_lifecycle", "messages_backfill", "messages_parity", "incremental", "snapshot"]);
+const ROOM_RECORD_STEPS = new Set(["messages_backfill", "messages_parity", "help_history"]);
 
 const SLI_WINDOW_DAYS = 30;
 
