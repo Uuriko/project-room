@@ -213,6 +213,9 @@ test('at the pilot event cap open claims can still be released, completed, expir
   const { store, owner, peer } = await fixture(t);
   // Open claims, all set up below the cap. The completion's review
   // ceremony also happens below the cap: verdicts are progress, not exits.
+  // So is the delivery (#3546): under a reviewed policy the holder first
+  // finishes to "delivered" with the bundle, and only the reviewer's
+  // verify to "done" is the exit that must land at the cap.
   await owner.workClaimCreate({ id: 'open', title: 'Open' });
   await owner.workClaim('held', { title: 'Held', files: ['docs/held.md'] });
   await owner.workClaim('lapsed', { title: 'Lapsed', leaseHours: 1 });
@@ -222,6 +225,8 @@ test('at the pilot event cap open claims can still be released, completed, expir
   await owner.updateWorkItem('finish', { state: 'in_progress' });
   await peer.reviewWorkItem('finish', { note: 'Checked the result' });
   await peer.reviewWorkItem('finish', { verdict: 'approve', summary: 'Approved' });
+  await owner.workDeliver('finish', { delivery: { artifact: { kind: 'text', ref: 'room://artifacts/finish', sha256: 'e'.repeat(64) },
+    checks: [{ name: 'unit', result: 'pass' }], criteria: [] } });
   store.db.prepare('UPDATE rooms SET sequence=? WHERE id=?').run(PILOT_LIMITS.eventsPerRoom, 'commons');
   const capped = error => error.status === 409 && error.code === 'pilot_limit';
   // Growth refuses and records nothing.
@@ -230,8 +235,9 @@ test('at the pilot event cap open claims can still be released, completed, expir
   // Exits land: release, completion and close each end a live claim.
   const released = await owner.releaseWorkItem('held', { note: 'parked', ...roundOf(await owner.workClaimGet('held')) });
   assert.equal(released.state, 'unclaimed');
-  const done = await owner.workComplete('finish', { reviewedBy: 'reviewer' });
+  const done = await peer.workComplete('finish', {});
   assert.equal(done.state, 'done');
+  assert.equal(done.verification.state, 'verified');
   const closed = await owner.closeWorkClaim('retire', { verb: 'close', reason: 'no longer needed' });
   assert.equal(closed.state, 'closed');
   // The exits did not reopen growth.
