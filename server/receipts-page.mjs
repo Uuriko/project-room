@@ -3,6 +3,7 @@
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
+import { jsonLdScriptTag, receiptJsonLd, receiptProvenNote, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -33,8 +34,11 @@ footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:v
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
+  const ogImageAlt = ogAlt ? `
+<meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
+<meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -45,12 +49,12 @@ function head({ title, description, path }) {
 <meta property="og:url" content="${escapeHtml(canonical)}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image" content="${escapeHtml(ogImage)}">${ogImageAlt}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
-<meta name="twitter:image" content="${OG_IMAGE}">
-<style>${pageStyle()}</style>
+<meta name="twitter:image" content="${escapeHtml(ogImage)}">
+${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
@@ -82,7 +86,8 @@ ${next}
 }
 
 export function renderReceiptDetailHtml(receipt) {
-  const description = `${receipt.title}. A public receipt from Project Room.`;
+  const verdictLine = verdictLineOf(receipt);
+  const description = `${receipt.title} — ${verdictLine}. A public receipt from Project Room.`;
   const room = receipt.room?.title
     ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.title)}</dd></div>`
     : receipt.room?.id
@@ -134,12 +139,15 @@ export function renderReceiptDetailHtml(receipt) {
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
   // unsigned (docs/RECEIPTS-PAGE.md).
-  const provenNote = receipt.source === "bounty-lot"
-    ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
-    : receipt.mergedAt && receipt.pullRequest
-    ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
-    : "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
-  return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
+  const provenNote = receiptProvenNote(receipt);
+  return `${head({
+    title: receipt.title,
+    description,
+    path: `/receipts/${receipt.id}`,
+    jsonLd: jsonLdScriptTag(receiptJsonLd(receipt)),
+    ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
+    ogAlt: verdictLine,
+  })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
