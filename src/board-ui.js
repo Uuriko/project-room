@@ -465,6 +465,22 @@ export function pendingOutcome(action, title) {
   return key ? uiText(key, { title }) : "";
 }
 
+// Failure narration for a board action. An error with an HTTP status came
+// back from the server and carries a humanised message worth showing. A
+// transport failure (fetch TypeError: no status) has an UNCONFIRMED outcome
+// — the request may or may not have committed — so the copy must say that,
+// never leak the raw "Failed to fetch". `refreshed` says what the board did
+// about it: true (reloaded, state is current), false (reload failed), or
+// "kept" (a form submit: no reload, so the user's entries survive for an
+// in-place retry; the claim itself must be checked before resubmitting).
+export function boardActionErrorNote(error, refreshed = true) {
+  if (error?.status) return error.message || "Could not update the claim.";
+  if (refreshed === "kept") return uiText("board.action.error.unconfirmed.kept");
+  return refreshed
+    ? uiText("board.action.error.unconfirmed.refreshed")
+    : uiText("board.action.error.unconfirmed.unrefreshed");
+}
+
 function filterBarHtml(filter = {}) {
   return uiText("board.filter.bar", {
     region: escapeHtml(uiText("board.filter.region")),
@@ -699,7 +715,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
-  async function act(run, focus, reconcile = null) {
+  async function act(run, focus, reconcile = null, { keepFormOnError = false } = {}) {
     const owned = context();
     if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
@@ -726,10 +742,23 @@ export function installWorkBoard({ client, getState, getSession }) {
         if (actionFlight === pending && context() === owned) {
           note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
         }
-      } else {
+      } else if (error?.status) {
         pendingFocus = null;
         pendingStatus = "";
-        note(error?.message || "Could not update the claim.");
+        note(boardActionErrorNote(error));
+      } else if (keepFormOnError) {
+        // Form submit: a refresh would repaint the card and destroy the
+        // user's entries. Keep the form; the copy says the outcome is
+        // unconfirmed and the entries survived.
+        pendingFocus = null;
+        pendingStatus = "";
+        note(boardActionErrorNote(error, "kept"));
+      } else {
+        // Transport failure on a button action: the outcome is unconfirmed,
+        // so refresh before narrating — the board must show the claim's true
+        // state behind the message, as the reconcile path does for PR links.
+        const refreshed = await load({ force: true, focus: { key: focus?.key ?? null, id: focus?.id ?? null } });
+        if (actionFlight === pending && context() === owned) note(boardActionErrorNote(error, refreshed));
       }
     } finally {
       if (actionFlight === pending) { actionFlight = null; mutating = false; }
@@ -809,7 +838,7 @@ export function installWorkBoard({ client, getState, getSession }) {
   function flySubmit(form, run, focus) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
-    act(run, focus).finally(() => {
+    act(run, focus, null, { keepFormOnError: true }).finally(() => {
       if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
     });
   }
