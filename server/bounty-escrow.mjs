@@ -18,7 +18,13 @@ import { canonicalJson } from "../src/audit-receipts.mjs";
 //
 //   Acceptance track (verdict on work, evidence-cited):
 //     claimed --submit--> submitted --accept--> accepted --challenge--> approved
-//     submitted|accepted --dispute--> disputed --release--> approved | --cancel--> refunded
+//     accepted --dispute--> disputed --release--> approved | --cancel--> refunded
+//
+// #3726 (Option A): disputes open ONLY on accepted work. Submitted work has
+// no acceptance verdict to re-decide, so a dispute there could vest the award
+// without acceptance, attestation, or the challenge window (the settle-kind
+// fall-through). The gate is structural: disputeBounty refuses any other
+// state and the acceptance track has no submitted -> disputed edge.
 //   Finality track (credit-lot movements; requires a terminal acceptance verdict):
 //     locked --attribute--> attributed --approve--> approved --payout--> paid
 //     locked|attributed --refund--> refunded
@@ -163,7 +169,7 @@ export const SETTLEMENT_KINDS = new Set(["verified-complete", "failed", "unverif
 // "refunded"). Every acceptance transition is evidence-cited.
 const ACCEPTANCE_TRACK = new Map([
   ["claimed", new Set(["submitted"])],              // work enters review
-  ["submitted", new Set(["accepted", "disputed", "refunded"])], // verdict | challenge | reject
+  ["submitted", new Set(["accepted", "refunded"])], // verdict | reject (no dispute edge: #3726)
   ["accepted", new Set(["disputed"])],              // challenge within the window
   ["disputed", new Set(["approved", "refunded"])], // release: verdict affirmed; cancel: verdict rejected
 ]);
@@ -174,7 +180,7 @@ const STATE_TRANSITION_TRACK = new Map([
   ["proposed", new Map([["funded", null], ["cancelled", null]])],
   ["funded", new Map([["claimed", null], ["refunded", TRACK_FINALITY]])],
   ["claimed", new Map([["submitted", TRACK_ACCEPTANCE], ["refunded", TRACK_FINALITY]])],
-  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE], ["disputed", TRACK_ACCEPTANCE],
+  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE],
     ["refunded", TRACK_ACCEPTANCE]])], // reject: the verdict failed the work (free-miss settlement)
   ["accepted", new Map([["approved", TRACK_FINALITY], ["disputed", TRACK_ACCEPTANCE]])],
   ["disputed", new Map([["approved", TRACK_ACCEPTANCE], ["refunded", TRACK_ACCEPTANCE]])],
@@ -2310,7 +2316,14 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(!bounty.disputeId, "dispute_exists", "this bounty already has a dispute");
-      check(bounty.state === "submitted" || bounty.state === "accepted", "invalid_state", `bounty is ${bounty.state}, not disputable`);
+      // #3726 (Option A): a dispute re-decides an acceptance verdict, so it
+      // can only open on accepted work. Submitted work has no verdict yet —
+      // the poster's reject path and the free-miss deadline settlement are
+      // its remedies. The refusal fires BEFORE the bond is checked or locked,
+      // so a challenger bond can never be locked by a dispute that cannot
+      // open.
+      check(bounty.state === "accepted", "invalid_state",
+        `bounty is ${bounty.state}, not disputable: disputes open only on accepted work`);
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
@@ -2489,8 +2502,10 @@ export class BountyEscrow {
     const challenger = this._disputeRecords.get(bounty.disputeId)?.raisedBy;
     const worker = bounty.claimant;
     const lotId = newId("lot_");
-    // Where the award currently sits: disputed from `submitted` -> still
-    // locked with the poster; disputed from `accepted` -> attributed.
+    // Where the award currently sits: disputed from `accepted` -> attributed.
+    // The from-`submitted` arm (award still locked with the poster) survives
+    // only so disputes persisted before the #3726 gate can still settle —
+    // no new dispute can open from submitted.
     const awardFrom = this._disputeWasFromSubmitted(bounty)
       ? { account: bounty.poster, state: "locked" } : { account: worker, state: "attributed" };
     const settleKind = outcome === "upheld" ? "cancel" : outcome === "split" ? "split" : "release";
@@ -2557,8 +2572,8 @@ export class BountyEscrow {
       } else {
         // RELEASE: the award vests with the worker (swept at the epoch, 1% fee
         // then); the challenger's bond compensates the worker for the delay —
-        // in full, no fee on penalty compensation. A forfeited bond (frivolous
-        // ruling, withdrawn challenge) goes to the room pool instead.
+        // in full, no fee on penalty compensation. A forfeited bond (a
+        // frivolous ruling) goes to the room pool instead.
         if (awardFrom.state === "locked") {
           this._requireFinalityMove(bounty, "attribute");
           collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
@@ -2606,8 +2621,8 @@ export class BountyEscrow {
     // 14-day timeout-default, which reaches no other producer). Without
     // this, timeout-default settlements never landed on the event stream
     // and the reputation projector (server/bounty-reputation.mjs) never
-    // applied their signals. Outcome-less settlements (a withdrawn dispute
-    // carries no verdict) emit nothing, as before.
+    // applied their signals. Outcome-less settlements (a settlement carrying
+    // no verdict) emit nothing, as before.
     if (typeof outcome === "string" && outcome.length > 0) {
       this._settlementDecidedEvent = this._event(roomId, "bounty.decided",
         { bountyId, actor, before: "disputed", after: bounty.state,

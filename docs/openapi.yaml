@@ -7815,7 +7815,10 @@ paths:
         and the cap). The designated third-lane verifier, if one was named
         at posting, seats as the decider; otherwise the dispute is honestly
         unavailable and the 14-day timeout default (RELEASE) is the backstop.
-        Emits `bounty.disputed`. API keys need `rooms:write`.
+        Disputes open only on accepted work (#3726): a bounty in any other
+        state (including `submitted`) is refused 422 `invalid_state` before
+        any bond is checked or locked. Emits `bounty.disputed`. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
