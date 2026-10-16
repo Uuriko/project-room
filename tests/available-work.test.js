@@ -109,3 +109,52 @@ test("public tasks: only unclaimed packets, paginated scan", () => {
   // No facade: explicit empty, never a throw.
   assert.deepEqual(availablePublicTasks({}), { items: [], total: 0 });
 });
+
+test("public tasks: items carry the ranking-layer fields (B-2 PR1)", () => {
+  const packet = { taskId: "t9", title: "Ranked task", namespaceId: "commons", termsVersion: 3,
+    repositoryUrl: "https://github.com/example/repo", repositoryRef: "main",
+    files: ["docs/a.md"], acceptanceCriteria: ["criterion one"],
+    claim: { state: "unclaimed", generation: 2, leaseExpiresAt: null } };
+  const store = { publicWorkClaims: { list: () => ({ tasks: [packet], nextCursor: null }) } };
+  const { items } = availablePublicTasks(store, { limit: 50 });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].repositoryUrl, "https://github.com/example/repo");
+  assert.equal(items[0].repositoryRef, "main");
+  assert.deepEqual(items[0].files, ["docs/a.md"]);
+  assert.deepEqual(items[0].acceptanceCriteria, ["criterion one"]);
+  assert.deepEqual(items[0].terms, { termsVersion: 3, generation: 2 });
+});
+
+test("public tasks: full-mode total is exact beyond the item limit", () => {
+  const packet = taskId => ({ taskId, title: `Task ${taskId}`, namespaceId: "commons",
+    termsVersion: 1, claim: { state: "unclaimed", generation: 1, leaseExpiresAt: null } });
+  const pages = {
+    "": { tasks: [packet("t1"), packet("t2")], nextCursor: "t2" },
+    t2: { tasks: [packet("t3")], nextCursor: null }
+  };
+  const store = { publicWorkClaims: { list: ({ after }) => pages[after] } };
+  const { items, total } = availablePublicTasks(store, { limit: 2 });
+  assert.deepEqual(items.map(item => item.id), ["t1", "t2"]);
+  assert.equal(total, 3);
+});
+
+test("public tasks: window mode reads exactly one offer_id-ordered page", () => {
+  const packet = (taskId, state) => ({ taskId, title: `Task ${taskId}`, namespaceId: "commons",
+    termsVersion: 1, claim: { state, generation: 1, leaseExpiresAt: null } });
+  const calls = [];
+  const store = { publicWorkClaims: { list: args => {
+    calls.push(args);
+    return { tasks: [packet("t1", "submitted"), packet("t2", "unclaimed"), packet("t3", "claimed")], nextCursor: "t3" };
+  } } };
+  const result = availablePublicTasks(store, { window: true, after: "t0" });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], { limit: 100, after: "t0", claimableFirst: false });
+  assert.deepEqual(result.items.map(item => item.id), ["t2"]);
+  assert.equal(result.total, 1);
+  assert.equal(result.inspected, 3);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.nextCursor, "t3");
+  // No facade in window mode: the window-shaped empty, never a throw.
+  assert.deepEqual(availablePublicTasks({}, { window: true }),
+    { items: [], total: 0, inspected: 0, hasMore: false, nextCursor: null });
+});
