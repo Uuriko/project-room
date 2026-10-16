@@ -677,7 +677,6 @@
   "tests/mention-receipts.test.js": 24697,
   "tests/mention-span.test.js": 5573,
   "tests/merge-hold.test.js": 9479,
-  "tests/merge-queue-eject-budget.test.js": 9358,
   "tests/merge-queue.test.js": 477,
   "tests/message-body-cache.test.js": 1000,
   "tests/message-delete-channel-copy.test.js": 426,
