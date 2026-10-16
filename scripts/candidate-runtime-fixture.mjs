@@ -167,7 +167,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/room-layout.js');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
   paths.add('src/owner-cockpit.js'); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
-  paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
+  paths.add('src/emoji.js'); paths.add('src/legacy-reaction-aliases.js'); // reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
   paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
