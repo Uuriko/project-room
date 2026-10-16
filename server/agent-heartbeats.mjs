@@ -1047,7 +1047,7 @@ export class AgentHeartbeats {
     // keeps the legacy hostless contract (no work signals).
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
-    // could not distinguish "exactly 50 pending" from "more waiting".
+    // could not distinguish "exactly 50 pending" from a longer queue.
     const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll" });
     return Object.freeze({
       agentId, registered: true, pendingWakes: page.signals, more: page.more,
@@ -1154,7 +1154,7 @@ export class AgentHeartbeats {
     if (this.statusOf(agentId).hosts.length === 0) {
       // #3345: the no-host suppression is the documented contract, but it
       // used to be invisible — count it so "agent never registered" is
-      // distinguishable from "wake was lost".
+      // distinguishable from a lost wake.
       recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
         event: "suppressed_no_host", kind, subjectId: agentId });
       return Object.freeze({ woken: false, signal: null });

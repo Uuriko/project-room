@@ -258,6 +258,7 @@ optional.push("server/agent-listener-contract.mjs"); // Shared HTTP/MCP receivin
 optional.push("server/agent-plugin-routes.mjs"); // Lane D: plug-in HTTP routes (imported by server/http.mjs)
 optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credential presence.
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
+optional.push("server/wake-metrics.mjs"); // #3345: wake-reliability accounting — emission-attempt outcomes + loss-class journal (imported by server/agent-heartbeats.mjs, server/store.mjs, server/work-wakes.mjs, server/work-claim-events.mjs, server/inbox-collab-routes.mjs; pure, no imports)
 optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs", "src/account-setup-ui.js", "src/gmail-ui.js");
