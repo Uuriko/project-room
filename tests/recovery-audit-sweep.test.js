@@ -101,6 +101,8 @@ function sweep() {
   step(T.MESSAGE_POSTED, "producer", { messageId: "chat-1", body: "hello room" });
   step(T.MESSAGE_EDITED, "producer", { messageId: "chat-1", body: "hello room, again", expectedMessageRevision: 0 });
   step(T.MESSAGE_REACTION_SET, "reviewer", { messageId: "chat-1", reaction: "like", active: true });
+  step(T.MESSAGE_POSTED, "producer", { messageId: "poll-1", body: "Pick one", kind: "poll", poll: { question: "Pick one", options: ["a", "b"] } });
+  step(T.POLL_VOTED, "reviewer", { messageId: "poll-1", option: 0, active: true });
   step(T.MESSAGE_PINNED, "owner", { messageId: "chat-1" });
   step(T.MESSAGE_UNPINNED, "owner", { messageId: "chat-1" });
   step(T.MESSAGE_DELETED, "producer", { messageId: "chat-1", expectedMessageRevision: 1, reason: "tidy" });
@@ -339,6 +341,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 66,
+  assert.equal(Object.values(T).length, 67,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
