@@ -28,6 +28,10 @@ import {
 
 export { PUBLIC_RECEIPT_ID, LOT_RECEIPT_ID, projectPublicWorkReceipt };
 
+// Verify-at-read-time (server/receipt-verify.mjs) is part of this public
+// receipts surface: the detail route re-checks a receipt through it.
+export { verifyPublicReceipt } from "./receipt-verify.mjs";
+
 // Column presence. The schema carries public_receipts on every booted
 // store; this is only the legacy-database path (a table predating the
 // column). The steady-state read issues one indexed query.
