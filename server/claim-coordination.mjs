@@ -373,13 +373,38 @@ export function fileLeaseConflictBody(claimed, conflicts) {
   };
 }
 
-// Unheld claims whose dependencies are all done. A missing dependency is not
-// done. An empty dependency list is ready: nobody is waiting on it.
+// The ONE eligibility predicate for "can this claim be taken?" (#3713).
+// A claim is usable when it exists and carries no premise flag and no
+// successor: flagPremiseInvalid marks a claim (and its provenance
+// downstream) "premise under question, do not take", and a superseded
+// claim has been replaced by another. AvailableWork's board projection
+// (server/available-work.mjs) imports this exact test, and the board
+// list's ready queue below applies it too, so the two "what can I take?"
+// surfaces cannot disagree.
+export function usableClaim(item) {
+  return Boolean(item) && !item.premiseFlag && !item.supersededBy;
+}
+
+// Board rows that are claimable right now, in input order: usable,
+// unclaimed, kind "work" (a missing kind is the stored default), and
+// every dependency in the usable-done set. A missing dependency is not
+// done, and neither is a done dependency that is itself unusable — a
+// completed claim whose premise was later declared invalid does not
+// unlock its dependents. An empty dependency list is ready: nobody is
+// waiting on it.
+export function claimableBoardRows(items) {
+  const list = (items ?? []).filter(item => Boolean(item));
+  const done = new Set(list.filter(item => usableClaim(item) && item.state === "done").map(item => item.id));
+  return list.filter(item => usableClaim(item)
+    && item.state === "unclaimed"
+    && (item.kind ?? "work") === "work"
+    && (Array.isArray(item.dependsOn) ? item.dependsOn : []).every(id => done.has(id)));
+}
+
+// Unheld claims that are claimable right now (claimableBoardRows), in id
+// order. This is the board list's queue=ready predicate.
 export function readyClaims(items) {
-  const byId = new Map((items ?? []).map(item => [item.id, item]));
-  return (items ?? []).filter(item => {
-    if (!item || item.state !== "unclaimed" || item.owner) return false;
-    const deps = Array.isArray(item.dependsOn) ? item.dependsOn : [];
-    return deps.every(id => byId.get(id)?.state === "done");
-  }).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return claimableBoardRows(items)
+    .filter(item => !item.owner)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
