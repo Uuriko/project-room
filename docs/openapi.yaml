@@ -17010,6 +17010,9 @@ components:
               type:
                 - "string"
                 - "null"
+            pathFenced:
+              type: "boolean"
+              description: "Present and true only when the task is unclaimed but not claimable because a live claim in the same namespace holds overlapping repository paths (a claim attempt would return public_work_path_conflict). Absent otherwise; claimable is false whenever this is present."
     PublicWorkReceipt:
       type: "object"
       required:
