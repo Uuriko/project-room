@@ -1,3 +1,4 @@
+import './predictable-request-browser-check.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync, mkdirSync } from 'node:fs';
@@ -7,6 +8,11 @@ import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
+
+async function openAssistantSetup(page) {
+  if (!await page.locator('#assistant-setup').isVisible()) await page.locator('#room-more > summary').click();
+  await page.locator('#assistant-setup').click();
+}
 
 function deferredResultResponse() {
   let resolve;
@@ -72,7 +78,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
   assert.equal(await owner.locator('#tasks-destination').isVisible(),false);
-  await owner.locator('#assistant-setup').click(); await owner.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(owner); await owner.locator('#room-assistant-setup select').selectOption('producer');
   await owner.locator('#room-assistant-setup button[type=submit]').click(); await owner.locator('#room-assistant-setup').waitFor({state:'hidden'});
   await owner.waitForFunction(()=>document.querySelector('#room-assistant-status').textContent==='Waiting for connection');
   const send = async (page, body) => { await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
@@ -179,16 +185,19 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#assistant-retry').waitFor({state:'hidden'});
   assert.equal((await api('owner')).runs.length,2);
   // Select context at revision N; the host claims N+1 before the human sends.
-  // A rejected stale write needs review and a new explicit confirmation, not an endless retry.
+  // Preflight rejects stale context before posting; the human selects the current request again.
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Recover this request exactly once.'));
   let recovery = (await api('producer')).runs.find(r=>r.id!==run.id);
   await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).click(); // the newest open ask is on the card face
   recovery = (await api('producer',{action:'claim',runId:recovery.id,attemptId:'recovery-host',expectedRevision:recovery.revision})).result;
-  await send(peer,'Please include our latest constraint.');
-  await peer.locator('#assistant-review').waitFor({state:'visible'});
+  await peer.locator('#message-input').fill('Please include our latest constraint.');
+  await peer.locator('#message-form button[type=submit]').click();
+  await peer.waitForFunction(()=>!document.querySelector('#message-form button[type=submit]').disabled);
+  assert.equal(await peer.locator('#message-input').inputValue(),'Please include our latest constraint.');
+  assert.equal(f.store.room('commons').state.messages.filter(m=>m.body==='Please include our latest constraint.').length,0);
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,1);
-  await peer.locator('#assistant-review').click(); await peer.locator('#assistant-retry').click();
-  await peer.locator('#assistant-retry').waitFor({state:'hidden'});
+  await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).first().click();
+  await send(peer,'Please include our latest constraint.');
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,2);
   // Stop is available for ordinary requests, without deleting the prompt.
   // Losing the committed response must preserve one exact cancellation for retry.
@@ -449,7 +458,8 @@ test('deleted assistant prompt shows only content-free stop controls and preserv
   await panel.getByRole('button',{name:'Stop',exact:true}).click();
   await panel.locator('.assistant-run-status').getByText('Stopping · waiting for confirmation',{exact:true}).waitFor();
   await api('producer',{action:'report',runId:'deleted-browser-run',attemptId:'browser-host',expectedRevision:5,state:'cancelled',summary:'Cancelled'});
-  await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor();
+  await panel.locator('.assistant-run-status').getByText('Cancelled',{exact:true}).waitFor({state:'attached'});
+  assert.equal(await page.locator('#room-assistant').isVisible(), false, 'deleted terminal requests no longer occupy the quiet conversation');
   assert.equal(await panel.getByRole('button').count(),0);
   assert.equal(await page.locator('#message-input').inputValue(),'Keep my unsent conversation draft.');
 });
@@ -495,7 +505,7 @@ test('keyboard Stop on the card face keeps focus and the status change is announ
   await status.getByText('Stopped',{exact:true}).waitFor();
   assert.equal(await page.evaluate(()=>document.activeElement===document.body),false,'focus survives the Stop button disappearing');
 });
-for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts, authority and stale review on a phone (${theme})`, { timeout: 60000 }, async t => {
+for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts, authority and stale preflight on a phone (${theme})`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
@@ -540,12 +550,14 @@ for (const theme of ['dark', 'light']) test(`visible resolution preserves drafts
   const observedRevision = run.revision;
   run = await api('producer', { action: 'report', runId: run.id, attemptId: 'resolve-host', expectedRevision: run.revision, state: 'needs_input', summary: 'The review also needs an owner.' });
   await owner.locator('#message-form button[type=submit]').click();
-  await owner.locator('#assistant-review').waitFor({ state: 'visible' });
+  await owner.waitForFunction(() => !document.querySelector('#message-form button[type=submit]').disabled);
+  assert.equal(await owner.locator('#message-input').inputValue(), 'Choose Monday after the review.');
+  assert.equal(f.store.room('commons').state.messages.filter(message => message.body === 'Choose Monday after the review.').length, 0, 'stale resolution preflight posts nothing');
   assert.equal((await api('owner')).runs[0].inputs.length, 1, 'a stale resolution is not applied');
-  await owner.locator('#assistant-review').click();
-  assert.equal((await api('owner')).runs[0].status, 'needs_input', 'review requires a separate confirmation');
-  await owner.locator('#assistant-retry').click();
-  await owner.locator('#assistant-retry').waitFor({ state: 'hidden' });
+  assert.equal((await api('owner')).runs[0].status, 'needs_input');
+  await control.click();
+  await owner.locator('#message-form button[type=submit]').click();
+  await owner.waitForFunction(() => document.querySelector('#message-input').value === '');
   run = (await api('owner')).runs[0];
   assert.ok(run.revision > observedRevision);
   assert.equal(run.status, 'pause_requested', 'the original host must pause before continuing with the resolution');
@@ -573,7 +585,7 @@ test('@Room in the mention list is an Ask Room, not a plain mention', { timeout:
   const roomOptions = () => page.locator('#mention-list .mention-option').evaluateAll(n => n.map(o => o.textContent.trim()).filter(t => /^Room(?! owner)/.test(t)).length);
   assert.equal(await roomOptions(), 0);
   await input.fill('');
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({ state: 'hidden' });
   await input.fill('can you help? @Roo');
   await page.waitForFunction(() => [...document.querySelectorAll('#mention-list .mention-option')].some(o => /^Room(?! owner)/.test(o.textContent.trim())));
@@ -600,7 +612,7 @@ test('ask card shows not-picked-up and stalled statuses with the result on the c
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What is the plan?');
@@ -762,7 +774,7 @@ test('each ask renders as one foldable row; the row keeps its open state', { tim
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
   const send = async body => { await page.locator('#ask-room').click(); await page.locator('#message-input').fill(body); await page.locator('#message-form button[type=submit]').click(); await page.waitForFunction(()=>document.querySelector('#message-input').value===''); };
   await send('First question for the room?');
@@ -806,7 +818,7 @@ test('Add to this ask wires the composer into the run and names the ask', { time
     const response = await fetch(`${origin}/api/rooms/commons/assistant`, {method:input?'POST':'GET',headers:{Authorization:`Bearer ${f.keys[actor]}`,...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify({requestId:crypto.randomUUID(),...input})}:{})});
     const json=await response.json(); assert.ok(response.ok,JSON.stringify(json));return json;
   };
-  await page.locator('#assistant-setup').click(); await page.locator('#room-assistant-setup select').selectOption('producer');
+  await openAssistantSetup(page); await page.locator('#room-assistant-setup select').selectOption('producer');
   await page.locator('#room-assistant-setup button[type=submit]').click(); await page.locator('#room-assistant-setup').waitFor({state:'hidden'});
   await page.locator('#ask-room').click();
   await page.locator('#message-input').fill('What should we prioritize?');

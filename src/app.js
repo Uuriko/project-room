@@ -329,6 +329,7 @@ let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
+let humanExperience;
 let requestMode = null, requestReading = false, requestEpoch = 0;
 const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? channelDraftKey(activeChannelId);
 const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
@@ -341,6 +342,16 @@ const timelineWindow = new Map();
 let timelineRevealing = false;
 const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 const timelinePin = createTimelinePin();
+function setTimelinePin(view, list) {
+  // Room owns bottom positioning until reader input. Native anchoring can
+  // otherwise undo that position before the resize observer runs.
+  list.style.overflowAnchor = "none";
+  timelinePin.set(view, list);
+}
+function clearTimelinePin() {
+  timelinePin.clear();
+  $("#message-list").style.removeProperty("overflow-anchor");
+}
 let pinScrollTop = null; // where the pin last moved the list; that scroll event is not the reader's
 let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
@@ -2161,7 +2172,6 @@ function setActiveChannel(id) {
   activeChannelId = next;
   try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
   restoreComposer(drafts.get(composerKey()));
-  $("#also-send-to-channel").checked = false;
   syncChannelChrome(); updateReply(); syncRequestComposer(); renderComposerError();
   renderMessages(); persistDrafts();
 }
@@ -2453,10 +2463,10 @@ function renderMessages() {
   list.dataset.view = view;
   if (!sameView) {
     list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0;
-    if (viewPositions.has(view)) timelinePin.clear(); else timelinePin.set(view, list);
+    if (viewPositions.has(view)) clearTimelinePin(); else setTimelinePin(view, list);
   } else if ((nearBottom || ownArrival) && !focused) {
     if (pinOnly && !ownArrival) { stickPinnedTimeline(list); if (newCount > 0) scheduleHorizonAdvance(); }
-    else { list.scrollTop = list.scrollHeight; timelinePin.set(view, list); }
+    else { list.scrollTop = list.scrollHeight; setTimelinePin(view, list); }
     newVisibleMessages = 0;
   }
   else {
@@ -2670,19 +2680,22 @@ async function attachComposerFiles(fileList) {
     renderComposerFiles();
   }
 }
-async function commitComposerFiles(messageId) {
-  const pending = composerFiles.filter(file => file.status === "staged");
+async function commitComposerFiles(messageId, files = composerFiles, ownsComposer = () => true) {
+  const generation = client.generation;
+  const pending = files.filter(file => file.status === "staged");
   if (!pending.length || !messageId) return;
   for (const file of pending) {
     try {
       await client.request(client.path(`/files/${encodeURIComponent(file.id)}/commit`), { method: "POST", data: { messageId } });
-      composerFiles = composerFiles.filter(entry => entry.id !== file.id);
+      if (generation !== client.generation) return;
+      if (ownsComposer()) composerFiles = composerFiles.filter(entry => entry.id !== file.id);
     } catch (error) {
+      if (generation !== client.generation) return;
       file.status = "error";
-      setComposerError(error?.message || "Couldn’t attach that file to the message.");
+      if (ownsComposer()) setComposerError(error?.message || "Couldn’t attach that file to the message.");
     }
   }
-  renderComposerFiles();
+  if (ownsComposer()) renderComposerFiles();
   await refreshRoomFiles();
 }
 function messageContent(m, cluster = {}, unreadStart = false, members = Object.values(state.members)) {
@@ -2740,6 +2753,7 @@ function renderSearch(now = Date.now()) {
 }
 function saveComposer() {
   drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
+    alsoSendToChannel: Boolean(currentThreadId && !$("#message-to-select").value && replyToId && $("#also-send-to-channel").checked),
     assistantDraft, ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
@@ -2754,6 +2768,7 @@ function restoreComposer(draft) {
     select.options[select.options.length - 1].disabled = true;
   }
   select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+  $("#also-send-to-channel").checked = Boolean(draft.alsoSendToChannel);
   syncComposerChrome();
   autosizeComposer();
 }
@@ -2835,6 +2850,8 @@ function syncRequestComposer() {
   input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
+  humanExperience?.syncIntent({ body: input.value.trim(), toMemberId: select.value || null, replyToId, channelId: activeChannelId,
+    alsoSendToChannel: Boolean(currentThreadId && !select.value && replyToId && $("#also-send-to-channel").checked) });
 }
 function setRequestMode(mode, initial = {}) {
   saveComposer(); assistantDraft = null; requestMode = mode;
@@ -2958,8 +2975,6 @@ function switchThread(threadId, focusComposer = false) {
     saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
     currentThreadId = threadId; requestMode = null; assistantDraft = null;
     restoreComposer(drafts.get(composerKey()));
-    // "Also send to channel" is per-send, off by default in every thread.
-    $("#also-send-to-channel").checked = false;
   }
   updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
   if (leavingResultQuestion) renderReturnBrief();
@@ -3825,9 +3840,10 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 });
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
-const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
+humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
   openWork: id => revealWork(id), openMessage: id => revealMessage(id),
   getContribution: () => assistantDraft, endContribution: () => switchThread(currentThreadId),
+  getPendingMessage: () => pendingMessage,
   startContribution: (sourceMessageId, intent) => {
     const source = conversation?.byId.get(sourceMessageId);
     if (!source || source.deletedAt || source.toMemberId || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return false;
@@ -3995,7 +4011,6 @@ $("#message-form").addEventListener("submit", e => {
   if (composerOverLimit()) { renderComposerLength(); return; }
   if (requestMode) { submitRequest(e.currentTarget); return; }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
-  const askRoom = humanExperience.intent(content);
   if (!content.body) return;
   if (composerFiles.some(file => file.status === "uploading")) { setComposerError("Wait for the file to finish attaching."); return; }
   // "Also send to channel": a public thread reply also lands as a top-level
@@ -4006,34 +4021,61 @@ $("#message-form").addEventListener("submit", e => {
   }
   const previous = pendingMessage?.command?.data;
   const unchanged = previous && previous.body === content.body && previous.toMemberId === content.toMemberId && previous.replyToId === content.replyToId && (previous.channelId ?? DEFAULT_CHANNEL_ID) === content.channelId && Boolean(previous.alsoSendToChannel) === Boolean(content.alsoSendToChannel);
-  // Preserve the exact legacy payload, including an omitted default channel.
-  const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
-  pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
-  saveComposer();
-  const generation = client.generation, draftKey = composerKey();
-  submit(e.currentTarget, async () => {
-    // Ownership must outlive pendingMessage: the command can commit while its immediate
-    // snapshot fails, then first appear on a later refresh after the draft was cleared.
-    locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+  const generation = client.generation, draftKey = composerKey(), originalBody = $("#message-input").value;
+  const originalFiles = JSON.stringify(composerFiles), originalPending = pendingMessage;
+  const sameComposer = () => generation === client.generation && state && composerKey() === draftKey
+    && $("#message-input").value === originalBody && ($("#message-to-select").value || null) === content.toMemberId
+    && replyToId === content.replyToId && activeChannelId === content.channelId
+    && Boolean(currentThreadId && !content.toMemberId && content.replyToId && $("#also-send-to-channel").checked) === Boolean(content.alsoSendToChannel);
+  const ownsComposer = () => sameComposer() && JSON.stringify(composerFiles) === originalFiles && pendingMessage === originalPending;
+  submit(e.currentTarget, async current => {
+    // A retry reconciles the original message and its original intent, even if
+    // the toggle or assistant configuration has since changed.
+    const prepared = await humanExperience.preflight(content, unchanged ? { intent: originalPending.assistantIntent ?? null } : null);
     try {
-      await client.send(pendingMessage.command);
-    } catch (error) {
+      if (!current() || !prepared.ok || !ownsComposer()) return;
+      const askRoom = prepared.intent;
+      // Preserve the exact legacy payload, including an omitted default channel.
+      const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
+      pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+      pendingMessage.assistantIntent = askRoom;
+      saveComposer();
+      const sentMessage = pendingMessage;
+      const sentFiles = [...composerFiles];
+      const ownsSentComposer = () => sameComposer() && pendingMessage === sentMessage;
+      // Ownership must outlive pendingMessage: the command can commit while its immediate
+      // snapshot fails, then first appear on a later refresh after the draft was cleared.
+      locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+      try {
+        await client.send(sentMessage.command);
+      } catch (error) {
+        if (generation !== client.generation || !state) return;
+        if (composerKey() !== draftKey) {
+          const message = requestFailureMessage(mapDmConsentRefusal(sentMessage.command, error) ?? error);
+          drafts.save(draftKey, { error: message });
+          notice(message, true);
+          return;
+        }
+        throw mapDmConsentRefusal(sentMessage.command, error) ?? error;
+      }
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
-    }
-    if (generation !== client.generation || !state) return;
-    await commitComposerFiles(data.messageId);
-    if (generation !== client.generation || !state) return;
-    drafts.clear(draftKey);
-    $("#message-input").value = ""; pendingMessage = null; clearReply(); autosizeComposer();
-    $("#also-send-to-channel").checked = false;
-    persistDrafts();
-    if (assistantDraft) {
-      assistantDraft = null; restoreComposer(drafts.get(composerKey()));
-      updateReply(); syncRequestComposer(); persistDrafts();
-    }
-    await humanExperience.posted(data.messageId, askRoom);
-    maybeShowGuestUpgradeHint();
+      await commitComposerFiles(data.messageId, sentFiles, ownsSentComposer);
+      if (generation !== client.generation || !state) return;
+      if (ownsSentComposer()) {
+        drafts.clear(draftKey);
+        $("#message-input").value = ""; pendingMessage = null; clearReply(); autosizeComposer();
+        $("#also-send-to-channel").checked = false;
+        if (assistantDraft) {
+          assistantDraft = null; restoreComposer(drafts.get(composerKey()));
+          updateReply(); syncRequestComposer();
+        }
+      } else if (composerKey() !== draftKey && drafts.get(draftKey).pending === sentMessage) {
+        drafts.clear(draftKey);
+      }
+      persistDrafts();
+      await humanExperience.posted(data.messageId, askRoom);
+      maybeShowGuestUpgradeHint();
+    } finally { humanExperience.releaseDispatch(prepared.reservation); }
   }, { failureHint: "Draft kept. Send again to retry." });
 });
 $("#composer-attach")?.addEventListener("click", () => $("#composer-file")?.click());
@@ -4333,6 +4375,7 @@ function syncAlsoSend() {
   label.hidden = !visible;
   if (!visible) box.checked = false;
 }
+$("#also-send-to-channel").addEventListener("change", () => { saveComposer(); syncRequestComposer(); });
 function rememberComposerSelection({ clearCollapsed = false } = {}) {
   const input = $("#message-input");
   if (input.selectionStart !== input.selectionEnd) {
@@ -4984,11 +5027,14 @@ const READER_SCROLL_MS = 1000;
 let readerScrollAt = -Infinity;
 const readerScrolling = () => performance.now() - readerScrollAt < READER_SCROLL_MS;
 const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
-const noteReaderScroll = () => { readerScrollAt = performance.now(); };
+const noteReaderScroll = event => {
+  if (event) clearTimelinePin();
+  readerScrollAt = performance.now();
+};
 addEventListener("wheel", noteReaderScroll, { capture: true, passive: true });
 addEventListener("touchmove", noteReaderScroll, { capture: true, passive: true });
-addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(); }, { capture: true });
-$("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(); }, { passive: true });
+addEventListener("keydown", event => { if (SCROLL_KEYS.has(event.key) && !event.target?.closest?.("input, textarea, select, [contenteditable]")) noteReaderScroll(event); }, { capture: true });
+$("#message-list").addEventListener("pointerdown", event => { if (event.target === event.currentTarget) noteReaderScroll(event); }, { passive: true });
 for (const scroller of [$("#message-list"), window]) {
   scroller.addEventListener("scroll", () => {
     if (!readerScrolling()) return;
@@ -5247,7 +5293,7 @@ if (globalThis.ResizeObserver) new ResizeObserver(() => {
 // dropped as it would have been without the pin.
 function stickPinnedTimeline(list) {
   const before = list.scrollTop, offBottom = list.scrollHeight - before - list.clientHeight >= 80;
-  list.scrollTop = list.scrollHeight; timelinePin.set(list.dataset.view, list);
+  list.scrollTop = list.scrollHeight; setTimelinePin(list.dataset.view, list);
   if (list.scrollTop === before) return;
   pinScrollTop = list.scrollTop;
   if (offBottom) { clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null; }
@@ -7625,8 +7671,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   const unread = state ? Math.max(0, client.sequence - Math.max(roomCursor, catchUpBoundary)) : 0;
   const contributions = owned ? contributionSteps(state, session.member.id, now) : [];
   renderContribution(contributions, owned);
-  setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
-    unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
+  setText("#catchup-count", current && (contributions.length || unread) ? String(contributions.length || unread) : "");
   $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.

@@ -398,7 +398,7 @@
           <form id="message-form" class="composer">
             <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
             <div class="composer-toolbar" id="composer-toolbar" hidden>
-              <label class="audience-label" for="message-to-select">To</label>
+              <label class="sr-only" for="message-to-select">To</label>
               <select id="message-to-select" aria-label="Who this message addresses"></select>
               <span class="audience-note" id="audience-note" hidden>Private</span>
             </div>
@@ -892,24 +892,22 @@
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
-        <p class="form-hint">1. Choose the app your agent uses</p>
         <div id="agent-type-catalog" class="agent-type-catalog" role="list">
           <div id="agent-roster" class="agent-type-grid agent-roster">
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CC</span><span class="agent-type-copy"><strong>Claude Code</strong><span>Best for local coding sessions</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="codex" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">CX</span><span class="agent-type-copy"><strong>Codex</strong><span>Best for OpenAI coding</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="cursor" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">CR</span><span class="agent-type-copy"><strong>Cursor</strong><span>Best for your IDE, by pasting a prompt</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">GK</span><span class="agent-type-copy"><strong>Grok Build</strong><span>Best for a local terminal</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="claude-code" data-join-path="mcp-url"><span class="agent-type-copy"><strong>Claude Code</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="codex" data-join-path="mcp-url"><span class="agent-type-copy"><strong>Codex</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="cursor" data-join-path="paste-prompt"><span class="agent-type-copy"><strong>Cursor</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-build" data-roster="grok-build" data-join-path="mcp-url"><span class="agent-type-copy"><strong>Grok Build</strong></span></button>
           </div>
           <details id="agent-other-types"><summary>Other agents</summary><div class="agent-type-grid">
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="hermes" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">HM</span><span class="agent-type-copy"><strong>Hermes</strong><span>Best for research tasks</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="opencode" data-join-path="mcp-url"><span class="agent-type-icon" aria-hidden="true">OC</span><span class="agent-type-copy"><strong>OpenCode</strong><span>Best for open-source coding</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="pi" data-join-path="invite-code"><span class="agent-type-icon" aria-hidden="true">π</span><span class="agent-type-copy"><strong>Pi</strong><span>Best for a lightweight agent</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-bot" data-roster="grok-bot" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">GB</span><span class="agent-type-copy"><strong>Grok Bot</strong><span>Best for a hosted bot</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="instinct" data-roster="instinct" data-join-path="packet"><span class="agent-type-icon" aria-hidden="true">IN</span><span class="agent-type-copy"><strong>Instinct</strong><span>Best for iMessage</span></span></button>
-            <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-icon" aria-hidden="true">MU</span><span class="agent-type-copy"><strong>Muse</strong><span>Best for the Muse app or WhatsApp</span></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="hermes" data-join-path="mcp-url"><span class="agent-type-copy"><strong>Hermes</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="opencode" data-join-path="mcp-url"><span class="agent-type-copy"><strong>OpenCode</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="pi" data-join-path="invite-code"><span class="agent-type-copy"><strong>Pi</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="grok-bot" data-roster="grok-bot" data-join-path="paste-prompt"><span class="agent-type-copy"><strong>Grok Bot</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="instinct" data-roster="instinct" data-join-path="packet"><span class="agent-type-copy"><strong>Instinct</strong></span></button>
+            <button type="button" class="agent-type-card" role="listitem" data-agent-type="muse" data-roster="muse" data-join-path="paste-prompt"><span class="agent-type-copy"><strong>Muse</strong></span></button>
           </div></details>
         </div>
-        <p class="form-hint">2. Choose its name and Room access</p>
         <label>Name<input id="agent-connect-name" maxlength="80" required autocomplete="off" placeholder="My assistant" aria-describedby="agent-name-warning"></label>
         <p id="agent-name-warning" class="form-hint" hidden></p>
         <p id="agent-packet-today" class="form-hint" hidden>Use my AI, then paste the draft. No key in chat.</p>

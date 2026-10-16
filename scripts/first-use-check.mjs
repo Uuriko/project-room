@@ -193,7 +193,7 @@ for (const touch of [false, true]) {
     await signInFixture(owner, ownerKey);
     await owner.locator('#main').waitFor({ state: 'visible' });
     const chip = () => owner.locator('#catchup-count').textContent();
-    assert.equal(await chip(), 'No new updates', 'the room you just created has nothing new for you');
+    assert.equal(await chip(), '', 'the room you just created has no update badge');
     for (const body of ['First note to myself', 'Second note']) {
       await owner.locator('#message-input').fill(body);
       if (touch) await owner.getByRole('button', { name: 'Send', exact: true }).click();
@@ -201,7 +201,7 @@ for (const touch of [false, true]) {
       await owner.locator('li.message', { hasText: body }).first().waitFor();
     }
     await owner.waitForTimeout(300); // let the post-send snapshot settle before reading the chip
-    assert.equal(await chip(), 'No new updates', 'messages you sent are not updates for you');
+    assert.equal(await chip(), '', 'messages you sent do not create an update badge');
     await clickChrome(owner, '#topbar-catchup');
     await owner.locator('#catchup-dialog').waitFor({ state: 'visible' });
     await owner.waitForFunction(() => /changes? since your marker/.test(document.querySelector('#summary-grid').textContent));
