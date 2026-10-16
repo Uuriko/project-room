@@ -761,6 +761,13 @@ const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
   loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
+  onProviderCapabilities: providers => {
+    // The OAuth anchors are static HTML whose start routes 503 when the
+    // provider is not configured on this deployment; hide an anchor only
+    // on the feed's positive "configured: false" answer.
+    if (providers?.github?.configured === false) signinNavigation.setProviderUnavailable("github");
+    if (providers?.google?.configured === false) signinNavigation.setProviderUnavailable("google");
+  },
   onViewChange: syncSigninView,
   onBack: handleSigninBack,
   onPasswordResetComplete: async () => {
