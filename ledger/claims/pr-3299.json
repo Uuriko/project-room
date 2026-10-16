@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "actor": "jill",
+  "requestId": "claim-2026-10-16T20-46-30Z-jill-ffde",
+  "kind": "merge-slot",
+  "prs": [
+    3299
+  ],
+  "claimed-at": "2026-10-16T20:46:30Z",
+  "heartbeat": "2026-10-16T20:46:30Z",
+  "expires": "2026-10-16T21:31:30Z",
+  "note": "bootstrap test"
+}
