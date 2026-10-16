@@ -339,7 +339,7 @@ export class GuestInvites {
       state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+    this.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
     this.store.agentConnections.revokeMember(roomId, member.id);
     this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
     this.store.reminders.retireMember(roomId, member.id);
@@ -400,7 +400,7 @@ export class GuestInvites {
     } catch (error) { fail(422, "command_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+    this.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     // Rebind the seat to the redeeming invite; the tier is owner-set and
     // never escalated by redemption.
@@ -592,7 +592,7 @@ export class GuestInvites {
         } catch (error) { fail(422, "command_rejected", error.message); }
         const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
         if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
-        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+        this.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
           .run(memberId, roomId, identity.identityId, row.tier, row.id, now);

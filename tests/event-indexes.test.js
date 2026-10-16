@@ -14,7 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore, EVENT_GENERATED_COLUMNS, EVENT_INDEX_SCHEMA } from "../server/store.mjs";
@@ -37,6 +37,21 @@ function eventIndexes(db) {
   return new Map(db.prepare("SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name='events' AND sql IS NOT NULL").all()
     .map(row => [row.name, row.sql]));
 }
+
+test("no bare INSERT INTO events VALUES remains in server code (workerd rejects it)", () => {
+  // Node's SQLite tolerates an INSERT with no column list into a table
+  // that has generated columns; the Durable Object SQLite does not
+  // ("cannot INSERT into generated column ev_type" — caught only by the
+  // hosted cloudflare check). Every events insert must name the stored
+  // columns explicitly.
+  const offenders = [];
+  for (const entry of readdirSync(new URL("../server/", import.meta.url))) {
+    if (!entry.endsWith(".mjs")) continue;
+    const source = readFileSync(new URL(`../server/${entry}`, import.meta.url), "utf8");
+    if (/INSERT INTO events VALUES/.test(source)) offenders.push(entry);
+  }
+  assert.deepEqual(offenders, []);
+});
 
 test("fresh store carries the v39 generated columns and named indexes", t => {
   const { filename } = tempStore(t);

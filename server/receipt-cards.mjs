@@ -34,7 +34,7 @@ export function appendRoomEvent(store, roomId, { id, type, actorId, data, atMs }
     });
     const state = applyEvent(room.state, incoming);
     const sequence = room.sequence + 1;
-    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+    store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
     syncMessageRows(store.db, { roomId, sequence, event: incoming, state });
