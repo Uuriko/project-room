@@ -141,21 +141,40 @@ const view = (row, now) => ({
 // no second burn — the same membership, a fresh onboarding token,
 // duplicate:true. Mirrors the duplicate-identity path's active-membership
 // check so a removed member's receipt cannot resurrect the grant.
-const replayRedeemReceipt = (invites, receipt) => {
+const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } = {}) => {
   const store = invites.store;
   const linked = invites.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
     .get(receipt.room_id, receipt.identity_id);
   const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+  // R305-1: a credential-less replay is the client that lost the 201 — the
+  // original secret died in that lost response, so retiring it strands
+  // nobody. Rotate a fresh one and show it in this response, authorized by
+  // the one-time code + requestId receipt. A replay that presents its
+  // credential is already fine and keeps today's shape. The fresh onboarding
+  // token is issued AFTER the rotation, so the scoped-key revocation the
+  // rotation carries cannot kill the token this response hands over.
+  const rotation = credentialPresented ? null : store.identities.rotateForReplay(receipt.identity_id);
   const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
     identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
   });
-  return withConnect(store, receipt.room_id, linked.member_id, {
+  const base = {
     identityId: receipt.identity_id, roomId: receipt.room_id, memberId: linked.member_id,
     displayName: member.displayName, permissions: JSON.parse(receipt.permissions_json),
     duplicate: true, mcpToken,
-    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id)
-  });
+  };
+  if (rotation) {
+    const freshNext = Object.freeze([
+      Object.freeze({ action: "save-identity-secret",
+        description: "A fresh identity secret was issued in THIS response because the earlier one was never received. Save it immediately; it is shown once and cannot be recovered again." }),
+      ...redeemNext(receipt.room_id, member.displayName),
+    ]);
+    return withConnect(store, receipt.room_id, linked.member_id, { ...base,
+      identitySecret: rotation.secret, rotatedAt: rotation.rotatedAt, next: freshNext,
+      nextActions: nextActionsForInviteRedeem(receipt.room_id) });
+  }
+  return withConnect(store, receipt.room_id, linked.member_id, { ...base,
+    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id) });
 };
 
 export class AgentInvites {
@@ -297,7 +316,7 @@ export class AgentInvites {
           // that redeemed: the replay mints a fresh onboarding token for it.
           if (existingIdentity && existingIdentity.identityId !== receipt.identity_id)
             fail(403, "invite_redeem_identity_mismatch", "This request id belongs to a different identity.");
-          return replayRedeemReceipt(this, receipt);
+          return replayRedeemReceipt(this, receipt, { credentialPresented: Boolean(existingIdentity) });
         }
       }
       if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {
