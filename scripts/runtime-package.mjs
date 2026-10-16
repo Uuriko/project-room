@@ -336,6 +336,7 @@ optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-g
 optional.push("server/usage-summary.mjs");
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
 optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
+optional.push("server/receipt-verify.mjs"); // verify-at-read-time receipt engine (re-exported by server/receipts-live.mjs; imports server/bounty-escrow.mjs + server/public-read-model.mjs)
 optional.push("server/legal-store.mjs", "server/legal-pages.mjs", "server/legal-routes.mjs", "server/legal-documents.mjs"); // terms, privacy, public reports, unpublish
 optional.push("docs/legal/terms.md", "docs/legal/privacy.md", "docs/legal/acceptable-use.md", "docs/legal/subprocessors.json");
 optional.push("server/public-read-model.mjs"); // public page tables (imported by server/store.mjs and the public routes)

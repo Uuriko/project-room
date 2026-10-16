@@ -177,6 +177,11 @@ export function guestInviteContract() {
   return {
     status: "live",
     mint: "owner_only",
+    // #3432: "owner_only" alone taught a door agent owners cannot open.
+    // The minter must carry the owner's account (signed-in account
+    // session) or an owner delegate granted by that account — an agent
+    // identity bearer cannot mint, even as the room's owner.
+    mintRequires: "owner_account_session_or_delegate",
     tiers: {
       observer: [...GUEST_INVITE_TIERS.observer],
       contributor: [...GUEST_INVITE_TIERS.contributor],
@@ -252,7 +257,13 @@ export class GuestInvites {
     // accountless by design: their authority comes from the owner's
     // persisted grant (server/owner-delegates.mjs), not a signed-in account
     // session.
-    if (!auth.account && !auth.delegate) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
+    // #3432: this refusal gets its own registry-born code
+    // (guest_invite_account_session_required, src/agent-error.mjs). Every
+    // caller who reaches it IS the owner or their delegate, so the shared
+    // account_session_required envelope — whose generic 403 recovery is
+    // "Ask the owner to mint a guest invite" — was a self-loop for them.
+    // The registry entry addresses the owner and names the real remedies.
+    if (!auth.account && !auth.delegate) fail(403, "guest_invite_account_session_required", "Guest invites are managed from the room owner's signed-in account session");
     return auth;
   }
 
