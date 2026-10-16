@@ -1,5 +1,6 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
 import { createHash, randomBytes } from "node:crypto";
+import { uiText } from "./strings.js";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -433,6 +434,17 @@ function publicCode(code) {
 function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
+
+// ERROR-CENSUS F-4: server-configuration codes whose recovery is
+// operator-directed (see the branch in agentErrorAx below); their hint/next
+// copy is catalog-owned under agentError.<code>.hint / agentError.<code>.next.
+const OPERATOR_CONFIG_CODES = new Set([
+  "github_not_configured",
+  "github_unconfigured",
+  "google_configuration_invalid",
+  "webhook_unconfigured",
+  "misconfigured",
+]);
 
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
@@ -954,19 +966,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // ERROR-CENSUS F-4: operator-configuration codes must not get the generic
   // 5xx "reconcile or retry the exact command" below — the caller cannot fix
   // missing server configuration and retrying is futile. Same shape as
-  // mail_not_configured: failed status, operator named as the mover.
-  const operatorConfigRecovery = {
-    github_not_configured: ["GitHub sign-in is not configured on this server — an operator setup gap. Nothing about your request can fix it and retrying will not help. Use a different sign-in method, or report the code to the operator.", "Use a different sign-in method, or report error.code 'github_not_configured' to the server operator; do not retry until they confirm it is configured"],
-    github_unconfigured: ["The server's GitHub access token is missing or was rejected — an operator configuration gap. Retrying will not help until the operator supplies a valid token.", "Report error.code 'github_unconfigured' to the server operator; do not retry until they confirm the token is fixed"],
-    google_configuration_invalid: ["The server's Google sign-in configuration is invalid — an operator setup gap. Retrying will not help until the operator fixes the OAuth configuration.", "Report error.code 'google_configuration_invalid' to the server operator; do not retry until they confirm the configuration is fixed"],
-    webhook_unconfigured: ["The PR webhook is enabled but its secret is not configured on the server — an operator setup gap. Retrying will not help until the operator sets the secret or disables the webhook.", "Report error.code 'webhook_unconfigured' to the server operator; do not retry until they confirm the webhook secret is set"],
-    misconfigured: ["A server subsystem is not wired up — an operator gap, not a request error. Retrying the same request will not help.", "Report error.code 'misconfigured' with the full message to the server operator; do not retry until they confirm the subsystem is wired"],
-  }[reasonCode];
-  if (operatorConfigRecovery) {
+  // mail_not_configured: failed status, operator named as the mover. The
+  // sentences live in the strings catalog (agentError.<code>.hint/.next).
+  if (OPERATOR_CONFIG_CODES.has(reasonCode)) {
     return {
       status: "failed", reason: reasonCode,
-      hint: operatorConfigRecovery[0],
-      next: [command(operatorConfigRecovery[1])]
+      hint: uiText(`agentError.${reasonCode}.hint`),
+      next: [command(uiText(`agentError.${reasonCode}.next`))]
     };
   }
   if (reasonCode === "mail_not_configured") {
