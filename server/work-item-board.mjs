@@ -456,6 +456,11 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     // computed them from room policy at propose time; never recompute here).
     // Same names/semantics as the item fields so the #3342 decisions inbox
     // (PR #3572 decisionFacts) can re-point at the board 1:1.
+    // B-4' Phase 0 slice 4 (Appendix D §D.1 §4.2): the accountable member,
+    // verbatim from the item. Distinct from claimer `owner` above — owner
+    // derivation is untouched; this field survives accepted-unclaimed,
+    // where owner is null (the measured §4.2 orphan).
+    accountableMemberId: typeof item.accountableMemberId === "string" && item.accountableMemberId.length > 0 ? item.accountableMemberId : null,
     ownerDecisionRequired: item.ownerDecisionRequired === true,
     humanDecisionMakerId: typeof item.humanDecisionMakerId === "string" && item.humanDecisionMakerId.length > 0 ? item.humanDecisionMakerId : null,
     reviewedBy: reviewsMerged.length > 0 ? reviewsMerged[reviewsMerged.length - 1].memberId : null,
@@ -552,6 +557,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     reviewPolicy: null,
     ownerDecisionRequired: false,
     humanDecisionMakerId: null,
+    accountableMemberId: null,
     reviewedBy: null,
     attestations: [],
     tags: [],
