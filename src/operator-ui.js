@@ -23,6 +23,56 @@ export function describeFailure(status, body) {
   return humanErrorMessage({ status, code: body?.error?.code, message: body?.error?.message });
 }
 
+// Pure summary of the status surface model (GET /api/operator/status-surface)
+// into display strings, so the console's honesty rules are testable without a
+// DOM: anything the records do not hold renders as "not recorded", with the
+// reason carried into the notes — never as a zero or a guess.
+export function summarizeSurface(surface) {
+  const ts = value => (value ? new Date(value).toLocaleString() : "not recorded");
+  const facts = [];
+  const add = (term, value) => facts.push([term, value]);
+  const doors = surface?.deployment?.doors ?? {};
+  add("Surface generated", ts(surface?.generatedAt));
+  add("Deployment", surface?.deployment?.deployment ?? "not recorded");
+  add("Revision (object door)", doors.do ?? "not recorded");
+  add("Revision (worker door)", doors.worker ?? "not recorded");
+  add("Door drift", doors.state ?? "unknown");
+  const integrity = surface?.integrity ?? {};
+  const integrityBits = [integrity.state ?? "not-recorded"];
+  if (integrity.cursor) integrityBits.push(`next step ${integrity.cursor.nextStepName} (${integrity.cursor.nextStepIndex + 1} of ${integrity.cursor.stepsTotal})`);
+  if (integrity.lastFailingRoom) integrityBits.push(`failing room ${integrity.lastFailingRoom}`);
+  else if (integrity.lastFailingRoomState === "not-recorded") integrityBits.push("failing room not recorded");
+  add("Integrity", integrityBits.join(" · "));
+  add("Integrity snapshot verified", ts(integrity.snapshot?.verifiedAt));
+  const claimPrs = surface?.claimPrs ?? {};
+  add("claim-prs skipped rows", claimPrs.state === "recorded" ? String(claimPrs.skippedInvalid) : "not recorded");
+  const backup = surface?.backup ?? {};
+  add("Latest backup", backup.state === "recorded" ? `${(backup.bytes / 1_000_000).toFixed(2)} MB, ${ts(backup.at)}` : "not recorded");
+  add("Backup margin", backup.marginDays != null ? `${backup.marginDays} days to the single-body cap at the measured growth rate` : "not recorded");
+  const board = surface?.board ?? {};
+  add("Board claimable", board.state === "recorded" ? String(board.claimableCount) : "not recorded");
+  const slis = surface?.behaviour?.slis ?? [];
+  const burning = slis.filter(sli => sli.burnState);
+  add("Behaviour burn rates", burning.length
+    ? burning.map(sli => `${sli.id}: ${sli.burnState}`).join(" · ")
+    : "not recorded — no SLO budgets are set");
+  const jobRows = (surface?.jobs?.rows ?? []).map(r => [
+    r.name, r.state, ts(r.lastSuccessAt),
+    r.lastErrorAt ? `${ts(r.lastErrorAt)}${r.lastErrorCode ? ` (${r.lastErrorCode})` : ""}` : "not recorded",
+    String(r.consecutiveFailures ?? 0)
+  ]);
+  const notes = [];
+  if (surface?.jobs?.source) notes.push(`Job records come from: ${surface.jobs.source}.`);
+  if (claimPrs.state === "not-recorded" && claimPrs.reason) notes.push(`claim-prs: ${claimPrs.reason}.`);
+  if (backup.state === "not-recorded" && backup.reason) notes.push(`Backup: ${backup.reason}.`);
+  if (integrity.lastFailingRoomState === "not-room-scoped") notes.push("Integrity: the latest recorded failure is not room-scoped, so no failing room is named.");
+  for (const sli of slis) {
+    if (sli.observed?.approvedLots != null) notes.push(`Behaviour — cost per task: ${sli.observed.approvedLots} lot(s) approved in the last ${sli.observed.windowDays} days (observed; no burn rate without a budget).`);
+    if (sli.gap) notes.push(`Behaviour — ${sli.id}: ${sli.gap}.`);
+  }
+  return { facts, jobRows, notes };
+}
+
 function el(tag, text, attrs = {}) {
   const node = document.createElement(tag);
   if (text != null) node.textContent = String(text);
@@ -90,6 +140,14 @@ function init() {
     body.replaceChildren(...(status.tables ?? []).map(t => row([t.table, t.rows])));
   }
 
+  async function loadSurface() {
+    const summary = summarizeSurface(await call("/api/operator/status-surface"));
+    const facts = $("op-surface-facts");
+    facts.replaceChildren(...summary.facts.flatMap(([term, value]) => [el("dt", term), el("dd", value)]));
+    $("op-surface-jobs").tBodies[0].replaceChildren(...summary.jobRows.map(cells => row(cells)));
+    $("op-surface-notes").replaceChildren(...summary.notes.map(note => el("li", note)));
+  }
+
   async function loadActions() {
     const { actions } = await call("/api/operator/actions?limit=20");
     const body = $("op-actions").tBodies[0];
@@ -147,7 +205,7 @@ function init() {
   async function start() {
     showSignedIn(true);
     renderTargets();
-    await guarded(async () => { await loadStatus(); await loadActions(); say("Connected."); });
+    await guarded(async () => { await loadStatus(); await loadSurface(); await loadActions(); say("Connected."); });
   }
 
   $("op-token-form").addEventListener("submit", event => {
@@ -166,6 +224,7 @@ function init() {
     say("Token forgotten.");
   });
   $("op-status-refresh").addEventListener("click", () => guarded(loadStatus));
+  $("op-surface-refresh").addEventListener("click", () => guarded(loadSurface));
   $("op-actions-refresh").addEventListener("click", () => guarded(loadActions));
   $("op-drift-form").addEventListener("submit", event => {
     event.preventDefault();

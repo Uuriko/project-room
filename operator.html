@@ -43,6 +43,15 @@
         </details>
       </section>
 
+      <section aria-labelledby="op-surface-heading">
+        <h2 id="op-surface-heading">Deployment status</h2>
+        <p class="op-note">One read of what is deployed and how the machinery is doing, composed from the revision, job, integrity, backup, and board records. Anything the records do not hold is shown as not recorded, never as a guess.</p>
+        <button type="button" id="op-surface-refresh">Refresh deployment status</button>
+        <dl id="op-surface-facts" class="op-facts"></dl>
+        <table id="op-surface-jobs"><caption>Registered jobs, from the runtime's own records</caption><thead><tr><th scope="col">Job</th><th scope="col">State</th><th scope="col">Last success</th><th scope="col">Last failure</th><th scope="col">Consecutive failures</th></tr></thead><tbody></tbody></table>
+        <ul id="op-surface-notes" class="op-list"></ul>
+      </section>
+
       <section aria-labelledby="op-find-heading">
         <h2 id="op-find-heading">Find leftovers</h2>
         <p class="op-note">Find is read-only. It lists ids and names. Nothing is deleted until you run a plan and confirm it.</p>

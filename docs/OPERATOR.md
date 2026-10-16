@@ -71,7 +71,7 @@ The table counts leave out Cloudflare's internal `_cf_*` tables. A table that re
 
 ## Console
 
-`/operator.html` is a small page over these endpoints. Room Settings → Room health (owner only) links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also lists the latest operator actions. Each page load makes two operator calls (status and actions), so stay inside the 10-per-minute limit.
+`/operator.html` is a small page over these endpoints. Room Settings → Room health (owner only) links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also lists the latest operator actions, and a Deployment status section renders the status-surface read (both doors, every registered job, integrity, backup margin, board claimable, and the behaviour SLIs with their gaps). Each page load makes three operator calls (status, status-surface, and actions), so stay inside the 10-per-minute limit.
 
 ## Audit
 
