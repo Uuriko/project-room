@@ -280,6 +280,202 @@ test("full path: one inconsistent invitation is isolated; the snapshot is not ad
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM integrity_snapshot").get().n, 1);
 });
 
+test("step records survive incomplete verification: a stuck backfill and an empty parity sweep do not clear earlier step failures", async t => {
+  const store = await settle(t, ["alpha"]);
+  // Poison: alpha's stored sequence runs ahead of its event log, so the
+  // backfill can never complete (done=false) and the parity sweep has no
+  // caught-up room to check (checked=0).
+  store.db.prepare("UPDATE rooms SET sequence = sequence + 3 WHERE id='alpha'").run();
+  // Step-scoped records from an earlier wedge, one per messages step.
+  store.recordIntegrityFailure("messages_backfill", "", new Error("messages backfill stopped at 1 before room alpha reached sequence 2"));
+  store.recordIntegrityFailure("messages_parity", "", new Error("messages parity failed for alpha: projection count 1, table count 1, projection last seq 1, table last seq 1"));
+  store.db.prepare("UPDATE integrity_job_cursor SET step=9 WHERE singleton=1").run();
+
+  // The pair runs: the backfill names alpha per-room, the parity sweep
+  // checks nothing — and NEITHER step-scoped record clears, because
+  // neither step verifiably covered its scope this visit.
+  let result = await tick(store);
+  const stepRows = () => failureRows(store).filter(row => row.recordId === "");
+  assert.ok(stepRows().some(row => row.step === "messages_backfill"), "the backfill step record survives an incomplete backfill");
+  assert.ok(stepRows().some(row => row.step === "messages_parity"), "the parity step record survives a checked=0 sweep");
+  assert.ok(result.failures.some(f => f.step === "messages_backfill" && f.recordId === ""), "the step record is still reported");
+  assert.ok(result.failures.some(f => f.step === "messages_backfill" && f.recordId === "alpha"), "alpha's per-room failure is recorded alongside");
+  for (let i = 0; i < 10; i++) result = await tick(store);
+  assert.equal(stepRows().length, 2, "repeated incomplete visits never clear the step records");
+
+  // Repair the log: the backfill now completes its whole scope and the
+  // parity sweep certifies a room — explicit successful verification —
+  // and only then do the step records clear.
+  store.db.prepare("UPDATE rooms SET sequence = sequence - 3 WHERE id='alpha'").run();
+  let clean = null;
+  for (let i = 0; i < 25 && !clean; i++) {
+    await tick(store);
+    if (!failureRows(store).length) clean = true;
+  }
+  assert.ok(clean, "completed verification clears every record");
+});
+
+test("operational errors propagate: a schema failure in a deferred step throws instead of being isolated as data", async t => {
+  const store = await settle(t, ["alpha"]);
+  // Step 0 (share_links) loses its table: a schema failure indicts the
+  // store, not a record. The batch must surface it on the job's throw
+  // path — no durable record, no cursor advance past it.
+  store.db.exec("DROP TABLE share_links");
+  store.db.prepare("UPDATE integrity_job_cursor SET step=0 WHERE singleton=1").run();
+  await assert.rejects(tick(store), /no such table: share_links/);
+  assert.deepEqual(failureRows(store), [], "no failure record is written for an operational error");
+  assert.equal(
+    store.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get().step, 0,
+    "the cursor does not advance past the operational failure"
+  );
+});
+
+test("operational errors in the messages backfill are not isolated as room data", async t => {
+  const store = await settle(t, ["alpha"]);
+  const eventId = post(store, "alpha", "held", "held back by the environment");
+  const original = store.db.prepare.bind(store.db);
+  const sabotage = error => {
+    store.db.prepare = sql => {
+      if (typeof sql === "string" && sql.includes("sequence>?")) throw error;
+      return original(sql);
+    };
+  };
+  try {
+    // Lock contention (SQLITE_BUSY) is the environment failing: the
+    // backfill call aborts instead of naming alpha a failed room.
+    sabotage(Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" }));
+    assert.throws(() => store.backfillMessages({ limit: 10 }), /database is locked/);
+    // The typed storage refusal likewise: its transaction already rolled
+    // back, and the room's data is not the cause.
+    sabotage(Object.assign(new Error("Storage is unavailable; no success is claimed"), { code: "storage_unavailable", status: 503 }));
+    assert.throws(() => store.backfillMessages({ limit: 10 }), /Storage is unavailable/);
+  } finally {
+    store.db.prepare = original;
+  }
+  // Unsabotaged, the same room backfills cleanly — it was never bad data.
+  const result = store.backfillMessages({ limit: 10 });
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.done, true);
+  assert.equal(
+    store.db.prepare("SELECT body FROM messages WHERE room_id='alpha' AND message_id=?").get(eventId)?.body,
+    "held back by the environment"
+  );
+});
+
+test("failure records persist only allowlisted diagnostics, and the job log does not re-emit stored text", async t => {
+  const store = openStore(t);
+  store.initialize(initialRoom("commons"));
+  // A recognized verdict template survives with its counts intact.
+  store.recordIntegrityFailure("messages_parity", "alpha",
+    new Error("messages parity failed for alpha: projection count 7, table count 3, projection last seq 9, table last seq 4"));
+  // Arbitrary exception text — a parser error quoting record content —
+  // is reduced to the generic line for the step.
+  store.recordIntegrityFailure("invitation_audit", "inv-1",
+    new Error('Unexpected token < in JSON at position 2: {"displayName":"SYNTHETIC-SECRET-1"}'));
+  const rows = store.integrityFailures();
+  assert.equal(
+    rows.find(row => row.step === "messages_parity")?.message,
+    "messages parity failed for alpha: projection count 7, table count 3, projection last seq 9, table last seq 4"
+  );
+  const reduced = rows.find(row => row.step === "invitation_audit");
+  assert.equal(reduced?.message, "invitation_audit integrity check failed");
+  assert.ok(!JSON.stringify(rows).includes("SYNTHETIC-SECRET-1"), "no record content reaches durable storage");
+
+  // The job's operator log line for an outstanding failure carries the
+  // allowlisted fields (sub-check, record id, code, class, count) — not
+  // the stored message text, however it got there.
+  const lines = [];
+  const originalError = console.error;
+  console.error = (...args) => lines.push(args.join(" "));
+  let run;
+  try {
+    run = await integrityJob.run(store, {
+      deadline: Date.now() + 5000,
+      room: {
+        verifyRoomIntegrity: async () => ({
+          failures: [{ step: "messages_parity", recordId: "alpha", code: "messages_parity_failed", message: "blew up on SYNTHETIC-SECRET-2 payload" }]
+        })
+      }
+    });
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(run.errors, 1);
+  assert.equal(run.failureDetail.subcheck, "messages_parity");
+  const logLine = lines.find(line => line.includes("[integrity]"));
+  assert.ok(logLine?.includes("alpha") && logLine.includes("messages_parity_failed"), "the log line names the record and the stable code");
+  assert.ok(!lines.join("\n").includes("SYNTHETIC-SECRET-2"), "stored text is not re-emitted to the log");
+  assert.ok(!JSON.stringify(run).includes("SYNTHETIC-SECRET-2"), "nor to the public result");
+});
+
+test("recheck reconciliation: a help record for a room whose help trace is gone clears while another room still has help", async t => {
+  const store = await settle(t, ["alpha", "beta"]);
+  // Beta still carries (phantom) help state, so the help audit runs.
+  const projection = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='beta'").get().projection);
+  projection.helpOffers = { poison: true };
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='beta'").run(JSON.stringify(projection));
+  // Alpha's record dates from when it had help; its trace is entirely
+  // gone now, so the audit can never return it in `checked` again.
+  store.recordIntegrityFailure("help_history", "alpha", new Error("Help invitation history requires operator reconciliation"));
+
+  store.recheckIntegrityFailures();
+  const rows = failureRows(store).filter(row => row.step === "help_history");
+  assert.ok(!rows.some(row => row.recordId === "alpha"), "the moot record is reconciled away");
+  assert.ok(rows.some(row => row.recordId === "beta"), "the room the audit can still see keeps its record");
+});
+
+test("full path reconciliation: a repaired room's stale help record clears on the next full pass; certification follows the reconciled state", async t => {
+  const store = await settle(t, ["alpha", "beta"]);
+  const verifiedAt = () => store.db.prepare("SELECT verified_at FROM integrity_snapshot WHERE id=1").get()?.verified_at;
+  const before = verifiedAt();
+  const poison = roomId => {
+    const projection = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+    projection.helpOffers = { poison: true };
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), roomId);
+  };
+  const repair = roomId => {
+    const projection = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+    delete projection.helpOffers;
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), roomId);
+  };
+
+  poison("alpha");
+  let result = null;
+  for (let i = 0; i < 12 && !result; i++) {
+    const candidate = await tick(store);
+    if (candidate.failures.some(f => f.step === "help_history" && f.recordId === "alpha")) result = candidate;
+  }
+  assert.ok(result, "alpha's help failure is reported");
+  assert.equal(result.verified, 0);
+  assert.equal(verifiedAt(), before, "the snapshot is not advanced over alpha's failure");
+
+  // Repair alpha; poison beta instead. The audits can no longer see any
+  // help trace for alpha — its record is reconciled away rather than
+  // reported forever — while beta's live failure still blocks
+  // certification and the snapshot.
+  repair("alpha");
+  poison("beta");
+  result = null;
+  for (let i = 0; i < 12 && !result; i++) {
+    const candidate = await tick(store);
+    if (candidate.failures.some(f => f.step === "help_history" && f.recordId === "beta")) result = candidate;
+  }
+  assert.ok(result, "beta's help failure is reported");
+  assert.ok(!failureRows(store).some(row => row.step === "help_history" && row.recordId === "alpha"), "alpha's stale record is reconciled");
+  assert.equal(result.verified, 0, "no certification while a live record remains outstanding");
+  assert.equal(verifiedAt(), before, "the snapshot is still not advanced");
+
+  // Repair beta and force one more full pass: nothing outstanding, so
+  // the path certifies and the snapshot finally advances.
+  repair("beta");
+  store.db.exec("DELETE FROM integrity_snapshot");
+  result = await tick(store);
+  assert.equal(result.verified, 1);
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(failureRows(store), []);
+  assert.ok(verifiedAt() && verifiedAt() !== before, "the snapshot advances on a clean reconciled state");
+});
+
 test("full path: a room with unreconcilable help history is isolated and reported until repaired", async t => {
   const store = await settle(t, ["alpha", "beta"]);
   const verifiedAt = () => store.db.prepare("SELECT verified_at FROM integrity_snapshot WHERE id=1").get()?.verified_at;

@@ -1157,6 +1157,71 @@ export function tagIntegritySubcheck(error, subcheck) {
   }
   return error;
 }
+// Operational failures indict the store or the environment — schema
+// damage, the typed storage refusal, lock contention — not a record.
+// Isolating one as a per-record data failure would advance the cursor
+// past a systemic failure and re-report it as drift, so the deferred
+// batch propagates these to the job's throw path (which classifies them
+// schema/storage) with the failing transaction's rollback intact.
+// Recognized integrity verdicts — the reconciliation refusals and
+// mismatch errors the verify paths throw — are not operational and
+// isolate as before.
+export function isOperationalIntegrityError(error) {
+  if (isStorageUnavailable(error)) return true;
+  if (error?.code === "storage_unavailable" || error?.code === "SQLITE_BUSY") return true;
+  if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 5) return true; // SQLITE_BUSY
+  const message = String(error?.message ?? error ?? "");
+  return /no such (table|column)|missing schema/i.test(message) || /database is locked/i.test(message);
+}
+// Whether a deferred step's return proves it verified its whole scope
+// this visit. The two budgeted messages steps report their coverage
+// explicitly, and a step-scoped record from an earlier visit clears only
+// against that explicit successful verification — a budget-exhausted
+// backfill (done=false) or a parity sweep that checked no room must not
+// clear it. Every other step's contract is a full verify per visit, so
+// returning without throwing is the proof.
+function stepVerifiedScope(name, result) {
+  if (name === "messages_backfill") return result?.done === true && !result?.budgetExceeded;
+  if (name === "messages_parity") return (result?.checked ?? 0) > 0;
+  return true;
+}
+// The only diagnostics a durable integrity-failure record may carry.
+// Arbitrary exception text is never persisted: parser and driver errors
+// can quote record bodies, and the stored message is re-logged on every
+// tick until the record clears. Fixed verdict templates survive with
+// their integer counts and the record's own id; anything else becomes a
+// generic line naming the step.
+const INTEGRITY_MESSAGE_CONSTANTS = new Set([
+  "Invitation record requires operator reconciliation",
+  "Help invitation history requires operator reconciliation"
+]);
+const INTEGRITY_MESSAGE_ID = "[A-Za-z0-9][A-Za-z0-9._-]*";
+const INTEGRITY_PARITY_COUNTS = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): projection count (\\d+), table count (\\d+), projection last seq (\\d+), table last seq (\\d+)$`);
+const INTEGRITY_PARITY_ARCHIVED = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): archived rows (\\d+), marker count (\\d+)$`);
+const INTEGRITY_PARITY_MISSING = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): stored message body missing$`);
+const INTEGRITY_PARITY_RECORD = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}) differs$`);
+const INTEGRITY_BACKFILL_STOP = new RegExp(
+  `^messages backfill stopped at (\\d+) before room (${INTEGRITY_MESSAGE_ID}) reached sequence (\\d+)$`);
+function allowlistedIntegrityMessage(step, error) {
+  const text = String(error?.message ?? error);
+  if (INTEGRITY_MESSAGE_CONSTANTS.has(text)) return text;
+  const parity = INTEGRITY_PARITY_COUNTS.exec(text);
+  if (parity) return `messages parity failed for ${parity[1]}: projection count ${parity[2]}, table count ${parity[3]}, projection last seq ${parity[4]}, table last seq ${parity[5]}`;
+  const archived = INTEGRITY_PARITY_ARCHIVED.exec(text);
+  if (archived) return `messages parity failed for ${archived[1]}: archived rows ${archived[2]}, marker count ${archived[3]}`;
+  const missing = INTEGRITY_PARITY_MISSING.exec(text);
+  if (missing) return `messages parity failed for ${missing[1]}: stored message body missing`;
+  const record = INTEGRITY_PARITY_RECORD.exec(text);
+  if (record) return `messages parity failed for ${record[1]}: current record ${record[2]} differs`;
+  if (/^messages parity failed for /.test(text)) return "messages parity failed: stored messages disagree with the projection";
+  const backfill = INTEGRITY_BACKFILL_STOP.exec(text);
+  if (backfill) return `messages backfill stopped at ${backfill[1]} before room ${backfill[2]} reached sequence ${backfill[3]}`;
+  return `${step} integrity check failed`;
+}
 const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL,
@@ -2007,12 +2072,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
 
   // Record one isolated integrity failure durably: step, record id, the
   // error's stable code when it carries one (else the step's derived code),
-  // and a redacted one-line message — record ids and counts only, never
-  // record bodies. Re-recording the same failure bumps its count, so the
+  // and an allowlisted diagnostic message (see allowlistedIntegrityMessage)
+  // — record ids and counts only, never record bodies or arbitrary
+  // exception text. Re-recording the same failure bumps its count, so the
   // row proves the failure is still live, not a leftover.
   recordIntegrityFailure(step, recordId, error) {
     this.ensureIntegrityFailures();
-    const message = String(error?.message ?? error).replace(/[\u0000-\u001f\u007f]+/g, " ").slice(0, 240);
+    const message = allowlistedIntegrityMessage(step, error).slice(0, 240);
     const code = typeof error?.code === "string" && Number.isFinite(error?.status) && /^[a-z][a-z0-9_]{0,63}$/i.test(error.code)
       ? error.code
       : `${step}_failed`;
@@ -2053,7 +2119,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.recordIntegrityFailure("messages_backfill", failure.roomId, failure.error);
     }
     for (const row of this.integrityFailures()) {
-      if (row.step !== "messages_backfill" || failedNow.has(row.recordId)) continue;
+      // Per-room records only: the step-scoped record (record id "") is
+      // the batch loop's to clear, against verified scope coverage —
+      // "" is not a room, so the moot-room rule below must not eat it.
+      if (row.step !== "messages_backfill" || !row.recordId || failedNow.has(row.recordId)) continue;
       const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId);
       if (!roomExists || messagesBackfillCaughtUp(this.db, row.recordId)) {
         this.clearIntegrityFailure("messages_backfill", row.recordId);
@@ -2074,9 +2143,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     });
     // A room deleted since its failure was recorded is never picked by the
-    // sweep again; its record is moot.
+    // sweep again; its record is moot. The step-scoped record (record id
+    // "") is not a room record — the batch loop clears it, against
+    // verified scope coverage.
     for (const row of this.integrityFailures()) {
-      if (row.step !== "messages_parity") continue;
+      if (row.step !== "messages_parity" || !row.recordId) continue;
       if (!this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId)) {
         this.clearIntegrityFailure("messages_parity", row.recordId);
       }
@@ -2120,7 +2191,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const roomId of help?.checked ?? []) {
           if (!failedRooms.has(roomId)) this.clearIntegrityFailure("help_history", roomId);
         }
+        this.reconcileHelpFailureRecords(help, failedRooms);
       }
+    }
+  }
+
+  // Reconcile outstanding help-history records against current evidence.
+  // The audit only returns rooms it could see — a repaired room whose
+  // help state and history are entirely gone (while another room still
+  // has help, so the audit still runs) is never in `checked`, and its
+  // record would otherwise be reported forever. A room that no longer
+  // exists, or that carries no help trace the audit can see, cannot be
+  // re-audited: the condition its record named is gone, so the record is
+  // moot — the same rule the no-help-anywhere path applies globally.
+  // Rooms the audit can still see keep their records until they verify.
+  reconcileHelpFailureRecords(help, failedRooms = new Set()) {
+    const auditable = new Set(help?.auditable ?? []);
+    for (const row of this.integrityFailures()) {
+      if (row.step !== "help_history" || failedRooms.has(row.recordId)) continue;
+      const exists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId);
+      if (!exists || !auditable.has(row.recordId)) this.clearIntegrityFailure("help_history", row.recordId);
     }
   }
   // At most `limit` chain members whose cap was never copied off the invite.
@@ -2182,12 +2272,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       const [name, run] = steps[step];
       try {
-        run();
-        // A step-scoped record from an earlier wedge clears when the step
-        // next completes. Per-room records for the messages steps are
-        // managed by their step wrappers, not here.
-        this.clearIntegrityFailure(name, "");
+        const result = run();
+        // A step-scoped record from an earlier wedge clears only when
+        // this visit verifiably covered the step's whole scope (see
+        // stepVerifiedScope): incomplete or skipped work preserves it.
+        // Per-room records for the messages steps are managed by their
+        // step wrappers, not here.
+        if (stepVerifiedScope(name, result)) this.clearIntegrityFailure(name, "");
       } catch (error) {
+        // Operational failures are not record data: they propagate to
+        // the job's throw path with their rollback intact, instead of
+        // being isolated here and silently advanced past (see
+        // isOperationalIntegrityError).
+        if (isOperationalIntegrityError(error)) throw error;
         // Blast-radius isolation (the claim-prs #3464 shape): a step that
         // throws is recorded against the step and the cursor still
         // advances past the pair, so one poisoned record can no longer
@@ -2339,7 +2436,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // record aborting the whole path (and, through the frozen snapshot,
     // every later tick). The orphan-journal check is a single global
     // verdict, not a per-record iteration, so it still throws.
-    const collected = [];
     try {
       const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
       if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
@@ -2353,10 +2449,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.verifyInvitationRecord(id);
         this.clearIntegrityFailure("invitation_audit", id);
       } catch (error) {
-        collected.push({ step: "invitation_audit", recordId: id });
         this.recordIntegrityFailure("invitation_audit", id, error);
       }
       await yieldBetween();
+    }
+    // Records for invitations deleted since they failed are moot: the
+    // audit above can only re-verify invitations that still exist.
+    {
+      const current = new Set(ids);
+      for (const row of this.integrityFailures()) {
+        if (row.step === "invitation_audit" && row.recordId && !current.has(row.recordId)) {
+          this.clearIntegrityFailure("invitation_audit", row.recordId);
+        }
+      }
     }
     if (this.helpProjectionPresent()) {
       if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
@@ -2364,12 +2469,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const help = this.verifyHelpHistory({ collect: helpFailures });
       const failedRooms = new Set(helpFailures.map(failure => failure.roomId));
       for (const failure of helpFailures) {
-        collected.push({ step: "help_history", recordId: failure.roomId });
         this.recordIntegrityFailure("help_history", failure.roomId, failure.error);
       }
       for (const roomId of help?.checked ?? []) {
         if (!failedRooms.has(roomId)) this.clearIntegrityFailure("help_history", roomId);
       }
+      this.reconcileHelpFailureRecords(help, failedRooms);
       await yieldBetween();
     } else {
       // No help state anywhere: earlier help records can no longer be
@@ -2383,8 +2488,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // outstanding it is NOT advanced, so the next tick re-runs the full
     // path and re-audits the failed records until they verify — the
     // failures are reported every tick, never silently certified over.
+    // The decision reads the reconciled outstanding records for this
+    // path's audits, not only what this run happened to collect: a
+    // record left outstanding by an earlier run blocks certification
+    // until the reconciliation above retires it or it verifies clean.
+    const outstanding = this.integrityFailures()
+      .filter(row => row.step === "invitation_audit" || row.step === "help_history");
     let after = before;
-    if (!collected.length) {
+    if (!outstanding.length) {
       try {
         this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
       } catch (error) {
@@ -2399,7 +2510,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         throw tagIntegritySubcheck(error, "snapshot");
       }
     }
-    const verified = collected.length ? 0 : 1;
+    const verified = outstanding.length ? 0 : 1;
     if (Date.now() > deadline) return { matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, failures: this.integrityFailures() };
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
     return { matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, failures: this.integrityFailures() };
@@ -2408,7 +2519,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // With `collect` (an array), a room whose help history does not reconcile
   // is pushed as { roomId, error } and the audit continues with the other
   // rooms, returning { checked } with every audited room id; without it, the
-  // first bad room throws, as the startup paths require.
+  // first bad room throws, as the startup paths require. The return also
+  // carries `auditable`: every room id carrying any help trace (help
+  // events, room projection, or checkpoint projection) — the set of rooms
+  // this audit could ever reach, which callers use to reconcile failure
+  // records for rooms that no longer carry any trace.
   verifyHelpHistory({ collect = null } = {}) {
     return this.readTransaction(() => {
       const placeholders = HELP_EVENT_TYPES.map(() => "?").join(",");
@@ -2441,7 +2556,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             collect.push({ roomId, error: new Error("Help invitation history requires operator reconciliation") });
           }
         }
-        return { checked };
+        return { checked, auditable: [...new Set([...roomHelp, ...checkpointHelp])] };
       }
       for (const row of this.db.prepare("SELECT id, projection FROM rooms ORDER BY id").all()) {
         if (!helpRooms.has(row.id) && !roomHelp.has(row.id) && !checkpointHelp.has(row.id)) continue;
@@ -2455,7 +2570,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
         }
       }
-      return { checked };
+      return { checked, auditable: [...new Set([...helpRooms, ...roomHelp, ...checkpointHelp])] };
     });
   }
 

@@ -405,8 +405,15 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
 // once per room and bury the signal, so they still abort the call.
 // Everything else thrown while filling a room is that room's data — a log
 // that can no longer replay to the room's sequence, a malformed event body.
+// Operational failures are recognized by type first: the store's typed
+// storage_unavailable refusal (its transaction has already rolled back,
+// so no partial write exists) and SQLite lock contention (SQLITE_BUSY,
+// primary result code 5) are the environment failing, never the room's
+// data — blaming the room would strand its backfill behind a transient.
 function isRoomDataError(error) {
-  return !/no such (table|column)|missing schema|sqlite|database disk|disk full|readonly database/i
+  if (error?.code === "storage_unavailable" || error?.code === "SQLITE_BUSY") return false;
+  if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 5) return false;
+  return !/no such (table|column)|missing schema|sqlite|database disk|disk full|readonly database|database is locked/i
     .test(String(error?.message ?? error));
 }
 

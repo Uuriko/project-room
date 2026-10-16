@@ -327,7 +327,12 @@ export const JOBS = Object.freeze([
           const first = failures[0];
           const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
           if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
-          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"}: ${oneLine(first.message)} (${failures.length} outstanding)`);
+          // The operator line carries the allowlisted fields only —
+          // sub-check, record id, stable code, class, count. The stored
+          // failure message is a diagnostic for the record's owner, not
+          // log text: re-emitting it here every tick would republish
+          // whatever a record's error once contained.
+          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
           const summary = {};
           for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
