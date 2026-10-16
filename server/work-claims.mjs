@@ -496,11 +496,17 @@ const ciOf = value => {
   check(CI_STATES.includes(value.state), `ci.state must be one of ${CI_STATES.join(", ")}`);
   check(value.url == null || (typeof value.url === "string" && value.url.length > 0 && value.url.length <= 300), "ci.url must be a short string or null");
   check(value.headSha == null || (typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha)), "ci.headSha must be a 40-character commit sha or null");
+  // #3685: the settlement is bound to the delivery it was made against —
+  // the digest of the delivery current when recordCi stamped it, or null
+  // when the round had no delivery yet. Records predating the binding
+  // carry no stamp and read as null (settled within the round).
+  check(value.deliveryDigest == null || (typeof value.deliveryDigest === "string" && /^[0-9a-f]{64}$/.test(value.deliveryDigest)), "ci.deliveryDigest must be a 64-character delivery digest or null");
   check(typeof value.checkedAt === "string" && Number.isFinite(Date.parse(value.checkedAt)), "ci.checkedAt must be an ISO timestamp");
   return Object.freeze({
     state: value.state,
     url: value.url ?? null,
     headSha: value.headSha ?? null,
+    deliveryDigest: value.deliveryDigest ?? null,
     checkedAt: value.checkedAt
   });
 };
@@ -513,14 +519,36 @@ const reviewBasisOf = value => {
   check(value.claimedAt === null || typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "review basis claimedAt must be an ISO timestamp or null");
   check(value.revision === null || typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 200, "review basis revision must be a short string or null");
   check(value.headSha === null || typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha), "review basis headSha must be a commit SHA or null");
-  return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha });
+  // #3684: the basis also binds the delivery the review was recorded
+  // against — its digest, and the claim's delivery generation at record
+  // time (0 before any delivery exists). Bases written before the
+  // binding carry neither and normalize to null/0, i.e. they read as
+  // in-flight approvals (see currentReviewBasis for what those cover).
+  check(value.deliveryDigest === undefined || value.deliveryDigest === null
+    || typeof value.deliveryDigest === "string" && /^[0-9a-f]{64}$/.test(value.deliveryDigest), "review basis deliveryDigest must be a delivery digest or null");
+  check(value.deliveryGeneration === undefined || value.deliveryGeneration === null
+    || Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration >= 0, "review basis deliveryGeneration must be a non-negative integer");
+  return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha,
+    deliveryDigest: value.deliveryDigest ?? null, deliveryGeneration: value.deliveryGeneration ?? 0 });
 };
 const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
-  revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
+  revision: item.revision ?? null, headSha: item.ci?.headSha ?? null,
+  deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0 });
 const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key => left[key] === right[key]);
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
-  return basis && Object.keys(current).every(key => basis[key] === current[key]);
+  if (!basis) return false;
+  // #3684 delivery binding: an approval recorded while a delivery
+  // existed counts only for that delivery's digest — a re-delivery
+  // stales it exactly like a CI head move. An approval recorded before
+  // any delivery (generation 0) attests the work in flight and counts
+  // only for the round's FIRST delivery (generation 1); a replacement
+  // delivery is outside what it attested and stales it too.
+  const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
+    ? basis.deliveryDigest === current.deliveryDigest
+    : (basis.deliveryGeneration ?? 0) === 0 && current.deliveryGeneration <= 1;
+  return deliveryCurrent
+    && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
 const reviewRecordOf = value => {
@@ -612,6 +640,17 @@ export const deliveryDigest = bundle => createHash("sha256").update(canonicalPay
   checks: bundle?.checks ?? [],
   criteria: bundle?.criteria ?? [],
 }), "utf8").digest("hex");
+// An na criterion's evidenceRef counts as evidence only when it resolves
+// to the delivery itself: the ref must name the bundle's own artifact
+// (sha256:<artifact digest> — the one ref form the bundle codec admits
+// that the platform can resolve against the frozen bundle). A ref to a
+// blob that is not this delivery is a caller assertion, not evidence
+// (#3683).
+const naEvidenceResolves = (delivery, evidenceRef) => {
+  if (typeof evidenceRef !== "string" || evidenceRef.length === 0) return false;
+  const artifact = delivery?.artifact ?? null;
+  return artifact !== null && evidenceRef === `sha256:${artifact.sha256}`;
+};
 // The platform's own executed checks over a delivered item (#3547: a
 // checker re-runs rather than re-reads). Pure over the item: the bundle's
 // stored digest is recomputed, the criteria mapping is re-validated against
@@ -630,18 +669,41 @@ export function executeDeliveryChecks(item) {
         : "stored bundle no longer matches the digest frozen at finish" }));
     const criteria = item?.acceptanceCriteria ?? [];
     if (criteria.length > 0) {
-      const mapped = new Set((delivery.criteria ?? []).map(entry => entry.criterion));
+      const mapped = new Map((delivery.criteria ?? []).map(entry => [entry.criterion, entry]));
       const missing = criteria.filter(criterion => !mapped.has(criterion));
+      // #3683: coverage reads the mapping's own statuses, not just its
+      // names. A criterion the delivery itself declares not_met fails the
+      // check, and an na counts only with an evidenceRef that resolves to
+      // the delivered artifact itself (naEvidenceResolves).
+      const notMet = criteria.filter(criterion => mapped.get(criterion)?.status === "not_met");
+      const unbackedNa = criteria.filter(criterion => {
+        const entry = mapped.get(criterion);
+        return entry?.status === "na" && !naEvidenceResolves(delivery, entry.evidenceRef);
+      });
+      const problems = [
+        ...(missing.length > 0 ? [`criteria with no mapping: ${missing.join("; ")}`] : []),
+        ...(notMet.length > 0 ? [`criteria the delivery declares not_met: ${notMet.join("; ")}`] : []),
+        ...(unbackedNa.length > 0 ? [`criteria declared na without evidence resolving to the delivered artifact: ${unbackedNa.join("; ")}`] : []),
+      ];
       results.push(Object.freeze({ name: "criteria_coverage",
-        result: missing.length > 0 ? "fail" : "pass",
-        detail: missing.length > 0 ? `criteria with no mapping: ${missing.join("; ")}` : `all ${criteria.length} criteria mapped` }));
+        result: problems.length > 0 ? "fail" : "pass",
+        detail: problems.length > 0 ? problems.join("; ") : `all ${criteria.length} criteria mapped and met` }));
     }
   }
   const ci = item?.ci ?? null;
   if (ci && (ci.state === "success" || ci.state === "failure")) {
+    // #3685: a settlement counts only for the delivery round it was made
+    // in. recordCi stamps the digest of the delivery current at settle
+    // time (null when the round had no delivery yet); a stamp naming a
+    // different delivery is stale evidence and fails closed — the poller
+    // re-settles against the current delivery. (Re-delivery, release and
+    // re-claim also clear the record outright; this is the second lock.)
+    const bound = ci.deliveryDigest == null || (delivery !== null && ci.deliveryDigest === delivery.digest);
     results.push(Object.freeze({ name: "ci_settlement",
-      result: ci.state === "success" ? "pass" : "fail",
-      detail: `platform-settled CI is ${ci.state}${ci.headSha ? ` at ${ci.headSha}` : ""}` }));
+      result: bound && ci.state === "success" ? "pass" : "fail",
+      detail: bound
+        ? `platform-settled CI is ${ci.state}${ci.headSha ? ` at ${ci.headSha}` : ""}`
+        : `platform-settled CI is ${ci.state}${ci.headSha ? ` at ${ci.headSha}` : ""} but was settled against a different delivery — fresh settlement required` }));
   }
   return Object.freeze(results);
 }
@@ -751,6 +813,11 @@ export const workOf = value => {
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
     acceptanceCriteria, delivery, verification,
+    // #3684: how many deliveries this claim round has frozen (0 = none
+    // yet). In-flight approvals (basis generation 0) cover only the
+    // round's first delivery; the counter is what makes "first" a fact
+    // the kernel can check rather than a narrative.
+    deliveryGeneration: Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration > 0 ? value.deliveryGeneration : 0,
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
@@ -942,6 +1009,10 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     pullRequest: links ? (links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null) : item.pullRequest,
     repo: repo === undefined ? item.repo : repoOf(repo),
     branch: branch === undefined ? item.branch : branchOf(branch),
+    // #3685: a fresh claim opens a fresh delivery round — no CI
+    // settlement from a previous round may be cited for this one, and
+    // the delivery generation restarts with the round (#3684)
+    ci: null, deliveryGeneration: 0,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
@@ -1140,9 +1211,20 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
       required: (item.acceptanceCriteria?.length ?? 0) > 0 || effectivePolicy !== "self_attested",
     });
     deliveredItem = bundle
-      ? { ...item, delivery: Object.freeze({ ...bundle, digest: deliveryDigest(bundle), deliveredBy: agent, deliveredAt: isoOf(atMs) }) }
+      ? { ...item, delivery: Object.freeze({ ...bundle, digest: deliveryDigest(bundle), deliveredBy: agent, deliveredAt: isoOf(atMs) }),
+        // #3684: every frozen delivery advances the round's generation —
+        // approvals bound to an earlier generation's delivery go stale.
+        deliveryGeneration: (item.deliveryGeneration ?? 0) + 1 }
       : { ...item, delivery: null };
   }
+  // #3685: a finish that REPLACES an existing delivery opens a new
+  // delivery round — the previous round's CI settlement is invalidated
+  // with the old delivery, and fresh evidence must settle against the
+  // new one. A round's first finish keeps the settlement the round
+  // already earned. (Review approvals stale on their own: the basis
+  // binds the delivery digest — #3684.)
+  const replacesDelivery = finishing && item.delivery != null;
+  if (replacesDelivery) deliveredItem = { ...deliveredItem, ci: null };
   // Verify step: the platform's executed checks run over the delivered
   // bundle. A failing executed check blocks a reviewed verify outright; on
   // a self-attested collapse the results are recorded on the verification
@@ -1192,6 +1274,10 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // the delivery belongs to the owner's round: a release clears it (and
     // its verification fact) exactly like the round's reviews
     delivery: released ? null : deliveredItem.delivery,
+    // #3685: the CI settlement belongs to the delivery round too — a
+    // release or a replacement delivery clears it (see replacesDelivery)
+    ci: released || replacesDelivery ? null : item.ci,
+    deliveryGeneration: deliveredItem.deliveryGeneration ?? item.deliveryGeneration ?? 0,
     verification,
     ...withProvenance };
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
@@ -1327,7 +1413,7 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     // be refreshed by identical content — that takes a fresh summary.
     const soleHeadMove = prior.basis !== null && prior.basis !== undefined && currentBasis.headSha !== null
       && prior.basis.headSha !== currentBasis.headSha
-      && ["version", "owner", "claimedAt", "revision"].every(key => prior.basis[key] === currentBasis[key]);
+      && ["version", "owner", "claimedAt", "revision", "deliveryDigest", "deliveryGeneration"].every(key => prior.basis[key] === currentBasis[key]);
     const deliberateRefresh = namedBasis !== null && (soleHeadMove || !prior.basis);
     if (!deliberateRefresh) return Object.freeze(item);
   }
@@ -1358,7 +1444,11 @@ export function closeWhenLive(work, liveRevision, now) {
 export function recordCi(work, ci, now) {
   const item = workOf(work);
   const atMs = nowMsOf(now);
-  const next = ciOf({ ...ci, checkedAt: ci?.checkedAt ?? isoOf(atMs) });
+  // #3685: stamp the settlement with the delivery it was made against —
+  // the digest of the delivery current now, or null when this round has
+  // no delivery yet. The stamp is computed here, never caller-supplied,
+  // so a settlement can never claim a delivery it did not settle under.
+  const next = ciOf({ ...ci, deliveryDigest: item.delivery?.digest ?? null, checkedAt: ci?.checkedAt ?? isoOf(atMs) });
   const changed = (item.ci?.state ?? null) !== next.state;
   const updated = { ...item, ci: next };
   return { changed, item: changed ? withHistory(updated, atMs, item.owner ?? "system", "ci", next.state) : updated };
@@ -1403,7 +1493,7 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
   return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]),
-    delivery: null, verification: null }, atMs, agent, `reassigned:${target}`, note);
+    delivery: null, verification: null, ci: null, deliveryGeneration: 0 }, atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -1426,7 +1516,7 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null,
+    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);

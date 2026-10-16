@@ -444,7 +444,30 @@ export class PublicWorkClaims {
               const mapped = new Set(criteriaAttestation.map(entry => entry.criterion));
               const missing = offerCriteria.find(criterion => !mapped.has(criterion));
               check(missing === undefined, `criteriaAttestation does not cover criterion "${missing}"`);
-              executedChecks.push({ name: 'criteria_coverage', result: 'pass', at: new Date(this.store.now()).toISOString() });
+              // #3683: coverage executes the attestation's statuses, not
+              // just its names. A criterion the deliverer declares not_met
+              // fails the check, and an na counts only when its
+              // evidenceRef resolves to something the platform holds: one
+              // of the reported checks that passed ("unit: pass"), or the
+              // submitted artifact itself (sha256:<artifact hash>, which
+              // the platform computes from the bytes at this very finish).
+              const byCriterion = new Map(criteriaAttestation.map(entry => [entry.criterion, entry]));
+              const passedChecks = new Set();
+              for (const text of input.checksReported) {
+                const match = /^(.+?):\s*(pass|passed)\s*$/i.exec(text);
+                if (match) passedChecks.add(match[1].trim());
+              }
+              const naBacked = entry => {
+                if (!entry || typeof entry.evidenceRef !== 'string' || entry.evidenceRef.length === 0) return false;
+                if (entry.evidenceRef === `sha256:${hash(input.artifactText)}`) return true;
+                const name = entry.evidenceRef.startsWith('check:') ? entry.evidenceRef.slice('check:'.length) : entry.evidenceRef;
+                return passedChecks.has(name);
+              };
+              const coveragePass = offerCriteria.every(criterion => {
+                const entry = byCriterion.get(criterion);
+                return entry.status === 'met' || (entry.status === 'na' && naBacked(entry));
+              });
+              executedChecks.push({ name: 'criteria_coverage', result: coveragePass ? 'pass' : 'fail', at: new Date(this.store.now()).toISOString() });
             }
           }
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
@@ -453,7 +476,10 @@ export class PublicWorkClaims {
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
-            verification: executedChecks.length > 0 ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            // #3683: the system_checked label is earned by a check that
+            // PASSED — a recorded failure is honest evidence on the
+            // receipt, never a label upgrade.
+            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
           // Paid tasks attach the submission to the funded escrow bounty
           // before the receipt lands, so a receipt never exists without its
           // settlement vehicle in 'submitted' state (no-op when unpaid).

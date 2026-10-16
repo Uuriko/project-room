@@ -158,8 +158,9 @@ export class PublicWorkReviews {
   // The receipt gains state "verified", the executed checks that ran
   // (finish-time criteria coverage + verify-time artifact integrity), and
   // the verification level they earn — "system_checked" only when at least
-  // one system-executed check is on record; an acceptance with no executed
-  // checks keeps its honest "hash_only" level under a verified state.
+  // one system-executed check is on record AND passed; an acceptance with
+  // no passed executed checks keeps its honest "hash_only" level under a
+  // verified state.
   stampPublicReceiptVerified(receiptId, review) {
     const row = this.db.prepare('SELECT receipt_json, artifact_sha256 FROM public_work_receipts WHERE receipt_id=?').get(receiptId);
     if (!row) return;
@@ -169,7 +170,9 @@ export class PublicWorkReviews {
       if (entry && typeof entry.name === 'string') executed.set(entry.name, entry);
     receipt.state = 'verified';
     receipt.executedChecks = [...executed.values()];
-    receipt.verification = receipt.executedChecks.length > 0 ? 'system_checked' : (receipt.verification ?? 'hash_only');
+    // #3683: as at finish, the label requires a passed check — a failed
+    // criteria_coverage on record must not read as a system endorsement.
+    receipt.verification = receipt.executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : (receipt.verification ?? 'hash_only');
     receipt.verified = { by: review.decision.actorId, at: review.decision.at,
       reviewRevision: review.revision, passVerdict: review.verification?.verdict ?? null };
     this.db.prepare('UPDATE public_work_receipts SET receipt_json=? WHERE receipt_id=?').run(JSON.stringify(receipt), receiptId);
