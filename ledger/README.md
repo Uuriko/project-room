@@ -11,7 +11,7 @@ Design evidence: `02a-feasibility.md` Q1 and `02-protocol-design.md` in
 Jill's local `~/workspace/strategy-2026-10/comms-bridge/`; the protocol
 handshake is the Coordination v3 comment on issue #3299:
 
-- Handshake comment: <!-- PLACEHOLDER: insert the #3299 Coordination v3 handshake comment URL here once posted -->
+- Handshake comment: https://github.com/Uuriko/project-room/issues/3299#issuecomment-6224488191
 
 ## Layout — disjoint write sets, so concurrent writers conflict ~never
 
