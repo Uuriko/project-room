@@ -128,6 +128,7 @@
   "tests/analytics-dashboard-honesty.test.js": 10229,
   "tests/analytics-derive.test.js": 2990,
   "tests/analytics-export.test.js": 2651,
+  "tests/analytics-loop-funnel.test.js": 3200,
   "tests/analytics-map.test.js": 3474,
   "tests/analytics-retention.test.js": 3355,
   "tests/analytics-sampling.test.js": 3620,
