@@ -7772,8 +7772,11 @@ paths:
       description: |
         Challenger stakes a bond of exactly 25% of the bounty (the minimum
         and the cap). The designated third-lane verifier, if one was named
-        at posting, seats as the decider; otherwise the dispute is honestly
-        unavailable and the 14-day timeout default (RELEASE) is the backstop.
+        at posting, seats as the decider; if no decider can be seated the
+        dispute is honestly unavailable and the request is refused
+        (`dispute_unavailable`) before any bond locks — a dispute never
+        opens into an empty decider seat. The 14-day timeout default
+        (RELEASE) remains the backstop for disputes that stall undecided.
         Emits `bounty.disputed`. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -7805,7 +7808,7 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '409': { description: dispute_exists }
-        '422': { description: invalid_bounty_input }
+        '422': { description: invalid_bounty_input, dispute_unavailable }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide:
     post:
       summary: Rule on a dispute (seated decider only)
