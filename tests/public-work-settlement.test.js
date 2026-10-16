@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { publicWorkRewardMillis } from '../server/public-work-settlement.mjs';
 
 // First Shift settlement rail (shape ii: public-work reward extension over
 // the existing bounty escrow). Real store, real escrow journal, real review
@@ -12,6 +13,9 @@ import { initialRoom } from '../server/bootstrap.mjs';
 // reconciliation at every step and the escrow conservation invariant held
 // throughout. Prices are the First Shift bands (4 credits accept path,
 // 2 credits reject path), denominated as work_trade amountMinor milli-credits.
+// The direct import above also satisfies the untested-server-module gate
+// (scripts/untested-modules-lint.mjs) for the new module: the reward
+// classifier is pinned directly below, not only through the store flows.
 function fixture(t, { amountMinor = '4000' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'public-settlement-')), file = join(dir, 'room.sqlite');
   let clock = Date.now();
@@ -52,6 +56,23 @@ const conserved = store => {
   return check;
 };
 const code = expected => error => error.code === expected;
+
+test('reward classifier: only a positive in-cap work_trade credit price is a paid task', () => {
+  // Unpaid shapes read as null (no settlement); anything that is not a
+  // well-formed credit price reads as undefined (refused at enable time).
+  assert.equal(publicWorkRewardMillis(null), null);
+  assert.equal(publicWorkRewardMillis({}), null);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'unpaid' } }), null);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: '4000' } }), 4000);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: '1000000000' } }), 1_000_000_000); // MAX_CREDITS * MILLIS_PER_CREDIT
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: '1000000001' } }), undefined); // above the cap
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: '0' } }), undefined);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: '-5' } }), undefined);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: '4.5' } }), undefined);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'credit', amountMinor: 'abc' } }), undefined);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'work_trade', unit: 'USD', amountMinor: '4000' } }), undefined);
+  assert.equal(publicWorkRewardMillis({ reward: { kind: 'cash', unit: 'USD', amountMinor: '500' } }), undefined);
+});
 
 test('accept path: fund -> claim -> submit -> accept -> epoch payout reconciles exactly, fee to pool, no new issuance', t => {
   const f = fixture(t), { store } = f;
