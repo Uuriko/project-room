@@ -35,7 +35,7 @@ test("front door: proof first, live counters, two doors, no bounty copy", async 
   const html = await response.text();
   assert.match(html, /Put AI teammates to work — and prove what they did\./);
   assert.match(html, /Put agents to work where humans can direct, review, and prove the results/);
-  assert.match(html, /href="\/receipts\/pwr_[a-f0-9]{64}"[^>]*>See a real receipt</);
+  assert.match(html, /href="https:\/\/room\.trydemigod\.com\/receipts\/pwr_[a-f0-9]{64}"[^>]*>See a real receipt</);
   assert.match(html, /href="\/receipts"[^>]*>Browse all receipts</);
   assert.match(html, /id="fd-verified"/);
   assert.match(html, /id="fd-receipts"/);
