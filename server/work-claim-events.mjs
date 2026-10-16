@@ -11,9 +11,17 @@
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { recordWakeEvent } from "./wake-metrics.mjs";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
+import { ServiceError } from "./service-error.mjs";
+// Read at call time, like the other satellite modules (access-requests,
+// referrals): store.mjs sits above this module in the import graph, so the
+// binding is only safe to dereference once modules are fully loaded.
+import { PILOT_LIMITS } from "./store.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+
+const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
 export const WORK_CLAIM_ACTIONS = WORK_CLAIM_EVENT_ACTIONS;
 
@@ -98,12 +106,26 @@ function claimWakeSkip(store, roomId, memberId, actorId) {
 export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, actorId } = {}) {
   if (!store?.agentHeartbeats || typeof memberId !== "string" || typeof messageId !== "string") return null;
   const skipped = claimWakeSkip(store, roomId, memberId, actorId);
-  if (skipped) return { enqueued: false, skipped };
+  if (skipped) {
+    // #3345: designed suppressions are counted, not silent.
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "suppressed_policy", kind: "claim", subjectId: memberId });
+    return { enqueued: false, skipped };
+  }
   const parts = messageId.startsWith("work-claim:") ? messageId.split(":") : [];
   const derivedReason = reason ?? (parts.length >= 3 ? parts[2] : undefined);
   const workClaim = parts.length >= 2 ? parts[1] : undefined;
   const identityId = linkedIdentityId(store, roomId, memberId);
-  const agentId = identityId ?? memberId;
+  // #3266: no identity link means no identity-scoped door can ever read
+  // the signal. The old fallback enqueued under the bare memberId,
+  // parking undrainable rows that counted nowhere; now the attempt is a
+  // counted, journaled loss instead of phantom stock.
+  if (!identityId) {
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "suppressed_no_identity", kind: "claim", subjectId: memberId, reason: "no_identity_link" });
+    return { enqueued: false, skipped: "no_identity" };
+  }
+  const agentId = identityId;
   try {
     const result = store.agentHeartbeats.enqueueWake({ agentId, kind: "mention", roomId, messageId });
     if (result?.enqueued && identityId && store.agentPlugin?.deliverWakePing) {
@@ -116,6 +138,11 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
     }
     return result;
   } catch (error) {
+    // #3345: the swallow stays (a wake must never roll back the claim),
+    // but the loss is now journaled with an allowlisted reason — never
+    // the exception text — instead of existing only in a console line.
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "failed", kind: "claim", subjectId: memberId, reason: "enqueue_error" });
     console.error("work claim wake failed:", error?.message ?? error);
     return null;
   }
@@ -161,9 +188,36 @@ export function claimEventCoalesced(store, roomId, claimId, action, atMs) {
   return Number.isFinite(at) && atMs - at >= 0 && atMs - at < CLAIM_EVENT_COALESCE_MS;
 }
 
+// #3747: the pilot caps gate growth, not exits — the same distinction the
+// command path draws with its cleanup exemption (store.command: a release of
+// an active claim, a completion, a blocker resolution and a supersession all
+// land at capacity; proposals, starts and verdicts refuse). A transition
+// that ends a live claim must always land: capped, it could never fire, and
+// the room would livelock with every open claim frozen mid-flight. Each
+// resolving transition is a one-way exit — it can fire at most once per
+// opening, because reopening is a growth action (created / claimed) that
+// stays capped — so events past the cap stay bounded by the claims already
+// open. A row that lands already terminal (done / closed / superseded)
+// opened nothing, whatever action carried it: superseding a never-accepted
+// item births its board card already closed. previousState is the claim's
+// state before the transition, for the one exit the resulting row cannot
+// show: leaving "blocked" (unblocking lands the claim back in a live
+// state, not a terminal one). A caller whose whole operation is one of
+// the command layer's cleanup transitions (the board sync) may instead
+// declare resolving outright: a supersession's footprint includes the
+// successor's phantom card, born "unclaimed" in the same transaction —
+// lineage bookkeeping for work that already exists, not new work.
+const RESOLVING_ACTIONS = new Set(["released", "lease_expired", "closed", "deleted", "pr_merged", "pr_closed"]);
+
+function isResolvingClaimEvent(action, item, previousState) {
+  if (item?.state === "done" || item?.state === "closed" || item?.supersededBy) return true;
+  if (RESOLVING_ACTIONS.has(action)) return true;
+  return action === "state_changed" && previousState === "blocked" && item?.state !== "blocked";
+}
+
 // Handler unit tests drive the routes with a registry-only store; events need
 // the real event log, so a store without one records nothing here.
-export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
+export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previousOwnerId = null, previousState = null, resolving = false, atMs = null, paths = undefined, pullRequest = undefined, reason = undefined, ciState = undefined, verdict = undefined, attention = undefined, attentionMemberId = undefined, coalesce = false }) {
   if (!store?.db || typeof store.room !== "function") return null;
   const stamp = Number.isFinite(atMs) ? atMs : (typeof store.now === "function" ? store.now() : Date.now());
   if (coalesce && claimEventCoalesced(store, roomId, item.id, action, stamp)) return null;
@@ -172,6 +226,16 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   // the receipt so the claim write still commits; an archived room has no
   // live timeline to update.
   if (isRoomArchived(room.state)) return null;
+  // #3699: the same pilot caps every other append path enforces
+  // (store.command, appendSideTableEvent). This runs inside the caller's
+  // claim transaction, so refusing here rolls the claim write back with
+  // its receipt — a capped room refuses the change whole, never records
+  // a claim whose event silently never landed. #3747: resolving
+  // transitions (isResolvingClaimEvent) are exempt from both caps,
+  // mirroring the command path's cleanup exemption — at capacity a room
+  // can still end every claim it has open, it just cannot grow.
+  const resolvingEvent = resolving === true || isResolvingClaimEvent(action, item, previousState);
+  if (!resolvingEvent && room.sequence >= PILOT_LIMITS.eventsPerRoom) fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
   const actor = room.state.members?.[actorId];
   const incoming = event({
     id: randomUUID(),
@@ -185,9 +249,11 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   if (actor?.system === true) incoming.data.actorKind = "system";
   const state = applyEvent(room.state, incoming);
   const sequence = room.sequence + 1;
-  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, store.storedProjection(roomId, compact), roomId);
+  const projection = store.storedProjection(roomId, compact);
+  if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+  store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {
     if (store.agentPlugin) store.agentPlugin.fanoutRoomEvent({ roomId, event: incoming });

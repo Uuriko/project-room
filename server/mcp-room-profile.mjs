@@ -314,14 +314,14 @@ function validWakeArgs(name, args) {
   if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification));
   }
   if (name === "wake_clear") return validHostId(args.hostId);
   if (name === "heartbeat_set") {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
@@ -660,6 +660,9 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
+    // #3265: the MCP heartbeat door carries the same truncation flag as
+    // the HTTP doors — heartbeat() computed it and this receipt dropped it.
+    more: result.more === true,
     next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {})
   };
 }
@@ -711,7 +714,14 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
+    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
+    // value through untouched (omitted = preserve the stored declaration,
+    // a number = replace, explicit null = clear). wake_clear has no
+    // cadenceSeconds field by design, so it sends an explicit null —
+    // clearing the declaration is part of what "clear" means for this
+    // tool, now expressed as the documented clear instead of as the
+    // side effect of an omitted field.
+    const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
     // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
     // API key gets the same pull-only guard and host namespace as HTTP.
@@ -724,7 +734,7 @@ async function callWakeTool(store, secret, identity, name, args) {
       return store.transaction(() => {
         const auth = resolveAuth(null, MCP_WAKE_SCOPE);
         if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-        const result = heartbeatWithListener(store, auth, data);
+        const result = heartbeatWithListener(store, auth, data, { door: "mcp" });
         if (auth.scopedKey) result.host = { ...result.host, hostId: args.hostId };
         return heartbeatReceipt(agentId, result);
       });
@@ -742,7 +752,7 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.transaction(() => {
       const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
       if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null });
+      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null, door: "mcp" });
     });
   }
   if (name === "wake_pause") {

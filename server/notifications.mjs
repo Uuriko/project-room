@@ -22,10 +22,6 @@ const WORK_UPDATE_TYPES = new Set([
   T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED, T.WORK_COMPLETED, T.WORK_SUPERSEDED,
   T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HANDOFF_RECORDED, T.WORK_HALT_CLEARED
 ]);
-// Tag acknowledgment (2026-09-23): the one-tap reaction the client offers on
-// pending mention items. "like" is the 👍 reaction key in src/conversation.js
-// (REACTIONS); a bare react on the mentioning message counts as a response.
-export const SUGGESTED_ACK_REACTION = "like";
 // RC-2026-09-19-063: session enforcement events. A round-limit pause or a
 // budget stop is a work control firing — the room owner is told even when
 // they are not the accountable/verifier on the card, because the pause
@@ -168,8 +164,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
   // (a) has an active reaction on the mentioning message (their id appears
   // in any `message.reactions[*]` member list), or (b) authored a message in
   // the same thread (same thread root) with a later sequence than the
-  // mention. `suggestedAck` names the one-tap reaction the client offers
-  // ("like" = 👍). Existing scoping is untouched: this post-pass only reads
+  // mention. Existing scoping is untouched: this post-pass only reads
   // items the loop above already admitted, so deleted messages, muted
   // threads, muted actors, DM filtering, and self-notify rules all hold.
   for (const item of items.values()) {
@@ -187,7 +182,6 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       return threadRootOf(replyId) === mentionRoot;
     });
     item.ackState = (reacted || replied) ? "acknowledged" : "pending";
-    item.suggestedAck = SUGGESTED_ACK_REACTION;
   }
   return [...items.values()].sort((a, b) => b.sequence - a.sequence);
 }
