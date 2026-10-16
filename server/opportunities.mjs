@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import { boardRowForItem, briefForWorkItem } from "./work-item-board.mjs";
 
 // Public opportunity feed (v2).
 //
@@ -150,7 +151,8 @@ function roomProjection(db, roomId) {
 
 const roomPath = roomId => `/?room=${encodeURIComponent(roomId)}`;
 
-function helpWantedOpportunity(item, roomId, roomTitle, now) {
+function helpWantedOpportunity(item, roomId, roomTitle, now, boardRow = null) {
+  const brief = briefForWorkItem(item, boardRow);
   const help = item?.helpWanted;
   if (!help || help.status !== "open") return null;
   const expiresAt = Date.parse(help.expiresAt);
@@ -165,11 +167,11 @@ function helpWantedOpportunity(item, roomId, roomTitle, now) {
     roomTitle,
     roomPath: roomPath(roomId),
     title,
-    definitionOfDone: cleanText(item.definitionOfDone),
+    definitionOfDone: cleanText(brief.definitionOfDone),
     helpScope: cleanText(help.scope),
     helpExpiresAt: help.expiresAt,
     workState: item.state,
-    mode: item.mode ?? null,
+    mode: brief.mode ?? null,
     openedAt: help.openedAt,
     labels: cleanLabels(item.labels),
   };
@@ -216,7 +218,7 @@ export function buildOpportunitiesFeed(store, { now = Date.now(), roomId = null,
     const workItems = projection.workItems && typeof projection.workItems === "object" ? Object.values(projection.workItems) : [];
     for (const item of workItems) {
       if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
-      const opp = helpWantedOpportunity(item, id, roomTitle, now);
+      const opp = helpWantedOpportunity(item, id, roomTitle, now, boardRowForItem(store, id, item.id));
       if (opp) opportunities.push(opp);
     }
   }

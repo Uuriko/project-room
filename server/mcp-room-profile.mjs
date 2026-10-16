@@ -24,6 +24,7 @@ import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
+import { boardBriefForItem } from "./work-item-board.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -340,10 +341,10 @@ function validWakeArgs(name, args) {
   return false;
 }
 
-function workRecord(item, now) {
+function workRecord(item, now, brief = null) {
   return {
     id: item.id, title: item.title, state: item.state, revision: item.revision,
-    mode: item.mode, definitionOfDone: item.definitionOfDone, next: nextWorkStep(item, now)
+    mode: brief?.mode ?? item.mode, definitionOfDone: brief?.definitionOfDone ?? item.definitionOfDone, next: nextWorkStep(item, now)
   };
 }
 
@@ -369,7 +370,7 @@ function listWork(store, secret, args) {
     workItems: Object.fromEntries(candidates.map(item => [item.id, item]))
   }, args.query);
   let work = (matches?.work ?? candidates.map(item => ({ item }))).map(({ item, excerpt }) => ({
-    ...workRecord(item, now),
+    ...workRecord(item, now, boardBriefForItem(store, snapshot.roomId, item)),
     ...(excerpt === undefined ? {} : { excerpt })
   }));
   let sort = null;

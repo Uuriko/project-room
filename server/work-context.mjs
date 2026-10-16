@@ -5,6 +5,7 @@ import { workOffersContext } from "../src/help-offers.js";
 import { sessionRecord, budgetCard, presentedSessionStatus } from "../src/work-item-session.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
+import { briefForWorkItem } from "./work-item-board.mjs";
 
 // The exact omissions every selected read reports; the access summary repeats the same list.
 export const WORK_CONTEXT_OMISSIONS = Object.freeze(["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"]);
@@ -33,8 +34,14 @@ const pick = (value, fields) => value == null ? null
   : Object.fromEntries(fields.split(" ").filter(key => Object.hasOwn(value, key)).map(key => [key, structuredClone(value[key])]));
 
 // Shared current record; no prior receipts/checks, conversation text or event log.
-export function currentWorkRecord(item) {
+export function currentWorkRecord(item, boardRow = null) {
   const work = pick(item, "id title definitionOfDone revision state mode sourceMessageId proposedById accountableMemberId verifierMemberId humanDecisionMakerId independentVerificationRequired ownerDecisionRequired supersededBy createdAt updatedAt");
+  // Slice 3b: board-first brief — a board row that carries the field wins.
+  if (boardRow) {
+    const brief = briefForWorkItem(item, boardRow);
+    if (typeof boardRow.definitionOfDone === "string") work.definitionOfDone = brief.definitionOfDone;
+    if (typeof boardRow.mode === "string") work.mode = brief.mode;
+  }
   const session = sessionRecord(item);
   work.status = session.status;
   work.displayStatus = presentedSessionStatus(item);
@@ -85,9 +92,9 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, boardRow = null }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
-  const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
+  const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item, boardRow);
   // Work assignment does not expand a targeted message's audience. Apply the
   // same participant boundary to delivered source, preview and inferred people.
   const linked = item.sourceMessageId ? state.messages.find(message => message.id === item.sourceMessageId
