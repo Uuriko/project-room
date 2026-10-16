@@ -2070,13 +2070,30 @@ export class BountyEscrow {
   }
 
   acceptWork(roomId, bountyId, { acceptor, verifierAttestation, actor } = {}) {
-    return this.store.transaction(() => {
+    // #3591: this entry point self-finalizes (see the keeper pass below).
+    // When the pass settles the bounty, the settlement must COMMIT even
+    // though the accept itself is refused — a throw inside the transaction
+    // would roll the settlement back and leave the race in place. The
+    // refusal is therefore raised after the transaction returns.
+    let selfFinalizedState = null;
+    const result = this.store.transaction(() => {
       this._ensure();
       const lane = this._requireLane(roomId, acceptor, "acceptor");
       const act = this._actorFor(roomId, actor, lane);
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
+      // #3591: evaluate the time windows before state. One deadline serves
+      // as claim close, submission deadline, and the end of the review
+      // window, but only the keeper honored it — so a post-deadline accept
+      // raced a permissionless finalize for the same facts. Running the
+      // keeper pass first makes every door behave exactly as if the keeper
+      // had just run: post-deadline accepts always lose, deterministically.
+      const now = this.nowMs();
+      if (this._keeperPass(bounty, now, isoNow(now))) {
+        selfFinalizedState = bounty.state;
+        return null;
+      }
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting acceptance`);
       check(this._mayApprove(bounty, lane), "not_authorized",
         bounty.approvalMode === "agent"
@@ -2125,6 +2142,11 @@ export class BountyEscrow {
         receipt: { kind: "attribute", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
     });
+    // The keeper pass settled the bounty at a boundary this accept needed
+    // to beat; refuse with the same error a post-finalize accept gets.
+    if (selfFinalizedState !== null)
+      fail("invalid_state", `bounty is ${selfFinalizedState}, not awaiting acceptance`);
+    return result;
   }
 
   // --- free-miss settlement (docs/FREE-MISS-SETTLEMENT.md) -----------------------------
@@ -2301,7 +2323,11 @@ export class BountyEscrow {
   }
 
   disputeBounty(roomId, bountyId, { challenger, bond, grounds, actor } = {}) {
-    return this.store.transaction(() => {
+    // #3591: self-finalizing like acceptWork — when the keeper pass below
+    // settles the bounty, the settlement commits and the refusal is raised
+    // after the transaction returns (a throw inside would roll it back).
+    let selfFinalizedState = null;
+    const result = this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
       const lane = this._requireLane(roomId, challenger, "challenger");
@@ -2310,6 +2336,17 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(!bounty.disputeId, "dispute_exists", "this bounty already has a dispute");
+      // #3591: evaluate the time windows before state. disputeBounty never
+      // consulted challengeEndsMs (accepted bounties) or deadlineMs
+      // (submitted bounties), so a post-window dispute raced the keeper's
+      // auto-approve / unverified settle for the same facts. Running the
+      // keeper pass first makes the outcome a function of facts + clock:
+      // post-window disputes always lose, deterministically.
+      const now = this.nowMs();
+      if (this._keeperPass(bounty, now, isoNow(now))) {
+        selfFinalizedState = bounty.state;
+        return null;
+      }
       check(bounty.state === "submitted" || bounty.state === "accepted", "invalid_state", `bounty is ${bounty.state}, not disputable`);
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
@@ -2381,6 +2418,12 @@ export class BountyEscrow {
         receipt: { kind: "bond-lock", bountyId, disputeId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
     });
+    // The keeper pass settled the bounty at a boundary this dispute
+    // needed to beat; refuse with the same error a post-finalize
+    // dispute gets.
+    if (selfFinalizedState !== null)
+      fail("invalid_state", `bounty is ${selfFinalizedState}, not disputable`);
+    return result;
   }
 
   decideDispute(roomId, bountyId, { decider, outcome, reasonCodes, rubricCheck = null, actor } = {}) {
@@ -2824,7 +2867,14 @@ export class BountyEscrow {
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
       const now = this.nowMs(), at = isoNow(now);
       const summary = { approved: [], swept: [], refunded: [], released: [], paid: [], expiredUnfunded: [] };
-      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
+      // #3591: 'submitted' belongs in this list. The keeper pass settles
+      // submitted work at the deadline (unverified, worker 0), and every
+      // other keeper-actionable state was already here — omitting
+      // 'submitted' made the epoch door disagree with finalizeBounty
+      // about the same boundary. The keeper pass still gates on the
+      // deadline itself, so in-review work before its deadline is
+      // untouched (the pass returns null and nothing is recorded).
+      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','submitted','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
         // #3275: each bounty's keeper action is atomic. Keeper actions are
