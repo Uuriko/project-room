@@ -3,12 +3,19 @@ import { githubSigninVerified, onGithubSigninGateChange } from "./provider-gate.
 export function createSigninNavigation({ getUI, active }) {
   const $ = selector => document.querySelector(selector);
   let current = "password-login", replay = false;
-  // #3548: the GitHub door is gated on deployment verification, not just
-  // the view — hidden on the welcome view as before, and hidden everywhere
-  // until the provider gate opens. Re-applied live when the gate changes.
+  // OAuth providers the deployment positively reported unconfigured (via
+  // the signin-options feed, relayed by the host). Their start routes answer
+  // 503, so the anchors stay hidden in every view — fail-open: a provider is
+  // only ever added here on a positive "configured: false" answer.
+  const unavailableProviders = new Set();
+  // #3548: the GitHub door is additionally gated on deployment verification,
+  // not just configuration — hidden on the welcome view as before, and
+  // hidden everywhere until the provider gate opens (configured AND a real
+  // sign-in on record). The gate fails closed, so it wins over the
+  // fail-open unavailable set; both apply. Re-applied live on gate change.
   const applyGithubVisibility = () => {
     const button = $("#github-signin");
-    if (button) button.hidden = current === "welcome" || !githubSigninVerified();
+    if (button) button.hidden = current === "welcome" || !githubSigninVerified() || unavailableProviders.has("github");
   };
   const releaseGate = onGithubSigninGateChange(() => { if (active()) applyGithubVisibility(); });
   function sync(view) {
@@ -32,6 +39,7 @@ export function createSigninNavigation({ getUI, active }) {
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
     $("#google-signin").hidden = view === "welcome";
+    if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
     applyGithubVisibility();
     $("#terms-notice").hidden = view === "welcome";
   }
@@ -49,6 +57,12 @@ export function createSigninNavigation({ getUI, active }) {
   window.addEventListener("popstate", onPopState);
   return {
     sync, withReplay,
+    setProviderUnavailable(name) {
+      unavailableProviders.add(name);
+      if (!active()) return;
+      const anchor = $(`#${name}-signin`);
+      if (anchor) anchor.hidden = true;
+    },
     back() {
       if (active() && history.state?.roomSigninView) { history.back(); return false; }
       return true;
