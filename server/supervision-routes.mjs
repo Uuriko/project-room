@@ -1,6 +1,15 @@
 // Supervision inbox HTTP routes (herdr redesign, lane B6): the 9 routes under
 // /api/rooms/{roomId}/supervision/cards* from phase1/inbox-mapping.md §2.7.
 //
+// T-6 DEAD-VERDICT LABEL (2026-10-16): SHIPPED BUT UNMOUNTED — no
+// server/http.mjs mount and no runtime-package registration exist at main
+// 6f828f08, so every path in this module 404s in production, and the B5
+// storage layer it contracts (server/supervision-sqlite.mjs,
+// createSupervisionCardStore) has not landed, so deps.store is absent and
+// the routes would 500 supervision_unwired even if mounted. Verdict:
+// LABEL, awaiting the integration lane's mount-or-remove decision
+// (mounting requires B5's store + the http.mjs mount sketched below).
+//
 // Mounting is DEFERRED to the integration lane (do not mount in
 // server/http.mjs from this lane; no runtime-package.mjs registration here).
 // The intended mount mirrors handleWorkClaims:

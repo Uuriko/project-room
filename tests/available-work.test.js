@@ -1,15 +1,14 @@
 // AvailableWork projection (EXECUTION-BRIEF decision #5): the ONE
 // availability definition for "what work can I take?". Board rules align
 // with needs-me's openWorkOf (usable + unclaimed + kind work + deps done +
-// viewer may write claims); work items must be accepted and unheld; public
-// tasks reuse the facade packet's own claim.state classification.
+// viewer may write claims); work items must be accepted and unheld.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { availableBoardRows, availableClaimsInRoom, availablePublicTasks, availableWorkInRoom } from "../server/available-work.mjs";
+import { availableBoardRows, availableClaimsInRoom, availableWorkInRoom } from "../server/available-work.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 
 const ROOM = "available-demo";
@@ -93,19 +92,5 @@ test("room projection: work items join board claims; zero-inventory is explicit"
   assert.equal(availableWorkInRoom(store, ROOM, { viewerId: "worker" }).total, 0);
 });
 
-test("public tasks: only unclaimed packets, paginated scan", () => {
-  const packet = (taskId, state) => ({ taskId, title: `Task ${taskId}`, namespaceId: "commons",
-    termsVersion: 1, claim: { state, generation: 1, leaseExpiresAt: null } });
-  const pages = {
-    "": { tasks: [packet("t1", "submitted"), packet("t2", "unclaimed")], nextCursor: "t2" },
-    t2: { tasks: [packet("t3", "claimed"), packet("t4", "unclaimed")], nextCursor: null }
-  };
-  const store = { publicWorkClaims: { list: ({ after }) => pages[after] } };
-  const { items, total } = availablePublicTasks(store, { limit: 50 });
-  assert.deepEqual(items.map(item => item.id), ["t2", "t4"]);
-  assert.equal(total, 2);
-  assert.equal(items[0].source, "publicTask");
-  assert.equal(items[0].claimAction.endpoint, "/api/public-work/tasks/t2/claim");
-  // No facade: explicit empty, never a throw.
-  assert.deepEqual(availablePublicTasks({}), { items: [], total: 0 });
-});
+// (The "public tasks" test was removed with availablePublicTasks itself,
+// T-6 dead-verdicts 2026-10-16: zero production callers.)

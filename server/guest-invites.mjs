@@ -54,6 +54,14 @@ export const GUEST_CREDENTIAL_TTL_MAX_MS = 14 * 24 * 60 * 60 * 1000;
 // are owner-issued trial seats only. The guest_selfserve tables below stay
 // as inert legacy — existing seats expire naturally and no data is
 // deleted — but no code reads or writes them now.
+//
+// T-6 DEAD-VERDICT LABEL (2026-10-16): RETAINED-FOR-AUDIT — dropping
+// guest_selfserve / guest_selfserve_idem is NOT provably safe: this repo
+// has no DROP migration machinery for them (additive-only schemas), #3219
+// deliberately retained them, and tests/guest-selfserve-cut.test.js pins
+// that retention. Verdict: label in-schema (below) and keep; a future
+// drop requires an explicit migration + a decision that the retained
+// seat/idempotency history may be deleted.
 export const GUEST_INVITE_REDEEM_DEFAULT_MS = 24 * 60 * 60 * 1000;
 export const GUEST_INVITE_REDEEM_MIN_MS = 60 * 60 * 1000;
 export const GUEST_INVITE_REDEEM_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -111,6 +119,12 @@ export const guestInviteSchema = `
   CREATE UNIQUE INDEX IF NOT EXISTS guest_members_identity_seat ON guest_members(room_id, guest_identity_id);
 `;
 
+// RETAINED-FOR-AUDIT (T-6 dead-verdict, 2026-10-16): the two tables in
+// this schema are inert legacy from the removed self-serve door (#3219);
+// no code reads or writes them. Kept, not dropped — see the note at
+// GUEST_INVITE_REDEEM_DEFAULT_MS above for the reasoning and what a
+// future drop would require.
+//
 // Self-serve seats + request-ID idempotency records (RC-2026-09-25-912
 // resolutions). Kept as a SEPARATE schema string from guestInviteSchema so a
 // database from the v1 window (v1 tables present, these absent) still

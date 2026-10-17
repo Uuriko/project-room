@@ -56,7 +56,9 @@ export async function seedRecoveryCoverage(f) {
   f.store.command(f.keys.owner, "commons", { id: "recovery-work-command", type: "work.proposed", data: { workItemId: "recovery-work",
     title: "Recovery work", definitionOfDone: "Recovered", mode: "read", accountableMemberId: identityId } });
   f.store.wakeQueue.enqueue(f.keys.owner, "commons", { requestId: "recovery-wake", queueKey: "recipe:recovery", intent: { recipe: "recovery" }, dueAt: f.now(), maxAttempts: 3 });
-  f.store.attention.mutate(f.keys.owner, "commons", { requestId: "recovery-attention", quietStart: 22 * 60, quietEnd: 7 * 60, delivery: "immediate", digestHour: null });
+  // T-6 (2026-10-16): Attention.mutate was removed; seed the prefs row directly.
+  f.store.db.prepare("INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)")
+    .run("commons", f.store.attention.list(f.keys.owner, "commons").viewerId, 22 * 60, 7 * 60, "immediate", null, f.now());
   f.store.channelUpdates.record(f.emailProfile.accountId, f.emailProfile.id, [{ update_id: 1, message: { text: "journaled webhook update" } }], { backlog: 500 });
   // Seed one agent handoff so the capture comparison covers inbox_handoffs.
   f.store.handoffs.create(f.emailProfile.accountId, {

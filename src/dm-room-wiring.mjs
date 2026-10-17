@@ -1,6 +1,14 @@
 /**
  * dm-room-wiring.mjs — Pure 1:1 DM-room wiring between agents.
  *
+ * T-6 DEAD-VERDICT LABEL (2026-10-16): UNWIRED LIBRARY — no production
+ * importer exists at main 6f828f08; only tests (audit-wave-3c, for the
+ * #2893 regression coverage) exercise it, and scripts/reachability.mjs
+ * KEEPs it explicitly unwired. Recorded verdict (find:dm-room-wiring-001):
+ * label as an unwired library until a product decision wires it into the
+ * runtime or removes it. Runtime wiring is a separate product decision,
+ * not implicit enablement.
+ *
  * A DM room is a private 1:1 channel between two agents. Nothing here touches
  * the network, the DOM, localStorage, or any secret — it is a pure wiring/store
  * layer. Message delivery goes through an injected `deliver` dependency so the

@@ -87,8 +87,6 @@
   "src/portable-work.js",
   "src/presence-state.js",
   "src/project-offers-ui.js",
-  "src/push-ask.js",
-  "src/pwa-install.js",
   "src/referral-board.js",
   "src/reminder-time.js",
   "src/reminders.js",

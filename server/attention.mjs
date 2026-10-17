@@ -4,13 +4,19 @@
 // is simply not deliverable yet, so delivery can never be mistaken for
 // handled. Preferences are private per member (draft class) and append no
 // room events, exactly like private reminders.
+//
+// T-6 dead-verdict (2026-10-16): the mutate() write door was REMOVED — at
+// main 6f828f08 it had zero production callers (no HTTP route, MCP tool or
+// command dispatch reached it; only tests and scripts/recovery-coverage
+// called it), so no production path could ever set preferences. Reading
+// stays: prefs() is consumed in production by server/work-wakes.mjs, and
+// preference rows written before the door closed keep working. The
+// private_attention_commands journal below is retained-for-audit: its
+// only writer was mutate(), existing rows are immutable receipts, and no
+// code reads or writes it now. Re-adding a write door is a product
+// decision; do not resurrect mutate() without one.
 
-import { createHash } from "node:crypto";
-import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
-import { executeOnce } from "./run-once.mjs";
 
-const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const attentionSchema = `
   CREATE TABLE IF NOT EXISTS private_attention_prefs (
     room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL,
@@ -96,48 +102,6 @@ export class Attention {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, binding);
       return { roomId, viewerId: auth.member.id, evaluatedAt: this.store.now(), preferences: this.prefs(roomId, auth.member.id) };
-    });
-  }
-  mutate(token, roomId, request, binding = null) {
-    return this.store.transaction(() => {
-      const auth = this.store.authenticate(token, roomId, binding);
-      const fields = ["requestId", "quietStart", "quietEnd", "delivery", "digestHour"];
-      const minute = v => v === null || (Number.isSafeInteger(v) && v >= 0 && v < MINUTES_PER_DAY);
-      if (!request || Array.isArray(request) || Object.keys(request).length !== fields.length || !fields.every(field => Object.hasOwn(request, field))
-        || !validId(request.requestId) || !minute(request.quietStart) || !minute(request.quietEnd)
-        || !["immediate", "digest"].includes(request.delivery)
-        || !(request.digestHour === null || (Number.isSafeInteger(request.digestHour) && request.digestHour >= 0 && request.digestHour <= 23)))
-        fail(422, "invalid_attention", "Supply quiet window minutes (or null), a delivery choice, a digest hour (or null) and a request ID.");
-      if ((request.quietStart === null) !== (request.quietEnd === null)) fail(422, "invalid_attention", "Quiet hours need both a start and an end, or neither.");
-      if (request.quietStart !== null && request.quietStart === request.quietEnd) fail(422, "invalid_attention", "Quiet hours start and end must differ.");
-      if (request.delivery === "digest" && request.digestHour === null) fail(422, "invalid_attention", "Digest delivery needs a digest hour.");
-      if (request.delivery === "immediate" && request.digestHour !== null) fail(422, "invalid_attention", "Immediate delivery takes no digest hour.");
-      const fingerprint = createHash("sha256").update(JSON.stringify(Object.fromEntries(fields.sort().map(field => [field, request[field]])))).digest("hex");
-      // Idempotency via the shared runOnce flow (server/run-once.mjs); the
-      // retained private_attention_commands journal keeps its own storage,
-      // immutability triggers and error shape — only the flow is shared.
-      const { result: receipt, replayed } = executeOnce({
-        fingerprint,
-        conflictCode: "idempotency_conflict",
-        conflictMessage: "Request ID already used for different attention settings",
-        throwError: fail,
-        find: () => {
-          const prior = this.db.prepare("SELECT fingerprint,response FROM private_attention_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, auth.member.id, request.requestId);
-          return prior ? { fingerprint: prior.fingerprint, result: JSON.parse(prior.response) } : null;
-        },
-        execute: () => {
-          const now = this.store.now();
-          const fresh = { requestId: request.requestId, quietStart: request.quietStart, quietEnd: request.quietEnd, delivery: request.delivery, digestHour: request.digestHour };
-          this.db.prepare(`INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)
-            ON CONFLICT(room_id,member_id) DO UPDATE SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,delivery=excluded.delivery,digest_hour=excluded.digest_hour,updated_at=excluded.updated_at`)
-            .run(roomId, auth.member.id, request.quietStart, request.quietEnd, request.delivery, request.digestHour, now);
-          return fresh;
-        },
-        record: result => {
-          this.db.prepare("INSERT INTO private_attention_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(result));
-        },
-      });
-      return { ...this.list(token, roomId, binding), receipt, duplicate: replayed };
     });
   }
   // Due wakes filtered through the member's delivery preference. Held wakes

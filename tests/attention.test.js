@@ -14,27 +14,29 @@ function fixture(t) {
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   const d0 = Date.UTC(2026, 8, 14, 0, 0, 0); let at = d0 + 12 * HOUR; // start at noon UTC
   f.store.now = () => at; f.at = () => at; f.set = h => { at = d0 + h * HOUR; }; f.advance = ms => { at += ms; };
-  f.prefs = (extra = {}, actor = "owner") => f.store.attention.mutate(f.keys[actor], "commons",
-    { requestId: randomUUID(), quietStart: null, quietEnd: null, delivery: "immediate", digestHour: null, ...extra });
+  // T-6 (2026-10-16): Attention.mutate was removed (zero production
+  // callers); tests seed preference rows directly, as pre-door-close
+  // production rows exist in the table.
+  f.prefs = (extra = {}, actor = "owner") => {
+    const viewerId = f.store.attention.list(f.keys[actor], "commons").viewerId;
+    const v = { quietStart: null, quietEnd: null, delivery: "immediate", digestHour: null, ...extra };
+    f.store.db.prepare(`INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(room_id,member_id) DO UPDATE SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,delivery=excluded.delivery,digest_hour=excluded.digest_hour,updated_at=excluded.updated_at`)
+      .run("commons", viewerId, v.quietStart, v.quietEnd, v.delivery, v.digestHour, f.at());
+    return v;
+  };
   f.enqueue = (extra = {}) => f.store.wakeQueue.enqueue(f.keys.owner, "commons",
     { requestId: randomUUID(), queueKey: "recipe:draft-catch-up", intent: { recipe: "draft-catch-up" }, dueAt: at, maxAttempts: 3, ...extra });
   f.deliverable = (actor = "owner") => f.store.attention.deliverable(f.keys[actor], "commons");
   return f;
 }
 
-test("delivery preferences validate exactly and retry idempotently", t => {
+test("preference rows are private per member and append no room events", t => {
+  // (The mutate() validation/idempotency cases were removed with the
+  // door itself, T-6 2026-10-16; what remains is the read contract.)
   const f = fixture(t);
-  for (const change of [{ quietStart: 1.5 }, { quietStart: 1440 }, { quietStart: 22 * 60 }, { delivery: "loud" }, { delivery: "digest" }, { digestHour: 9 }, { digestHour: 24 }]) {
-    assert.throws(() => f.prefs(change), "mismatched or out-of-range settings refuse");
-  }
-  const first = f.prefs({ quietStart: 22 * 60, quietEnd: 7 * 60 });
-  assert.equal(first.duplicate, false);
+  f.prefs({ quietStart: 22 * 60, quietEnd: 7 * 60 });
   assert.deepEqual(f.store.attention.list(f.keys.owner, "commons").preferences.quietStart, 22 * 60);
-  const retry = f.store.attention.mutate(f.keys.owner, "commons",
-    { requestId: first.receipt.requestId, quietStart: 22 * 60, quietEnd: 7 * 60, delivery: "immediate", digestHour: null });
-  assert.equal(retry.duplicate, true);
-  assert.throws(() => f.store.attention.mutate(f.keys.owner, "commons",
-    { requestId: first.receipt.requestId, quietStart: 21 * 60, quietEnd: 7 * 60, delivery: "immediate", digestHour: null }), { code: "idempotency_conflict" });
   assert.equal(f.store.attention.list(f.keys.guest, "commons").preferences, null, "preferences are private per member");
   const snap = f.store.snapshot(f.keys.owner, "commons");
   f.prefs({ quietStart: null, quietEnd: null });
