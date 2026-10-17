@@ -783,7 +783,22 @@ export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
-  return row ? rowToPublic(row) : null;
+  if (!row) return null;
+  const pub = rowToPublic(row);
+  if (typeof id === "string" && id.startsWith("pwr_")) {
+    try {
+      const j = store.db.prepare("SELECT lot_id, amount, lot_state FROM bounty_journal WHERE receipt_id=? LIMIT 1").get(id);
+      if (j && j.lot_id) {
+        pub.lotId = j.lot_id;
+        pub.settlement = {
+          lotId: j.lot_id,
+          amountCredits: Math.abs(j.amount) / 1000,
+          lotState: j.lot_state
+        };
+      }
+    } catch { /* graceful fallback */ }
+  }
+  return pub;
 }
 
 // Verify-at-read-time support (server/receipt-verify.mjs): rebuild the
@@ -952,6 +967,7 @@ export function publicLotReceiptById(store, id) {
       })),
       entries: entries.map(entry => entry.entry_id),
       signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
+      workReceiptId: entries.map(entry => entry.receipt_id).find(id => typeof id === "string" && id.startsWith("pwr_")) ?? null,
       journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
       prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,
       bountyCreatedAt: iso(bounty.created_at),
