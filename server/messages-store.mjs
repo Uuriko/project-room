@@ -538,8 +538,11 @@ function loadState(db, roomId, cursor) {
   return { state: replayFrom(0, emptyRoomState()), seq: cursor.applied_seq };
 }
 
-function nextRoom(db, exclude = []) {
-  const excluded = exclude.length ? ` AND r.id NOT IN (${exclude.map(() => "?").join(",")})` : "";
+// Parked rooms are excluded by the messages_backfill_blocks clause below, so
+// no per-call NOT IN list is needed: binding one value per room parked in
+// this call broke past 100 (the Worker's Durable Object SQL limit) exactly
+// when many rooms stop replaying at once.
+function nextRoom(db) {
   return db.prepare(`SELECT r.id AS id, r.sequence AS sequence
     FROM rooms r
     LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id
@@ -548,10 +551,10 @@ function nextRoom(db, exclude = []) {
       OR (c.applied_seq > 0 AND NOT EXISTS (
         SELECT 1 FROM events e
         WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
-      )))${excluded}
+      )))
       AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id = r.id)
     ORDER BY r.id
-    LIMIT 1`).get(...exclude) ?? null;
+    LIMIT 1`).get() ?? null;
 }
 
 // True when a room's messages table has replayed to the room's current
@@ -654,7 +657,6 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
   if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : MESSAGES_BACKFILL_BATCH;
   const failed = [];
-  const failedIds = [];
   // The caller's yield hook is control flow, not room data: tag anything it
   // throws so the per-room isolation below always lets it propagate. An
   // interruption mid-batch keeps the committed prefix on the cursor and the
@@ -687,7 +689,7 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
   const seen = new Set();
   while (events < cap) {
     if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
-    const room = nextRoom(store.db, failedIds);
+    const room = nextRoom(store.db);
     if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
     if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
     seen.add(room.id);
@@ -705,7 +707,6 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
       // integrity_failures surface.
       freshRooms.set(room.id, recordBlock(store, room.id, block));
       failed.push({ roomId: room.id, error });
-      failedIds.push(room.id);
       roomId = room.id;
       appliedSeq = readCursor(store.db, room.id)?.applied_seq ?? null;
       continue;

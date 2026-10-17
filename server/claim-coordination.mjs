@@ -41,11 +41,16 @@ export function rateLimitUntil({ status, remaining, reset, retryAfter, message }
   const limited = status === 429 || (status === 403 && (remaining === "0" || /rate limit/i.test(message ?? "")));
   if (!limited) return null;
   let until = null;
-  if (typeof reset === "string" && /^\d+$/.test(reset.trim())) {
+  // GitHub's documented order: an explicit retry-after wins; the primary
+  // window's x-ratelimit-reset applies only when that window is spent
+  // (remaining 0). A secondary limit (403 "rate limit", remaining > 0) also
+  // carries the primary reset, up to an hour away; holding until it parked
+  // every claim poll far past the minute GitHub asked for.
+  if (typeof retryAfter === "string" && /^\d+$/.test(retryAfter.trim())) {
+    until = nowMs + Number(retryAfter.trim()) * 1000;
+  } else if (remaining === "0" && typeof reset === "string" && /^\d+$/.test(reset.trim())) {
     const value = Number(reset.trim());
     until = value > 1e12 ? value : value * 1000;
-  } else if (typeof retryAfter === "string" && /^\d+$/.test(retryAfter.trim())) {
-    until = nowMs + Number(retryAfter.trim()) * 1000;
   }
   if (!until || until <= nowMs) until = nowMs + PULL_POLL_BACKOFF_MS;
   return until;
