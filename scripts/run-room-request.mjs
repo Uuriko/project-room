@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { agentConnectionFromEnvironment } from "../client/agent-connection.mjs";
 import { configuredHost } from "../client/host-process.mjs";
+import { isolatedHostCommand } from "../client/host-subprocess.mjs";
 import { openRequestJournal, runRequestOnce, runRequestQueue } from "../client/request-runner.mjs";
 import { validId } from "../src/events.js";
 
@@ -13,17 +14,26 @@ export async function main(argv = process.argv.slice(2)) {
   }
   const [requestMessageId, journal, hostFile] = argv;
   if (argv.length !== 3 || (requestMessageId !== "--auto" && !validId(requestMessageId)) || !isAbsolute(journal ?? "") || !isAbsolute(hostFile ?? "")) throw new Error("Invalid runner arguments; use --help");
-  const execute = configuredHost(JSON.parse(readFileSync(hostFile, "utf8")));
+  const config = JSON.parse(readFileSync(hostFile, "utf8"));
+  const execute = configuredHost(config);
+  // Refuse unsupported local execution before reserving a Room request or
+  // writing an intent that would later require unknown-outcome reconciliation.
+  const preflight = () => isolatedHostCommand(config, config.cwd);
   const connection = agentConnectionFromEnvironment();
   const db = openRequestJournal(journal), controller = new AbortController();
   const stop = () => controller.abort();
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   try {
-    if (requestMessageId === "--auto") await runRequestQueue({ connection, db, execute, signal: controller.signal,
+    if (requestMessageId === "--auto") await runRequestQueue({ connection, db, execute, preflight, signal: controller.signal,
       emit: result => console.log(JSON.stringify(result)) });
-    else console.log(JSON.stringify(await runRequestOnce({ connection, requestMessageId, db, execute, signal: controller.signal })));
+    else console.log(JSON.stringify(await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal: controller.signal })));
   } finally { db.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch(() => { console.error("Request run failed. Inspect configuration and the original host attempt; retain the private journal. No successful execution or delivery is claimed."); process.exitCode = 1; });
+  main().catch(error => {
+    console.error(error?.code === "host_isolation_unavailable"
+      ? "This generic host requires Linux with bubblewrap (/usr/bin/bwrap). On macOS use the Codex Room host (scripts/run-codex-room.mjs) or the desktop agent setup. No request was reserved or executed."
+      : "Request run failed. Inspect configuration and the original host attempt; retain the private journal. No successful execution or delivery is claimed.");
+    process.exitCode = 1;
+  });
 }

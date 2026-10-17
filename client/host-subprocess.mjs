@@ -12,7 +12,8 @@ export const validHostCommand = config => config && isAbsolute(config.command ??
 // spawning it, rather than silently degrading to an ordinary local process.
 const BWRAP = "/usr/bin/bwrap";
 export function isolatedHostCommand(config, cwd) {
-  if (!existsSync(BWRAP) || !isAbsolute(cwd ?? "")) throw new Error("Host isolation is unavailable");
+  if (!existsSync(BWRAP)) throw Object.assign(new Error("Host isolation is unavailable"), { code: "host_isolation_unavailable" });
+  if (!isAbsolute(cwd ?? "")) throw new Error("Host isolation requires an absolute checkout");
   const root = realpathSync(cwd), executable = realpathSync(config.command);
   if (config.env && Object.keys(config.env).length)
     throw new Error("Automatic host policy refuses configured environment variables; use a brokered, reviewed tool path");
