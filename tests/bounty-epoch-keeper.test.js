@@ -275,3 +275,19 @@ test("the escrow-epochs job is registered, gated and scheduled by the escrow clo
   assert.equal(escrow.getBounty(room, accepted.bountyId).state, "paid");
   expectConserved(escrow, room);
 });
+
+test("a store that has never run escrow reads as empty, never as an error", () => {
+  // No BountyEscrow was ever constructed over this database, so the escrow
+  // tables do not exist. The job runs against every store — including ones
+  // that predate escrow entirely — so the due-scan must read missing tables
+  // as "nothing waiting" (the query helper's null), never throw.
+  const db = new DatabaseSync(":memory:");
+  const store = { db };
+  assert.equal(escrowEpochNextDueAt(store, nowMs), null);
+  const EMPTY = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
+  assert.deepEqual(progressEscrowEpochs(store, { now: nowMs }), EMPTY);
+  // A store with no database at all gets the same empty shape.
+  assert.deepEqual(progressEscrowEpochs({}, { now: nowMs }), EMPTY);
+  assert.deepEqual(progressEscrowEpochs(null, { now: nowMs }), EMPTY);
+});
