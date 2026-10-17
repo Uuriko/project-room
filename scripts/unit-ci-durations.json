@@ -845,6 +845,7 @@
   "tests/receipt-verify.test.js": 10336,
   "tests/receipt-verify-pull.test.js": 21804,
   "tests/receipt-verdict-page.test.js": 14067,
+  "tests/receipt-verdict-links.test.js": 5169,
   "tests/receipts-live-filter.test.js": 1085,
   "tests/receipts-route.test.js": 17378,
   "tests/recipe-preview.test.js": 4715,
