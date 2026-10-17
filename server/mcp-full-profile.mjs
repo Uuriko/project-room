@@ -375,7 +375,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_inbox") {
-    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50 });
+    const inbox = store.agentInbox(secret, roomId, { limit: rest.limit ?? 50, after: rest.after ?? 0 });
     const stamp = rows => rows.map(row => row.nextRead ? { ...row,
       nextRead: { ...row.nextRead, arguments: { roomId, ...row.nextRead.arguments } }
     } : row);

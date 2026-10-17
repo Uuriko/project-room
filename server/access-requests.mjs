@@ -287,6 +287,11 @@ export class AccessRequests {
         }
         if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived; access cannot be upgraded");
       }
+      // #3745: expiry is lazy, so this identity's lapsed rows may still be
+      // stored 'pending' in a room nobody reads. Materialize them before
+      // the cap counts — the same flip list() performs for the room — or
+      // dead rows consume the cap forever.
+      this.expireOld(roomId, identityId);
       const pending = this.db.prepare(
         "SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status IN ('pending', 'pending_upgrade')").get(roomId, identityId).n;
       if (pending >= MAX_PENDING_PER_IDENTITY_ROOM) {
@@ -787,9 +792,17 @@ export class AccessRequests {
     return row;
   }
 
-  expireOld(roomId) {
+  // Lazy expiry, materialized on contact: rows past the TTL flip to
+  // 'expired', so stored state matches what readers already assume. The
+  // room-wide form serves the owner's list(); the identity-scoped form
+  // serves the create paths, where the pending cap must measure only the
+  // caller's own live requests (#3745) and no other identity's rows are
+  // flipped as a side effect of someone else's create.
+  expireOld(roomId, identityId = null) {
     const cutoff = this.store.now() - REQUEST_TTL_MS;
-    this.db.prepare("UPDATE access_requests SET status='expired' WHERE room_id=? AND status IN ('pending', 'pending_upgrade') AND created_at<?")
-      .run(roomId, cutoff);
+    const scoped = identityId !== null;
+    this.db.prepare(`UPDATE access_requests SET status='expired'
+      WHERE room_id=?${scoped ? " AND identity_id=?" : ""} AND status IN ('pending', 'pending_upgrade') AND created_at<?`)
+      .run(...(scoped ? [roomId, identityId, cutoff] : [roomId, cutoff]));
   }
 }

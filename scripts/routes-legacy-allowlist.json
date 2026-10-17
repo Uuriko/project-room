@@ -831,6 +831,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/owner/overview"
+    },
+    {
+      "method": "GET",
       "path": "/api/project-offers"
     },
     {
@@ -4374,6 +4378,10 @@
     {
       "method": "GET",
       "path": "/api/opportunities.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/owner/overview"
     },
     {
       "method": "GET",

@@ -1,5 +1,6 @@
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
+import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 // Authenticated hosted MCP profile for the Room Worker.
 //
 // The public join tools stay on POST /mcp when no Authorization header is
@@ -67,9 +68,9 @@ function rpcError(message, code, text) {
   return { jsonrpc: "2.0", id, error: { code, message: text } };
 }
 
-function toolResult(value, isError = false) {
+function toolResult(value, isError = false, redactions = []) {
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text: mcpResultText(value, redactions) }],
     structuredContent: value,
     ...(isError ? { isError: true } : {})
   };
@@ -182,12 +183,6 @@ function validRoomArgs(name, args) {
     const replyOk = args.replyToId === undefined || validId(args.replyToId);
     return idOk && messageOk && replyOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
-  }
-  if (name === "room_react") {
-    const idOk = args.id === undefined || validId(args.id);
-    const activeOk = args.active === undefined || typeof args.active === "boolean";
-    return idOk && activeOk && validId(args.messageId)
-      && typeof args.reaction === "string" && args.reaction.trim().length > 0 && args.reaction.length <= 64;
   }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
@@ -314,14 +309,14 @@ function validWakeArgs(name, args) {
   if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification));
   }
   if (name === "wake_clear") return validHostId(args.hostId);
   if (name === "heartbeat_set") {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
@@ -532,7 +527,14 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
-    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.redactionMessages(roomId)), auth.member.id);
+    // B4 agent read-path: same filters as GET /events — type (comma-separated
+    // event types), mentions (a member id, or "me"), compact (drop envelope
+    // noise). All optional; omitting them keeps the legacy page.
+    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50, {
+      types: typeof args.type === "string" ? args.type.split(",").map(part => part.trim()).filter(part => part.length > 0) : null,
+      mentions: typeof args.mentions === "string" ? args.mentions : null,
+      compact: args.compact === true
+    }), store.redactionMessages(roomId)), auth.member.id);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
@@ -554,11 +556,6 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }) };
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
-  }
-  if (name === "room_react") {
-    const id = args.id ?? randomUUID();
-    const data = { messageId: args.messageId, reaction: args.reaction, active: args.active !== false };
-    return commandReceipt(store, secret, roomId, { id, type: "message.reaction_set", data }, "reacted");
   }
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
@@ -660,6 +657,9 @@ function heartbeatReceipt(identityId, result) {
   }
   return {
     agentId: identityId, host: result.host, pendingWakes: result.pendingWakes,
+    // #3265: the MCP heartbeat door carries the same truncation flag as
+    // the HTTP doors — heartbeat() computed it and this receipt dropped it.
+    more: result.more === true,
     next, pushConfigured: result.pushConfigured, reachability: result.reachability, ...(result.listener ? { listener: result.listener } : {})
   };
 }
@@ -711,7 +711,14 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
+    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
+    // value through untouched (omitted = preserve the stored declaration,
+    // a number = replace, explicit null = clear). wake_clear has no
+    // cadenceSeconds field by design, so it sends an explicit null —
+    // clearing the declaration is part of what "clear" means for this
+    // tool, now expressed as the documented clear instead of as the
+    // side effect of an omitted field.
+    const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
     // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
     // API key gets the same pull-only guard and host namespace as HTTP.
@@ -724,7 +731,7 @@ async function callWakeTool(store, secret, identity, name, args) {
       return store.transaction(() => {
         const auth = resolveAuth(null, MCP_WAKE_SCOPE);
         if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-        const result = heartbeatWithListener(store, auth, data);
+        const result = heartbeatWithListener(store, auth, data, { door: "mcp" });
         if (auth.scopedKey) result.host = { ...result.host, hostId: args.hostId };
         return heartbeatReceipt(agentId, result);
       });
@@ -742,7 +749,7 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.transaction(() => {
       const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
       if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
-      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null });
+      return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null, door: "mcp" });
     });
   }
   if (name === "wake_pause") {
@@ -931,7 +938,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
+      // A minted invite code is a one-time credential: it rides in
+      // structuredContent only, never in the text block hosts log
+      // verbatim (issue #3750). room_run_action recurses into this same
+      // handler with the inner tool name, so it is covered here too.
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false,
+        name === "room_create_agent_invite" ? [mcpRedaction(value?.code, "structuredContent.code")] : []) };
     } catch (error) {
       const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
@@ -973,7 +986,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_create", "room_join",
   "squads_create", "squads_update_members", "squads_disband",
-  "room_post_message", "room_react",
+  "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",

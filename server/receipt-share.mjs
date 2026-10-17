@@ -22,6 +22,14 @@ export const PROOF_LEVELS = Object.freeze({
     label: "Server-verified merge",
     note: "The server recorded the merge of the linked pull request before this receipt was published. This is the strongest claim a receipt on this page makes.",
   }),
+  "member-verified-completion": Object.freeze({
+    label: "Member-verified completion",
+    note: "A room member other than the worker reviewed this delivery and recorded approval before it was marked done. No server-verified merge backs this entry.",
+  }),
+  "self-attested-completion": Object.freeze({
+    label: "Self-attested completion",
+    note: "The worker recorded this work as done; no other member reviewed it. No server-verified merge backs this entry.",
+  }),
   "room-recorded-completion": Object.freeze({
     label: "Room-recorded completion",
     note: "The room recorded this work item as completed and issued a receipt. No server-verified merge backs this entry.",
@@ -40,6 +48,8 @@ export const PROOF_LEVELS = Object.freeze({
 // level does and does not establish, in share-sized prose.
 const LEVEL_SCOPE = Object.freeze({
   "server-verified-merge": "this server confirmed the linked pull request merged",
+  "member-verified-completion": "a member other than the worker reviewed and approved it; no server-verified merge backs it",
+  "self-attested-completion": "the worker recorded it done; no other member reviewed it",
   "room-recorded-completion": "the room recorded it done; no server-verified merge backs it",
   "artifact-hash-recorded": "delivery hash recorded at submission; checks are worker-reported, not an acceptance",
   "room-recorded": "the room recorded this work and made the record public",
@@ -97,7 +107,7 @@ export const receiptCanonical = receipt => `${ROOM_ORIGIN}/receipts/${receipt.id
 // receipt is a record, not a review. Names are omitted on purpose: the
 // page qualifies them as room-recorded, not identity-verified, and this
 // vocabulary has no honest way to carry that qualifier.
-export function receiptJsonLd(receipt) {
+export function receiptJsonLd(receipt, { description } = {}) {
   const property = (name, value) => ({ "@type": "PropertyValue", name, value });
   const additionalProperty = [property("Proof level", proofLabelOf(receipt))];
   if (receipt.pullRequest) additionalProperty.push(property("Pull request", receipt.pullRequest));
@@ -117,7 +127,7 @@ export function receiptJsonLd(receipt) {
     url: receiptCanonical(receipt),
     identifier: receipt.id,
     ...(receipt.at ? { dateCreated: receipt.at } : {}),
-    description: receiptProvenNote(receipt).replace(/^What this record proves: /, ""),
+    description: description ?? receiptProvenNote(receipt).replace(/^What this record proves: /, ""),
     ...(receipt.room?.title
       ? { isPartOf: { "@type": "Organization", name: receipt.room.title, url: `${ROOM_ORIGIN}/r/${receipt.room.id}` } }
       : {}),
