@@ -1223,7 +1223,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         };
         let stage = "provider";
         try {
-          const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search });
+          // Bind the callback to the browser session that started the flow: a
+          // cross-session (or cookie-less) completion fails closed in
+          // complete() instead of adopting the state's slot (login CSRF).
+          const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search,
+            expectedSlotToken: cookie(req, accountCookieName) ?? null });
           // Shared-model linking (RC-2026-09-17-017): the callback links the
           // Google subject through the account-login model. A link intent
           // attaches to the signed-in account; otherwise find-or-provision
@@ -5083,6 +5087,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
+        // Research r7, opt-in: ROOM_PAUSE_BLOCKS_POSTS=1 makes an owner's
+        // Pause also stop the paused member from POSTING in that room. A
+        // pause the member set on itself never blocks. Default off: blocking
+        // posts is an owner/product decision, not part of the pause default.
+        if (process.env.ROOM_PAUSE_BLOCKS_POSTS === "1" && auth?.member) {
+          const memberPause = store.wakeQueue.pauseStatus(roomId, auth.member.id);
+          if (memberPause && memberPause.heldBy !== "self") reject(423, "member_paused", "The room owner paused this member. Posting resumes when the owner resumes it.");
+        }
         // RC-2026-09-23-100: per-guest message token bucket (chat spam
         // mitigation). The per-request scope gate in RoomStore#command is
         // the authority boundary; this is volume control.

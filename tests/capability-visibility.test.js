@@ -175,7 +175,7 @@ test("guest-visible subset matches the #1166 guest semantics", () => {
         `guest catalog lists write tool ${tool.name}: call time would 403 guest_scope_denied`);
     }
   }
-  // The exact #1166 subset: chat posts + reactions stay, everything
+  // The exact #1166 subset: chat posts stay, everything
   // else (drafts, work, wake, files, admin) is withheld.
   for (const keep of GUEST_WRITABLE_TOOLS) assert.ok(names.has(keep), `guest catalog must keep ${keep}`);
   assert.ok(!names.has("room_post_draft"), "guest catalog must withhold drafts (contributor-tier gated at call time)");
@@ -201,7 +201,6 @@ test("capabilityVisibleTo: mixed standing unions the call-time carve-outs", () =
     { active: true, isGuest: false, isOwner: false, autonomyTier: "t1_readonly" },
   ]);
   assert.equal(capabilityVisibleTo(mixed, write("room_post_message")), true, "guest class keeps chat");
-  assert.equal(capabilityVisibleTo(mixed, write("room_react")), true, "guest class keeps reactions");
   assert.equal(capabilityVisibleTo(mixed, write("heartbeat_set")), true, "t1 class keeps heartbeats");
   assert.equal(capabilityVisibleTo(mixed, write("room_create")), false, "no class admits room_create: withheld");
   assert.equal(capabilityVisibleTo(mixed, read("wake_list")), true, "reads are never withheld");
@@ -231,8 +230,13 @@ test("listing endpoints: no leaks, no over-filtering", async t => {
   assert.deepEqual(toolNames(publicList.result.tools),
     new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"]));
 
-  // 2. Server card: public by design, full unfiltered list.
-  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null, "public_work")));
+  // 2. Server card: public by design, full unfiltered list. The enrolled
+  //    tier is the member core catalog — the default a member bearer gets —
+  //    not the non-member public-work list (#3769).
+  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null)));
+  assert.ok(toolNames(liveEnrolledMcpTools()).has("room_post_message"), "enrolled tier lists hosted room tools");
+  assert.notDeepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null, "public_work")),
+    "enrolled tier is not the non-member catalog");
 
   // 3. Member capabilities directory: reads stay open to guests (#1166);
   //    it advertises unenforced delegation hints, not permission-gated

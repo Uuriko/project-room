@@ -484,6 +484,76 @@ test("legacy undecidable dispute: the 14-day timeout returns the bond to the cha
   expectConserved(escrow);
 });
 
+// Post -> fund -> claim -> submit -> accept with arbitrary post overrides.
+function runToAcceptedDesignated(escrow, overrides = {}) {
+  const bounty = post(escrow, { amount: 10, ...overrides });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  return escrow.getBounty(ROOM, bounty.bountyId);
+}
+
+test("the designated verifier cannot dispute into their own decider seat", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "judging my own case" });
+  const d = escrow.getDispute(ROOM, dispute.disputeId);
+  assert.equal(d.decider, null); // the designee IS the challenger: no seat
+  assert.match(d.unavailable, /challenger/);
+  assert.equal(d.raisedBy, INSTINCT);
+  // Nobody may rule on it — least of all the challenger.
+  expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+  expectConserved(escrow);
+});
+
+test("the designated dispute decider cannot dispute into their own seat either", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAcceptedDesignated(escrow, { disputeDeciderId: CODEX });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "my own case" });
+  const d = escrow.getDispute(ROOM, dispute.disputeId);
+  assert.equal(d.decider, null);
+  assert.match(d.unavailable, /challenger/);
+  expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: CODEX, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+  expectConserved(escrow);
+});
+
+test("a verifier's dispute still seats a distinct designated decider (precedence unchanged)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAcceptedDesignated(escrow, { verifierId: INSTINCT, disputeDeciderId: CODEX });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "not my seat" });
+  assert.equal(dispute.decider, CODEX); // disputeDecider ?? verifier, as before
+  assert.equal(dispute.unavailable, null);
+  expectConserved(escrow);
+});
+
+test("decide-time guard: a pre-seated self-dispute cannot be ruled on by its raiser", () => {
+  const db = new DatabaseSync(":memory:");
+  const { escrow } = makeEscrow(db);
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "neutral challenge" });
+  assert.equal(dispute.decider, INSTINCT);
+  // Simulate a dispute record seated before the challenger exclusion
+  // existed: the seated decider is also the dispute's raiser, persisted
+  // exactly as such a legacy row would sit in bounty_disputes.
+  const legacy = Object.freeze({ ...escrow.getDispute(ROOM, dispute.disputeId), raisedBy: INSTINCT });
+  escrow._disputeRecords.set(dispute.disputeId, legacy);
+  escrow._persistDispute(ROOM, legacy);
+  // A fresh escrow over the same store rehydrates the legacy row.
+  const { escrow: rehydrated } = makeEscrow(db);
+  const row = rehydrated.getDispute(ROOM, dispute.disputeId);
+  assert.equal(row.raisedBy, INSTINCT);
+  assert.equal(row.decider, INSTINCT);
+  expectCode(() => rehydrated.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+  // The refusal is a refusal, not a settlement: the bounty stays disputed.
+  assert.equal(rehydrated.getBounty(ROOM, bounty.bountyId).state, "disputed");
+  expectConserved(rehydrated);
+});
+
 test("getDispute is room-scoped: another room's dispute reads as absent (L-P2-10)", () => {
   const { escrow } = makeEscrow();
   const OTHER = "room-other";
@@ -671,9 +741,9 @@ test("persistence across restart: journal, bounties, watchers and sequences rehy
 // qa200-reg-13 regression sweep: the dispute SPLIT settlement path had no
 // escrow-level test. It moves real money (halves the award, returns the
 // challenger's bond), so these lock in the exact amounts, the no-double-move
-// behavior, and conservation. Post-accept and pre-accept (re-attribute) shapes.
+// behavior, and conservation. Post-#3726 every dispute opens from accepted.
 
-// Post -> fund -> claim -> submit (no accept): dispute freezes a locked award.
+// Post -> fund -> claim -> submit (no accept).
 function runToSubmitted(escrow, { amount = 10, verifier = null } = {}) {
   const bounty = post(escrow, { amount, verifierId: verifier });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
@@ -692,6 +762,9 @@ test("dispute SPLIT from accepted: exact halves, challenger bond returned (never
   assert.equal(settled.resolution.kind, "split");
   assert.equal(settled.resolution.bondForfeited, false, "split returns the bond; it never forfeits it");
   assert.equal(settled.state, "approved");
+  // Nothing sits in a transient state: the full award moved out of the
+  // attributed lot (worker half vested, poster half refunded).
+  assert.equal(escrow.balances(ROOM, GROK).attributed, 0, "split leaves no attributed lot behind");
   // Half the award refunded to the poster in full (no fee), half vested with the worker.
   assert.equal(bal(escrow, JILL).payable, 95, "poster: 90 + 5 refund");
   assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
@@ -704,29 +777,74 @@ test("dispute SPLIT from accepted: exact halves, challenger bond returned (never
   expectConserved(escrow);
 });
 
-test("dispute SPLIT from submitted: award is attributed first, then split — no lost move", () => {
+test("#3726: a dispute cannot open on submitted work — no vesting without acceptance", () => {
   const { escrow } = makeEscrow();
+  // The differential-escrow probe case: submitted work, disputed and ruled
+  // "rejected", vested the award as approved (poster 87.5, worker 112.4)
+  // through the settle-kind fall-through — bypassing acceptance,
+  // attestation, and the challenge window. Option A makes it impossible:
+  // the dispute cannot open, so no ruling on it can move money.
   const bounty = runToSubmitted(escrow, { amount: 10, verifier: INSTINCT });
-  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
-  const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
-    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
-  assert.equal(settled.resolution.kind, "split");
-  assert.equal(settled.resolution.bondForfeited, false);
-  assert.equal(bal(escrow, JILL).payable, 95, "poster: 90 + 5 refund");
-  assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
-  // Nothing sits in a transient state: the full 10 moved out of the award lots.
-  const lots = escrow.balances(ROOM, GROK);
-  assert.equal(lots.attributed, 0, "attribute-then-split leaves no attributed lot behind");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "submitted");
+  assert.throws(
+    () => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad" }),
+    error => error.code === "invalid_state" && /only on accepted work/.test(error.message));
+  // The refusal happens before any bond movement: the challenger's bond is
+  // never locked by a dispute that cannot open, and no dispute exists.
+  assert.equal(bal(escrow, CODEX).payable, 100);
+  assert.equal(bal(escrow, CODEX).locked, 0);
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "submitted");
+  assert.equal(after.disputeId, null);
+  // With no dispute open, no ruling path exists for this bounty at all.
+  expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "rejected", reasonCodes: ["evidence-insufficient"] }), "invalid_state");
+  assert.equal(bal(escrow, JILL).payable, 90, "poster unchanged: award still locked");
+  assert.equal(bal(escrow, GROK).payable, 99, "worker unchanged: claim bond still locked, nothing vested");
+  expectConserved(escrow);
+  // The submitted bounty's real remedies still work: acceptance unblocks a
+  // dispute, and the dispute then behaves exactly as before.
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad" });
+  assert.ok(dispute.disputeId);
+  expectConserved(escrow);
+});
+
+test("#3726/F3: a refused dispute cannot vest by timeout — no dispute exists for the keeper to default after 14 days", () => {
+  const { escrow } = makeEscrow();
+  // Long deadline (30d) isolates the dispute-timeout vector from the
+  // free-miss deadline settlement: only the 14-day dispute clock passes.
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT, deadline: isoFuture(30 * 24 * 3_600_000) });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  // The dispute cannot open on submitted work (the Option A gateway).
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "stall" }), "invalid_state");
+  // 15 days pass — beyond DISPUTE_TIMEOUT_MS. At baseline an open dispute
+  // defaulted to RELEASE here and vested the award with no ruling at all
+  // (sweep findings-06 F3); with no dispute open there is nothing to default.
+  tick(15 * 24 * 3_600_000);
+  expectCode(() => escrow.finalizeBounty(ROOM, bounty.bountyId, {}), "invalid_state");
   escrow.closeEpoch(ROOM, {});
-  assert.equal(bal(escrow, GROK).payable, 99 + 4.95 + 1);
-  assert.equal(bal(escrow, "pool").payable, 0.05);
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "submitted");
+  assert.equal(after.disputeId, null);
+  assert.equal(after.resolution ?? null, null);
+  // Nothing vested, nothing compensated, no bond ever moved.
+  assert.equal(bal(escrow, GROK).payable, 99, "worker unchanged: claim bond still locked, award not vested");
+  assert.equal(bal(escrow, GROK).approved, 0);
+  assert.equal(bal(escrow, CODEX).payable, 100);
+  assert.equal(bal(escrow, CODEX).locked, 0);
+  assert.equal(bal(escrow, JILL).payable, 90, "poster unchanged: award still locked");
   expectConserved(escrow);
 });
 
 test("dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly", () => {
   const { escrow } = makeEscrow();
   // Odd-millis award: floor/ceil split must still sum to the whole.
-  const bounty = runToSubmitted(escrow, { amount: 0.011, verifier: INSTINCT });
+  const bounty = runToAccepted(escrow, { amount: 0.011, verifier: INSTINCT });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.003, grounds: "partial" });
   const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
@@ -748,7 +866,7 @@ test("dispute SPLIT of a 1-milli bounty: zero worker half vests nothing, whole m
   // worker's vesting half is zero millis — the settlement must not attempt a
   // zero-amount approve move (the journal rejects those), or the split throws
   // after the verdict is recorded and the bounty wedges in `disputed`.
-  const bounty = runToSubmitted(escrow, { amount: 0.001, verifier: INSTINCT });
+  const bounty = runToAccepted(escrow, { amount: 0.001, verifier: INSTINCT });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
   const { bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
@@ -759,25 +877,27 @@ test("dispute SPLIT of a 1-milli bounty: zero worker half vests nothing, whole m
   assert.equal(bal(escrow, JILL).payable, 100, "poster: 99.999 + 0.001 refund");
   assert.equal(bal(escrow, CODEX).payable, 100, "challenger bond returned in full");
   const lots = escrow.balances(ROOM, GROK);
-  assert.equal(lots.attributed, 0, "attribute-then-split leaves no attributed lot behind");
+  assert.equal(lots.attributed, 0, "split leaves no attributed lot behind");
   assert.equal(lots.approved, 0, "worker vested a zero half: nothing approved");
   assert.equal(bal(escrow, "pool").payable, 0);
   expectConserved(escrow);
 });
 
-// #3263 regression: the split above lands the bounty in `approved` holding
-// ZERO approved millis. The epoch sweep must not gate the claim-bond
-// settlement (or the terminal transition) on a positive payout amount:
-// closeEpoch completes the bounty to `paid` with worker 0 / fee 0 and
-// returns the claimant's flat 1000ms claim bond, instead of recording
-// "nothing approved to sweep" in summary.failed on every epoch forever.
+// #3263 regression, from-accepted shape (the only shape since #3726): the
+// split above lands the bounty in `approved` holding ZERO approved millis.
+// The epoch sweep must not gate the claim-bond settlement (or the terminal
+// transition) on a positive payout amount: closeEpoch completes the bounty
+// to `paid` with worker 0 / fee 0 and returns the claimant's flat 1000ms
+// claim bond, instead of recording "nothing approved to sweep" in
+// summary.failed on every epoch forever.
 test("dispute SPLIT of a 1-milli bounty: epoch sweep settles the claim bond and pays out zero (#3263)", () => {
   const { escrow } = makeEscrow();
-  const bounty = runToSubmitted(escrow, { amount: 0.001, verifier: INSTINCT });
+  const bounty = runToAccepted(escrow, { amount: 0.001, verifier: INSTINCT });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
   escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
   assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
+  assert.equal(bal(escrow, GROK).approved, 0);
   assert.equal(bal(escrow, GROK).locked, 1, "claim bond (1000ms = 1 credit) still locked before the sweep");
   const epoch = escrow.closeEpoch(ROOM, {});
   assert.equal(epoch.summary.failed, undefined, `epoch must not fail the zero-approved bounty: ${JSON.stringify(epoch.summary.failed)}`);
@@ -791,23 +911,6 @@ test("dispute SPLIT of a 1-milli bounty: epoch sweep settles the claim bond and 
   const epoch2 = escrow.closeEpoch(ROOM, {});
   assert.equal(epoch2.summary.failed, undefined);
   assert.deepEqual(epoch2.summary.swept, []);
-  expectConserved(escrow);
-});
-
-test("dispute SPLIT of a 1-milli bounty from accepted: epoch sweep also completes it (#3263)", () => {
-  const { escrow } = makeEscrow();
-  const bounty = runToAccepted(escrow, { amount: 0.001, verifier: INSTINCT });
-  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 0.001, grounds: "partial" });
-  escrow.decideDispute(ROOM, bounty.bountyId,
-    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
-  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
-  assert.equal(bal(escrow, GROK).approved, 0);
-  const epoch = escrow.closeEpoch(ROOM, {});
-  assert.equal(epoch.summary.failed, undefined, `epoch must not fail the zero-approved bounty: ${JSON.stringify(epoch.summary.failed)}`);
-  assert.deepEqual(epoch.summary.swept, [bounty.bountyId]);
-  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "paid");
-  assert.equal(bal(escrow, GROK).locked, 0, "claim bond settled by the sweep");
-  assert.equal(bal(escrow, GROK).payable, 100);
   expectConserved(escrow);
 });
 
@@ -829,12 +932,13 @@ const failNthMove = (escrow, bountyId, n) => {
 
 test("decideDispute settlement throw: machine and DB stay consistent, re-decision works (#3275)", () => {
   const { escrow } = makeEscrow();
-  const bounty = runToSubmitted(escrow, { amount: 10, verifier: INSTINCT });
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
   const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial" });
   assert.equal(escrow.getDispute(ROOM, dispute.disputeId).state, "adjudicating");
-  // Split settlement moves: attribute (1), approve worker half (2), refund
-  // poster half (3 — injected throw), bond return (never reached).
-  const restore = failNthMove(escrow, bounty.bountyId, 3);
+  // Split settlement moves from accepted (award already attributed):
+  // approve worker half (1), refund poster half (2 — injected throw),
+  // bond return (never reached).
+  const restore = failNthMove(escrow, bounty.bountyId, 2);
   assert.throws(() => escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] }),
     /injected mid-settlement failure/);
@@ -852,7 +956,7 @@ test("decideDispute settlement throw: machine and DB stay consistent, re-decisio
   assert.equal(machine.resolution, null);
   // No journal move from the aborted settlement survived.
   assert.equal(bal(escrow, JILL).payable, 90, "poster half refund must not commit");
-  assert.equal(bal(escrow, GROK).attributed, 0);
+  assert.equal(bal(escrow, GROK).attributed, 10, "the acceptance attribution stands; the split did not move it");
   assert.equal(bal(escrow, GROK).approved, 0);
   assert.equal(bal(escrow, CODEX).payable, 97.5, "challenger bond still locked, not returned");
   assert.equal(bal(escrow, CODEX).locked, 2.5);

@@ -743,10 +743,6 @@ test("record identities and fragments remain collision-safe and legacy work link
       id: `event-${messageId}`, idempotencyKey: `seed-${messageId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_POSTED,
       data: { messageId, body }
     }));
-    seed.push(event({
-      id: `reaction-${memberId}`, idempotencyKey: `seed-reaction-${memberId}`, roomId: "commons", actorId: memberId, type: T.MESSAGE_REACTION_SET,
-      data: { messageId: "list", reaction: "heart", active: true }
-    }));
   }
   seed.push(event({
     id: "message-colon", idempotencyKey: "seed-message-colon", roomId: "commons", actorId: "owner", type: T.MESSAGE_POSTED,
@@ -821,7 +817,6 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.match(await page.locator('[data-member-record-id="duplicate-b"]').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-a-message"] .message-meta').textContent(), /Alex \(duplicate-a\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-b-message"] .message-meta').textContent(), /Alex \(duplicate-b\)/);
-  assert.match(await page.locator('[data-message-record-id="list"] [data-reaction="\u2764\uFE0F"]').getAttribute("title"), /Alex \(duplicate-a\).*Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-event-record-id="event-duplicate-a-message"]').textContent(), /Alex \(duplicate-a\)/);
   await closeSettings(page);
   await openSearch(page);

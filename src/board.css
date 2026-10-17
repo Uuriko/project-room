@@ -42,6 +42,13 @@
 .claim-owner { display: flex; align-items: center; gap: var(--space-2); }
 .claim-deps, .claim-chain { overflow-wrap: anywhere; }
 .claim-files, .claim-reviews, .claim-deps { margin: 0 0 var(--space-2); }
+/* #3795: the claim record disclosure gets the same touch sizing as the file
+   list; its labelled sections read as a compact record, not a second card. */
+.claim-record { margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.claim-record summary { min-height: 44px; padding-block: .65rem; cursor: pointer; }
+.claim-record ul { margin: 0 0 var(--space-2); }
+.claim-record p { margin: 0 0 var(--space-2); }
+.claim-record-label { font-weight: 600; }
 .claim-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .claim-actions button, .claim-actions select { min-height: 44px; }
 .ci-badge { display: inline-block; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 99px; font-size: var(--text-xs); text-transform: uppercase; }

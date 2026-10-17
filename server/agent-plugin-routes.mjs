@@ -882,7 +882,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // pinned namespaced response. The listener block rides only when the
     // heartbeat asked for the lease.
     const presentedHost = auth.scopedKey ? { ...host, hostId: data.hostId } : host;
-    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, more: more === true, next, pushConfigured, reachability,
+    // R327-1 (r6): the heartbeat carries the pause state so a machine whose
+    // room the owner paused learns it before it asks anything in the room.
+    const heartbeatPaused = store.agentHeartbeats.pausedRoomsOf(auth.identityId);
+    return json(res, 200, { agentId: auth.identityId, host: presentedHost, pendingWakes, ...(heartbeatPaused.length ? { paused: heartbeatPaused } : {}), more: more === true, next, pushConfigured, reachability,
       ...(listener ? { listener } : {}) });
   });
 
@@ -907,7 +910,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       auth = heartbeatActor(req, requiredScope("heartbeats:report"));
       if (auth.identityId !== initialIdentity) reject(403, "identity_changed", "Credential identity changed during request");
       return store.agentHeartbeats.ackWakes({ agentId: auth.identityId, signalIds: data.signalIds, roomId: auth.roomId ?? null,
-        fencingToken: data.fencingToken ?? null });
+        fencingToken: data.fencingToken ?? null, door: "rest" });
     }));
   });
 
@@ -996,6 +999,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         reject(422, "invalid_wake_poll", "waitMs must be 0..55000 milliseconds");
       waitMs = parsed;
     }
+    // R327-1 (r6): the poll carries the pause state so a paused bot learns
+    // why its room wakes are being held, and learns at once when the pause
+    // lands or lifts (releasePauseWaiters wakes the held poll).
+    const pausedField = identityId => { const rooms = store.agentHeartbeats.pausedRoomsOf(identityId); return rooms.length ? { paused: rooms } : {}; };
     const wakeNext = pendingWakes => [
       ...heartbeatNext(pendingWakes),
       Object.freeze({ action: "poll-wakes", method: "GET", path: "/api/agent-wakes/poll", requiredScope: "heartbeats:read",
@@ -1023,7 +1030,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (!immediate.registered) reject(404, "agent_not_registered",
         "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
+        // #3265: the poll door carries the heartbeat door's truncation
+        // flag — a full page says whether more signals are waiting.
         return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+          more: immediate.more === true, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
       const startedAt = Date.now();
@@ -1044,6 +1054,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+        more: fresh.more === true, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {
       release();
