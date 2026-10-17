@@ -1197,7 +1197,9 @@ function freezeJsonState(value) {
   if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
   const keys = Object.keys(value);
   if (Reflect.ownKeys(value).length !== keys.length + (array ? 1 : 0) || array && keys.length !== value.length) return false;
-  for (const key of keys) {
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (array && key !== String(index)) return false;
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
   }
@@ -2790,8 +2792,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const pending = this._pendingProjectionFrames?.at(-1);
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }),
-      weight: Buffer.byteLength(projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) });
+    const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;

@@ -20,7 +20,7 @@ function fixture(t, options = {}) {
   const prepare = store.db.prepare.bind(store.db);
   store.db.prepare = sql => {
     const statement = prepare(sql);
-    if (sql === "SELECT projection FROM rooms WHERE id=?") {
+    if (/^SELECT\s+projection\b[\s\S]*\bFROM\s+rooms\b/i.test(sql)) {
       const get = statement.get.bind(statement);
       statement.get = (...args) => { projectionReads += 1; return get(...args); };
     }
@@ -185,6 +185,7 @@ test("JSON-unstable command output falls back to the exact stored representation
   try { assert.deepEqual(store.room("commons"), cold.room("commons")); }
   finally { cold.close(); }
   assert.equal(Object.is(store.room("commons").state.room.spendAllowance.allowanceCents, -0), false);
+
 });
 
 test("failed COMMIT discards candidates even when the command itself succeeded", t => {
