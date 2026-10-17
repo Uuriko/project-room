@@ -2545,15 +2545,6 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_messages": {
       "inputSchema": "ddc58b6f3ab954c3",
       "annotations": {
