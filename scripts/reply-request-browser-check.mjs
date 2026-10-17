@@ -67,6 +67,7 @@ for (const width of [1280, 390, 320]) test(`request journey at ${width}px: reque
   await guest.getByRole("button", { name: "Send answer", exact: true }).waitFor();
   await idle(guest);
   assert.equal(await guest.locator("#request-refresh").isVisible(), false, "unchanged context needs no refresh control");
+  assert.equal(await guest.locator("#ask-room").isVisible(), false, "private request mode does not offer a public assistant action");
   if (width <= 390) {
     const geometry = await guest.evaluate(() => {
       const bar = document.querySelector('#request-mode-bar').getBoundingClientRect();
@@ -84,6 +85,7 @@ for (const width of [1280, 390, 320]) test(`request journey at ${width}px: reque
   await input(guest).press("Shift+Enter");
   assert.match(await input(guest).inputValue(), /\n$/);
   await input(guest).press("Enter"); await saved(guest);
+  assert.equal(await guest.locator("#ask-room").isVisible(), true, "ordinary conversation restores the assistant action");
   assert.equal(f.state().replyRequests[id].status, "answered");
   assert.deepEqual(f.state().workItems, before);
   await record(owner, id).locator(".request-state").filter({ hasText: "Answered" }).waitFor();

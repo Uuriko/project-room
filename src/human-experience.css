@@ -64,3 +64,10 @@
   #request-mode-label { flex: 1 1 8rem; min-width: 0; }
   #request-mode-bar button { flex: 0 0 auto; width: auto; min-height: 44px; }
 }
+
+/* An addressed request has its own send/retry action. Keep the public
+   assistant action out of that mode without changing message routing. */
+#message-form:has(#request-mode-bar:not([hidden])) #ask-room { display: none; }
+@media (max-width: 600px) {
+  #catchup-count[data-quiet="true"] { display: none; }
+}

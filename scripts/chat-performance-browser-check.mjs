@@ -100,7 +100,12 @@ test('chat requests activity only; Record loads the complete tail, retries failu
   const leanRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && response.request().headers()['x-project-room-audit-view'] === 'activity-v1');
   await page.locator('#settings-close').click();
   await leanRead;
-  denyRecord = true; await openSettings(page, 'record-panel');
+  denyRecord = true;
+  // The selected Record panel survives closing. Its refused read immediately
+  // hides the room, so do not wait for that dialog to remain visible.
+  const deniedRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && response.status() === 403);
+  await clickChrome(page, '#topbar-settings');
+  await deniedRead;
   await page.locator('#main').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('[data-message-record-id="audit-message"]').count(), 0, 'a refused lazy read clears cached private Room content');
   assert.deepEqual(errors, []);

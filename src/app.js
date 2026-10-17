@@ -7500,6 +7500,8 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
   renderContribution(contributions, owned);
   setText("#catchup-count", current ? briefView.message === "Updating room…" ? "Updating…" : [contributions.length ? `${contributions.length} need${contributions.length === 1 ? "s" : ""} you` : "",
     unread ? `${unread} update${unread === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") || "No new updates" : "");
+  const quiet = String(Boolean(current && briefView.message !== "Updating room…" && !contributions.length && !unread));
+  if ($("#catchup-count").dataset.quiet !== quiet) $("#catchup-count").dataset.quiet = quiet;
   $("#room-results-open").hidden = !owned || completedResults(state).length === 0;
   if (owned) {
     // Work destinations and catch-up use the same clock, even without new events.
