@@ -2902,12 +2902,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // the outer commit. Every rooms write invalidates all earlier candidates.
     const boundary = outermost || isolated;
     const frames = this._pendingProjectionFrames ??= [];
-    if (boundary) frames.push(new Map());
+    // Append ownership follows savepoint scopes independently of cache
+    // invalidation: a failed child must not erase valid parent appends.
+    const parentAppends = boundary ? this._pendingAppends : null;
+    if (boundary) { frames.push(new Map()); this._pendingAppends = new Set(); }
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
       this._dropProjectionCache();
-      if (boundary) { frames.pop(); this._pendingAppends.clear(); }
+      if (boundary) { frames.pop(); this._pendingAppends = parentAppends; }
       throw this.storageFailure(error, outermost);
     }
     if (boundary) {
@@ -2919,11 +2922,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const cache = this._projectionCache ??= new ProjectionCache();
         for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
       }
-      // Publish committed appends only after the cache promotion above, so
-      // streams woken by the flush observe the post-commit projection state.
-      // A rolled-back append never reaches here: the catch path clears
-      // _pendingAppends at the same boundary instead.
-      this._flushEventAppends();
+      const appends = this._pendingAppends;
+      this._pendingAppends = parentAppends;
+      for (const roomId of appends) this._pendingAppends.add(roomId);
+      // Releasing a savepoint only transfers ownership to its parent. The
+      // outer commit publishes after cache promotion; rollback discards
+      // only the failed scope, including any successful children it held.
+      if (outermost) this._flushEventAppends();
     }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
