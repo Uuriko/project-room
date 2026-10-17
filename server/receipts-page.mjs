@@ -2,6 +2,7 @@
 // Every interpolated string is escaped: titles and names are room data.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
@@ -99,6 +100,29 @@ ${next}
 const CHECK_STATUS_WORDS = { pass: "matches", contradicted: "does not match", missing: "missing",
   "not-checked": "not checked", observed: "as reported" };
 
+// Claim → source, at phrase level (proof-ux R3: the largest measured
+// checking improvement): a check's detail names its evidence in words,
+// and the words naming the pull request link to the pull request itself —
+// the checkable source — instead of sitting next to a bare URL elsewhere
+// on the page. Links are formed only from a pull URL the record carries;
+// nothing is linked that the record does not name.
+// The record's pull-request row names the claim ("Pull request #2099")
+// and links it to the pull itself; the raw URL stays the href and the
+// JSON field — the phrase is what a reader checks.
+const prPhrase = url => {
+  const parsed = parsePullRequestUrl(url);
+  return parsed ? `Pull request #${parsed.number}` : url;
+};
+
+function linkPullPhrase(escapedDetail, receipt) {
+  if (!receipt.pullRequest) return escapedDetail;
+  const parsed = parsePullRequestUrl(receipt.pullRequest);
+  if (!parsed) return escapedDetail;
+  const phrase = `pull request #${parsed.number}`;
+  return escapedDetail.split(phrase)
+    .join(`<a href="${escapeHtml(receipt.pullRequest)}">${phrase}</a>`);
+}
+
 export function renderVerificationBlock(receipt, verification) {
   if (!verification) {
     return `<section class="receipt-verification" aria-label="Verification">
@@ -107,8 +131,10 @@ export function renderVerificationBlock(receipt, verification) {
 <p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
 </section>`;
   }
-  const checks = verification.checks.map(check =>
-    `<li data-check="${escapeHtml(check.id)}" data-status="${escapeHtml(check.status)}"><strong>${escapeHtml(check.label)}</strong> — ${escapeHtml(CHECK_STATUS_WORDS[check.status] ?? check.status)}: ${escapeHtml(check.detail)}</li>`).join("");
+  const checks = verification.checks.map(check => {
+    const detail = check.id === "pull-request" ? linkPullPhrase(escapeHtml(check.detail), receipt) : escapeHtml(check.detail);
+    return `<li data-check="${escapeHtml(check.id)}" data-status="${escapeHtml(check.status)}"><strong>${escapeHtml(check.label)}</strong> — ${escapeHtml(CHECK_STATUS_WORDS[check.status] ?? check.status)}: ${detail}</li>`;
+  }).join("");
   const notChecked = verification.scope.notChecked.map(item => `<li>${escapeHtml(item)}</li>`).join("");
   return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
@@ -130,7 +156,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.id)}</dd></div>`
       : "";
   const pr = receipt.pullRequest
-    ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(receipt.pullRequest)}</a></dd></div>`
+    ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(prPhrase(receipt.pullRequest))}</a></dd></div>`
     : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
   const tierLabel = verificationLabel(receipt.verification?.state);

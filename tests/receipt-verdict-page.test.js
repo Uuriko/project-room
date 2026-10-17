@@ -67,7 +67,8 @@ test("?verify=1 renders the graded verdict with its scope in one block", async t
   const html = await (await fetch(`${origin}/receipts/${receiptId}?verify=1`)).text();
   assert.match(html, /data-verdict="server-verified"/);
   assert.match(html, /<strong>Server-verified<\/strong>/);
-  assert.match(html, /Pull request on GitHub<\/strong> — matches: GitHub reports pull request #2099 merged/);
+  assert.match(html, /Pull request on GitHub<\/strong> — matches: GitHub reports <a href="https:\/\/github\.com\/Uuriko\/project-room\/pull\/2099">pull request #2099<\/a> merged/,
+    "the claim phrase in the verdict links to the pull request itself (slice 3)");
   assert.match(html, /What was not checked/);
   assert.match(html, /Whether the work itself is any good/);
   assert.match(html, /Checked <time datetime=/, "the verdict is stamped with the check time");
