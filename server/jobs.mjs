@@ -11,6 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -425,6 +426,25 @@ export const JOBS = Object.freeze([
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
         return { errors: 1 };
       }
+    }
+  }),
+  defineJob({
+    name: "patrol",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // ClueBot phase 1: enabled only while some room has events the patrol
+    // has not tailed, so an idle room never wakes for it (the registry's
+    // standing rule). Read-only: the patrol files findings, it never acts.
+    enabled: (_env, store) => (store ? patrolPending(store) : true),
+    disabledReason: () => "No unpatrolled events are waiting",
+    // Due at the caller's `now`, never a live Date.now(): a fresh clock
+    // read lands a hair past the arming computation, slips past the
+    // registry's push-out-by-one-cadence rule, and arms the alarm
+    // immediately — an idle room would wake at once (jobs-alarm proof).
+    nextDueAt: (store, now) => (patrolPending(store) ? now : null),
+    async run(store, ctx) {
+      if (ctx.room?.patrolTick) return ctx.room.patrolTick();
+      return runPatrolTick(store, { deadline: ctx.deadline });
     }
   }),
   defineJob({
