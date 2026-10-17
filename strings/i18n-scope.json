@@ -26,6 +26,7 @@
   "src/board-mine.js",
   "src/board-ui.js",
   "src/board.js",
+  "src/bounty-board.js",
   "src/browser-session.js",
   "src/chat-suggestions.js",
   "src/client.js",

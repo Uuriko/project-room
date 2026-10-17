@@ -324,6 +324,7 @@ let referralBoardUI = null;
 let landQueueUI = null;
 let openQuestionsUI = null;
 let retentionUI = null;
+let bountyBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -445,6 +446,7 @@ const client = new RoomClient({
     landQueueUI?.sync();
     openQuestionsUI?.sync();
     retentionUI?.sync();
+    bountyBoardUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -538,6 +540,7 @@ const client = new RoomClient({
     landQueueUI?.reset();
     openQuestionsUI?.reset();
     retentionUI?.reset();
+    bountyBoardUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -710,6 +713,13 @@ retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
   load: () => import("./retention-ui.js"),
   install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
   onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
+// Bounties & credits (#3437): the in-room human money surface — list, post +
+// fund, review/accept/reject, own balances and receipts, all over the
+// existing bounty-escrow endpoints.
+bountyBoardUI = lazyDisclosure({ panel: $("#bounty-panel"),
+  load: () => import("./bounty-board.js"),
+  install: module => module.installBountyBoard({ client, getSession: () => session }),
+  onError: () => notice("Could not load bounties. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
