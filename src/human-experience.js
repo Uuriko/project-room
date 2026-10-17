@@ -196,16 +196,23 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; } }
     finally { reading = false; }
   }
-  async function invoke() {
+  async function invoke({ rethrow = false } = {}) {
     if (!operation || !getState()) return;
     const owned = operation, stamp = key();
-    try { await client.request(path(), { method: 'POST', data: owned }); if (stamp !== key() || operation !== owned) return; operation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; await refresh(); }
+    try {
+      const value = await client.request(path(), { method: 'POST', data: owned });
+      if (stamp !== key() || operation !== owned) return value;
+      operation = null; rejectedOperation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0;
+      // A failed refresh does not undo an accepted send. The stream can catch up.
+      if (value.receipt) { try { await client.refresh(value.receipt); } catch { /* durable receipt already received */ } }
+      await refresh(); return value;
+    }
     catch (failure) { if (stamp === key()) {
       const rejected = failure.status >= 400 && failure.status < 500;
       error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');
       if (rejected) { rejectedOperation = owned; operation = null; persistOperation(); }
       paint();
-    } }
+    } if (rethrow) throw failure; }
   }
   $('#assistant-retry').onclick = invoke;
   $('#assistant-discard').onclick = () => { operation = null; rejectedOperation = null; persistOperation(); error = ''; contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed','false'); paint(); };
@@ -213,9 +220,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     const original = rejectedOperation, stamp = key(); if (!original) return;
     try {
       const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation) return;
-      const run = latest.runs.find(r => r.id === original.runId);
-      if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
-      operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in original ? { expectedAttemptId: run.attemptId || null } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
+      const intent = original.action === 'submit' ? original.intent : original;
+      const run = latest.runs.find(r => r.id === intent.runId);
+      if (intent.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
+      const reviewed = { ...intent, ...(intent.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in intent ? { expectedAttemptId: run.attemptId || null } : {}) };
+      operation = { ...(original.action === 'submit' ? { ...original, intent: reviewed } : reviewed), requestId: crypto.randomUUID() }; rejectedOperation = null; projection = latest; persistOperation();
       error = uiText("human.copy.016"); paint();
     } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
   };
@@ -305,7 +314,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
-          if (pending && ['invoke','contribute','resolve','pause','resume','cancel'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
+          if (pending?.action === 'submit' && typeof pending.requestId === 'string' && pending.command?.type === 'message.posted'
+            && typeof pending.command?.data?.messageId === 'string' && Array.isArray(pending.fileIds)) { operation = pending; error = uiText("human.copy.023"); }
+          else if (pending && ['invoke','contribute','resolve','pause','resume','cancel'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
             && (['pause','resume','cancel'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId))) { operation = pending; error = uiText("human.copy.023"); }
         } catch { /* corrupt/unavailable saved state is not executed */ }
         let enabled = false; try { enabled = sessionStorage.getItem(`room-human-advanced:${boundary}`) === 'true'; } catch { /* defaults */ }
@@ -316,6 +327,15 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       paint(); void refresh();
     },
     syncContribution,
+    hasSubmission(command) {
+      return [operation, rejectedOperation].some(item => item?.action === 'submit' && item.command.id === command.id);
+    },
+    async submit(command, intent, fileIds) {
+      const previous = [operation, rejectedOperation].find(item => item?.action === 'submit' && item.command.id === command.id);
+      operation = previous || { action: 'submit', requestId: `ask-${command.data.messageId}`, command, intent, fileIds };
+      persistOperation();
+      return invoke({ rethrow: true });
+    },
     intent(content) {
       syncContribution();
       if (contribution) {
@@ -337,10 +357,6 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
       $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
       resultDialog.showModal(); return true;
-    },
-    async posted(messageId, wanted) {
-      if (!wanted || !human()) return;
-      operation = { ...wanted, requestId: `ask-${messageId}`, ...(wanted.action === 'invoke' ? { runId: `run-${messageId}` } : {}), sourceMessageId: messageId }; persistOperation(); await invoke();
     }
   };
 }
