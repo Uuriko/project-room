@@ -560,8 +560,31 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
   else store.transaction(write);
 }
 
+// The receipt rows a directory count may credit: exactly the receipts a
+// public reader can see. Operator unpublish (HIDDEN_RECEIPT) plus the owner
+// directory toggle, resolved the way receipts-live resolves it — a receipt
+// hides when any room it belongs to turned public receipts off, and a
+// public-work receipt's room comes from its task record when the origin is
+// a namespace rather than a room id. A legacy store whose settings table
+// predates the toggle column has no private rooms by definition, so the
+// scan falls back to the unpublish predicate alone.
+function countableReceiptRows(store) {
+  const columns = "agents_json, humans_json, origin_room_id, room_id";
+  try {
+    return store.db.prepare(`SELECT ${columns} FROM public_receipts WHERE ${HIDDEN_RECEIPT} AND NOT EXISTS (
+      SELECT 1 FROM room_directory_settings s WHERE s.public_receipts = 0
+        AND (s.room_id = public_receipts.origin_room_id OR s.room_id IN (
+          SELECT pwt.room_id FROM public_work_receipts pwr
+          JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+          WHERE pwr.receipt_id = public_receipts.id)))`).all();
+  } catch (error) {
+    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
+    return store.db.prepare(`SELECT ${columns} FROM public_receipts WHERE ${HIDDEN_RECEIPT}`).all();
+  }
+}
+
 function directoryCounts(store, agentId, identityId) {
-  const names = new Set();
+  const namesByRoom = new Map();
   let roomCount = 0;
   if (identityId) {
     const links = store.db.prepare("SELECT room_id AS roomId, member_id AS memberId FROM identity_links WHERE identity_id=?").all(identityId);
@@ -572,13 +595,22 @@ function directoryCounts(store, agentId, identityId) {
       const member = members.find(item => item && item.id === link.memberId);
       if (!member) continue;
       roomCount += 1;
-      if (typeof member.name === "string" && member.name) names.add(member.name);
+      if (typeof member.name === "string" && member.name) {
+        if (!namesByRoom.has(link.roomId)) namesByRoom.set(link.roomId, new Set());
+        namesByRoom.get(link.roomId).add(member.name);
+      }
     }
   }
   let receiptCount = 0;
-  for (const row of store.db.prepare("SELECT agents_json, humans_json FROM public_receipts").all()) {
+  for (const row of countableReceiptRows(store)) {
     const named = [...parseJson(row.agents_json, []), ...parseJson(row.humans_json, [])];
-    if (named.includes(agentId) || (identityId && named.includes(identityId)) || named.some(name => names.has(name))) receiptCount += 1;
+    if (named.includes(agentId) || (identityId && named.includes(identityId))) { receiptCount += 1; continue; }
+    // Name-only credit exists for receipts recorded before identity
+    // linking, and it is sound only inside a room the identity is linked
+    // to, under the name its member record carries in that room. Display
+    // names are self-supplied and not unique, so a bare name match would
+    // credit every same-named agent with each other's receipts.
+    if (named.some(name => [row.origin_room_id, row.room_id].some(roomId => namesByRoom.get(roomId)?.has(name)))) receiptCount += 1;
   }
   return { roomCount, receiptCount };
 }
