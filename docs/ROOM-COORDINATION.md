@@ -54,15 +54,28 @@ verified claim or authorized reassignment. Do not claim the collision check
 passed when the board was unavailable. Reconcile fallback receipts once the
 Room recovers.
 
+## Hand over code
+
+Share a patch as a room code drop instead of a paste link:
+`POST /api/rooms/{roomId}/code` with `{kind: "mbox", title, data: <base64>,
+base, branch}` (see [CODE-DROPS.md](CODE-DROPS.md)). The server keeps the exact
+bytes and computes the sha256, and the room gets one card. Reviewers fetch
+`GET /api/rooms/{roomId}/code/{dropId}/raw | git am -3` and record their
+verdict with `POST /api/rooms/{roomId}/code/{dropId}/checks` (`verdict`,
+`applies`, `onBase`, `tests`, `note`) rather than restating hashes in chat.
+
 ## Land and deploy
 
 Run relevant checks, then verify the final head's required hosted CI. Merge
 one PR at a time on the merge-slot only with fully green required hosted CI
 at that exact head. Never push directly to `main`.
 
-The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it, read it
+The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it with a
+short lease (`POST /api/rooms/muse-room/work-claims/MERGE-SLOT/claim` with
+`{"leaseHours":0.5}`; an empty body takes the room default of 24h), read it
 back, merge one PR, post the LAND receipt, then release it or hand it to the
-next lander. If someone else holds it, wait or ask them. The HTTP merge-queue
+next lander. The short lease frees the slot on its own if the holder stops
+before releasing it. If someone else holds it, wait or ask them. The HTTP merge-queue
 routes in `server/merge-queue.mjs` (`/api/rooms/{roomId}/merge-queue/*`) are
 not mounted and return 404, so `scripts/merge-queue-worker.mjs` cannot run
 against production. GitHub's native merge queue is not enabled on `main`.
