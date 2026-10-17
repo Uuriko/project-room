@@ -61,13 +61,19 @@ const when = value => {
   return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : "";
 };
 
+// The verification tier a result-mode receipt carries (#3636), worded
+// exactly as the proof page's levels name them, so every surface that
+// shows the tier shows the same claim — and no surface upgrades it.
+const verificationLabel = state => state === "verified" ? "Member-verified completion"
+  : state === "self_attested" ? "Self-attested completion" : null;
+
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
-  const items = receipts.map(item => `<article class="card">
+  const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
-<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}</p>
-</article>`).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
+<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}</p>
+</article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
@@ -127,6 +133,8 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(receipt.pullRequest)}</a></dd></div>`
     : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
+  const tierLabel = verificationLabel(receipt.verification?.state);
+  const verification = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
     : "";
@@ -138,11 +146,37 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     const s = l.settlement ?? {};
     const credits = value => typeof value === "number" && Number.isFinite(value) ? `${escapeHtml(value)} credits` : "—";
     const side = entry => entry ? `${escapeHtml(entry.account)} · ${escapeHtml(entry.lotState)}` : "—";
+    const kinds = Array.isArray(l.kinds) && l.kinds.length ? l.kinds : [l.kind].filter(Boolean);
+    // A lot can carry several movements under one id: a dispute split
+    // writes attribute + approve + refund, an epoch payout writes payout +
+    // fee. The Movement/Amount/From/To rows name only the first movement,
+    // so a multi-movement lot also lists every movement in full — without
+    // it the face misstates the settlement (a split lot headlined as the
+    // full award going to the worker though half refunded to the poster,
+    // #3765). Movements are the consecutive same-kind journal legs.
+    const groups = [];
+    for (const movement of Array.isArray(l.movements) ? l.movements : []) {
+      const current = groups.at(-1);
+      if (current && current.kind === movement.kind) current.legs.push(movement);
+      else groups.push({ kind: movement.kind, legs: [movement] });
+    }
+    const movementsRow = groups.length > 1
+      ? `<div><dt>Movements</dt><dd>${groups.map(group => {
+          const debits = group.legs.filter(leg => leg.amountMillis < 0);
+          const creditsIn = group.legs.filter(leg => leg.amountMillis > 0);
+          const millis = creditsIn.reduce((sum, leg) => sum + leg.amountMillis, 0)
+            || Math.abs(debits.reduce((sum, leg) => sum + leg.amountMillis, 0));
+          const froms = debits.length ? debits.map(side).join(", ") : "—";
+          const tos = creditsIn.length ? creditsIn.map(side).join(", ") : "—";
+          return `${escapeHtml(group.kind)}: ${froms} → ${tos} — ${credits(millis / 1000)} (${millis} milli-credits)`;
+        }).join("<br>")}</dd></div>`
+      : "";
     const rows = [
-      `<div><dt>Movement</dt><dd>${escapeHtml(l.kind ?? "")}</dd></div>`,
+      `<div><dt>Movement</dt><dd>${escapeHtml(kinds.join(", "))}</dd></div>`,
       `<div><dt>Amount</dt><dd>${credits(l.amountCredits)} (${escapeHtml(l.amountMillis)} milli-credits)</dd></div>`,
       `<div><dt>From</dt><dd>${side(l.from)}</dd></div>`,
       `<div><dt>To</dt><dd>${side(l.to)}</dd></div>`,
+      movementsRow,
       `<div><dt>Posted by</dt><dd>${escapeHtml(l.poster ?? "—")}</dd></div>`,
       `<div><dt>Worker</dt><dd>${escapeHtml(l.worker ?? "—")}</dd></div>`,
       l.verifier ? `<div><dt>Verifier</dt><dd>${escapeHtml(l.verifier)}</dd></div>` : "",
@@ -150,6 +184,10 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       l.bountyState ? `<div><dt>Bounty state</dt><dd>${escapeHtml(l.bountyState)}</dd></div>` : "",
       `<div><dt>Award</dt><dd>${credits(l.awardCredits)}</dd></div>`,
       s.kind ? `<div><dt>Settlement</dt><dd>${escapeHtml(s.kind)}</dd></div>` : "",
+      // The settlement's own amounts, on the face: for a split these are
+      // the numbers the first-movement headline cannot express (#3765).
+      typeof s.workerCredits === "number" ? `<div><dt>Worker received</dt><dd>${credits(s.workerCredits)}</dd></div>` : "",
+      typeof s.refundCredits === "number" ? `<div><dt>Refunded to poster</dt><dd>${credits(s.refundCredits)}</dd></div>` : "",
       s.reason ? `<div><dt>Settlement reason</dt><dd>${escapeHtml(s.reason)}</dd></div>` : "",
       s.settledAt ? `<div><dt>Settled</dt><dd><time datetime="${escapeHtml(s.settledAt)}">${escapeHtml(s.settledAt)}</time></dd></div>` : "",
       s.settledBy?.id ? `<div><dt>Settled by</dt><dd>${escapeHtml(s.settledBy.id)}${s.settledBy.kind ? ` (${escapeHtml(s.settledBy.kind)})` : ""}</dd></div>` : "",
@@ -165,6 +203,9 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   // work-claim receipt carries a server-verified merge (the server's own
   // poll wrote pr_merged + syncedAt; a member-supplied outcome "merged"
   // never qualifies — server/public-read-model.mjs serverVerifiedMerge).
+  // A result-mode work-claim receipt names its recorded verification tier
+  // instead (#3636): member-verified when a distinct member reviewed the
+  // delivery, self-attested when the worker's finish is the only record.
   // Names are room data (member display names, or a self-supplied name on
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
@@ -175,6 +216,10 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest
     ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : receipt.verification?.state === "verified"
+    ? "What this record proves: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : receipt.verification?.state === "self_attested"
+    ? "What this record proves: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
@@ -185,7 +230,7 @@ ${renderVerificationBlock(receipt, verification)}
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${hashes}${lot}
+${pr}${merged}${verification}${hashes}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
@@ -206,6 +251,7 @@ const publicJson = receipt => ({
   humans: receipt.humans,
   pullRequest: receipt.pullRequest,
   mergedAt: receipt.mergedAt,
+  ...(receipt.verification ? { verification: receipt.verification } : {}),
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.lot ? { lot: receipt.lot } : {}),

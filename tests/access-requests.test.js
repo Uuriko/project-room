@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
+import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 
 function setup(t) {
@@ -169,6 +169,68 @@ test("pending cap per identity per room", async t => {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_cap_over"
   }, identity.secret), /At most/);
+});
+
+// #3745 (TIME-TRAVEL): expiry is lazy, so in a room nobody reads, lapsed
+// requests stay stored 'pending' forever — and the create path counted
+// them, permanently refusing a sixth request. The create now materializes
+// the caller's own lapsed rows before counting.
+test("lapsed pendings are expired on create and do not consume the cap (#3745)", async t => {
+  const { store, requests, identity } = setup(t);
+  const ask = requestId => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId
+  }, identity.secret);
+  for (let i = 0; i < MAX_PENDING_PER_IDENTITY_ROOM; i++) ask(`ar_dead${i}`);
+  // All five lapse with nobody reading the room: past the 7-day TTL, still
+  // stored 'pending' because nothing has materialized the expiry.
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(store.now() - REQUEST_TTL_MS - 1000);
+  // The sixth create flips the dead rows instead of refusing.
+  assert.equal(ask("ar_after_lapse").status, "pending");
+  const stored = store.db.prepare(
+    "SELECT status, count(*) AS n FROM access_requests WHERE room_id='commons' GROUP BY status").all();
+  assert.deepEqual(Object.fromEntries(stored.map(row => [row.status, row.n])),
+    { expired: MAX_PENDING_PER_IDENTITY_ROOM, pending: 1 });
+  // The poll path agrees with the stored state the create left behind.
+  assert.equal(requests.status("ar_dead0", identity.identityId).status, "expired");
+});
+
+test("only live pendings count toward the cap when lapsed and live rows mix (#3745)", async t => {
+  const { store, requests, identity } = setup(t);
+  const ask = requestId => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId
+  }, identity.secret);
+  for (let i = 0; i < 3; i++) ask(`ar_mix_old${i}`);
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(store.now() - REQUEST_TTL_MS - 1000);
+  // The three lapsed rows free their slots entirely: a full cap of live
+  // pendings fits, and the next live one is refused exactly as before.
+  for (let i = 0; i < MAX_PENDING_PER_IDENTITY_ROOM; i++) {
+    assert.equal(ask(`ar_mix_live${i}`).status, "pending");
+  }
+  assert.throws(() => ask("ar_mix_over"), err => err.code === "too_many_requests");
+});
+
+test("a create expires only the caller's rows, never another identity's (#3745)", async t => {
+  const { store, requests, identity } = setup(t);
+  const other = store.identities.create("Other Agent");
+  const ask = (who, requestId) => requests.request("commons", {
+    identityId: who.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId
+  }, who.secret);
+  ask(other, "ar_other_old");
+  for (let i = 0; i < MAX_PENDING_PER_IDENTITY_ROOM; i++) ask(identity, `ar_mine${i}`);
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(store.now() - REQUEST_TTL_MS - 1000);
+  assert.equal(ask(identity, "ar_mine_new").status, "pending");
+  // The other identity's lapsed row is untouched by this identity's
+  // create; it flips only when its owner polls it (or the room is listed).
+  const otherRow = store.db.prepare(
+    "SELECT status FROM access_requests WHERE request_id='ar_other_old'").get();
+  assert.equal(otherRow.status, "pending");
+  assert.equal(requests.status("ar_other_old", other.identityId).status, "expired");
 });
 
 test("identity can check its own request; others get 404", async t => {
