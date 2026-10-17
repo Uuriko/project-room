@@ -19,6 +19,8 @@ import {
   buildPostPayload,
   buildAcceptAttestation,
   installBountyBoard,
+  bountyFocusKey,
+  restoreBountyFocus,
 } from "../src/bounty-board.js";
 
 const SUBMITTED = {
@@ -225,4 +227,46 @@ test("installBountyBoard reads list, balances, and history for the session membe
   } finally {
     if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
   }
+});
+
+test("bountyFocusKey captures a stable key per control kind (A11Y-LOOP)", () => {
+  assert.equal(bountyFocusKey(null), null);
+  assert.equal(bountyFocusKey({}), null);
+  assert.equal(bountyFocusKey({ id: "bounty-title" }), "id:bounty-title");
+  assert.equal(
+    bountyFocusKey({ dataset: { bountyAction: "fund", bountyId: "ROOMX-1" } }),
+    "action:fund:ROOMX-1");
+  assert.equal(
+    bountyFocusKey({ dataset: { verdictFor: "ROOMX-1:c1" } }),
+    "verdict:ROOMX-1:c1");
+  assert.equal(
+    bountyFocusKey({ dataset: { rejectReason: "ROOMX-1" } }),
+    "reject:ROOMX-1");
+  assert.equal(
+    bountyFocusKey({ getAttribute: (name) => name === "aria-label" ? "Recover escrow" : null }),
+    "aria:Recover escrow");
+  assert.equal(bountyFocusKey({ type: "submit" }), "submit:");
+});
+
+test("restoreBountyFocus focuses the equivalent control and reports misses (A11Y-LOOP)", () => {
+  const focused = [];
+  const target = { focus() { focused.push(this.selector); } };
+  const root = {
+    querySelector(selector) {
+      target.selector = selector;
+      return selector.includes("missing") ? null : target;
+    },
+  };
+  assert.equal(restoreBountyFocus(root, "id:bounty-title"), true);
+  assert.equal(focused[0], '[id="bounty-title"]');
+  assert.equal(restoreBountyFocus(root, "action:fund:ROOMX-1"), true);
+  assert.equal(focused[1], '[data-bounty-action="fund"][data-bounty-id="ROOMX-1"]');
+  assert.equal(restoreBountyFocus(root, "verdict:ROOMX-1:c1"), true);
+  assert.equal(focused[2], '[data-verdict-for="ROOMX-1:c1"]');
+  assert.equal(restoreBountyFocus(root, "submit:"), true);
+  assert.equal(restoreBountyFocus(root, null), false);
+  assert.equal(restoreBountyFocus(null, "id:bounty-title"), false);
+  const emptyRoot = { querySelector: () => null };
+  assert.equal(restoreBountyFocus(emptyRoot, "id:bounty-title"), false,
+    "a control that legitimately vanished restores nothing");
 });
