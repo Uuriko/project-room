@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, realpathSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -18,8 +18,9 @@ async function fixture(t, mode = "complete") {
   const data = join(root, "runtime.json"), command = join(root, "fake-codex");
   writeFileSync(data, JSON.stringify({ threads: {}, starts: 0, interrupted: 0 }));
   writeFileSync(command, `#!${process.execPath}
-import readline from 'node:readline'; import {readFileSync,writeFileSync,renameSync} from 'node:fs';
-const path=${JSON.stringify(data)}, mode=${JSON.stringify(mode)};
+import readline from 'node:readline'; import {readFileSync,writeFileSync,renameSync,existsSync} from 'node:fs'; import {basename} from 'node:path';
+const path=${JSON.stringify(data)}+'.'+basename(process.env.CODEX_HOME), mode=${JSON.stringify(mode)};
+if(!existsSync(path))writeFileSync(path,JSON.stringify({threads:{},starts:0,interrupted:0}));
 const load=()=>JSON.parse(readFileSync(path)),save=v=>{const temp=path+'.'+process.pid+'.tmp';writeFileSync(temp,JSON.stringify(v));renameSync(temp,path);},send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(!m.id)return;const d=load(),p=m.params||{};let result;
 switch(m.method){
@@ -50,7 +51,9 @@ save(d);send({id:m.id,result});});`);
   const run = (options = {}) => superviseCodexRoom({ connection, db, directory, cwd, policy: settings.policy, pollMs: 100, retryMaxMs: 400, timeoutMs: 1000,
     connect: async allowedThreadIds => { const rpc = openCodexStdio(settings, { allowedThreadIds }); try { await checkCodexProtocol(rpc, settings, { threadId: allowedThreadIds[0] }); return rpc; } catch (e) { await rpc.close(); throw e; } }, ...options });
   t.after(async () => { db.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(root, { recursive: true, force: true }); });
-  return { root, settings, origin, run, invoke, owner, directory, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => JSON.parse(readFileSync(data)), db, connection };
+  return { root, settings, origin, run, invoke, owner, directory, deleteSource: id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.deleted", data: { messageId: `message-${id}`, expectedMessageRevision: 0 } }), runtime: () => readdirSync(root).filter(name => name.startsWith("runtime.json.") && !name.endsWith(".tmp"))
+    .map(name => JSON.parse(readFileSync(join(root, name))))
+    .reduce((sum, value) => ({ starts: sum.starts + value.starts, interrupted: sum.interrupted + value.interrupted }), { starts: 0, interrupted: 0 }), db, connection };
 }
 
 
@@ -114,6 +117,8 @@ test("two hosts on one member: each ask runs once and the losing host keeps its 
   const c = new AbortController(), events = [], connects = { A: 0, B: 0 };
   const opts = who => ({ signal: c.signal, emit: e => { events.push({ who, ...e }); if (events.filter(v => v.status === "settled").length >= 3) c.abort(); },
     connect: async ids => { connects[who]++; const own = profile(who); const rpc = openCodexStdio(own, { allowedThreadIds: ids }); await checkCodexProtocol(rpc, own, { threadId: ids[0] }); return rpc; } });
+  // Each profile also has a separate fake provider store. Atomic rename alone
+  // cannot protect a shared JSON read/modify/write from two provider processes.
   // Real separate hosts have separate dedicated Codex profiles.
   function profile(who) { const codexHome = join(x.root, "profile-" + who); mkdirSync(codexHome, { recursive: true, mode: 0o700 }); return { ...x.settings, codexHome }; }
   const timer = setTimeout(() => c.abort(), 7000);
