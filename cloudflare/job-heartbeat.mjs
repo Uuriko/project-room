@@ -21,7 +21,8 @@ export const CRON_JOB_BUDGET_MS = JOB_BUDGET_MS;
 export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.includes("worker")).map(job => Object.freeze({
   name: job.name,
   periodSeconds: Math.round(job.cadenceMs / 1000),
-  redactErrors: job.redactErrors === true
+  redactErrors: job.redactErrors === true,
+  required: job.required === true
 })));
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 
@@ -151,7 +152,9 @@ export function applyOutcomes(previous, outcomes) {
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
 // Public read model. Stale = no success within STALE_PERIODS periods.
-// A disabled job is listed with a reason and is not stale. Gates stay unknown
+// A disabled job is listed with a reason and is not stale — except a
+// required job (registry `required`), whose disable is a configuration
+// failure and fails the rollup below. Gates stay unknown
 // when both env and store are omitted, so a stored heartbeat can still be read.
 export function jobHealthView(stored, now = Date.now(), env = null, store = null) {
   const gatesKnown = env != null || store != null;
@@ -186,6 +189,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
       lastSummaryAt: iso(record.lastSummaryAt),
+      required: job.required === true,
       stale,
       degraded,
       reason,
@@ -193,7 +197,14 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
-  const status = active.some(job => job.stale) ? 'stale' : active.some(job => job.status === 'failing') ? 'failing'
+  // #3894: a required job (room-backup) disabled by a dropped binding is
+  // a configuration failure, not healthy idle: the deployment cannot do
+  // the safety work at all, and "disabled" is also what an intentional
+  // disable looks like. It fails the rollup while keeping its honest
+  // per-job 'disabled' status and reason. Ordinary disabled jobs
+  // (work-gated, feature-gated) stay out of the rollup as before.
+  const requiredDisabled = jobs.some(job => job.status === 'disabled' && job.required);
+  const status = active.some(job => job.stale) ? 'stale' : requiredDisabled || active.some(job => job.status === 'failing') ? 'failing'
     : active.some(job => job.status === 'degraded') ? 'degraded' : 'ok';
   return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
 }

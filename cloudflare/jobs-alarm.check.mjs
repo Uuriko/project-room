@@ -20,6 +20,10 @@ async function start() {
     compatibilityDate: "2026-07-30",
     compatibilityFlags: ["nodejs_compat"],
     durableObjects: { ROOM: { className: "JobsProbe", useSQLite: true } },
+    // The modeled deployment has its backups binding: room-backup is a
+    // required job (#3894), so without one the health board would fail
+    // by design and drown the alarm behavior under test here.
+    kvNamespaces: ["ROOM_BACKUPS_KV"],
     bindings: { ROOM_ORIGIN: origin, ROOM_MAINTENANCE: "0", ROOM_GMAIL_ENABLED: "0" }
   });
 }

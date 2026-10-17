@@ -1178,6 +1178,14 @@ const INTEGRITY_FAILURES_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_failures
   PRIMARY KEY (step, record_id)
 )`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+const INTEGRITY_DEFERRED_SKIPS_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN deferred_skips INTEGER NOT NULL DEFAULT 0";
+// #3896: consecutive verifyRoomIntegrity calls in which the deferred
+// batch may complete zero steps before the batch is run FIRST instead.
+// Two starved ticks are tolerated (a single heavy tick is ordinary);
+// the third call guarantees the batch progress before anything else
+// can eat the budget, so starvation is bounded and counted, never a
+// silent success forever.
+const DEFERRED_STARVATION_LIMIT = 2;
 // #3334: tag an integrity failure with the sub-check that threw, so the job
 // layer can report WHICH check failed on the public health surface. Only the
 // sub-check name (a fixed enum in server/jobs.mjs) is attached — never record
@@ -2419,6 +2427,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.exec(INTEGRITY_ROOM_STATE_SCHEMA);
     const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_job_cursor)").all().map(column => column.name));
     if (!columns.has("sweep_after")) this.db.exec(INTEGRITY_SWEEP_COLUMN);
+    if (!columns.has("deferred_skips")) this.db.exec(INTEGRITY_DEFERRED_SKIPS_COLUMN);
+  }
+
+  // #3896: the durable streak of consecutive verifyRoomIntegrity calls
+  // in which the deferred batch completed zero steps (its budget was
+  // eaten by the incremental/full checks ahead of it, or the deadline
+  // had already passed). The streak rides every result as
+  // `deferredSkips`, so a starving store is visible on the job summary
+  // while the batch-first rule below bounds the starvation itself.
+  integrityDeferredSkips() {
+    this.ensureIntegrityRoomState();
+    const row = this.db.prepare("SELECT deferred_skips FROM integrity_job_cursor WHERE singleton=1").get();
+    return Number.isSafeInteger(row?.deferred_skips) && row.deferred_skips > 0 ? row.deferred_skips : 0;
+  }
+
+  noteDeferredOutcome(progressed) {
+    const current = this.integrityDeferredSkips();
+    const next = progressed ? 0 : current + 1;
+    if (next !== current) {
+      this.transaction(() => {
+        this.db.prepare(`INSERT INTO integrity_job_cursor (singleton, step, deferred_skips) VALUES (1, 0, ?)
+          ON CONFLICT(singleton) DO UPDATE SET deferred_skips=excluded.deferred_skips`).run(next);
+      });
+    }
+    return next;
   }
 
   // Remember each room's sequence and projection size after a full check so
@@ -2522,7 +2555,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() };
+    // #3896: every return carries deferredSkips — the durable streak of
+    // consecutive calls in which the deferred batch completed zero
+    // steps — and once the streak reaches the limit the batch runs
+    // FIRST, before the incremental/full checks can eat the budget
+    // again. A throwing call records nothing: it is a failure tick,
+    // not a silent success.
+    let deferredProgressed = false;
+    const finish = result => ({ ...result, deferredSkips: this.noteDeferredOutcome(deferredProgressed) });
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
+    if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
+      const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      deferredProgressed = (first?.ran ?? 0) > 0;
+    }
     let incremental;
     try {
       incremental = this.incrementalIntegrityCheck();
@@ -2531,19 +2576,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (incremental.ok) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-      return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred, failures: deferred.failures };
+      deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+      return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred, failures: deferred.failures });
     }
     const before = this.integrityChecksum();
     if (this.readIntegritySnapshot() === before.text) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures };
+      deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+      return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures });
     }
     await yieldBetween();
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
     // Per-record isolation for the full path's audits: one inconsistent
     // invitation or one room's help history is recorded durably and the
     // audit continues with every other record, instead of the first bad
@@ -2558,7 +2605,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
     for (const id of ids) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
       try {
         this.verifyInvitationRecord(id);
         this.clearIntegrityFailure("invitation_audit", id);
@@ -2578,7 +2625,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     }
     if (this.helpProjectionPresent()) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
       const helpFailures = [];
       const help = this.verifyHelpHistory({ collect: helpFailures });
       const failedRooms = new Set(helpFailures.map(failure => failure.roomId));
@@ -2597,7 +2644,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (row.step === "help_history") this.clearIntegrityFailure("help_history", row.recordId);
       }
     }
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
     // The snapshot certifies a clean full pass. With isolated failures
     // outstanding it is NOT advanced, so the next tick re-runs the full
     // path and re-audits the failed records until they verify — the
@@ -2625,9 +2672,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     }
     const verified = outstanding.length ? 0 : 1;
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, failures: this.integrityFailures() };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-    return { matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, failures: this.integrityFailures() };
+    deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+    return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, failures: this.integrityFailures() });
   }
 
   // With `collect` (an array), a room whose help history does not reconcile

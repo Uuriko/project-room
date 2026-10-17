@@ -128,7 +128,7 @@ function backupConfigured(env) {
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "deferredSkips"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
@@ -216,10 +216,53 @@ function defineJob(job) {
     budgetMs: JOB_BUDGET_MS,
     redactErrors: false,
     slow: false,
+    required: false,
     singleRuntimeReason: null,
     disabledReason() { return "Not configured"; },
     ...job
   });
+}
+
+// #3895: aggregate growth gauges for the single-DO store. Every room,
+// account, session and job shares one SQLite store; before store-growth
+// no production-runtime job watched its aggregate size approach the
+// store's limits (growth-watch tracks product-growth events off a
+// process-local collector and is node-only for that reason). The gauges
+// are one aggregate read over the rooms table plus the SQLite page
+// count — cheap at any room count. The limits are the lines where an
+// operator must act, not the hard caps: the largest room projection is
+// escalated at 3.5 MB against the 4 MiB application cap, and the
+// database at 8 GB against the 10 GB Durable Object SQLite limit.
+export const STORE_GROWTH_LIMITS = Object.freeze({
+  maxProjectionBytes: 3_500_000,
+  dbBytes: 8_000_000_000
+});
+
+export function measureStoreGrowth(store) {
+  const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
+    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+  let dbBytes = 0;
+  try {
+    const pages = store.db.prepare("PRAGMA page_count").get();
+    const size = store.db.prepare("PRAGMA page_size").get();
+    const count = Number(pages?.page_count);
+    const bytes = Number(size?.page_size);
+    if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+  } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
+  return {
+    rooms: Number(row?.rooms) || 0,
+    events: Number(row?.events) || 0,
+    maxProjectionBytes: Number(row?.maxProjectionBytes) || 0,
+    dbBytes
+  };
+}
+
+// The name of the first gauge past its limit, or null. The projection
+// line is judged first: it is the nearer, per-room-actionable cap.
+export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
+  if (Number(gauges?.maxProjectionBytes) > limits.maxProjectionBytes) return "maxProjectionBytes";
+  if (Number(gauges?.dbBytes) > limits.dbBytes) return "dbBytes";
+  return null;
 }
 
 export const JOBS = Object.freeze([
@@ -352,7 +395,7 @@ export const JOBS = Object.freeze([
           // whatever a record's error once contained.
           console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
           const summary = {};
-          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept"]) {
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
           integrity = {
@@ -446,6 +489,13 @@ export const JOBS = Object.freeze([
     name: "room-backup",
     cadenceMs: DAY_MS,
     slow: true,
+    // #3894: a required job's disable is a configuration failure, not
+    // healthy idle. Work-gated jobs are disabled whenever nothing is
+    // waiting — that is their resting state. This job is config-gated:
+    // disabled means the deployment cannot take backups at all (a
+    // dropped binding looks exactly like an intentional disable), so
+    // the health rollup and the external probe grade it as failing.
+    required: true,
     runtimes: Object.freeze(["worker"]),
     singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket or the ROOM_BACKUPS_KV namespace. A Node process has neither binding.",
     enabled: env => backupConfigured(env),
@@ -488,6 +538,24 @@ export const JOBS = Object.freeze([
     async run(_store, ctx) {
       if (typeof ctx.growthTick !== "function") return { skipped: 1 };
       return ctx.growthTick();
+    }
+  }),
+  defineJob({
+    name: "store-growth",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled: () => true,
+    disabledReason: () => null,
+    // The summary is the watch: the gauges ride the heartbeat on every
+    // tick, and a crossed limit fails the tick by name so the probe
+    // pages before the store reaches the hard cap.
+    async run(store) {
+      const gauges = measureStoreGrowth(store);
+      const breach = storeGrowthBreach(gauges);
+      if (!breach) return gauges;
+      console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
+      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
     }
   })
 ]);
