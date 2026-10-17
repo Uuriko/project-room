@@ -114,7 +114,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#room-actions-query").fill("Catch up");
   await page.locator("[data-room-action=catch-up]").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
-  await selectUpdatesFilter("Saved", "saved");
+  await selectUpdatesFilter("Read", "saved");
   await page.locator(".updates-row").waitFor();
   assert.match(await page.locator(".updates-row").innerText(), /read/);
   await page.locator('.updates-row [data-update-action="done"]').click();
@@ -282,8 +282,8 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.waitForFunction(id => document.activeElement?.closest("[data-update-id]")?.dataset.updateId === id, review.id);
 
   // Another real client handles the item while its task is open. Returning to
-  // Saved keeps the filter and uses its tab when the original row disappeared.
-  await selectUpdatesFilter("Saved", "saved");
+  // Read keeps the filter and uses its tab when the original row disappeared.
+  await selectUpdatesFilter("Read", "saved");
   await openReview(review.id).press("Enter");
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
   const sessionResponse = await page.request.get(`${origin}/api/session`);
@@ -297,7 +297,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "saved");
   assert.equal(await row(review.id).count(), 0);
-  assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.getByRole("tab", { name: "Read" }).getAttribute("aria-selected"), "true");
   assert.equal(await page.locator("#message-input").inputValue(), draft);
   await selectUpdatesFilter("All activity", "all");
   await openReview(review.id).waitFor();
@@ -1007,7 +1007,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   await f.waitRows(pages[0].items);
   assert.equal(await page.locator("#updates-count").textContent(), "100+", "the separate bounded badge fetch is also visibly truncated");
   assert.doesNotMatch(await page.locator("#topbar-updates").getAttribute("aria-label"), /100 need you$/);
-  await f.selectUpdatesFilter("Saved", "saved");
+  await f.selectUpdatesFilter("Read", "saved");
   await f.waitRows([]);
   assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/,
     "zero read rows in the first prefix says nothing about later pages");
@@ -1017,9 +1017,9 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b100 checked\b/);
   await f.loadMore([review], { keyboard: true });
   assert.equal(await page.evaluate(() => document.activeElement?.dataset.updateFilter), "saved",
-    "an exhausted Saved page with no new matching row returns keyboard focus to its selected tab");
+    "an exhausted Read page with no new matching row returns keyboard focus to its selected tab");
   assert.match(await page.locator("#updates-summary").textContent(), /\b1 loaded\b.*\b126 checked\b/);
-  assert.equal(f.countCommands(), commandsBefore, "Saved remains the read-state alias and creates no save operation");
+  assert.equal(f.countCommands(), commandsBefore, "Read keeps the saved filter ID and creates no save operation");
   assert.equal(JSON.stringify(store.room("commons")), sharedBefore);
   await page.locator("#updates-close").click();
 
@@ -1092,9 +1092,9 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   assert.equal(await f.more.isVisible() && !await f.more.isDisabled(), false, "hasMore=false exposes no enabled continuation");
   assert.equal(await page.locator("#updates-count").textContent(), "100+", "the last activity page is never mistaken for the actionable total");
 
-  // An older Saved target can disappear while away, without replacing Saved
+  // An older Read target can disappear while away, without replacing Read
   // with another filter or treating the first two pages as the whole list.
-  await f.selectUpdatesFilter("Saved", "saved");
+  await f.selectUpdatesFilter("Read", "saved");
   await f.loadMore([review]);
   await f.action(review.id, "open").click();
   await page.locator("#updates-dialog").waitFor({ state: "hidden" });
@@ -1104,7 +1104,7 @@ test("Updates page older authorized work, keep honest counts and restore the cap
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.activeElement?.dataset.updateFilter === "saved");
   assert.equal(await f.row(review.id).count(), 0);
-  assert.equal(await page.getByRole("tab", { name: "Saved" }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.getByRole("tab", { name: "Read" }).getAttribute("aria-selected"), "true");
   assert.equal(requests.length - beforeMissingReturn, 2);
   assert.doesNotMatch(await page.locator(".updates-list").innerText(), /Nothing in this filter|Nothing needs you/);
 
@@ -1353,7 +1353,7 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
     assert.equal(await f.action(pages[0].items[0].id, "open").isDisabled(), true,
       "a page transition cannot launch a row action from its older list");
     if (transition === "filter") {
-      await f.selectUpdatesFilter("Saved", "saved");
+      await f.selectUpdatesFilter("Read", "saved");
       await f.waitRows([]);
     } else {
       if (transition === "Escape") await page.keyboard.press("Escape");
@@ -1382,7 +1382,7 @@ test("Updates fence repeated Load more and held real pages across filter, Close,
       assert.equal(await page.evaluate(() => document.activeElement?.dataset.workRecordId), review.sourceRef.workItemId);
     } else {
       await f.waitRows(transition === "filter" ? [] : pages[0].items);
-      assert.equal(await page.getByRole("tab", { name: transition === "filter" ? "Saved" : "All activity" }).getAttribute("aria-selected"), "true");
+      assert.equal(await page.getByRole("tab", { name: transition === "filter" ? "Read" : "All activity" }).getAttribute("aria-selected"), "true");
       assert.match(await page.locator("#updates-summary").textContent(), transition === "filter" ? /\b0 loaded\b.*\b50 checked\b/ : /\b50 loaded\b/);
       await page.locator("#updates-close").click();
     }
