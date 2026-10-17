@@ -43,6 +43,21 @@ test('a person without steer can post but cannot ask the room assistant (R301-n1
   assert.equal(asked.result.status, 'queued');
 });
 
+test('direct invoke requires steer even when the authenticated human owns the room', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  message('owner', 'owner-without-steer', 'Please help.');
+  const assistant = new RoomAssistant(f.store);
+  const owner = f.store.authenticate(f.keys.owner, 'commons');
+  const input = { action: 'invoke', requestId: randomUUID(), runId: 'owner-needs-steer', sourceMessageId: 'owner-without-steer' };
+  // The authorization boundary supplies current permissions. Ownership alone
+  // must not bypass them, matching the atomic submit path's rule.
+  assert.throws(() => assistant.apply('commons', input, () => ({ ...owner, member: { ...owner.member, permissions: [] } })),
+    error => error.status === 403 && error.code === 'assistant_denied');
+  assert.equal((await api('owner')).runs.some(run => run.id === input.runId), false);
+  assert.equal(assistant.apply('commons', input, () => owner).result.status, 'queued');
+});
+
 test('unfinished assistant work stays discoverable after more than 100 newer terminal requests', async t => {
   const { f, api, message } = await setup(t);
   const assistant = new RoomAssistant(f.store);
