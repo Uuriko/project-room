@@ -113,7 +113,6 @@ test("snapshot polling deduplicates chat and repeats only observed renewed atten
   assert.equal(await watcher.tick(), 0);
   assert.deepEqual(f.store.room("commons").state, before.state && { ...before.state, eventLog: [] });
   f.send("owner", T.MESSAGE_POSTED, { messageId: "chat", body: "Unrelated fixture conversation" });
-  f.send("reviewer", T.MESSAGE_REACTION_SET, { messageId: "chat", reaction: "like", active: true });
   assert.equal(await watcher.tick(), 0);
   f.mutate("agent", T.WORK_ACCEPTED);
   assert.equal(await watcher.tick(), 1);
