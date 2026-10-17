@@ -38,7 +38,7 @@ import {
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
   walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
-  updateRequestDigest, requestReplayVerdict,
+  updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
   openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
@@ -58,6 +58,8 @@ import {
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
+import { publicReceiptById } from "./receipts-live.mjs";
+import { publicReceiptUrl, publicWorkClaimReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
@@ -467,6 +469,19 @@ const receiptOf = item => {
   });
 };
 
+// The member receipt names its public twin when one resolves (#3636).
+// The twin id is the projection's deterministic hash; the link is carried
+// only when the anonymous public read would resolve it — the room opted
+// in to public receipts and neither the owner toggle nor an operator
+// unpublish hides it — so the field is never a dead link. No twin: both
+// fields are null, stating plainly that this receipt has no public page.
+const receiptWithPublicLink = (store, roomId, item) => {
+  const receipt = receiptOf(item);
+  const publicId = publicWorkClaimReceiptId(roomId, item.id);
+  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
+  return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+};
+
 const receiptsQueryOf = (reject, params) => {
   if ([...params.keys()].some(key => !RECEIPT_QUERY_PARAMS.includes(key))) {
     reject(422, "invalid_receipt_query", "q, tag, limit and cursor are the accepted query parameters");
@@ -853,7 +868,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const page = ranked.slice(offset, offset + limit);
     const nextOffset = offset + limit;
     return json(res, 200, stampReceipts({
-      receipts: page.map(receiptOf),
+      receipts: page.map(item => receiptWithPublicLink(store, roomId, item)),
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
     }, caller));
   }
@@ -1009,6 +1024,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    // #3880: dependsOn gates the AvailableWork projection (a claim is
+    // claimable only when every dependency is done); the claim write path
+    // must enforce the same definition, or the projection's "claimable"
+    // is unenforced at its own endpoint and direct API/MCP claimers can
+    // take work whose prerequisites are unfinished. The checked set is
+    // the one the claim records — the body's dependsOn when supplied,
+    // else the item's stored list, exactly as claimWork resolves it —
+    // and "done" is the projection's test (availableBoardRows): a usable
+    // claim (not premise-flagged, not superseded) in state "done".
+    const effectiveDeps = data.dependsOn !== undefined ? (data.dependsOn ?? []) : (item.dependsOn ?? []);
+    if (effectiveDeps.length) {
+      const board = registry.list(roomId);
+      const doneIds = new Set(board.filter(entry => entry && !entry.premiseFlag && !entry.supersededBy && entry.state === "done").map(entry => entry.id));
+      const unmet = effectiveDeps.filter(dep => !doneIds.has(dep));
+      if (unmet.length) {
+        const stateOf = id => board.find(entry => entry?.id === id)?.state ?? "missing";
+        reject(409, "work_claim_dependencies_unmet",
+          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.`);
+      }
+    }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {
@@ -1075,7 +1110,9 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // stays owner-only.
     const verifyCall = item.state === "delivered" && data.state === "done";
     const sendBackCall = item.state === "delivered" && data.state === "in_progress";
-    if (item.owner !== caller && !verifyCall && !sendBackCall) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    const reviewerOutcome = item.owner !== caller && data.requestId !== undefined
+      ? reviewerRequestOutcome(item, data.requestId, caller) : null;
+    if (item.owner !== caller && !verifyCall && !sendBackCall && !reviewerOutcome) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
     if (sendBackCall && item.owner !== caller
       && !mayManageAnyClaim(access)
       && !(item.reviews ?? []).some(entry => entry.memberId === caller && entry.verdict === "changes_requested")) {
@@ -1094,6 +1131,23 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // #2965: the replay is bound to the payload digest — a seen requestId
     // carrying a different update is refused 409, never silently swallowed.
     if (data.requestId !== undefined) {
+      if (item.owner !== caller && Object.hasOwn(item.requestOutcomes ?? {}, data.requestId)) {
+        // A requestId is not a capability. Only the actor bound to this exact
+        // landed exit may retry; old digest-only records grant no reviewer access.
+        if (!reviewerOutcome) reject(403, "work_not_owner", `requestId "${data.requestId}" does not bind a current reviewer exit by ${caller}`);
+        const reviewers = reviewersOf(store, roomId);
+        if (!mayReviewWorkClaims(access) || !reviewers.includes(caller)) refuseWorkClaims();
+        const allowed = reviewerOutcome.state === "done"
+          ? canCloseWork({ ...item, state: "delivered" }, caller, {
+            policy: item.reviewPolicy ?? config.reviewPolicy,
+            verifyMembers: verifiersOf(store, roomId), reviewMembers: reviewers,
+          })
+          : mayManageAnyClaim(access) || (hasCurrentReview(item, caller)
+            && (item.reviews ?? []).some(entry => entry.memberId === caller && entry.verdict === "changes_requested"));
+        if (!allowed) reject(403, "work_review_rejected", `The current review authority does not permit replaying work "${item.id}"`);
+        if (!reviewerReadingAckMatches(reviewerOutcome, data.readingAck)) reject(409, "work_claim_conflict",
+          `requestId "${data.requestId}" already landed on work "${item.id}" with a different reading ack`);
+      }
       const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
         updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
           reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
@@ -1219,9 +1273,13 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // when) after the state/note write, in the same commit.
     const acked = data.readingAck === undefined ? updated
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
+    // Keep the legacy self_attested first-call behavior unchanged; it does
+    // not create authority for a nonowner to replay an owner's attestation.
+    const result = data.requestId !== undefined && (sendBackCall || (verifyCall && policy !== "self_attested")) && item.owner !== caller
+      ? runPure(reject, () => bindReviewerRequestOutcome(item, acked, caller, data.requestId, data.readingAck)) : acked;
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
-    return json(res, 200, acked);
+    commit(result, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
+    return json(res, 200, result);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
     // A verdict review is a record from someone other than the owner who

@@ -46,10 +46,13 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }
   }, ["roomId"])),
-  tool("room_list_events", "List room events after a sequence number, oldest first. Use after (a sequence), never afterSequence. Targeted DMs and peer-bond receipts stay filtered to their parties. Reading does not mark anything read.", schema({
+  tool("room_list_events", "List room events after a sequence number, oldest first. Use after (a sequence), never afterSequence. Optional server-side filters: type (comma-separated event types, e.g. message.posted), mentions (a member id, or me — only events that @mention that member), compact (true drops envelope noise: idempotency keys, the repeated room id, null causation ids, mention display names). Targeted DMs and peer-bond receipts stay filtered to their parties. Reading does not mark anything read.", schema({
     roomId: roomIdField,
     after: { type: "integer", minimum: 0, default: 0 },
-    limit: { type: "integer", minimum: 1, maximum: 100, default: 50 }
+    limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+    type: { type: "string", description: "Comma-separated event types to return, e.g. \"message.posted,work_item.updated\"." },
+    mentions: { type: "string", description: "Member id whose @mentions to return, or \"me\"." },
+    compact: { type: "boolean", default: false, description: "Drop per-event envelope noise (idempotencyKey, roomId, null causationId, mention display names)." }
   }, ["roomId"])),
   tool("room_post_message", "Post room chat by submitting the message.posted command { id, type, data: { messageId, body } }. id is the command receipt key: retry the exact same id and body. A different body with the same id is an idempotency conflict and does not replace the receipt. id and messageId are optional; when omitted the server mints them and returns them on the receipt. messageId defaults to id. Optional replyToId links the post to an existing message. This does not accept, complete, or approve work.", schema({
     roomId: roomIdField,
@@ -275,7 +278,7 @@ export const hostedWakeTools = [
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },
     reason: { type: ["string", "null"], maxLength: 200, description: "Optional pause note. Omit or send null." }
   }, ["roomId"]), false),
-  tool("wake_resume", "Resume this member's queued wakes. Same call as POST /api/rooms/:roomId/agent-pause with action resume. requestId is optional and is minted by the server when omitted. memberId defaults to this identity. reason is accepted and optional. An identity secret resumes its own member row.", schema({
+  tool("wake_resume", "Resume this member's queued wakes. Same call as POST /api/rooms/:roomId/agent-pause with action resume. requestId is optional and is minted by the server when omitted. memberId defaults to this identity. reason is accepted and optional. An identity secret resumes its own member row. A pause set by the room owner or manage members is lifted only by them (403 wake_pause_held_by_owner otherwise); a pause the member set itself stays self-resumable.", schema({
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id. Defaults to this identity. An identity secret can resume only its own member row." },
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },

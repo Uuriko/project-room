@@ -117,13 +117,20 @@ async function loadContribution(offer, flight) {
     paint('<p role="status">Submitted · loading receipt…</p>');
     const id = task.claim.submittedReceiptId, record = await read(`/api/public-work/receipts/${encodeURIComponent(id)}`, flight.signal);
     if (!current()) return;
-    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'verified'].includes(record.state) || !['hash_only', 'system_checked'].includes(record.verification) || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
+    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'verified', 'rejected', 'revision_requested'].includes(record.state) || !['hash_only', 'system_checked'].includes(record.verification) || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
     // #3546: an accepted receipt carries the verified successor state. Show
     // it truthfully — the level still separates what the platform executed
     // itself (system_checked) from a hash-only record of acceptance.
-    const status = record.state === 'verified' ? 'Verified' : 'Submitted';
-    const note = record.verification === 'system_checked'
+    // #3733: a rejection or revision request never stamps the record; the
+    // canonical read composes the decision onto it, and this view shows
+    // that outcome rather than masking the delivery as a bare submission.
+    const status = record.state === 'verified' ? 'Verified' : record.state === 'rejected' ? 'Rejected' : record.state === 'revision_requested' ? 'Revision requested' : 'Submitted';
+    const note = record.state === 'rejected'
+      ? 'Unsigned receipt. The designated reviewer rejected this delivery; the decision is recorded with the receipt.'
+      : record.state === 'revision_requested'
+      ? 'Unsigned receipt. The designated reviewer asked for changes to this delivery.'
+      : record.verification === 'system_checked'
       ? 'System-checked, unsigned receipt. The platform ran its own checks over the submission.'
       : record.state === 'verified'
         ? 'Hash-only, unsigned receipt. Acceptance is recorded on the receipt; reported checks are not system-verified.'

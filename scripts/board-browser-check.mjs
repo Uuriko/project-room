@@ -300,13 +300,26 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(await linked.getAttribute("href"), canonicalHash);
     assert.equal(await linked.getAttribute("data-open-work"), workId);
     const boardUrl = page.url();
+    // #3795: a claim without a resolvable work item is not a fabricated WORK
+    // link — its title links to its own claim record instead. The journey
+    // stays on the Board (the record is the card, disclosure open, return
+    // control naming the Board), and going back restores the Board URL with
+    // the dialog still open and focus on the title link.
     for (const id of ["board-null", "board-dangling", "board-coincidence"]) {
-      const heading = page.locator(`article[data-claim-id='${id}'] h4`);
-      assert.equal(await heading.count(), 1);
-      assert.equal(await heading.locator("a, [data-open-work]").count(), 0, `${id} is not a fabricated work link`);
-      await heading.click();
-      assert.equal(page.url(), boardUrl);
+      const titleLink = page.locator(`article[data-claim-id='${id}'] h4 a[data-open-claim]`);
+      assert.equal(await titleLink.count(), 1, `${id} links to its own claim record`);
+      assert.equal(await titleLink.getAttribute("data-open-work"), id);
+      assert.equal(await titleLink.getAttribute("href"), `#pr-record/work/${id}`,
+        `${id} never links to a missing or coincidentally equal work item`);
+      await titleLink.click();
+      await page.waitForFunction(claimId => location.hash === `#pr-record/work/${claimId}`
+        && document.querySelector(`article[data-claim-id='${claimId}'] details[data-claim-record]`)?.open === true, id);
+      assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
+      assert.equal(await dialog.evaluate(node => node.open), true, "the claim record is the Board card itself");
+      await page.goBack();
+      await page.waitForFunction(expected => location.href === expected, boardUrl);
       assert.equal(await dialog.evaluate(node => node.open), true);
+      assert.equal(await titleLink.evaluate(node => node === document.activeElement), true, "return restores the title link");
     }
     await page.locator("#board-close").focus();
     for (let step = 0; step < 100; step += 1) {
@@ -557,7 +570,10 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     assert.match(await dependent.innerText(), /Prepare the handoff.*Unclaimed; needs an owner/);
     assert.equal(await dependent.locator("[data-claim-action='claim']").count(), 0);
     assert.match(await unknown.innerText(), /Not loaded or unavailable; status unknown/);
-    assert.equal(await unknown.locator("a, [data-claim-action='claim']").count(), 0);
+    // The missing prerequisite itself is never linked (its reference stays
+    // plain text) and the card offers no claim action; the card's own title
+    // record link (#3795) is the one anchor the card legitimately carries.
+    assert.equal(await unknown.locator(".claim-deps a, [data-claim-action='claim']").count(), 0);
     assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
     assert.equal(await link.getAttribute("href"), `#pr-record/work/${encodeURIComponent(workId)}`);
     assert.equal(await dependent.locator(".claim-chain [data-open-work]").getAttribute("href"), await link.getAttribute("href"));
@@ -1207,4 +1223,67 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
   } finally {
     await drainBoardRoutes(page, ...holds.map(entry => entry.release));
   }
+});
+
+// #3688: closing the board must hand keyboard focus to a stable anchor —
+// the element that opened it when that element survives, otherwise the
+// conversation title — never <body>. The native <dialog> return chain
+// bottoms out at <body> when the palette was opened from body focus, and
+// when the recorded opener is removed while the board is open.
+test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const dialog = page.locator("#board-dialog");
+  const focusLandsOn = id => page.waitForFunction(expected => document.activeElement?.id === expected, id);
+  const closeWithEscape = async () => {
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+  };
+
+  // A backdrop click is not a close path: the dialog stays open.
+  await openBoard(page);
+  await page.mouse.click(8, 8);
+  assert.equal(await dialog.evaluate(node => node.open), true, "backdrop click does not close the board");
+  await closeWithEscape();
+
+  // Surviving opener: focus starts in the composer, the palette carries it
+  // into the board, and both close paths hand it back to the composer.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("message-input");
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.locator("#board-close").click();
+  await dialog.waitFor({ state: "hidden" });
+  await focusLandsOn("message-input");
+
+  // No opener: the palette was opened from body focus, so the fallback
+  // anchor — the conversation title — takes focus instead of <body>.
+  await page.evaluate(() => document.activeElement?.blur());
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+
+  // Opener removed while the board is open: the same fallback applies.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.evaluate(() => document.querySelector("#message-input").remove());
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
 });
