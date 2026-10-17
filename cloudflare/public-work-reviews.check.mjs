@@ -74,7 +74,12 @@ test('actual Worker review verification/acceptance and exact journals survive di
   assert.equal(accepted.review.state,'accepted');
   const persisted=await json(await call('state'));
   assert.equal(persisted.results.results[0].offer.status,'withdrawn');
-  assert.deepEqual(persisted.submitted,before.submitted);assert.deepEqual(persisted.kernel,before.kernel);assert.deepEqual(persisted.balances,before.balances);
+  // #3546: acceptance rewrites only the receipt's verified successor
+  // fields (state/verification/executedChecks/verified); the submitted
+  // artifact bytes and every other row column survive byte-exactly.
+  const beforeReceipt=JSON.parse(before.submitted[0].receipt_json);
+  const expectedSubmitted=before.submitted.map(row=>({...row,receipt_json:JSON.stringify({...beforeReceipt,state:'verified',verification:'system_checked',executedChecks:verified.review.verification.executedChecks,verified:{by:'owner',at:accepted.review.decision.at,reviewRevision:accepted.review.revision,passVerdict:verified.review.verification.verdict}})}));
+  assert.deepEqual(persisted.submitted,expectedSubmitted);assert.deepEqual(persisted.kernel,before.kernel);assert.deepEqual(persisted.balances,before.balances);
   assert.deepEqual(persisted.members,before.members);assert.equal(persisted.permit,0);assert.ok(!persisted.members.includes(producer.identityId));
   await reopen();assert.deepEqual(await json(await call('state')),persisted);
   assert.deepEqual(await json(await call('decide',{receiptId:receipt.receiptId,body:decision})),accepted);

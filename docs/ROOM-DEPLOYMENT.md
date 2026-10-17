@@ -163,8 +163,7 @@ second failed run in a row notifies once. Later failures in that same incident
 do not notify again. When a later run passes, the Worker sends one recovery
 notice and clears the incident.
 
-The 6-hour GitHub schedules stay the deep checks: `live-smoke.yml` and
-`qa2-synthetic.yml`. This Worker is the 5-minute outage signal.
+The 6-hour GitHub schedule `live-smoke.yml` stays the deep check. This Worker is the 5-minute outage signal.
 
 Notices go to two destinations. Each one stays quiet until its secret is set.
 The Worker never writes the token or the webhook URL into the notice or the

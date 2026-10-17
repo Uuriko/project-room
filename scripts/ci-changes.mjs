@@ -12,7 +12,7 @@
 // Outputs (GITHUB_OUTPUT): browser=true|false, eval=true|false, and
 // coverage=true|false.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, globSync, readFileSync } from "node:fs";
 import { dirname, resolve, basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -110,14 +110,13 @@ function resolveImport(fromFile, spec) {
   return null;
 }
 
-let cachedBrowserDeps = null;
-
-function browserDependencyPaths(suite) {
-  const key = suite.join("\n");
-  if (cachedBrowserDeps?.key === key) return cachedBrowserDeps.deps;
-  const deps = new Set(suite);
-  const seen = new Set(suite);
-  const queue = [...suite];
+// Transitive relative-import closure from a set of root files: every file
+// reachable by following import/export-from/dynamic-import specifiers that
+// resolve inside the tree. Shared by the browser and coverage classifiers.
+function importClosure(roots) {
+  const deps = new Set(roots);
+  const seen = new Set(roots);
+  const queue = [...roots];
   while (queue.length) {
     const file = queue.shift();
     if (!CODE_EXTS.some(ext => file.endsWith(ext))) continue;
@@ -125,7 +124,7 @@ function browserDependencyPaths(suite) {
     try {
       source = readFileSync(resolve(root, file), "utf8");
     } catch {
-      continue; // A suite entry that is not on disk contributes no imports.
+      continue; // A root entry that is not on disk contributes no imports.
     }
     for (const re of IMPORT_RES) {
       re.lastIndex = 0;
@@ -140,6 +139,15 @@ function browserDependencyPaths(suite) {
       }
     }
   }
+  return deps;
+}
+
+let cachedBrowserDeps = null;
+
+function browserDependencyPaths(suite) {
+  const key = suite.join("\n");
+  if (cachedBrowserDeps?.key === key) return cachedBrowserDeps.deps;
+  const deps = importClosure(suite);
   cachedBrowserDeps = { key, deps };
   return deps;
 }
@@ -174,11 +182,26 @@ export function classifyChanges(files, suite = browserSuitePaths()) {
 // execute it, new test-discoverable scripts (node --test picks up
 // **/{test,test/**/*,test-*,*[._-]test}), and the gate's own config, script,
 // classifier, and workflow.
+//
+// The flat prefix list alone had blind spots (bug sweep 2026-10-16 lane 14
+// F2, issue #3901): files the root suite executes that sit in none of the
+// measured prefixes — package.json / package-lock.json (dependency versions
+// and `imports` remaps change which measured lines execute), server.mjs
+// (the root entry point suites spawn; it is in no measured directory), and
+// scripts/*.mjs helpers the tests import but that are not themselves
+// test-discoverable (scripts/acceptance-fixture.mjs drives the store
+// through the acceptance scenarios). The exact list covers the first two;
+// the import closure from every Node-discovered test file covers the third
+// the same way the browser classifier above covers its helpers, so a helper
+// added tomorrow is classified by reachability, not by a hand-kept list.
 const COVERAGE_EXACT = new Set([
   "coverage-thresholds.json",
   "scripts/coverage-thresholds.mjs",
   "scripts/ci-changes.mjs",
   ".github/workflows/test.yml",
+  "package.json",
+  "package-lock.json",
+  "server.mjs",
 ]);
 
 function isTestDiscoverableScript(file) {
@@ -187,16 +210,38 @@ function isTestDiscoverableScript(file) {
   return base.startsWith("test-") || /[._-]test\.(js|mjs|cjs)$/.test(base);
 }
 
+// Node's default test discovery from the repo root — the same pattern
+// scripts/unit-shards.mjs (discoverUnitTests) uses to build the unit plan,
+// so the closure is seeded from exactly the files the measured suite runs.
+function discoverTestFiles() {
+  const extensions = process.features?.typescript === false ? "js,mjs,cjs" : "js,mjs,cjs,ts,mts,cts";
+  const pattern = `**/{test,test/**/*,test-*,*[._-]test}.{${extensions}}`;
+  return globSync(pattern, { cwd: root, exclude: name => name.split(/[\\/]/).includes("node_modules") }).sort();
+}
+
+let cachedCoverageDeps = null;
+
+function coverageDependencyPaths() {
+  cachedCoverageDeps ??= importClosure(discoverTestFiles());
+  return cachedCoverageDeps;
+}
+
 function coverageRelevant(files) {
-  return files.some(
-    file =>
+  let deps = null;
+  return files.some(file => {
+    if (
       file.startsWith("server/") ||
       file.startsWith("src/") ||
       file.startsWith("machine/") ||
       file.startsWith("tests/") ||
       COVERAGE_EXACT.has(file) ||
       isTestDiscoverableScript(file)
-  );
+    ) {
+      return true;
+    }
+    deps ??= coverageDependencyPaths();
+    return deps.has(file);
+  });
 }
 
 function diffNames(base, head) {

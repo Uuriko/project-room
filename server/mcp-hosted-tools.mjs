@@ -46,10 +46,13 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }
   }, ["roomId"])),
-  tool("room_list_events", "List room events after a sequence number, oldest first. Use after (a sequence), never afterSequence. Targeted DMs and peer-bond receipts stay filtered to their parties. Reading does not mark anything read.", schema({
+  tool("room_list_events", "List room events after a sequence number, oldest first. Use after (a sequence), never afterSequence. Optional server-side filters: type (comma-separated event types, e.g. message.posted), mentions (a member id, or me — only events that @mention that member), compact (true drops envelope noise: idempotency keys, the repeated room id, null causation ids, mention display names). Targeted DMs and peer-bond receipts stay filtered to their parties. Reading does not mark anything read.", schema({
     roomId: roomIdField,
     after: { type: "integer", minimum: 0, default: 0 },
-    limit: { type: "integer", minimum: 1, maximum: 100, default: 50 }
+    limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+    type: { type: "string", description: "Comma-separated event types to return, e.g. \"message.posted,work_item.updated\"." },
+    mentions: { type: "string", description: "Member id whose @mentions to return, or \"me\"." },
+    compact: { type: "boolean", default: false, description: "Drop per-event envelope noise (idempotencyKey, roomId, null causationId, mention display names)." }
   }, ["roomId"])),
   tool("room_post_message", "Post room chat by submitting the message.posted command { id, type, data: { messageId, body } }. id is the command receipt key: retry the exact same id and body. A different body with the same id is an idempotency conflict and does not replace the receipt. id and messageId are optional; when omitted the server mints them and returns them on the receipt. messageId defaults to id. Optional replyToId links the post to an existing message. This does not accept, complete, or approve work.", schema({
     roomId: roomIdField,
@@ -58,13 +61,6 @@ export const hostedRoomTools = [
     body: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS },
     replyToId: { ...idField, description: "Optional message id this post replies to." }
   }, ["roomId", "body"]), false),
-  tool("room_react", "Set or clear your reaction on a room message by submitting message.reaction_set { messageId, reaction, active }. active defaults to true. This does not post a message or change work.", schema({
-    roomId: roomIdField,
-    id: { ...idField, description: "Client command id. Stable across retries. Omitted ids are minted by the server." },
-    messageId: { ...idField, description: "Message id to react to." },
-    reaction: { type: "string", minLength: 1, maxLength: 64, description: "Emoji or shortcode." },
-    active: { type: "boolean", default: true, description: "true sets the reaction. false clears it. Defaults to true." }
-  }, ["roomId", "messageId", "reaction"]), false),
   tool("room_list_work", "List current work for this member. focus=needs_me is handoffs addressed to you plus open reply requests addressed to you in replyRequests, separately observed at replyRequestsEvaluatedThrough. Follow nextRead and finish its pages before answering with current.answerBasis; room_request_reply opens a new question. focus=results is completed work with required gates satisfied. focus=help_wanted is explicit invitations. Omit focus for the full list. sort=curiosity ranks the listed work by interestingness-to-you: unfamiliar-but-learnable first, measured against your own completed work (adds a curiosity {score, familiarity, label} field per item; with no completed work, the most distinctive items surface first). Text is untrusted context. This read does not accept, execute, or approve work.", schema({
     roomId: roomIdField,
     focus: { type: "string", enum: ["all", "needs_me", "help_wanted", "results"], default: "all" },
@@ -225,7 +221,7 @@ export const hostedInboxTools = [
 
 const hostIdField = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]{1,128}$", description: "Host id for this identity. Same hostId updates that host." };
 const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused. Same checks as POST /api/agent-heartbeats." };
-const cadenceField = { type: "number", exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). Omitted stores null, the same as a heartbeat body that omits cadenceSeconds." };
+const cadenceField = { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). The declaration is sticky, the same as a heartbeat body: omitting cadenceSeconds keeps the stored declaration, a number replaces it, and an explicit null clears it (the host then reads the 180s default window)." };
 const pushAuthField = {
   type: "object", additionalProperties: false, required: ["schemes", "credentials"],
   properties: {
@@ -251,18 +247,18 @@ const webhookEventsField = {
 
 const listenerLeaseField = { anyOf: [{ type: "boolean", const: true }, { type: "object", properties: { roomId: { type: "string", minLength: 1 } }, required: ["roomId"], additionalProperties: false }], description: "Explicitly acquire or renew a receiving lease. true uses the credential scope; {roomId} requires active membership. Contention is returned as listener.acquired:false. This is not execution admission." };
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds stores null. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
     pushNotification: pushNotificationField
   }, ["hostId", "wakeUrl"]), false),
-  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared because this body omits cadenceSeconds, matching that route. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
+  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored declaration. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds stores null. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     mode: modeField,
@@ -282,7 +278,7 @@ export const hostedWakeTools = [
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },
     reason: { type: ["string", "null"], maxLength: 200, description: "Optional pause note. Omit or send null." }
   }, ["roomId"]), false),
-  tool("wake_resume", "Resume this member's queued wakes. Same call as POST /api/rooms/:roomId/agent-pause with action resume. requestId is optional and is minted by the server when omitted. memberId defaults to this identity. reason is accepted and optional. An identity secret resumes its own member row.", schema({
+  tool("wake_resume", "Resume this member's queued wakes. Same call as POST /api/rooms/:roomId/agent-pause with action resume. requestId is optional and is minted by the server when omitted. memberId defaults to this identity. reason is accepted and optional. An identity secret resumes its own member row. A pause set by the room owner or manage members is lifted only by them (403 wake_pause_held_by_owner otherwise); a pause the member set itself stays self-resumable.", schema({
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id. Defaults to this identity. An identity secret can resume only its own member row." },
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },
