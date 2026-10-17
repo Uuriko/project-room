@@ -63,6 +63,12 @@ export function summaryFailure(result) {
   // budgetExceeded is cooperative progress, recorded in the summary. It is
   // not a failed tick: the next minute continues the remainder.
   if (result.scanError) return `scanError: ${redactError(result.scanError)}`;
+  // A room parked in messages backfill is not progress: its messages never
+  // backfill and its parity never certifies until an operator repairs the
+  // stored log, so every tick that finds one is a failed tick (bug sweep
+  // F-3 — the fresh-block surfacing already classified it that way; the
+  // steady state now agrees instead of reading ok).
+  if (Number(result.blockedRooms) > 0) return `${Number(result.blockedRooms)} room(s) parked in messages backfill`;
   if (Number(result.errors) > 0) return `${Number(result.errors)} error(s) in tick`;
   return null;
 }
@@ -82,6 +88,27 @@ export function sanitizeFailureDetail(detail) {
     if (typeof detail[key] === "string" && DETAIL_TOKEN.test(detail[key])) out[key] = detail[key];
   }
   return Object.keys(out).length ? out : null;
+}
+
+const BLOCKED_ROOM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const MAX_BLOCKED_ROOMS = 25;
+
+// The integrity job reports which rooms are parked in messages backfill
+// (bug sweep F-3). Room ids are public routing slugs, but this surface is
+// unauthenticated, so the list rides its own channel (never the summary)
+// and is shape-checked and capped: token-shaped ids only. The exact count
+// always rides lastSummary as the numeric `blockedRooms`, even when the
+// list itself is truncated.
+export function sanitizeBlockedRoomIds(value) {
+  if (!Array.isArray(value)) return null;
+  const out = [];
+  for (const id of value) {
+    if (typeof id === "string" && BLOCKED_ROOM_ID.test(id)) {
+      out.push(id);
+      if (out.length >= MAX_BLOCKED_ROOMS) break;
+    }
+  }
+  return out;
 }
 
 // Numbers and booleans only: summaries must never carry ids, bodies or secrets.
@@ -118,13 +145,13 @@ export async function runCronJobs(runners, {
       const durationMs = now() - startedAt;
       console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: !failure, durationMs }));
       if (failure) log(`[${name}] cron tick reported failure: ${failure}`);
-      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result), failure: failure ? sanitizeFailureDetail(result?.failureDetail) : null });
+      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result), failure: failure ? sanitizeFailureDetail(result?.failureDetail) : null, blockedRoomIds: sanitizeBlockedRoomIds(result?.blockedRoomIds) });
     } catch (error) {
       const message = errorText(job, error);
       const durationMs = now() - startedAt;
       console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: false, durationMs }));
       log(`[${name}] cron tick failed: ${message}`);
-      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null, failure: sanitizeFailureDetail(error?.failureDetail) });
+      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null, failure: sanitizeFailureDetail(error?.failureDetail), blockedRoomIds: sanitizeBlockedRoomIds(error?.blockedRoomIds) });
     }
   }
   return outcomes;
@@ -137,10 +164,16 @@ export function applyOutcomes(previous, outcomes) {
     if (!outcome || !JOBS.has(outcome.job)) continue;
     const prior = next[outcome.job] ?? {};
     const at = Number.isFinite(outcome.at) ? outcome.at : Date.now();
-    next[outcome.job] = outcome.ok
+    const record = outcome.ok
       ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
         lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure) };
+    // The parked-backfill list is a standing set, not a per-tick fact: an
+    // outcome that reports it (even empty) replaces it, so the last block
+    // clearing leaves no residue; outcomes that don't carry it (every
+    // other job) leave the prior list untouched.
+    if (Array.isArray(outcome.blockedRoomIds)) record.blockedRoomIds = outcome.blockedRoomIds;
+    next[outcome.job] = record;
   }
   return next;
 }
@@ -181,6 +214,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       lastErrorRecordClass: record.lastFailure?.recordClass ?? null,
       lastDurationMs: record.lastDurationMs ?? null,
       consecutiveFailures: record.consecutiveFailures ?? 0,
+      blockedRoomIds: Array.isArray(record.blockedRoomIds) ? record.blockedRoomIds : [],
       lastSummary: record.lastSummary ?? null,
       lastSummaryAt: iso(record.lastSummaryAt),
       stale,

@@ -53,6 +53,43 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+// Bug sweep F-1: a background channel drain that has not settled within
+// this bound is wedged. Drain ticks are deadline-bound to
+// CRON_JOB_BUDGET_MS, so two minutes is far beyond a healthy drain; past
+// it the drain RPC reports a failed tick instead of another success.
+export const CHANNEL_DRAIN_STUCK_MS = 120000;
+
+// The fields of a completed drain tick that may cross the RPC to the
+// heartbeat: the numeric digest plus the failure strings summaryFailure
+// reads. The full summary (per-connection results, account and connection
+// ids) never crosses — only the drain's outcome does.
+function drainOutcomeFields(summary) {
+  if (!summary || typeof summary !== 'object') return {};
+  const out = {};
+  for (const key of ['screened', 'parked', 'drained', 'deferred', 'errors']) {
+    if (typeof summary[key] === 'number' && Number.isFinite(summary[key])) out[key] = summary[key];
+  }
+  if (summary.budgetExceeded) out.budgetExceeded = 1;
+  if (summary.scanError) out.scanError = String(summary.scanError);
+  return out;
+}
+
+// Exported for tests: the drain RPC's decision table. The drain runs in
+// the background, so a tick reports the last COMPLETED drain's outcome
+// (consumed by the caller exactly once) instead of pre-reporting success
+// for work nobody has observed; `start` says whether this call must
+// launch a new background drain.
+export function channelDrainTickShape({ connections, inflight, inflightSince, now, completed }) {
+  const report = drainOutcomeFields(completed);
+  if (!inflight) return { start: true, result: { started: 1, background: 1, connections, ...report } };
+  const inflightMs = Number.isFinite(inflightSince) ? Math.max(0, now - inflightSince) : 0;
+  if (inflightMs > CHANNEL_DRAIN_STUCK_MS) {
+    return { start: false, result: { started: 0, background: 1, inflight: 1, stuck: 1,
+      inflightSeconds: Math.round(inflightMs / 1000), ...report,
+      errors: Math.max(1, report.errors ?? 0), scanError: 'channel_drain_stuck' } };
+  }
+  return { start: false, result: { started: 0, background: 1, inflight: 1, connections, ...report } };
+}
 const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
@@ -256,21 +293,35 @@ export class ProjectRoom extends DurableObject {
   // on schedule); the inbox import itself still needs an owner session (B20
   // system import authority), so slices without one are honestly deferred,
   // never imported. Runs in the DO so no connection data leaves it.
+  //
+  // The drain itself runs in the background (waitUntil), so this RPC cannot
+  // report the drain it starts — it reports the last one that COMPLETED,
+  // whose outcome #drainChannelsInBackground stashes in channelDrainOutcome
+  // (the same summary the drainer keeps as lastTick). Each outcome is
+  // consumed exactly once, by the next call; a drain still inflight past
+  // CHANNEL_DRAIN_STUCK_MS is reported as a failed tick, not a success
+  // (bug sweep F-1: previously every return shape recorded success while
+  // the real drain's failures went to console only).
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
     const gate = drainer.configured();
     if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
-    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
-    const work = this.#drainChannelsInBackground(drainer);
-    this.ctx.waitUntil(work);
-    return { started: 1, background: 1, connections: gate.connections };
+    const completed = this.channelDrainOutcome ?? null;
+    this.channelDrainOutcome = null;
+    const { result, start } = channelDrainTickShape({
+      connections: gate.connections, inflight: this.channelDrainInflight === true,
+      inflightSince: this.channelDrainInflightSince, now: Date.now(), completed
+    });
+    if (start) this.ctx.waitUntil(this.#drainChannelsInBackground(drainer));
+    return result;
   }
   // Runs after the RPC returns. The first await opens the input gate before
   // any journal scan, and tick yields again between connections. Not an RPC.
   async #drainChannelsInBackground(drainer) {
     this.channelDrainInflight = true;
+    this.channelDrainInflightSince = Date.now();
     try {
       await yieldToQueuedRequests();
       const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
@@ -278,12 +329,15 @@ export class ProjectRoom extends DurableObject {
         event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
         errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
       }));
+      this.channelDrainOutcome = summary;
       return summary;
     } catch (error) {
       console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      this.channelDrainOutcome = { at: Date.now(), errors: 1 };
       return { errors: 1 };
     } finally {
       this.channelDrainInflight = false;
+      this.channelDrainInflightSince = null;
     }
   }
   // Changed rooms update the checksum. One room per tick is reread so a

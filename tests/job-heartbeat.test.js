@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import {
-  CRON_JOBS, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, summaryFailure
+  CRON_JOBS, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, sanitizeBlockedRoomIds, summaryFailure
 } from "../cloudflare/job-heartbeat.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -36,7 +36,7 @@ function installWorkersShim() {
   register(pathToFileURL(join(dir, "hook.mjs")).href, import.meta.url);
 }
 installWorkersShim();
-const { default: worker, ProjectRoom } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
+const { default: worker, ProjectRoom, channelDrainTickShape, CHANNEL_DRAIN_STUCK_MS } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
 
 function memoryStorage() {
   const map = new Map();
@@ -152,6 +152,116 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   assert.match(land.lastError, /does not support RPC/);
   assert.equal(failingView.status, "failing");
   assert.equal(jobHealthView(undefined, now).status, "stale", "never-run jobs are stale");
+});
+
+test("a parked messages backfill fails the integrity tick until the last block clears", async () => {
+  // Bug sweep F-3: the count is a number, so it survives compaction; the
+  // room ids ride their own channel and never enter the summary.
+  assert.equal(summaryFailure({ blockedRooms: 2 }), "2 room(s) parked in messages backfill");
+  assert.equal(summaryFailure({ blockedRooms: 0 }), null);
+  assert.deepEqual(compactSummary({ blockedRooms: 2, blockedRoomIds: ["alpha"] }), { blockedRooms: 2 });
+  assert.deepEqual(sanitizeBlockedRoomIds(["alpha", "bad id!", "x".repeat(200), 42, "beta"]), ["alpha", "beta"]);
+  assert.equal(sanitizeBlockedRoomIds("alpha"), null);
+  assert.equal(sanitizeBlockedRoomIds(undefined), null);
+
+  let t = 5_000;
+  const tick = result => runCronJobs({ integrity: async () => result }, { now: () => (t += 5), log: () => {} });
+  let stored = applyOutcomes({}, await tick({ matched: 1, checked: 42, blockedRooms: 0, blockedRoomIds: [] }));
+  let view = jobHealthView(stored, t).jobs.find(job => job.name === "integrity");
+  assert.equal(view.status, "ok");
+  assert.deepEqual(view.blockedRoomIds, []);
+
+  // The count survives compaction in the tick outcome itself. On the
+  // stored record it surfaces through lastError (a failed tick never
+  // overwrites the last successful summary — the #3334 rule), while the
+  // room list is always current.
+  const parkedOutcomes = await tick({ matched: 1, checked: 42, blockedRooms: 2, blockedRoomIds: ["alpha", "beta"] });
+  assert.equal(parkedOutcomes[0].ok, false);
+  assert.equal(parkedOutcomes[0].summary.blockedRooms, 2);
+  assert.deepEqual(parkedOutcomes[0].blockedRoomIds, ["alpha", "beta"]);
+  stored = applyOutcomes(stored, parkedOutcomes);
+  view = jobHealthView(stored, t).jobs.find(job => job.name === "integrity");
+  assert.equal(view.status, "failing");
+  assert.equal(view.consecutiveFailures, 1);
+  assert.equal(view.lastError, "2 room(s) parked in messages backfill");
+  assert.equal(view.lastSummary.blockedRooms, 0, "the summary stays the last successful tick's");
+  assert.deepEqual(view.blockedRoomIds, ["alpha", "beta"]);
+
+  // Steady state: the block persists, so the failure persists — this is
+  // the tick that read ok before the fix.
+  stored = applyOutcomes(stored, await tick({ matched: 1, checked: 42, blockedRooms: 2, blockedRoomIds: ["alpha", "beta"] }));
+  view = jobHealthView(stored, t).jobs.find(job => job.name === "integrity");
+  assert.equal(view.status, "failing");
+  assert.equal(view.consecutiveFailures, 2);
+  assert.deepEqual(view.blockedRoomIds, ["alpha", "beta"]);
+
+  // The last block clears: health returns to ok with no residue.
+  stored = applyOutcomes(stored, await tick({ matched: 1, checked: 42, blockedRooms: 0, blockedRoomIds: [] }));
+  view = jobHealthView(stored, t).jobs.find(job => job.name === "integrity");
+  assert.equal(view.status, "ok");
+  assert.equal(view.consecutiveFailures, 0);
+  assert.equal(view.lastSummary.blockedRooms, 0);
+  assert.deepEqual(view.blockedRoomIds, []);
+});
+
+test("channel drain ticks report the last completed drain, and a wedged drain fails", async () => {
+  // Bug sweep F-1: the RPC starts the drain in the background, so its
+  // return shape is built from the last completed drain's outcome.
+  const now = 1_000_000;
+  // Nothing completed yet: a fresh start has no outcome to report.
+  let shape = channelDrainTickShape({ connections: 3, inflight: false, inflightSince: null, now, completed: null });
+  assert.equal(shape.start, true);
+  assert.deepEqual(shape.result, { started: 1, background: 1, connections: 3 });
+  assert.equal(summaryFailure(shape.result), null);
+
+  // A completed drain with per-connection errors becomes the next tick's
+  // recorded outcome; its per-connection detail (ids) never crosses.
+  shape = channelDrainTickShape({ connections: 3, inflight: false, inflightSince: null, now,
+    completed: { at: now - 1000, connections: 1, screened: 4, parked: 1, drained: 0, deferred: 0, errors: 2,
+      results: [{ accountId: "a1", connectionId: "c1", status: "error" }] } });
+  assert.equal(shape.start, true);
+  assert.equal(shape.result.errors, 2);
+  assert.equal(shape.result.screened, 4);
+  assert.equal(shape.result.parked, 1);
+  assert.equal(shape.result.results, undefined);
+  assert.ok(!JSON.stringify(shape.result).includes("a1"));
+  assert.equal(summaryFailure(shape.result), "2 error(s) in tick");
+
+  // A scanError from the completed drain rides the same channel.
+  shape = channelDrainTickShape({ connections: 1, inflight: false, inflightSince: null, now,
+    completed: { errors: 0, scanError: "channel_scan_failed" } });
+  assert.match(summaryFailure(shape.result), /scanError/);
+
+  // A clean completed drain records success.
+  shape = channelDrainTickShape({ connections: 1, inflight: false, inflightSince: null, now,
+    completed: { screened: 2, parked: 0, drained: 1, deferred: 0, errors: 0 } });
+  assert.equal(summaryFailure(shape.result), null);
+  assert.equal(shape.result.drained, 1);
+
+  // The reported outcome lands in the heartbeat as a failing tick.
+  const outcomes = await runCronJobs({ "channel-drain": async () => channelDrainTickShape({
+    connections: 1, inflight: false, inflightSince: null, now, completed: { errors: 2 } }).result },
+    { now: () => now, log: () => {} });
+  assert.equal(outcomes[0].ok, false);
+  let stored = applyOutcomes({}, [{ job: "channel-drain", ok: true, at: now - 1000 }]);
+  stored = applyOutcomes(stored, outcomes);
+  const drain = jobHealthView(stored, now).jobs.find(job => job.name === "channel-drain");
+  assert.equal(drain.status, "failing");
+  assert.equal(drain.consecutiveFailures, 1);
+  assert.match(drain.lastError, /2 error\(s\) in tick/);
+
+  // Inflight within the bound: a drain is legitimately running, no verdict.
+  shape = channelDrainTickShape({ connections: 2, inflight: true, inflightSince: now - 1000, now, completed: null });
+  assert.equal(shape.start, false);
+  assert.equal(shape.result.inflight, 1);
+  assert.equal(summaryFailure(shape.result), null);
+
+  // Inflight past the bound: the wedge is a failed tick, not a success.
+  shape = channelDrainTickShape({ connections: 2, inflight: true, inflightSince: now - CHANNEL_DRAIN_STUCK_MS - 1000, now, completed: null });
+  assert.equal(shape.start, false);
+  assert.equal(shape.result.stuck, 1);
+  assert.equal(shape.result.scanError, "channel_drain_stuck");
+  assert.match(summaryFailure(shape.result), /channel_drain_stuck/);
 });
 
 test("scheduled() makes one safety-net call and fails the invocation when that call fails", async () => {

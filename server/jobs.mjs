@@ -122,11 +122,36 @@ function backupConfigured(env) {
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
   return integrity;
+}
+
+// Bug sweep F-3 (2026-10-16): a room parked in messages_backfill_blocks
+// must stay visible in job health for exactly as long as the block exists.
+// The deferred batch does carry the standing set in its result, but nested
+// under `deferred`, which the heartbeat's compactSummary drops wholesale —
+// so after the one fresh-block surfacing, integrity read ok while the
+// parked room never backfilled or parity-certified. Read the durable
+// table on every tick instead: the count joins the result (a number
+// survives compaction, and the heartbeat fails a tick whose count is
+// nonzero), and the room ids ride the outcome's blockedRoomIds channel
+// into the health view. Null when the table is unreadable (a store
+// predating the backfill), leaving the tick exactly as it was.
+function backfillBlockedRooms(store) {
+  if (!store?.db?.prepare) return null;
+  try {
+    return store.db.prepare("SELECT room_id FROM messages_backfill_blocks ORDER BY room_id").all()
+      .map(row => row?.room_id).filter(id => typeof id === "string" && id.length > 0);
+  } catch { return null; }
+}
+
+function withBackfillBlocks(store, result) {
+  const blocked = backfillBlockedRooms(store);
+  if (!blocked || !result || typeof result !== "object") return result;
+  return { ...result, blockedRooms: blocked.length, blockedRoomIds: blocked };
 }
 
 // #3334: a failed integrity tick must name the sub-check that threw, in a
@@ -317,18 +342,18 @@ export const JOBS = Object.freeze([
         const integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
-        return logIntegrity(integrity);
+        return logIntegrity(withBackfillBlocks(store, integrity));
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
         // #3334: the failure detail survives reporting — the heartbeat turns
         // scanError into lastError and persists failureDetail, so the health
         // surface names the failing sub-check instead of "1 error(s) in tick".
         const failure = classifyIntegrityError(error);
-        return {
+        return withBackfillBlocks(store, {
           errors: 1,
           scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
           failureDetail: failure
-        };
+        });
       }
     }
   }),
@@ -572,7 +597,9 @@ export function startNodeScheduler({
           lastRan.set(job.name, at);
           const failed = summaryFailed(result);
           record(job.name, at, !failed, {
-            error: failed ? (result.scanError ? `scanError: ${oneLine(result.scanError)}` : `${Number(result.errors) || 0} error(s) in tick`) : null,
+            error: failed ? (result.scanError ? `scanError: ${oneLine(result.scanError)}`
+              : Number(result.blockedRooms) > 0 ? `${Number(result.blockedRooms)} room(s) parked in messages backfill`
+              : `${Number(result.errors) || 0} error(s) in tick`) : null,
             failure: failed ? failureDetailOf(result) : null,
             durationMs: now() - startedAt
           });
@@ -636,7 +663,7 @@ export function nodeJobHealth() {
 
 function summaryFailed(result) {
   if (!result || typeof result !== "object") return false;
-  return Boolean(result.scanError) || Number(result.errors) > 0;
+  return Boolean(result.scanError) || Number(result.errors) > 0 || Number(result.blockedRooms) > 0;
 }
 
 export function wireNodeJobs(store, options = {}) {

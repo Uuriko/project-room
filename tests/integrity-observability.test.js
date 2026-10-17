@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { EVENT_TYPES as T, event } from "../src/events.js";
 import { JOBS, classifyIntegrityError } from "../server/jobs.mjs";
 import { ServiceError } from "../server/service-error.mjs";
 import {
@@ -191,4 +192,81 @@ test("end to end: parity poison is named on the health surface, stale summary is
   assert.equal(recovered.lastErrorCode, null);
   assert.equal(recovered.lastErrorSubcheck, null);
   assert.notEqual(recovered.lastSummaryAt, new Date(t0).toISOString());
+});
+
+// Bug sweep F-3: a room parked in messages_backfill_blocks surfaced once
+// as a named failure, then vanished — compactSummary dropped the batch
+// result's blocked list, so steady-state ticks read ok while the room
+// never backfilled or parity-certified. The park must keep the integrity
+// job failing, with the count in the summary and the room named in the
+// view, for exactly as long as the block exists.
+test("end to end: a parked room keeps integrity failing by name until it is repaired", async t => {
+  const store = openStore(t);
+  const at = offset => new Date(Date.UTC(2026, 9, 2) + offset * 1000).toISOString();
+  const messageEvent = (roomId, id, data, offset) => event({
+    type: T.MESSAGE_POSTED, actorId: "owner", roomId, id, idempotencyKey: `${id}-key`, at: at(offset), data
+  });
+  // A legacy-shaped room: log and projection agree, but the stored event
+  // carries a messageId the current reducer rejects (the #3847 poison).
+  store.initialize([
+    ...initialRoom("alpha"),
+    messageEvent("alpha", "ev-standin", { messageId: "standin", body: "legacy text" }, 10),
+    messageEvent("alpha", "ev-tail", { messageId: "tail", body: "after the poison" }, 11)
+  ]);
+  const row = store.db.prepare("SELECT body FROM events WHERE id='ev-standin'").get();
+  const stored = JSON.parse(row.body);
+  stored.data.messageId = "bad id@x";
+  store.db.prepare("UPDATE events SET body=? WHERE id='ev-standin'").run(JSON.stringify(stored));
+  const roomRow = store.db.prepare("SELECT projection FROM rooms WHERE id='alpha'").get();
+  const projection = JSON.parse(roomRow.projection);
+  projection.messages.find(message => message.id === "standin").id = "bad id@x";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(projection));
+
+  const t0 = Date.now();
+  let storedHealth = {};
+  // Rotate ticks until the deferred batch parks the room; the park tick
+  // itself already names it (the job reads the durable table directly).
+  let parked = null;
+  for (let i = 1; i <= 20 && !parked; i++) {
+    storedHealth = await heartbeatTick(storedHealth, store, t0 + i * 3_600_000);
+    const view = viewOf(storedHealth);
+    if (view.blockedRoomIds.includes("alpha")) parked = view;
+  }
+  assert.ok(parked, "the park reaches the health view");
+  assert.equal(parked.status, "failing");
+  assert.match(parked.lastError, /messages_backfill/, "the park tick names the sub-check");
+  assert.deepEqual(parked.blockedRoomIds, ["alpha"]);
+
+  // Steady state: the batch has advanced past the park and no fresh block
+  // throws — the ticks that read ok before the fix must keep failing.
+  for (let i = 21; i <= 23; i++) {
+    storedHealth = await heartbeatTick(storedHealth, store, t0 + i * 3_600_000);
+    const view = viewOf(storedHealth);
+    assert.equal(view.status, "failing", `steady-state tick ${i} still fails`);
+    assert.equal(view.lastError, "1 room(s) parked in messages backfill");
+    assert.deepEqual(view.blockedRoomIds, ["alpha"]);
+  }
+
+  // Repair the stored log and move the room's head, so the backfill's
+  // stale-block refresh re-diagnoses the room, clears the block, and the
+  // room rejoins the sweep.
+  const fixed = JSON.parse(row.body);
+  store.db.prepare("UPDATE events SET body=? WHERE id='ev-standin'").run(JSON.stringify(fixed));
+  const fixedProjection = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='alpha'").get().projection);
+  fixedProjection.messages.find(message => message.id === "bad id@x").id = "standin";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(fixedProjection));
+  const key = store.issueAccessKey("alpha", "owner");
+  store.command(key, "alpha", { id: "m-after-repair", type: "message.posted", data: { body: "after repair" } });
+
+  let recovered = null;
+  for (let i = 24; i <= 48 && !recovered; i++) {
+    storedHealth = await heartbeatTick(storedHealth, store, t0 + i * 3_600_000);
+    const view = viewOf(storedHealth);
+    if (view.status === "ok" && view.blockedRoomIds.length === 0) recovered = view;
+  }
+  assert.ok(recovered, "the repaired room's block clears and health recovers");
+  assert.equal(recovered.consecutiveFailures, 0);
+  assert.equal(recovered.lastSummary.blockedRooms, 0);
+  assert.deepEqual(recovered.blockedRoomIds, []);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get().n, 0);
 });
