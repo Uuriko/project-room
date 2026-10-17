@@ -251,3 +251,55 @@ test("get_room_context is not_modified when unchanged and never carries bodies",
   assert.equal(unmodified.context_version, printed.context_version);
   assert.equal(Object.hasOwn(unmodified, "roster"), false);
 });
+
+// C-01 ORIENT-FIX contract: the HTTP context route must not embed orient.
+// (a) unchanged poll -> the small not_modified short-circuit body only;
+// (b) changed poll -> full context, still without an embedded orient;
+// (c) orient remains available, unchanged, via its explicit /orient route.
+test("HTTP context never embeds orient; unchanged polls short-circuit; /orient is the explicit hop", async t => {
+  const f = await serve(t);
+  const raw = async (path, token) => {
+    const res = await f.request(path, token);
+    const text = await res.text();
+    return { status: res.status, bytes: Buffer.byteLength(text), body: JSON.parse(text) };
+  };
+
+  // (b, initial full read) context carries the projection and no orient key.
+  const full = await raw("/api/rooms/commons/context", f.ownerKey);
+  assert.equal(full.status, 200);
+  assert.equal(full.body.not_modified, undefined);
+  assert.ok(Array.isArray(full.body.roster));
+  assert.ok(Array.isArray(full.body.focusWork));
+  assert.equal(Object.hasOwn(full.body, "orient"), false, "full context must not embed orient");
+
+  // (a) unchanged poll with since_version returns only the short-circuit body.
+  const unchanged = await raw(`/api/rooms/commons/context?since_version=${full.body.context_version}`, f.ownerKey);
+  assert.equal(unchanged.status, 200);
+  assert.equal(unchanged.body.not_modified, true);
+  assert.equal(unchanged.body.context_version, full.body.context_version);
+  assert.equal(Object.hasOwn(unchanged.body, "orient"), false);
+  assert.equal(Object.hasOwn(unchanged.body, "roster"), false);
+  assert.equal(Object.hasOwn(unchanged.body, "focusWork"), false);
+  assert.ok(unchanged.bytes < 1000, `not_modified body should be ~300-430 B, got ${unchanged.bytes} B`);
+  assert.ok(unchanged.bytes < full.bytes, "short-circuit must be smaller than the full context");
+
+  // (b) a structural change makes the same since_version return the full
+  // context again — with a new version and still no embedded orient.
+  f.send(f.ownerKey, T.WORK_SUPERSEDED, { workItemId: "old", expectedRevision: 0, supersededByWorkItemId: "replacement", reason: "REASON-SENTINEL" });
+  const changed = await raw(`/api/rooms/commons/context?since_version=${full.body.context_version}`, f.ownerKey);
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.not_modified, undefined);
+  assert.notEqual(changed.body.context_version, full.body.context_version);
+  assert.ok(Array.isArray(changed.body.roster));
+  assert.deepEqual(changed.body.deps, [{ workItemId: "old", supersededBy: "replacement" }]);
+  assert.equal(Object.hasOwn(changed.body, "orient"), false, "changed context must not embed orient");
+
+  // (c) the explicit orient route is unchanged and serves the payload that
+  // used to ride along inside context responses.
+  const orient = await raw("/api/rooms/commons/orient", f.ownerKey);
+  assert.equal(orient.status, 200);
+  assert.deepEqual(orient.body.contract, { name: "project-room/orient", version: 1 });
+  assert.ok(orient.body.work.some(item => item.id === "live"));
+
+  console.log(`C-01 sizes: full context ${full.bytes} B, changed context ${changed.bytes} B, unchanged not_modified ${unchanged.bytes} B, explicit orient ${orient.bytes} B (orient is no longer inside either context shape)`);
+});
