@@ -37,8 +37,6 @@
   "src/display-name-guard.js",
   "src/dm-consents.js",
   "src/dm-room-wiring.mjs",
-  "src/emoji-catalog.js",
-  "src/emoji.js",
   "src/entry.js",
   "src/error-copy.js",
   "src/events.js",

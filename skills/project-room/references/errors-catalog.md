@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-904 rows (863 distinct codes).
+909 rows (868 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -127,6 +127,7 @@ response's own `hint`/`next` when it names something more specific.
 | `approval_invalid` | 422 | Invalid approval input (the message names the field). | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
 | `approval_not_found` | 404 | No such approval proposal. | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: collab STATUS_BY_CODE.) |
 | `approval_transition` | 409 | A ${proposal.status} proposal cannot move to ${status}. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
+| `artifact_integrity_failed` | 409 | Stored artifact bytes no longer match the submitted hash — verification cannot pass | no | Do not retry the PASS. Report the receipt id and this code to the room owner — the stored artifact itself is in question. |
 | `assign_conflict` | 409 | Thread is already assigned to ${current.assignee.id}; release it or force the takeover. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
 | `assign_not_assigned` | 404 | Thread has no live assignment to release. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
 | `assistant_archived` | 409 | This room is archived | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -241,6 +242,8 @@ response's own `hint`/`next` when it names something more specific.
 | `demigod_offer_ref_missing` | 422 | offerRef must reference an existing project offer in this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `desktop_auth_rejected` | 401 | Native sign-in could not be confirmed | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `desktop_session_exists` | 409 | Use a fresh native authentication session | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `delivery_check_failed` | 422 | executed check "${failed.name}" failed for "${item.id}" — ${failed.detail ?? "the delivery does not pass system verification"} | fix+resend | Fix the delivery or CI state named in the message, re-deliver, then verify again. |
+| `delivery_incomplete` | 422 | finishing "${item.id}" requires a delivery bundle { artifact, checks, criteria } — none was supplied | fix+resend | Resend the finish with the complete delivery bundle the message names (artifact, checks, or the criteria mapping). |
 | `direct_send_idempotency_conflict` | 409 | This request id already recorded a different direct send. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `direct_send_not_found` | 404 | Send attempt not found. | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `direct_send_settled` | 409 | This send attempt already settled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -819,10 +822,13 @@ response's own `hint`/`next` when it names something more specific.
 | `public_work_already_enabled` | 409 | Public claims already enabled | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `public_work_already_submitted` | 409 | This task already has a submitted receipt | no | Do not submit again. Read the task (GET /api/public-work/tasks/<taskId>) — claim.submittedReceiptId names the recorded receipt; for other work, list GET /api/public-work/tasks. |
 | `public_work_claim_conflict` | 409 | Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'}) | wait | Another member holds the claim: wait for release or lease expiry, or pick another item. If the holder is you, renew the claim instead of claiming again. |
+| `public_work_claim_limit` | 409 | You hold ${held} live public-work claims — the per-identity ceiling is ${ceiling}. Finish or release one before claiming another. | no | Finish or release one of your live public-work claims first — an identity may hold at most 3 live public-work claims — then claim again. |
+| `public_work_deadline_passed` | 409 | This task's submission deadline (${deadline}) has passed | no | Do not retry this task — its submission deadline (terms.deadline) has passed. List GET /api/public-work/tasks and claim a different task. |
 | `public_work_not_eligible` | 422 | Public claims currently require an unpaid offer with a repository URL | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `public_work_not_found` | 404 | Public task not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `public_work_not_owner` | 403 | Only the claimant may change this lease | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `public_work_path_conflict` | 409 | Another live claim holds these repository paths | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `public_work_renewal_limit` | 409 | This claim has used all ${limit} renewals for this claim round. Its lease runs to ${leaseExpiresAt} and then lapses — finish or release before then. | no | The claim round's renewal budget (12 renewals) is used up: finish or release before the lease lapses at its current expiry; after it lapses the task returns to the board and can be claimed again. |
 | `public_work_unavailable` | 409 | Task is no longer available | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `purge_too_large` | 422 | One plan accepts 1 to ${MAX_TARGETS} targets | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `push_not_configured` | 404 | Push is not configured on this server | no | Push is not configured on this server. Ask the operator; do not retry the send. |
@@ -908,6 +914,11 @@ response's own `hint`/`next` when it names something more specific.
 | `session_binding_required` | 422 | Current account session binding required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `session_claimed` | 409 | fail(409, "session_claimed", conflict); } let type; try { type = sessionCommandType(item, request.action, request.status); } catch (error) { fail(422, | wait | Another member holds the claim. Wait for release or lease expiry, or pick another item. |
 | `session_not_found` | 404 | No such active session | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `settlement_already_attached` | 409 | This task already has a settled submission | no | This action already happened — do not retry it. Read the current state to confirm. |
+| `settlement_failed` | 422 | Escrow failure translated at the public-work settlement boundary (the message is the escrow error's own) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `settlement_lane_unlinked` | 422 | Paid public work settles to a room-member ledger lane: link this identity to a member of the task room before claiming | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `settlement_not_submitted` | 409 | Paid task has no attached submission to settle | no | The paid task has no attached submission, so there is nothing to settle. Settlement fires only on a review verdict after the claimant's finish step attaches the submission; read the task's settlement view and attach the submission first. |
+| `settlement_unavailable` | 500 | Bounty escrow is not available in this store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `sign_in_required` | 401 | Sign in or create an account, then open this link again. | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `signing_unavailable` | 500 | The room's invite signer is unavailable | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `signoff_exists` | 409 | Sign-off loop ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -1029,6 +1040,7 @@ response's own `hint`/`next` when it names something more specific.
 | `work_claim_terminal` | 409 | Cannot ${verb} "${item.id}": it is already ${item.state} | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: work-claim-routes map.) |
 | `work_claims_not_permitted` | 0 | error: { code: "work_claims_not_permitted", message }, hint, next: [{ command: hint }] }; throw error; } const refuseAttest = () => refuseBoardAction( | follow hint | Follow this error's hint and next steps. |
 | `work_claims_not_permitted` | 403 | throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap."); } const cap = rest.maxMemberOpenCla | follow hint | Follow this error's hint and next steps. |
+| `work_not_delivered` | 422 | Review policy "${policy}" not satisfied for "${item.id}": finish it to "delivered" first — its reviewer then verifies it to "done" | follow hint | Follow this error's hint and next steps. |
 | `work_not_found` | 404 | Work no longer exists | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `work_not_owner` | 403 | Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it | follow hint | Follow this error's hint and next steps. |
 | `work_reassign_unknown_member` | 422 | newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

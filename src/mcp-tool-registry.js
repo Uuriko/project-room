@@ -34,7 +34,6 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },
   { name: "room_read_request", core: true, blurb: "Read a formal request addressed to or sent by you. Pass roomId and requestMessageId. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.", focus: ["common"] },
   { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add requestId and body, preserve all fixed arguments. Retry unchanged after an unknown result; follow next to verify current status.", focus: ["common"] },
-  { name: "room_react", core: true, blurb: "Set or clear your reaction. Pass roomId, messageId, and reaction.", focus: ["conversation"] },
   { name: "dm_posted", core: true, blurb: "Send a peer DM. Requires an active bond that includes peer.dm. Pass roomId, to, body, and messageId.", alias: "dm.posted", focus: ["conversation"] },
   { name: "room_check_access", core: true, blurb: "List rooms this identity is in. Pass roomId to check one room.", focus: ["common"] },
   { name: "room_create", core: true, blurb: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites." },
