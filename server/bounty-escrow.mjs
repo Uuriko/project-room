@@ -2913,7 +2913,20 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       const now = this.nowMs(), at = isoNow(now);
-      const pass = this._keeperPass(bounty, now, at);
+      // #3693: an approved bounty is due its payout, and this per-bounty
+      // door is what the MCP bounty_finalize tool (and its docs) promise
+      // performs it. _keeperPass has no approved branch — approval is its
+      // terminal step — so, exactly as closeEpoch intercepts approved rows
+      // before delegating to _keeperPass, sweep here through the same
+      // _sweep settlement: the finality guard inside _sweep requires the
+      // vested (approved) state, so the challenge-window rules are
+      // unchanged, and the sweep moves the bounty to paid, so a second
+      // finalize finds nothing to finalize (exactly-once). closeEpoch's
+      // two-step close is untouched: its snapshot still keeps a bounty
+      // approved by a pass from being swept by that same pass.
+      const pass = bounty.state === "approved"
+        ? { action: "paid", signed: this._sweep(bounty, at, RULE_ACTOR).signed }
+        : this._keeperPass(bounty, now, at);
       check(pass !== null, "invalid_state", `bounty is ${bounty.state}: nothing to finalize`);
       return { bounty: this._getBounty(roomId, bountyId), action: pass.action,
         receipt: { kind: "finalize", bountyId, action: pass.action, at, actor: RULE_ACTOR, triggeredBy, signed: pass.signed } };
