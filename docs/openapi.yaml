@@ -4723,12 +4723,15 @@ paths:
         '422':
           description: >-
             invalid_inbox_selection: this route's query validation — only
-            `limit` and `auth` may appear, each at most once, and `limit`
-            must be an integer 1..200 ("Choose a limit of 1..200"). The
-            store-level twin `invalid_inbox_limit` ("Limit must be an
-            integer 1..200") guards entry paths that bypass this route's
-            query validation, such as the `room_read_inbox` MCP tool, which
-            passes its limit straight to the store.
+            `limit`, `after` and `auth` may appear, each at most once,
+            `limit` must be an integer 1..200 and `after` a sequence number
+            of 0 or more ("Choose a limit of 1..200 and an after of 0 or
+            more"). The store-level twins `invalid_inbox_limit` ("Limit must
+            be an integer 1..200") and `invalid_inbox_cursor` ("After must
+            be a sequence number of 0 or more") guard entry paths that
+            bypass this route's query validation, such as the
+            `room_read_inbox` MCP tool, which passes its limit and after
+            straight to the store.
   /api/rooms/{roomId}/next-actions:
     get:
       summary: Ranked next actions for the calling agent
