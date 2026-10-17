@@ -100,6 +100,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-i
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -5653,36 +5654,36 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
-    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     // Decision #25: trial seats receive mention wakes in their room. Guest
     // members are seated through guest_members, never identity_links, so
-    // the identity_links-only lookup silently dropped every trial-seat
-    // wake. Fall back to the guest seat's identity. Deliberately local to
-    // this fan-out: identityIdForMember (the work-wake resolver) keeps
-    // NOT resolving guests — work wakes stay excluded for trial seats.
-    const guestLinkOf = this.db.prepare("SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=? AND member_id=?");
+    // an identity_links-only lookup silently drops every trial-seat wake.
+    // Resolve through the shared guest-aware resolver
+    // (server/wake-identity-resolution.mjs), the same one the webhook fan-out
+    // uses. identityIdForMember (the work-wake
+    // resolver) deliberately keeps NOT resolving guests — work wakes stay
+    // excluded for trial seats.
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
+      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
       // #3345: a mention target with no identity link on either table can
       // never be woken — that used to be a silent `continue`; it is now a
       // counted, journaled loss (the member exists; the fabric cannot
       // address them).
-      if (!link) {
+      if (!identityId) {
         recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
-        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+        agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
-        this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+        this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
+        this.agentHeartbeats.pushNotify({ identityId: identityId,
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }
