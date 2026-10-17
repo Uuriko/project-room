@@ -247,11 +247,19 @@ test("end to end: a parked room keeps integrity failing by name until it is repa
 
   // Steady state: the batch has advanced past the park and no fresh block
   // throws — the ticks that read ok before the fix must keep failing.
+  // Composed with the deferred-batch isolation on main (#3544): the batch
+  // returns the parked room as an outstanding failure on every tick, so
+  // the heartbeat's failure string is that scanError (sub-check and code
+  // named), which precedes the blocked-rooms string in summaryFailure.
+  // The blocked-rooms string is the failure text when a block exists
+  // without a batch failure entry — pinned in job-heartbeat.test.js. The
+  // F-3 invariants here are the failing verdict and the room named in the
+  // view on every tick, for exactly as long as the block exists.
   for (let i = 21; i <= 23; i++) {
     storedHealth = await heartbeatTick(storedHealth, store, t0 + i * 3_600_000);
     const view = viewOf(storedHealth);
     assert.equal(view.status, "failing", `steady-state tick ${i} still fails`);
-    assert.equal(view.lastError, "1 room(s) parked in messages backfill");
+    assert.equal(view.lastError, "scanError: integrity messages_backfill failed (messages_backfill_failed)");
     assert.deepEqual(view.blockedRoomIds, ["alpha"]);
   }
 
