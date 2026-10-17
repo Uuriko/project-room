@@ -37,6 +37,7 @@ function installWorkersShim() {
 }
 installWorkersShim();
 const { default: worker, ProjectRoom } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
+const { channelDrainTickShape, CHANNEL_DRAIN_STUCK_MS } = await import(pathToFileURL(join(root, "cloudflare/channel-drain-tick.mjs")).href);
 
 function memoryStorage() {
   const map = new Map();
@@ -152,6 +153,66 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   assert.match(land.lastError, /does not support RPC/);
   assert.equal(failingView.status, "failing");
   assert.equal(jobHealthView(undefined, now).status, "stale", "never-run jobs are stale");
+});
+
+test("channel drain ticks report the last completed drain, and a wedged drain fails", async () => {
+  // Bug sweep F-1: the RPC starts the drain in the background, so its
+  // return shape is built from the last completed drain's outcome.
+  const now = 1_000_000;
+  // Nothing completed yet: a fresh start has no outcome to report.
+  let shape = channelDrainTickShape({ connections: 3, inflight: false, inflightSince: null, now, completed: null });
+  assert.equal(shape.start, true);
+  assert.deepEqual(shape.result, { started: 1, background: 1, connections: 3 });
+  assert.equal(summaryFailure(shape.result), null);
+
+  // A completed drain with per-connection errors becomes the next tick's
+  // recorded outcome; its per-connection detail (ids) never crosses.
+  shape = channelDrainTickShape({ connections: 3, inflight: false, inflightSince: null, now,
+    completed: { at: now - 1000, connections: 1, screened: 4, parked: 1, drained: 0, deferred: 0, errors: 2,
+      results: [{ accountId: "a1", connectionId: "c1", status: "error" }] } });
+  assert.equal(shape.start, true);
+  assert.equal(shape.result.errors, 2);
+  assert.equal(shape.result.screened, 4);
+  assert.equal(shape.result.parked, 1);
+  assert.equal(shape.result.results, undefined);
+  assert.ok(!JSON.stringify(shape.result).includes("a1"));
+  assert.equal(summaryFailure(shape.result), "2 error(s) in tick");
+
+  // A scanError from the completed drain rides the same channel.
+  shape = channelDrainTickShape({ connections: 1, inflight: false, inflightSince: null, now,
+    completed: { errors: 0, scanError: "channel_scan_failed" } });
+  assert.match(summaryFailure(shape.result), /scanError/);
+
+  // A clean completed drain records success.
+  shape = channelDrainTickShape({ connections: 1, inflight: false, inflightSince: null, now,
+    completed: { screened: 2, parked: 0, drained: 1, deferred: 0, errors: 0 } });
+  assert.equal(summaryFailure(shape.result), null);
+  assert.equal(shape.result.drained, 1);
+
+  // The reported outcome lands in the heartbeat as a failing tick.
+  const outcomes = await runCronJobs({ "channel-drain": async () => channelDrainTickShape({
+    connections: 1, inflight: false, inflightSince: null, now, completed: { errors: 2 } }).result },
+    { now: () => now, log: () => {} });
+  assert.equal(outcomes[0].ok, false);
+  let stored = applyOutcomes({}, [{ job: "channel-drain", ok: true, at: now - 1000 }]);
+  stored = applyOutcomes(stored, outcomes);
+  const drain = jobHealthView(stored, now).jobs.find(job => job.name === "channel-drain");
+  assert.equal(drain.status, "failing");
+  assert.equal(drain.consecutiveFailures, 1);
+  assert.match(drain.lastError, /2 error\(s\) in tick/);
+
+  // Inflight within the bound: a drain is legitimately running, no verdict.
+  shape = channelDrainTickShape({ connections: 2, inflight: true, inflightSince: now - 1000, now, completed: null });
+  assert.equal(shape.start, false);
+  assert.equal(shape.result.inflight, 1);
+  assert.equal(summaryFailure(shape.result), null);
+
+  // Inflight past the bound: the wedge is a failed tick, not a success.
+  shape = channelDrainTickShape({ connections: 2, inflight: true, inflightSince: now - CHANNEL_DRAIN_STUCK_MS - 1000, now, completed: null });
+  assert.equal(shape.start, false);
+  assert.equal(shape.result.stuck, 1);
+  assert.equal(shape.result.scanError, "channel_drain_stuck");
+  assert.match(summaryFailure(shape.result), /channel_drain_stuck/);
 });
 
 test("scheduled() makes one safety-net call and fails the invocation when that call fails", async () => {

@@ -17,6 +17,7 @@ import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
+import { channelDrainTickShape } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
@@ -55,6 +56,11 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+// The drain RPC's decision table (channelDrainTickShape,
+// CHANNEL_DRAIN_STUCK_MS) lives in ./channel-drain-tick.mjs: this file is
+// the Worker entry module, so its export surface is the runtime's
+// handler/RPC surface and cannot carry test-only exports — workerd
+// rejects a non-function entry at startup.
 const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
@@ -258,21 +264,35 @@ export class ProjectRoom extends DurableObject {
   // on schedule); the inbox import itself still needs an owner session (B20
   // system import authority), so slices without one are honestly deferred,
   // never imported. Runs in the DO so no connection data leaves it.
+  //
+  // The drain itself runs in the background (waitUntil), so this RPC cannot
+  // report the drain it starts — it reports the last one that COMPLETED,
+  // whose outcome #drainChannelsInBackground stashes in channelDrainOutcome
+  // (the same summary the drainer keeps as lastTick). Each outcome is
+  // consumed exactly once, by the next call; a drain still inflight past
+  // CHANNEL_DRAIN_STUCK_MS is reported as a failed tick, not a success
+  // (bug sweep F-1: previously every return shape recorded success while
+  // the real drain's failures went to console only).
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
     const gate = drainer.configured();
     if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
-    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
-    const work = this.#drainChannelsInBackground(drainer);
-    this.ctx.waitUntil(work);
-    return { started: 1, background: 1, connections: gate.connections };
+    const completed = this.channelDrainOutcome ?? null;
+    this.channelDrainOutcome = null;
+    const { result, start } = channelDrainTickShape({
+      connections: gate.connections, inflight: this.channelDrainInflight === true,
+      inflightSince: this.channelDrainInflightSince, now: Date.now(), completed
+    });
+    if (start) this.ctx.waitUntil(this.#drainChannelsInBackground(drainer));
+    return result;
   }
   // Runs after the RPC returns. The first await opens the input gate before
   // any journal scan, and tick yields again between connections. Not an RPC.
   async #drainChannelsInBackground(drainer) {
     this.channelDrainInflight = true;
+    this.channelDrainInflightSince = Date.now();
     try {
       await yieldToQueuedRequests();
       const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
@@ -280,12 +300,15 @@ export class ProjectRoom extends DurableObject {
         event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
         errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
       }));
+      this.channelDrainOutcome = summary;
       return summary;
     } catch (error) {
       console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      this.channelDrainOutcome = { at: Date.now(), errors: 1 };
       return { errors: 1 };
     } finally {
       this.channelDrainInflight = false;
+      this.channelDrainInflightSince = null;
     }
   }
   // Changed rooms update the checksum. One room per tick is reread so a
