@@ -2002,6 +2002,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // MSG-2 blocks: rooms parked on an un-replayable event, named for the
       // operator. Unfenced and additive, like the cursor.
       this.db.exec(MESSAGES_BACKFILL_BLOCKS_SCHEMA);
+      // The re-diagnosis cadence stamp: existing block rows predate it and
+      // default to 0, which refreshStaleBlocks reads as "clock not
+      // started" — their cadence starts on first sight, like a fresh park.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='last_diagnosed_at'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
+      }
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
       }

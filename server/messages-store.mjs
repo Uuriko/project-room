@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS messages_backfill_cursor (
 // operator-actionable record instead of an anonymous wedge that re-throws
 // every tick and blocks every other room. Written by the backfill, cleared
 // when the room's log is replaced or a fresh diagnosis replays cleanly.
+// last_diagnosed_at stamps the most recent diagnosis attempt (the park
+// itself, a head-moved refresh, or a periodic re-diagnosis) and drives the
+// periodic re-diagnosis cadence in refreshStaleBlocks.
 export const MESSAGES_BACKFILL_BLOCKS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages_backfill_blocks (
   room_id TEXT PRIMARY KEY,
@@ -76,9 +79,22 @@ CREATE TABLE IF NOT EXISTS messages_backfill_blocks (
   event_id TEXT,
   error TEXT NOT NULL,
   head_seq INTEGER NOT NULL DEFAULT 0,
-  blocked_at INTEGER NOT NULL DEFAULT 0
+  blocked_at INTEGER NOT NULL DEFAULT 0,
+  last_diagnosed_at INTEGER NOT NULL DEFAULT 0
 );
 `;
+
+// How long a parked room whose head never moves waits between re-diagnoses.
+// The repair this serves is invisible to the head: an operator fixing the
+// named event in place, or a deploy fixing the reducer that rejects it —
+// neither appends an event, so head movement alone would leave a quiet
+// room parked forever. Six hours bounds the replay cost of a still-poisoned
+// room to a handful of full-log replays a day while a repaired room clears
+// the same day it was fixed.
+export const MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Periodic re-diagnoses per backfill call: a fleet of parked rooms becoming
+// due at once must not turn one tick into an unbounded replay session.
+const BLOCK_REDIAGNOSIS_PER_CALL = 1;
 
 export const MESSAGES_BACKFILL_BATCH = 200;
 const BACKFILL_COMMIT = 25;
@@ -422,14 +438,26 @@ function recordBlock(store, roomId, block) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const existing = db.prepare("SELECT sequence, event_id, error FROM messages_backfill_blocks WHERE room_id=?").get(roomId);
   const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId || existing.error !== block.error;
+  const now = Date.now();
   store.transaction(() => {
-    db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+    db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at, last_diagnosed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
-        error=excluded.error, head_seq=excluded.head_seq, blocked_at=excluded.blocked_at`)
-      .run(roomId, block.sequence, block.eventId, block.error, head, Date.now());
+        error=excluded.error, head_seq=excluded.head_seq, blocked_at=excluded.blocked_at,
+        last_diagnosed_at=excluded.last_diagnosed_at`)
+      .run(roomId, block.sequence, block.eventId, block.error, head, now, now);
   });
   return fresh;
+}
+
+// Stamp a re-diagnosis attempt that changed nothing: the block's content
+// (and blocked_at — when the standing accusation was recorded) stays as it
+// was; only the cadence clock moves, so the room is not re-diagnosed again
+// until the interval elapses.
+function noteDiagnosisAttempt(store, roomId, at) {
+  store.transaction(() => {
+    store.db.prepare("UPDATE messages_backfill_blocks SET last_diagnosed_at=? WHERE room_id=?").run(at, roomId);
+  });
 }
 
 function clearBlock(store, roomId) {
@@ -444,14 +472,49 @@ function clearBlock(store, roomId) {
 // sweep. Runs before room selection; a still-blocked room stays parked. A
 // re-diagnosis that changes the block marks the room in `freshRooms`, so
 // the changed block is surfaced once like a new one.
-function refreshStaleBlocks(store, freshRooms = new Map()) {
-  for (const row of store.db.prepare("SELECT room_id, head_seq FROM messages_backfill_blocks").all()) {
+//
+// A parked room whose head never moves is not abandoned either: the repair
+// it waits for (an operator fixing the named event in place, a deploy
+// fixing the reducer) appends no event, so on a slow cadence — at most
+// BLOCK_REDIAGNOSIS_PER_CALL rooms per call, each at most once per
+// MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS — the room earns a periodic
+// re-diagnosis through the same diagnoseBlock path. A clean replay clears
+// the park and the room rejoins this call's sweep; a still-failing log
+// keeps its park, with only the attempt stamp moving when the diagnosis is
+// unchanged. Periodic attempts honor the caller's deadline; head-moved
+// diagnoses keep their existing unconditional pass.
+function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity } = {}) {
+  const rows = store.db.prepare(
+    "SELECT room_id, sequence, event_id, error, head_seq, last_diagnosed_at FROM messages_backfill_blocks ORDER BY room_id"
+  ).all();
+  let periodicLeft = BLOCK_REDIAGNOSIS_PER_CALL;
+  for (const row of rows) {
     const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
     if (head === undefined) { clearBlock(store, row.room_id); continue; }
-    if (head === row.head_seq) continue;
+    if (head !== row.head_seq) {
+      const block = diagnoseBlock(store.db, row.room_id);
+      if (!block) clearBlock(store, row.room_id);
+      else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);
+      continue;
+    }
+    if (periodicLeft <= 0) continue;
+    // A row with no stamp predates the cadence (written before the column
+    // existed, or inserted directly): start its clock on first sight
+    // rather than diagnosing on the spot, so the cadence means the same
+    // thing for every parked room.
+    if (!row.last_diagnosed_at) { noteDiagnosisAttempt(store, row.room_id, Date.now()); continue; }
+    if (Date.now() - row.last_diagnosed_at < MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS) continue;
+    if (Date.now() > deadline) break;
+    periodicLeft -= 1;
     const block = diagnoseBlock(store.db, row.room_id);
-    if (!block) clearBlock(store, row.room_id);
-    else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);
+    if (!block) { clearBlock(store, row.room_id); continue; }
+    const changed = row.sequence !== block.sequence || row.event_id !== block.eventId || row.error !== block.error;
+    if (changed) {
+      recordBlock(store, row.room_id, block);
+      freshRooms.set(row.room_id, true);
+    } else {
+      noteDiagnosisAttempt(store, row.room_id, Date.now());
+    }
   }
 }
 
@@ -578,9 +641,10 @@ function isRoomDataError(error) {
 // parked in messages_backfill_blocks, and named in the result's `failed`
 // list (this call's fresh failures) and its `blocked` list (the standing
 // parked set) while every other room proceeds. A parked room is skipped
-// on later calls until refreshStaleBlocks finds the block stale (the
-// underlying event repaired), so a poisoned room neither wedges the batch
-// nor re-runs forever; its failure stays recorded in the unified
+// on later calls until refreshStaleBlocks finds the block stale — the
+// room's head moved, or the periodic re-diagnosis cadence came due and
+// the underlying event proves repaired — so a poisoned room neither
+// wedges the batch nor re-runs forever; its failure stays recorded in the unified
 // integrity surface until the room backfills clean. Parking is deliberate
 // — skipping the event silently would corrupt the table the parity check
 // certifies against the projection; the block names what an operator must
@@ -615,7 +679,7 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     fresh: freshRooms.get(row.room_id) ?? false
   }));
   if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, blocked: allBlocked(), failed };
-  refreshStaleBlocks(store, freshRooms);
+  refreshStaleBlocks(store, freshRooms, { deadline });
   let events = 0;
   let rooms = 0;
   let roomId = null;
