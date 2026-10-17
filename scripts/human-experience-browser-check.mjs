@@ -166,11 +166,13 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   // must recover one run, while keeping the already-posted prompt in the transcript.
   await owner.route('**/api/rooms/commons/assistant', async route => {
     const payload = route.request().postDataJSON();
-    if (route.request().method() === 'POST' && payload?.action === 'invoke') {
+    if (route.request().method() === 'POST' && payload?.action === 'submit') {
       await route.fetch(); await route.abort(); await owner.unroute('**/api/rooms/commons/assistant');
     } else await route.continue();
   });
-  await owner.locator('#ask-room').click(); await send(owner,'Recover this request exactly once.');
+  await owner.locator('#ask-room').click();
+  await owner.locator('#message-input').fill('Recover this request exactly once.');
+  await owner.locator('#message-form button[type=submit]').click();
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   const beforeRetry = (await api('owner')).runs;
   assert.equal(beforeRetry.length,2);
@@ -178,18 +180,41 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#assistant-retry').waitFor({state:'visible'}); await owner.locator('#assistant-retry').click();
   await owner.locator('#assistant-retry').waitFor({state:'hidden'});
   assert.equal((await api('owner')).runs.length,2);
+  assert.equal(await owner.locator('#message-input').inputValue(), '', 'confirmed retry clears its restored draft');
   // Select context at revision N; the host claims N+1 before the human sends.
   // A rejected stale write needs review and a new explicit confirmation, not an endless retry.
   await peer.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Recover this request exactly once.'));
   let recovery = (await api('producer')).runs.find(r=>r.id!==run.id);
   await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).click(); // the newest open ask is on the card face
   recovery = (await api('producer',{action:'claim',runId:recovery.id,attemptId:'recovery-host',expectedRevision:recovery.revision})).result;
-  await send(peer,'Please include our latest constraint.');
+  await peer.locator('#composer-file').setInputFiles({ name: 'accepted.txt', mimeType: 'text/plain', buffer: Buffer.from('Original attachment') });
+  await peer.waitForFunction(() => document.querySelector('#composer-attachments').textContent === 'accepted.txt×');
+  await peer.locator('#message-input').fill('Please include our latest constraint.');
+  await peer.locator('#message-form button[type=submit]').click();
   await peer.locator('#assistant-review').waitFor({state:'visible'});
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,1);
-  await peer.locator('#assistant-review').click(); await peer.locator('#assistant-retry').click();
+  await peer.locator('#assistant-review').click();
+  const retryCommitted = deferredResultResponse(), releaseRetry = deferredResultResponse();
+  await peer.route('**/api/rooms/commons/assistant', async route => {
+    if (route.request().method() !== 'POST' || route.request().postDataJSON()?.action !== 'submit') { await route.fallback(); return; }
+    const response = await route.fetch(); retryCommitted.resolve();
+    await releaseRetry.promise; await route.fulfill({ response });
+  });
+  await peer.locator('#assistant-retry').click(); await retryCommitted.promise;
+  await peer.locator('#message-input').fill('A newer thought, still unsent.');
+  await peer.locator('#composer-file').setInputFiles({ name: 'next.txt', mimeType: 'text/plain', buffer: Buffer.from('New unsent attachment') });
+  await peer.waitForFunction(() => document.querySelector('#composer-attachments').textContent.includes('next.txt×'));
+  await peer.locator('#thread-back').click();
+  await peer.locator('#message-input').fill('An unrelated room draft.');
+  releaseRetry.resolve();
   await peer.locator('#assistant-retry').waitFor({state:'hidden'});
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,2);
+  assert.equal(await peer.locator('#message-input').inputValue(), 'An unrelated room draft.', 'late retry receipt leaves the current conversation alone');
+  await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).click();
+  assert.equal(await peer.locator('#message-input').inputValue(), 'A newer thought, still unsent.', 'late retry receipt preserves newer text');
+  assert.equal(await peer.locator('#composer-attachments').textContent(), 'next.txt×', 'only accepted files leave the draft');
+  await peer.unroute('**/api/rooms/commons/assistant');
+  await peer.locator('#message-input').fill('');
   // Stop is available for ordinary requests, without deleting the prompt.
   // Losing the committed response must preserve one exact cancellation for retry.
   const ownerRun = owner.locator(`[data-assistant-run="${recovery.id}"]`);
@@ -681,6 +706,7 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#message-form button[type=submit]').click();
     const sent = await response;
     assert.equal(sent.status(), 200, await sent.text());
+    await page.waitForFunction(() => !document.querySelector('#message-form button[type=submit]').disabled);
     const run = (await api('producer')).runs.find(r => r.id === 'shared');
     assert.equal(run.inputs.length, 2);
     const added = f.store.room('commons').state.messages.find(m => m.id === run.inputs[1].sourceMessageId);
