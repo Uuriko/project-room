@@ -689,6 +689,36 @@ test("#3726: a dispute cannot open on submitted work — no vesting without acce
   expectConserved(escrow);
 });
 
+test("#3726/F3: a refused dispute cannot vest by timeout — no dispute exists for the keeper to default after 14 days", () => {
+  const { escrow } = makeEscrow();
+  // Long deadline (30d) isolates the dispute-timeout vector from the
+  // free-miss deadline settlement: only the 14-day dispute clock passes.
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT, deadline: isoFuture(30 * 24 * 3_600_000) });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  // The dispute cannot open on submitted work (the Option A gateway).
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "stall" }), "invalid_state");
+  // 15 days pass — beyond DISPUTE_TIMEOUT_MS. At baseline an open dispute
+  // defaulted to RELEASE here and vested the award with no ruling at all
+  // (sweep findings-06 F3); with no dispute open there is nothing to default.
+  tick(15 * 24 * 3_600_000);
+  expectCode(() => escrow.finalizeBounty(ROOM, bounty.bountyId, {}), "invalid_state");
+  escrow.closeEpoch(ROOM, {});
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "submitted");
+  assert.equal(after.disputeId, null);
+  assert.equal(after.resolution ?? null, null);
+  // Nothing vested, nothing compensated, no bond ever moved.
+  assert.equal(bal(escrow, GROK).payable, 99, "worker unchanged: claim bond still locked, award not vested");
+  assert.equal(bal(escrow, GROK).approved, 0);
+  assert.equal(bal(escrow, CODEX).payable, 100);
+  assert.equal(bal(escrow, CODEX).locked, 0);
+  assert.equal(bal(escrow, JILL).payable, 90, "poster unchanged: award still locked");
+  expectConserved(escrow);
+});
+
 test("dispute SPLIT leaves no duplicate or dust: halves sum to the award exactly", () => {
   const { escrow } = makeEscrow();
   // Odd-millis award: floor/ceil split must still sum to the whole.
