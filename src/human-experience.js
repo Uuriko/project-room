@@ -27,7 +27,7 @@ export function soloUnaddressed({ body, replyToId, members, messages, selfId, as
   const source = replyToId ? (messages ?? []).find(m => m.id === replyToId) : null;
   return !source || source.authorId === selfId || source.authorId === assistantId;
 }
-export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript }) {
+export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
@@ -203,6 +203,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const value = await client.request(path(), { method: 'POST', data: owned });
       if (stamp !== key() || operation !== owned) return value;
       operation = null; rejectedOperation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0;
+      if (owned.action === 'submit' && value.receipt) onSubmitted?.(owned, value.result);
       // A failed refresh does not undo an accepted send. The stream can catch up.
       if (value.receipt) { try { await client.refresh(value.receipt); } catch { /* durable receipt already received */ } }
       await refresh(); return value;
