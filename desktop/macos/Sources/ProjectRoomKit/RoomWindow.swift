@@ -10,6 +10,9 @@ public enum RoomLocation {
         return (url.scheme == "https" && url.host == "room.trydemigod.com" && (url.port == nil || url.port == 443))
             || (url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? ""))
     }
+    public static func authenticationHandlerMatches(_ handler: URL?, application: URL) -> Bool {
+        handler?.resolvingSymlinksInPath().standardizedFileURL == application.resolvingSymlinksInPath().standardizedFileURL
+    }
     public static func sameOrigin(_ url: URL, _ origin: URL) -> Bool {
         url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port && url.user == nil && url.password == nil
     }
@@ -31,6 +34,12 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
     private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
+    private let browserRecoveryButton = NSButton(title: "Open browser…", target: nil, action: nil)
+    private let browserRecoveryDelayNanoseconds: UInt64
+    private var browserRecoveryTask: Task<Void, Never>?
+    private var pendingProvider: String?
+    private var externalCallback: (state: String, complete: (URL?, Error?) -> Void)?
+    private let acceptanceBrowserOpener: ((URL) -> Bool)?
     private var localTools: LocalToolsWindow?
     private var authentication: (any RoomAuthenticationSession)?
     private let acceptanceAuthenticationFactory: RoomAuthenticationFactory?
@@ -51,7 +60,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil) {
+    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceBrowserOpener: ((URL) -> Bool)? = nil, acceptanceBrowserRecoveryDelayNanoseconds: UInt64? = nil) {
         precondition(RoomLocation.allowed(url))
         // Destination overrides are restricted to isolated loopback acceptance.
         precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
@@ -59,6 +68,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         precondition(acceptanceAuthenticationTimeoutNanoseconds == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "") && acceptanceAuthenticationTimeoutNanoseconds! > 0 && acceptanceAuthenticationTimeoutNanoseconds! <= 300_000_000_000))
         precondition(acceptanceCookieInstaller == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
         precondition(acceptanceCookieCommitTimeoutNanoseconds == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "") && acceptanceCookieCommitTimeoutNanoseconds! > 0 && acceptanceCookieCommitTimeoutNanoseconds! <= 10_000_000_000))
+        precondition(acceptanceBrowserOpener == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        precondition(acceptanceBrowserRecoveryDelayNanoseconds == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "") && acceptanceBrowserRecoveryDelayNanoseconds! > 0))
+        self.browserRecoveryDelayNanoseconds = acceptanceBrowserRecoveryDelayNanoseconds ?? 8_000_000_000
+        self.acceptanceBrowserOpener = acceptanceBrowserOpener
         self.acceptanceCookieInstaller = acceptanceCookieInstaller
         self.cookieCommitTimeoutNanoseconds = acceptanceCookieCommitTimeoutNanoseconds ?? 10_000_000_000
         self.authenticationTimeoutNanoseconds = acceptanceAuthenticationTimeoutNanoseconds ?? 300_000_000_000
@@ -94,6 +107,8 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         cancelSignInButton.keyEquivalentModifierMask = []
         cancelSignInButton.isHidden = true
         bar.addArrangedSubview(cancelSignInButton)
+        browserRecoveryButton.target = self; browserRecoveryButton.action = #selector(recoverBrowserSignIn)
+        browserRecoveryButton.isHidden = true; bar.addArrangedSubview(browserRecoveryButton)
         status.font = .systemFont(ofSize: 11)
         status.textColor = .secondaryLabelColor
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -124,7 +139,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
 
     public func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
     public func open(_ url: URL) {
-        guard RoomLocation.sameOrigin(url, origin) else { return }
+        guard !signInPending, RoomLocation.sameOrigin(url, origin) else { return }
         webView.load(URLRequest(url: url))
     }
     public func windowShouldClose(_ sender: NSWindow) -> Bool { window.orderOut(nil); return false }
@@ -142,13 +157,14 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         webView.evaluateJavaScript("document.querySelector('#room-actions-open')?.click()", completionHandler: nil)
     }
     @objc public func signIn() { signIn(provider: nil) }
-    private func signIn(provider: String?) {
+    private func signIn(provider: String?, external: Bool = false, destination: URL? = nil) {
         guard !signInPending else { return }
         guard let url = webView.url, RoomLocation.sameOrigin(url, origin) else { return }
         // Reserve the attempt before either asynchronous WebKit call. A provider
         // click and menu action must not launch competing browser sessions.
         let attempt = UUID()
         signInAttempt = attempt
+        pendingProvider = provider
         signInPending = true
         cancelSignInButton.isHidden = false
         cancelSignInButton.isEnabled = true
@@ -168,7 +184,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
                     guard let tuple = slot as? String else { self.endAuthentication(attempt); return }
                     self.signInSlot = tuple
                     self.webView.isHidden = true
-                    self.beginAuthentication(attempt, provider: provider)
+                    self.beginAuthentication(attempt, provider: provider, external: external, destination: destination)
                 } catch {
                     guard self.currentAuthentication(attempt) else { return }
                     self.endAuthentication(attempt)
@@ -185,17 +201,44 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { fatalError("Secure randomness unavailable") }
         return Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
-    private func beginAuthentication(_ attempt: UUID, provider: String?) {
+    @objc public func recoverBrowserSignIn() {
+        guard signInPending, !browserRecoveryButton.isHidden, !cookieCommitPending else { return }
+        let provider = pendingProvider, destination = pendingDestination
+        cancelAuthentication(message: "Opening browser…")
+        signIn(provider: provider, external: true, destination: destination)
+    }
+    private enum AuthenticationCallback { case code(String), denied }
+    private static func authenticationCallback(_ callback: URL, state: String) -> AuthenticationCallback? {
+        guard callback.scheme == "projectroom", callback.host == "auth", callback.path.isEmpty,
+            callback.user == nil, callback.password == nil, callback.port == nil, callback.fragment == nil,
+            let parts = URLComponents(url: callback, resolvingAgainstBaseURL: false), let items = parts.queryItems,
+            items.allSatisfy({ ["state", "code", "error"].contains($0.name) }),
+            Set(items.map(\.name)).count == items.count,
+            items.first(where: { $0.name == "state" })?.value == state else { return nil }
+        let code = items.first(where: { $0.name == "code" })?.value, error = items.first(where: { $0.name == "error" })?.value
+        if error == "access_denied", code == nil, items.count == 2 { return .denied }
+        guard error == nil, items.count == 2, let code, code.range(of: "^oac_[A-Za-z0-9_-]{32}$", options: .regularExpression) != nil else { return nil }
+        return .code(code)
+    }
+    @discardableResult public func receiveAuthenticationCallback(_ url: URL) -> Bool {
+        guard signInPending, authenticationCallbackPending, let pending = externalCallback,
+            Self.authenticationCallback(url, state: pending.state) != nil else { return false }
+        externalCallback = nil // Consume before the asynchronous completion task.
+        pending.complete(url, nil)
+        return true
+    }
+    private func beginAuthentication(_ attempt: UUID, provider: String?, external: Bool, destination: URL?) {
         let state = randomProof(), verifier = randomProof()
         let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
         var components = URLComponents(url: origin.appendingPathComponent("api/auth/desktop/start"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "state", value: state), URLQueryItem(name: "challenge", value: challenge)]
         if let provider { components.queryItems?.append(URLQueryItem(name: "provider", value: provider)) }
-        pendingDestination = webView.url
+        pendingDestination = destination ?? webView.url
         let completion: (URL?, Error?) -> Void = { [weak self] callback, error in
             Task { @MainActor in
                 guard let self, self.currentAuthentication(attempt), self.authenticationCallbackPending else { return }
                 self.authenticationCallbackPending = false
+                self.browserRecoveryTask?.cancel(); self.browserRecoveryButton.isHidden = true
                 self.authentication = nil
                 if let error {
                     self.endAuthentication(attempt)
@@ -208,18 +251,33 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
                     }
                     return
                 }
-                guard let callback, callback.scheme == "projectroom", callback.host == "auth", callback.path.isEmpty,
-                      let parts = URLComponents(url: callback, resolvingAgainstBaseURL: false),
-                      parts.queryItems?.filter({ $0.name == "state" }).count == 1,
-                      parts.queryItems?.first(where: { $0.name == "state" })?.value == state else {
+                guard let callback, let result = Self.authenticationCallback(callback, state: state) else {
                     self.endAuthentication(attempt); self.tell("Sign-in did not match this app. Start again."); return
                 }
-                if parts.queryItems?.first(where: { $0.name == "error" })?.value == "access_denied" { self.endAuthentication(attempt); self.status.stringValue = "Sign-in cancelled."; return }
-                guard parts.queryItems?.filter({ $0.name == "code" }).count == 1,
-                      let code = parts.queryItems?.first(where: { $0.name == "code" })?.value,
-                      code.count == 36 && code.hasPrefix("oac_") else { self.endAuthentication(attempt); self.tell("Sign-in did not finish. Start again."); return }
+                let code: String
+                switch result {
+                case .denied: self.endAuthentication(attempt); self.status.stringValue = "Sign-in cancelled."; return
+                case .code(let value): code = value
+                }
                 await self.completeAuthentication(code: code, verifier: verifier, attempt: attempt)
             }
+        }
+        if external {
+            authenticationCallbackPending = true
+            externalCallback = (state, completion)
+            if acceptanceBrowserOpener == nil {
+                let currentApp = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+                let handler = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "projectroom://auth")!)?.resolvingSymlinksInPath().standardizedFileURL
+                guard RoomLocation.authenticationHandlerMatches(handler, application: currentApp) else {
+                    endAuthentication(attempt)
+                    tell("macOS sends sign-in to another copy of Project Room. Use email and password here, or open the registered copy: \(handler?.path ?? "none registered").")
+                    return
+                }
+            }
+            let opened = acceptanceBrowserOpener?(components.url!) ?? NSWorkspace.shared.open(components.url!)
+            if !opened { endAuthentication(attempt); tell("Your browser could not open. Try email and password here.") }
+            else { status.stringValue = "Finish in browser · Cancel if it doesn’t return." }
+            return
         }
         let session = acceptanceAuthenticationFactory?(components.url!, "projectroom", completion)
             ?? ASWebAuthenticationSession(url: components.url!, callbackURLScheme: "projectroom", completionHandler: completion)
@@ -227,7 +285,15 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         authentication = session
         authenticationCallbackPending = true
         if !session.start() { authentication = nil; endAuthentication(attempt); tell("The browser sign-in session could not open. Email and password sign-in are available in the window.") }
-        else { status.stringValue = "Finish signing in in your browser…" }
+        else {
+            status.stringValue = "Finish signing in in your browser…"
+            browserRecoveryTask = Task { @MainActor [weak self, delay = browserRecoveryDelayNanoseconds] in
+                do { try await Task.sleep(nanoseconds: delay) } catch { return }
+                guard let self, self.currentAuthentication(attempt), self.authenticationCallbackPending else { return }
+                self.browserRecoveryButton.isHidden = false
+                self.status.stringValue = "Browser didn’t open?"
+            }
+        }
     }
     private func cancelAuthentication(message: String) {
         guard let attempt = signInAttempt, currentAuthentication(attempt) else { return }
@@ -246,6 +312,8 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     private func endAuthentication(_ attempt: UUID) {
         guard currentAuthentication(attempt) else { return }
         authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
+        browserRecoveryTask?.cancel(); browserRecoveryTask = nil; browserRecoveryButton.isHidden = true
+        externalCallback = nil; pendingProvider = nil
         signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
         cancelSignInButton.isHidden = true
         cookieCommitPending = false; cookieCommitWaitExpired = false
@@ -303,7 +371,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             query.removeAll { $0.name == "oauth" }
             query.append(URLQueryItem(name: "oauth", value: "login"))
             destination?.queryItems = query
-            open(destination?.url ?? origin)
+            webView.load(URLRequest(url: destination?.url ?? origin))
             pendingDestination = nil
         } catch {
             guard currentAuthentication(attempt) else { return }

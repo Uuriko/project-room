@@ -14,6 +14,7 @@ private func acceptanceFailure(_ message: String) -> Never {
 @MainActor final class SyntheticAuthentication: RoomAuthenticationSession {
     weak var presentationContextProvider: ASWebAuthenticationPresentationContextProviding?
     let callback: (URL?, Error?) -> Void
+    var startURL: URL?
     var started = 0
     var cancelled = 0
     let startResult: Bool
@@ -49,6 +50,8 @@ private func acceptanceFailure(_ message: String) -> Never {
     var sessions: [SyntheticAuthentication] = []
     var nextStartResult = true
     var completeWithRealBrowser = false
+    var externalURLs: [URL] = []
+    var externalCanOpen = true
     var cookieCommitInstalled = false
     var releaseCookieCommit: CheckedContinuation<Void, Never>?
     init(url: URL) { self.url = url }
@@ -58,12 +61,22 @@ private func acceptanceFailure(_ message: String) -> Never {
             let params = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!
             guard params.first(where: { $0.name == "state" })?.value?.count == 43,
                   params.first(where: { $0.name == "challenge" })?.value?.count == 43 else { acceptanceFailure("Missing state/PKCE proof") }
-            let session = SyntheticAuthentication(state: params.first(where: { $0.name == "state" })!.value!, startResult: nextStartResult, browserStart: completeWithRealBrowser ? url : nil, provider: params.first(where: { $0.name == "provider" })?.value, callback: callback); sessions.append(session); return session
+            let session = SyntheticAuthentication(state: params.first(where: { $0.name == "state" })!.value!, startResult: nextStartResult, browserStart: nil, provider: params.first(where: { $0.name == "provider" })?.value, callback: callback); session.startURL = url; sessions.append(session); return session
         } , acceptanceCookieInstaller: { [unowned self] cookie, store in
             await store.setCookie(cookie)
             cookieCommitInstalled = true
             await withCheckedContinuation { releaseCookieCommit = $0 }
-        }, acceptanceCookieCommitTimeoutNanoseconds: 1_000_000_000)
+        }, acceptanceCookieCommitTimeoutNanoseconds: 1_000_000_000, acceptanceBrowserOpener: { [unowned self] url in
+            externalURLs.append(url)
+            if completeWithRealBrowser {
+                let params = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!
+                let bridge = SyntheticAuthentication(state: params.first(where: { $0.name == "state" })!.value!, startResult: true, browserStart: url, provider: "google", callback: { [weak self] callback, _ in
+                    if let callback { _ = self?.room?.receiveAuthenticationCallback(callback) }
+                })
+                _ = bridge.start()
+            }
+            return externalCanOpen
+        }, acceptanceBrowserRecoveryDelayNanoseconds: 400_000_000)
         room?.show()
         Task { @MainActor in
             do {
@@ -93,6 +106,38 @@ private func acceptanceFailure(_ message: String) -> Never {
                 try await Task.sleep(nanoseconds: 500_000_000)
                 guard sessions.isEmpty, !room.webView.isHidden, cancel.isHidden else { acceptanceFailure("Escape did not retire pending account read") }
                 print("NATIVE_AUTH_CANCEL_ESCAPE passed; visible Cancel and actual Escape key binding restore app")
+                room.signIn()
+                try await Task.sleep(nanoseconds: 300_000_000)
+                guard let earlyRecovery = descendantViews(root).compactMap({ $0 as? NSButton }).first(where: { $0.title == "Open browser…" }), earlyRecovery.isHidden else { acceptanceFailure("Recovery must wait for its delay") }
+                try await Task.sleep(nanoseconds: 500_000_000)
+                guard let recovery = descendantViews(root).compactMap({ $0 as? NSButton }).first(where: { $0.title == "Open browser…" }), !recovery.isHidden else { acceptanceFailure("Accepted but never-presented auth needs explicit browser recovery") }
+                let old = sessions.last!, originalDestination = room.webView.url
+                recovery.performClick(nil)
+                try await Task.sleep(nanoseconds: 400_000_000)
+                guard old.cancelled == 1, externalURLs.count == 1, room.webView.isHidden else { acceptanceFailure("Explicit recovery must cancel AS and keep account page fenced") }
+                let state = URLComponents(url: externalURLs[0], resolvingAgainstBaseURL: false)!.queryItems!.first(where: { $0.name == "state" })!.value!
+                guard state != old.state, URLComponents(url:externalURLs[0],resolvingAgainstBaseURL:false)!.queryItems!.first(where:{$0.name == "challenge"})?.value != URLComponents(url:old.startURL!,resolvingAgainstBaseURL:false)!.queryItems!.first(where:{$0.name == "challenge"})?.value else { acceptanceFailure("Recovery must generate fresh state") }
+                let good = URL(string: "projectroom://auth?state=\(state)&error=access_denied")!
+                for text in ["projectroom://auth?state=\(old.state)&error=access_denied", "projectroom://auth?state=\(state)&state=\(state)&error=access_denied", "projectroom://auth?state=\(state)&error=access_denied&code=oac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "projectroom://auth?state=\(state)&error=unknown", "projectroom://auth?state=\(state)&error=access_denied#fragment"] {
+                    guard !room.receiveAuthenticationCallback(URL(string:text)!) else { acceptanceFailure("Malformed/stale external callback accepted") }
+                }
+                old.callback(nil,NSError(domain:"late cancelled AS",code:1))
+                room.open(URL(string:"/?unexpected-navigation",relativeTo:url)!.absoluteURL)
+                try await Task.sleep(nanoseconds:100_000_000)
+                guard room.webView.isHidden, room.webView.url == originalDestination else { acceptanceFailure("Stale AS callback or public link mutated external attempt") }
+                guard room.receiveAuthenticationCallback(good), !room.receiveAuthenticationCallback(good) else { acceptanceFailure("External callback must be consumed once") }
+                try await Task.sleep(nanoseconds:100_000_000)
+                guard !room.webView.isHidden, !room.receiveAuthenticationCallback(good) else { acceptanceFailure("External denial must restore page and retire callback") }
+                guard RoomLocation.authenticationHandlerMatches(URL(fileURLWithPath:"/Applications/Room.app"),application:URL(fileURLWithPath:"/Applications/Room.app")), !RoomLocation.authenticationHandlerMatches(URL(fileURLWithPath:"/Other/Room.app"),application:URL(fileURLWithPath:"/Applications/Room.app")), !RoomLocation.authenticationHandlerMatches(nil,application:URL(fileURLWithPath:"/Applications/Room.app")) else { acceptanceFailure("Callback handler must match exact app copy") }
+                externalCanOpen = false
+                room.signIn(); try await Task.sleep(nanoseconds:800_000_000)
+                room.recoverBrowserSignIn(); try await Task.sleep(nanoseconds:400_000_000)
+                guard !room.webView.isHidden, let openFailure = room.window.attachedSheet?.contentView else { acceptanceFailure("External browser open failure must restore app and explain recovery") }
+                guard let dismiss = descendantViews(openFailure).compactMap({$0 as? NSButton}).first(where:{$0.keyEquivalent == "\r" || $0.title == "OK"}) else { acceptanceFailure("External open failure acknowledgement missing") }
+                dismiss.performClick(nil); externalCanOpen = true
+                sessions.removeAll(); externalURLs.removeAll()
+                print("NATIVE_AUTH_EXTERNAL_RECOVERY passed; delayed explicit recovery, fresh state, stale AS fence, strict callback, one-time consume, navigation fence and app-copy check")
+
                 // Select the real minimal entrance choice and activate its provider link.
                 // A rapid menu invocation overlaps the actual WK navigation callback.
                 _ = try await room.webView.evaluateJavaScript("document.querySelector('#auth-signin-ui [data-password-mode=login]')?.click(); document.querySelector('#google-signin').click(); true")
@@ -159,6 +204,8 @@ private func acceptanceFailure(_ message: String) -> Never {
                 print("NATIVE_AUTH_PROVIDER_INTENT passed; Google/GitHub preserved; generic menu omits provider")
                 completeWithRealBrowser = true
                 _ = try await room.webView.evaluateJavaScript("history.replaceState(null, '', '/?native_return=preserved&oauth=old&oauth=duplicate#pr-view/inbox'); document.querySelector('#google-signin').click(); true")
+                try await Task.sleep(nanoseconds:800_000_000)
+                room.recoverBrowserSignIn()
                 for _ in 0..<200 {
                     if cookieCommitInstalled { break }
                     try await Task.sleep(nanoseconds: 50_000_000)

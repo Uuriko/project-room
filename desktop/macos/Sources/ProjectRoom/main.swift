@@ -44,7 +44,9 @@ import ProjectRoomKit
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { room?.show(); return true }
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            // Authentication callbacks belong to ASWebAuthenticationSession.
+            // Only an explicitly selected browser fallback has an active callback.
+            // Its state/PKCE/account slot still belong to this exact app attempt.
+            if room?.receiveAuthenticationCallback(url) == true { room?.show(); continue }
             // Public links use the canonical HTTPS Room URL and current auth.
             if RoomLocation.allowed(url) { room?.open(url); room?.show() }
         }
