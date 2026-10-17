@@ -253,14 +253,14 @@ describe("store-backed tiles", () => {
   });
 
   test("healthy: the deferred-batch cursor names the next step, board is empty", async () => {
-    const before = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
+    const preBatch = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
     await store.runDeferredIntegrityBatch();
     const surface = buildStatusSurface({ store, jobs: healthyJobs, now: NOW });
     assert.ok(surface.integrity.cursor, "cursor exists after a batch ran");
     assert.equal(surface.integrity.cursor.stepsTotal, 11);
     assert.equal(surface.integrity.cursor.nextStepName, INTEGRITY_STEP_NAMES[surface.integrity.cursor.nextStepIndex]);
-    if (before.integrity.cursor) {
-      assert.equal(surface.integrity.cursor.nextStepIndex, (before.integrity.cursor.nextStepIndex + 2) % 11);
+    if (preBatch.integrity.cursor) {
+      assert.equal(surface.integrity.cursor.nextStepIndex, (preBatch.integrity.cursor.nextStepIndex + 2) % 11);
     }
     assert.equal(surface.board.state, "recorded");
     assert.equal(surface.board.claimableCount, 0);
