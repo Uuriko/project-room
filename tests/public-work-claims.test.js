@@ -209,12 +209,16 @@ test('explicit match claims exactly one task and retry retains chosen outcome th
 });
 
 test('matching exposes continuation when the first hundred tasks are held and rejects invalid cursors', t => {
-  const f = fixture(t), [a, b] = f.identities;
+  const f = fixture(t), [, b] = f.identities;
   f.store.initialize(initialRoom('overflow'));
+  // The 100 holds are spread across 100 identities: since #3707 one
+  // identity may hold at most 3 live public-work claims, so a single
+  // holder for the whole page would be the squat that ceiling refuses.
+  const holders = Array.from({ length: 100 }, (_, n) => f.store.identities.create('Page holder ' + n));
   for (let n = 0; n < 101; n++) {
     const id = 'page-' + String(n).padStart(3, '0');
     f.enable(id, ['files/' + id], { kind: 'unpaid' }, 'main', n === 100 ? 'overflow' : 'commons');
-    if (n < 100) f.service().act(id, a.secret, 'claim', claim('hold-' + id));
+    if (n < 100) f.service().act(id, holders[n].secret, 'claim', claim('hold-' + id));
   }
   const page = f.service().match(null, {});
   assert.deepEqual(page.recommendations, []); assert.equal(page.inspected, 100);
@@ -287,4 +291,64 @@ test('stale claim distinguishes changed generation from expired lease', t => {
   assert.equal(expired.status, 409);
   assert.ok(/expired|lapsed/i.test(expired.message) && !/changed/i.test(expired.message),
     'says the lease expired (not ambiguously "expired or changed"): ' + expired.message);
+});
+
+// #3899: match() scanned one page of 100 tasks and, finding none of them
+// claimable, declared reasonCode 'no_claimable_tasks' for the whole
+// board — while claimable work sat on page 2 and llms.txt teaches agents
+// to read that code as "nothing claimable right now". The verdict is a
+// board-wide claim and may only follow a board-wide scan.
+function matchFixture(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'public-work-match-')), file = join(dir, 'room.sqlite');
+  let clock = Date.parse('2026-11-02T00:00:00Z');
+  const store = new RoomStore(file, { now: () => clock });
+  store.initialize(initialRoom());
+  store.initialize(initialRoom('annex'));
+  store.db.exec(publicWorkClaimsSchema); store.db.exec(publicWorkClaimFenceSchema);
+  const service = () => new PublicWorkClaims(store);
+  const enable = (id, roomId, deadline) => {
+    store.projectOffers.create(roomId, 'owner', { requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'],
+      terms: { kind: 'task', title: id, summary: 'Public result', acceptanceCriteria: ['Deliver the declared change'],
+        repositoryUrl: 'https://github.com/Example/Project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' }, deadline } });
+    store.projectOffers.transition(roomId, 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
+    return service().enable(roomId, 'owner', id, { requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: [`src/${id}.js`] });
+  };
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  return { store, service, enable, tick(ms) { clock += ms; } };
+}
+
+test('match makes no board-wide no_claimable_tasks verdict from a partial scan (#3899)', t => {
+  const f = matchFixture(t);
+  const t0 = Date.parse('2026-11-02T00:00:00Z');
+  const soon = new Date(t0 + 3600 * 1000).toISOString();
+  const later = new Date(t0 + 72 * 3600 * 1000).toISOString();
+  for (let i = 0; i < 100; i++) f.enable(`t-${String(i).padStart(3, '0')}`, 'commons', soon);
+  f.enable('zz-open', 'annex', later);
+  f.tick(2 * 3600 * 1000); // the first 100 tasks' deadlines pass; zz-open stays claimable
+  // Page 1 alone is all-unclaimable, but the board is not: the verdict
+  // must not be made, and the continuation fields carry the truth.
+  const result = f.service().match(null, {});
+  assert.deepEqual(result.recommendations, []);
+  assert.equal(result.reasonCode, undefined,
+    'no board-wide verdict from a scan that stopped at page 1');
+  assert.equal(result.inspected, 100);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.nextCursor, 't-099');
+  // The caller-driven continuation reaches the claimable task.
+  const next = f.service().match(null, { after: result.nextCursor });
+  assert.deepEqual(next.recommendations.map(entry => entry.task.taskId), ['zz-open']);
+  // A cursor-bounded tail scan makes no board-wide claim either.
+  const tail = f.service().match(null, { after: 'zz-open' });
+  assert.deepEqual(tail.recommendations, []);
+  assert.equal(tail.reasonCode, undefined);
+
+  // A board with genuinely nothing claimable still earns the verdict —
+  // once the scan has covered the whole board.
+  const g = matchFixture(t);
+  for (let i = 0; i < 3; i++) g.enable(`d-${i}`, 'commons', soon);
+  g.tick(2 * 3600 * 1000);
+  const empty = g.service().match(null, {});
+  assert.deepEqual(empty.recommendations, []);
+  assert.equal(empty.reasonCode, 'no_claimable_tasks');
+  assert.equal(empty.inspected, 3);
 });
