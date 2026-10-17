@@ -16,6 +16,18 @@ export class JobsProbe extends ProjectRoom {
     this.channelRuns += 1;
     return super.drainChannelBacklog();
   }
+  // #3893 retired this probe's original throw vehicle: the seed used to
+  // plant a malformed payload_json row whose JSON.parse throw aborted
+  // the drain and failed the webhook-dispatch job. The drain now
+  // isolates such rows instead (they dead-letter; the job stays healthy
+  // — pinned by tests/webhook-drain-poison-isolation.test.js), so the
+  // alarm check arms the throw directly. The subject under test is the
+  // alarm machinery — a thrown alarm is re-armed and the failure lands
+  // in job health — not the drain's error shape.
+  async drainWebhookDeliveries() {
+    if (this.drainFailureArmed) throw new Error("seeded webhook drain failure");
+    return super.drainWebhookDeliveries();
+  }
   jobRunCounts() {
     return { gmailRuns: this.gmailRuns, channelRuns: this.channelRuns };
   }
@@ -40,6 +52,10 @@ export class JobsProbe extends ProjectRoom {
     return { deliveryId: "del_due", due };
   }
   seedThrowingWebhook() {
+    // A due delivery row must exist or the webhook-dispatch job is
+    // disabled and never runs; the armed override above supplies the
+    // throw when it does. The row itself is well-formed now — a
+    // malformed one no longer throws (#3893).
     const identity = this.store.identities.create("Alarm Throw");
     const signing = "alarm-throw-" + "fixture";
     const subscribed = this.store.agentPlugin.subscribeWebhook({
@@ -51,8 +67,9 @@ export class JobsProbe extends ProjectRoom {
     const now = Date.now();
     this.store.db.prepare(`INSERT INTO agent_webhook_deliveries
       (delivery_id, idempotency_key, subscription_id, agent_id, event_type, room_id, target_url, payload_json, signature, state, attempts, next_attempt_at, created_at, updated_at)
-      VALUES ('del_throw', 'manual:del_throw', ?, ?, 'message.posted', NULL, 'https://hooks.example.test/hook', '{', 'sig', 'pending', 0, ?, ?, ?)`)
+      VALUES ('del_throw', 'manual:del_throw', ?, ?, 'message.posted', NULL, 'https://hooks.example.test/hook', '{}', 'sig', 'pending', 0, ?, ?, ?)`)
       .run(subscribed.subscription.subscriptionId, identity.identityId, now, now, now);
+    this.drainFailureArmed = true;
     return { deliveryId: "del_throw", due: now };
   }
   readDelivery(deliveryId) {

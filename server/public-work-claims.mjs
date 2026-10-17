@@ -632,7 +632,15 @@ export class PublicWorkClaims {
         // were inspected but none of them is claimable. Deliberately named
         // reasonCode, not reason/guidance — those are human-readable fields
         // used by other (stale) proposals for this same outcome object.
-        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)) outcome.reasonCode = 'no_claimable_tasks';
+        // The verdict is board-wide, so it is made only when this scan
+        // covered the whole board (#3899): it started at the beginning
+        // (no caller cursor) and reached the end (no continuation). A
+        // page-bounded scan — the caller-driven continuation protocol
+        // above, inspected/hasMore/nextCursor — makes no board-wide
+        // claim; neither does a scan where a claimable task was filtered
+        // out by the live path-overlap rule.
+        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)
+          && !(input.after ?? '') && page.nextCursor === null) outcome.reasonCode = 'no_claimable_tasks';
         if (input.autoClaim === true && candidates.length) {
           // #3271: an auto-claim is a claim — count it against the ceiling
           // here, where a claim actually happens (see the note above).
