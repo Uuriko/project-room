@@ -36,7 +36,8 @@ function installWorkersShim() {
   register(pathToFileURL(join(dir, "hook.mjs")).href, import.meta.url);
 }
 installWorkersShim();
-const { default: worker, ProjectRoom, channelDrainTickShape, CHANNEL_DRAIN_STUCK_MS } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
+const { default: worker, ProjectRoom } = await import(pathToFileURL(join(root, "cloudflare/room.mjs")).href);
+const { channelDrainTickShape, CHANNEL_DRAIN_STUCK_MS } = await import(pathToFileURL(join(root, "cloudflare/channel-drain-tick.mjs")).href);
 
 function memoryStorage() {
   const map = new Map();
