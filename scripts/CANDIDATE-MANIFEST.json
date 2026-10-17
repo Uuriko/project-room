@@ -112,7 +112,7 @@
     "src/owner-project-offers-ui.js": "sha256:9942e8c2a9f18a59a137f489aba84dcda625c5707d3e6fee3630666525168606",
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
     "src/portable-work.js": "sha256:62d2d53f538d177fa485f6d708987ce2419dd7cba038ad95cf21862034421d9a",
-    "src/project-offers-ui.js": "sha256:26166599f4b7df43d5feeddcb15acae7585e4c01e34875909f992fcc256f41a8",
+    "src/project-offers-ui.js": "sha256:02b9ece80dd23f0f1172f0b1df0ce017efc7de4a2bb3633edffbeeae3389ee52",
     "src/project-offers.css": "sha256:1d736d3aceb0317a4dda92966103e221d6201859076ee1b83e499a8e51664054",
     "src/public-a11y.css": "sha256:8295b367053469cb2c9ee4ff9a106dd5e746a2d5bee43cc6fa387fb4bcf34b30",
     "src/push-ask.js": "sha256:a81105c001f9043a657b203d642b64933107cc11fbf486386451f2336d417c5a",

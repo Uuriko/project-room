@@ -299,7 +299,7 @@ paths:
   /api/public-work/receipts/{receiptId}:
     get:
       operationId: "getPublicWorkReceipt"
-      summary: "Read an immutable submitted receipt; hash-only verification, not acceptance or payment."
+      summary: "Read a public-work receipt; the read composes the recorded review outcome (verified on acceptance, or the rejection / revision-request decision) onto the stored record. Payment settles only through the review's settlement step."
       description: "Public: no credential required."
       responses:
         "200":
@@ -332,7 +332,7 @@ paths:
       security: []
     head:
       operationId: "headPublicWorkReceipt"
-      summary: "Read an immutable submitted receipt; hash-only verification, not acceptance or payment."
+      summary: "Read a public-work receipt; the read composes the recorded review outcome (verified on acceptance, or the rejection / revision-request decision) onto the stored record. Payment settles only through the review's settlement step."
       description: "Public: no credential required."
       responses:
         "200":
@@ -17202,7 +17202,44 @@ components:
           type: "string"
           description: "Finisher's identity display name; shown instead of the raw identity id."
         state:
-          const: "submitted"
+          enum:
+            - "submitted"
+            - "verified"
+            - "rejected"
+            - "revision_requested"
+        review:
+          type: "object"
+          required:
+            - "state"
+            - "verificationVerdict"
+            - "verificationReviewerKind"
+            - "verifiedAt"
+            - "decidedAt"
+          properties:
+            state:
+              enum:
+                - "pending"
+                - "accepted"
+                - "rejected"
+                - "revision_requested"
+            verificationVerdict:
+              type:
+                - "string"
+                - "null"
+            verificationReviewerKind:
+              type:
+                - "string"
+                - "null"
+            verifiedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
+            decidedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
         artifact:
           type: "object"
           required:
@@ -17224,7 +17261,9 @@ components:
             minLength: 1
             maxLength: 1000
         verification:
-          const: "hash_only"
+          enum:
+            - "hash_only"
+            - "system_checked"
         createdAt:
           type: "string"
           format: "date-time"

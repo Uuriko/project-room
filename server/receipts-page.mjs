@@ -57,6 +57,12 @@ function head({ title, description, path }) {
 
 const names = list => list.length ? list.map(escapeHtml).join(", ") : "—";
 
+// A public-work receipt's outcome (#3733), composed from its records by
+// the read model: the train's record states (submitted / verified) and
+// the two review decisions that never stamp the record.
+const OUTCOME_LABELS = { verified: "Verified", accepted: "Accepted", rejected: "Rejected", revision_requested: "Revision requested", submitted: "Submitted" };
+const outcomeLabel = state => OUTCOME_LABELS[state] ?? state;
+
 const when = value => {
   const time = Date.parse(value ?? "");
   return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : "";
@@ -73,7 +79,7 @@ export function renderReceiptsHtml(page) {
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
   const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
-<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}</p>
+<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
@@ -173,6 +179,30 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
     : "";
+  // Public-work receipts carry the outcome their records support (#3733):
+  // the state the receipt reached, the designated reviewer's verdict and
+  // decision, the verification tier, and the checks — platform-executed
+  // ones apart from the ones the worker merely reported. Before this, a
+  // rejected delivery's page was identical to a verified one's except
+  // title and id.
+  const work = receipt.source === "public-work" && receipt.state ? (() => {
+    const review = receipt.review ?? {};
+    const outcomeText = {
+      verified: "Verified — the designated reviewer accepted this delivery, and the acceptance is stamped on the receipt record.",
+      rejected: "Rejected — the designated reviewer rejected this delivery.",
+      revision_requested: "Revision requested — the designated reviewer asked for changes.",
+      submitted: "Submitted — no reviewer decision is recorded yet.",
+    }[receipt.state] ?? `Recorded state: ${receipt.state}.`;
+    const rows = [`<div><dt>Outcome</dt><dd>${escapeHtml(outcomeText)}</dd></div>`];
+    if (review.verificationVerdict) rows.push(`<div><dt>Reviewer verdict</dt><dd>${escapeHtml(review.verificationVerdict)}${review.verificationReviewerKind ? ` (${escapeHtml(review.verificationReviewerKind)} reviewer)` : ""}${review.verifiedAt ? ` · <time datetime="${escapeHtml(review.verifiedAt)}">${escapeHtml(review.verifiedAt)}</time>` : ""}</dd></div>`);
+    if (review.decidedAt) rows.push(`<div><dt>Decided</dt><dd><time datetime="${escapeHtml(review.decidedAt)}">${escapeHtml(review.decidedAt)}</time></dd></div>`);
+    if (receipt.verification === "hash_only") rows.push(`<div><dt>Verification</dt><dd>Hash only (hash_only) — the platform recorded the artifact's sha256; no platform-executed check passed for this delivery.</dd></div>`);
+    else if (receipt.verification === "system_checked") rows.push(`<div><dt>Verification</dt><dd>System-checked (system_checked) — the platform itself executed the checks listed below.</dd></div>`);
+    else if (receipt.verification) rows.push(`<div><dt>Verification</dt><dd>${escapeHtml(receipt.verification)}</dd></div>`);
+    if (receipt.executedChecks?.length) rows.push(`<div><dt>Platform-executed checks</dt><dd>${receipt.executedChecks.map(check => `${escapeHtml(check.name)} — ${escapeHtml(check.result)}`).join("<br>")}</dd></div>`);
+    if (receipt.checksReported?.length) rows.push(`<div><dt>Checks the worker reported</dt><dd>${receipt.checksReported.map(entry => escapeHtml(entry)).join("<br>")}</dd></div>`);
+    return rows.join("");
+  })() : "";
   // Bounty lot receipts carry the escrow movement and the settlement
   // verdict. Parties are ledger account ids (poster / worker lanes), not
   // display names, and credits are the room's internal ledger units.
@@ -249,6 +279,8 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
     : receipt.source === "bounty-lot"
     ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : receipt.source === "public-work" && receipt.review?.decidedAt
+    ? "What this record proves: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest
     ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.verification?.state === "verified"
@@ -265,7 +297,7 @@ ${renderVerificationBlock(receipt, verification)}
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${verificationTier}${hashes}${payout}${lot}
+${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
@@ -289,6 +321,10 @@ const publicJson = receipt => ({
   ...(receipt.verification ? { verification: receipt.verification } : {}),
   hashes: receipt.hashes,
   at: receipt.at,
+  ...(receipt.state ? { state: receipt.state } : {}),
+  ...(receipt.checksReported ? { checksReported: receipt.checksReported } : {}),
+  ...(receipt.executedChecks ? { executedChecks: receipt.executedChecks } : {}),
+  ...(receipt.review ? { review: receipt.review } : {}),
   ...(receipt.lot ? { lot: receipt.lot } : {}),
   // The work receipt's payout cross-reference (#3781): the read model
   // sets these two fields on a paid work receipt only; a receipt with
