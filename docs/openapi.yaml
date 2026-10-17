@@ -1399,13 +1399,25 @@ paths:
           in: query
           description: Only events at or before this ISO timestamp (audit filter)
           schema: { type: string, format: date-time }
+        - name: type
+          in: query
+          description: Only events of these types (comma-separated, e.g. `message.posted,work_item.updated`); applied server-side, the cursor still advances by what was scanned
+          schema: { type: string }
+        - name: mentions
+          in: query
+          description: Only events that @mention this member id (or `me` for the caller); applied server-side
+          schema: { type: string }
+        - name: compact
+          in: query
+          description: When `1`/`true`, each event drops envelope noise a poller never acts on (idempotencyKey, the repeated roomId, a null causationId, mention-chip displayName); event data is unchanged
+          schema: { type: string, enum: ['1', '0', 'true', 'false'] }
         - name: tail
           in: query
           description: |
             Newest N events in ascending order, plus `next` to continue forward
             with `after`. An integer from 1 to 200. Send `tail` alone: combining
-            it with `after`, `limit`, `actor`, `since`, `until`, or `afterSequence`
-            is 422 `invalid_event_cursor`.
+            it with `after`, `limit`, `actor`, `since`, `until`, `type`,
+            `mentions`, `compact`, or `afterSequence` is 422 `invalid_event_cursor`.
           schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '401': { description: unauthenticated }
@@ -1427,7 +1439,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since`, `until`, `type` or `mentions` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`, or `compact` is not 1/0/true/false" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -4622,6 +4634,15 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: after
+          in: query
+          description: |
+            Sequence cursor for the two event-log lists (`directMessages`,
+            `directMentions`): pass the previous response's `cursor.after`
+            and only entries newer than it return, instead of the lists'
+            heads. The standing lists (assignments, routed mentions, bond
+            proposals, peer messages, DM requests) always ride in full.
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '200':
           description: The agent's own inbox items
@@ -4632,6 +4653,11 @@ paths:
                 properties:
                   agentId: { type: string }
                   roomId: { type: string }
+                  cursor:
+                    type: object
+                    description: Poll cursor over the event-log lists; pass `after` back on the next poll
+                    properties:
+                      after: { type: integer }
                   directMessages:
                     type: array
                     items:
@@ -4697,12 +4723,15 @@ paths:
         '422':
           description: >-
             invalid_inbox_selection: this route's query validation — only
-            `limit` and `auth` may appear, each at most once, and `limit`
-            must be an integer 1..200 ("Choose a limit of 1..200"). The
-            store-level twin `invalid_inbox_limit` ("Limit must be an
-            integer 1..200") guards entry paths that bypass this route's
-            query validation, such as the `room_read_inbox` MCP tool, which
-            passes its limit straight to the store.
+            `limit`, `after` and `auth` may appear, each at most once,
+            `limit` must be an integer 1..200 and `after` a sequence number
+            of 0 or more ("Choose a limit of 1..200 and an after of 0 or
+            more"). The store-level twins `invalid_inbox_limit` ("Limit must
+            be an integer 1..200") and `invalid_inbox_cursor` ("After must
+            be a sequence number of 0 or more") guard entry paths that
+            bypass this route's query validation, such as the
+            `room_read_inbox` MCP tool, which passes its limit and after
+            straight to the store.
   /api/rooms/{roomId}/next-actions:
     get:
       summary: Ranked next actions for the calling agent
@@ -10420,7 +10449,7 @@ paths:
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
       responses:
-        '200': { description: "{ identityId, items, openWork?, myWork?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
+        '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }

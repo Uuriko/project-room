@@ -55,6 +55,27 @@ const clip = text => {
   return value.length > 140 ? `${value.slice(0, 139)}…` : value;
 };
 
+// B4 agent read-path: a one-line triage snippet for Board section entries,
+// which otherwise carry only the (80-char) title — an agent had to re-read
+// the whole Board to learn what a listed claim is about. Source order: the
+// first acceptance criterion (what "done" looks like), else the newest
+// history note (create / finish / review notes ride the claim's history).
+const claimSnippet = claim => {
+  const criteria = Array.isArray(claim?.acceptanceCriteria) ? claim.acceptanceCriteria : [];
+  const criterion = criteria.find(entry => typeof entry === "string" && entry.trim());
+  if (criterion) return clip(criterion);
+  const history = Array.isArray(claim?.history) ? claim.history : [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const note = history[index]?.note;
+    if (typeof note === "string" && note.trim()) return clip(note);
+  }
+  return null;
+};
+const snippetField = claim => {
+  const snippet = claimSnippet(claim);
+  return snippet ? { snippet } : {};
+};
+
 function integerMap(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const out = {};
@@ -390,6 +411,7 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
       id: item.id,
       ...(hard ? { hard: true, reviewPolicy: item.reviewPolicy ?? "self_attested" } : {}),
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...snippetField(item),
       ...(idleMinutes !== null ? { idleMinutes } : {}),
       ...(released ? { released: true } : {}),
       ...(item.tags?.length ? { tags: item.tags.slice(0, 3) } : {})
@@ -418,6 +440,7 @@ export function reviewAsksOf(store, roomId, memberId, authority, claims = null) 
     top: asks.slice(0, OPEN_WORK_SHOWN).map(item => ({
       id: item.id,
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...snippetField(item),
       owner: item.owner,
       ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
       ...(item.ci?.headSha ? { headSha: item.ci.headSha } : {}),
@@ -442,10 +465,10 @@ export function myWorkOf(store, roomId, memberId, claims = null, nowMs = Date.no
     if (item.owner === memberId) {
       const left = item.leaseExpiresAt ? Date.parse(item.leaseExpiresAt) - nowMs : NaN;
       if (left > 0 && left <= LEASE_SOON_MS) {
-        rows.push({ id: item.id, title: title(item), why: "lease_expiring", minutesLeft: Math.ceil(left / 60000) });
+        rows.push({ id: item.id, title: title(item), ...snippetField(item), why: "lease_expiring", minutesLeft: Math.ceil(left / 60000) });
       } else if (claimIdle(item, nowMs)) {
         const idleMinutes = Math.round((nowMs - Date.parse(claimUpdatedAt(item) || item.claimedAt)) / 60000);
-        rows.push({ id: item.id, title: title(item), why: "claim_idle", ...(Number.isFinite(idleMinutes) ? { idleMinutes } : {}) });
+        rows.push({ id: item.id, title: title(item), ...snippetField(item), why: "claim_idle", ...(Number.isFinite(idleMinutes) ? { idleMinutes } : {}) });
       }
     }
   }
@@ -512,6 +535,7 @@ export function myClaimsOf(store, roomId, memberId, claims = null) {
     top: mine.slice(0, MY_CLAIMS_SHOWN).map(item => ({
       id: item.id,
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...snippetField(item),
       state: item.state,
       next: ownerNextAction(item),
       ...(item.leaseExpiresAt ? { leaseExpiresAt: item.leaseExpiresAt } : {}),
@@ -540,7 +564,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
     const at = claimUpdatedAt(item) ?? "";
     if (item.ci?.state === "failure") {
       rows.push({
-        id: item.id, title, why: "ci_failed", at,
+        id: item.id, title, ...snippetField(item), why: "ci_failed", at,
         ...(item.ci.url ? { ciUrl: item.ci.url } : {}),
         ...(item.ci.headSha ? { headSha: item.ci.headSha } : {}),
         ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {})

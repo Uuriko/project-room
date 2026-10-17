@@ -500,11 +500,12 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_human_push_preferences` | 422 | Send { preferences: { mention, dm, preview, quietHours } } | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_identity` | 422 | displayName must be 1-80 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_import` | 422 | Line ${lineNumber} is not valid JSON | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_inbox_cursor` | 422 | After must be a sequence number of 0 or more | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_draft` | 422 | Draft must be well-formed text up to 4,000 characters. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_limit` | 422 | Limit must be an integer 1..200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_request` | 422 | Supply an exact inbox operation and stable request ID. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_result` | 422 | Choose an exact reviewed room result. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
-| `invalid_inbox_selection` | 422 | Choose a limit of 1..200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_inbox_selection` | 422 | Choose a limit of 1..200 and an after of 0 or more | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_send` | 422 | Choose an exact reply operation. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_share` | 422 | Select source paragraphs and the current room audience. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_source` | 422 | Supply a qualified channel observation. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

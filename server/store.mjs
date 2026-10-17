@@ -959,6 +959,31 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
 
+// B4 agent read-path: compact event shape for polling agents. Drops only
+// envelope fields a poller re-reads but never acts on: the write-path
+// idempotency key, the room id (constant across the whole page — the request
+// already names the room), a null causation id, and mention-chip display
+// names (the member id is the actionable part; names live on the roster).
+// Event content (type, actor, timestamp, data) is never touched.
+const compactEventForPoll = event => {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return event;
+  const out = {};
+  for (const [name, value] of Object.entries(event)) {
+    if (name === "idempotencyKey" || name === "roomId") continue;
+    if (name === "causationId" && value === null) continue;
+    if (name === "mentions" && Array.isArray(value)) {
+      out.mentions = value.map(chip => {
+        if (!chip || typeof chip !== "object") return chip;
+        const { displayName, ...rest } = chip;
+        return rest;
+      });
+      continue;
+    }
+    out[name] = value;
+  }
+  return out;
+};
+
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
 // them (DM via the message.posted command with toMemberId).
 const presenceNext = (roomId, memberIds) => {
@@ -5187,7 +5212,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const opts = bindingOrOptions && typeof bindingOrOptions === "object" && !Array.isArray(bindingOrOptions)
       ? bindingOrOptions : options;
     const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
-    const { actor = null, since = null, until = null } = opts;
+    const { actor = null, since = null, until = null, types = null, mentions = null, compact = false } = opts;
     // #658: mention timeouts are evaluated lazily on read. The flip needs a
     // write-capable transaction, so it runs before the query_only read
     // below; usually a no-op (one indexed UPDATE, zero rows touched).
@@ -5199,19 +5224,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const [name, value] of [["since", since], ["until", until]]) {
         if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
       }
+      // B4 agent read-path: type + mentions filters, same SQL-level audit
+      // filter family as actor/since/until — a filtered page still advances
+      // its cursor by what was scanned (see the note at `next` below).
+      if (types !== null && (!Array.isArray(types) || types.length < 1 || types.length > 16
+        || types.some(type => typeof type !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(type))))
+        fail(422, "invalid_cursor", "Invalid type filter");
+      let mentionsMemberId = null;
+      if (mentions !== null) {
+        if (typeof mentions !== "string" || !mentions || mentions.length > 128) fail(422, "invalid_cursor", "Invalid mentions filter");
+        mentionsMemberId = mentions === "me" ? auth.member.id : mentions;
+      }
+      // A database from before the #658 schema has no mention_states table
+      // and simply has no mentions (same stance as openDirectMentions).
+      const mentionsTableReady = mentionsMemberId === null ? false
+        : Boolean(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mention_states'").get());
       const authority = this.roomAuthority(roomId);
       const sequence = authority.sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
       // Round-2 #110: audit filters. The event log is the audit log —
       // every mutation records actorId + at, so "who did what when" is a
       // filtered read, not a new table.
+      const filterClauses = [
+        `AND (? IS NULL OR json_extract(body,'$.actorId')=?)`,
+        `AND (? IS NULL OR json_extract(body,'$.at')>=?)`,
+        `AND (? IS NULL OR json_extract(body,'$.at')<=?)`
+      ];
+      const filterArgs = [actor, actor, since, since, until, until];
+      if (types !== null) {
+        filterClauses.push(`AND json_extract(body,'$.type') IN (${types.map(() => "?").join(",")})`);
+        filterArgs.push(...types);
+      }
+      if (mentionsMemberId !== null) {
+        if (mentionsTableReady) {
+          filterClauses.push(`AND id IN (SELECT message_event_id FROM mention_states WHERE room_id=? AND mentioned_member_id=?)`);
+          filterArgs.push(roomId, mentionsMemberId);
+        } else {
+          filterClauses.push(`AND 1=0`);
+        }
+      }
       const events = this.db.prepare(
         `SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
-         AND (? IS NULL OR json_extract(body,'$.actorId')=?)
-         AND (? IS NULL OR json_extract(body,'$.at')>=?)
-         AND (? IS NULL OR json_extract(body,'$.at')<=?)
+         ${filterClauses.join("\n         ")}
          ORDER BY sequence LIMIT ?`
-      ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      ).all(roomId, after, ...filterArgs, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       // The cursor advances by what was SCANNED, not by what was returned.
       // A filter can match nothing in a stretch of the log: taking `next` from
       // the last returned row left it at the caller's own `after`, while
@@ -5250,7 +5306,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const { event } of visible) {
         if (event?.type === T.MESSAGE_POSTED && chips.has(event.id)) event.mentions = chips.get(event.id);
       }
-      return { events: visible, next, hasMore: next < sequence };
+      // B4 agent read-path: compact is opt-in per request; without it the
+      // page is byte-identical to the pre-filter read.
+      const shaped = compact === true
+        ? visible.map(row => ({ sequence: row.sequence, event: compactEventForPoll(row.event) }))
+        : visible;
+      return { events: shaped, next, hasMore: next < sequence };
     });
   }
   // RC-2026-09-18-012: agent-scoped unified inbox. An authenticated agent
@@ -5264,8 +5325,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Additive and room-scoped; the human /api/inbox/* account-session gate
   // is untouched. The HTTP layer additionally requires agent membership
   // and, for API-key callers, the inbox:read scope.
-  agentInbox(token, roomId, { limit = 50, expectedSessionBinding = null } = {}) {
+  agentInbox(token, roomId, { limit = 50, after = 0, expectedSessionBinding = null } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_inbox_limit", "Limit must be an integer 1..200");
+    // B4 agent read-path: `after` is a sequence cursor over the two
+    // event-log lists (directMessages, directMentions). A polling agent
+    // passes the previous response's cursor.after and stops re-reading the
+    // head of both lists; the standing lists (assignments, routed mentions,
+    // bond proposals, peer messages, DM requests) are current state, not a
+    // log, and always ride in full. after=0 keeps the legacy response.
+    if (!Number.isSafeInteger(after) || after < 0) fail(422, "invalid_inbox_cursor", "After must be a sequence number of 0 or more");
     // RC-2026-09-18-013: the first per-room collab access lazily replays the
     // persisted journal inside a WRITE transaction. That replay cannot run
     // inside the readTransaction below ("Cannot write inside a read-only
@@ -5281,10 +5349,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
-        `SELECT sequence, body FROM events WHERE room_id=?
+        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
          ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, T.MESSAGE_POSTED, memberId, limit)
+        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
         .map(row => {
           const parsed = JSON.parse(row.body);
           return {
@@ -5322,7 +5390,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit);
+      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
       // Bond proposals and peer DMs are sibling lists, same composition as
       // routing mentions (items plus a next action). Direct @mentions stay
       // their own list — friend traffic is not a mention.
@@ -5331,6 +5399,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
+      // The poll cursor: the highest sequence either event-log list
+      // returned, or the caller's own `after` when nothing was newer.
+      // Standing lists carry no sequence and never move it.
+      const cursorAfter = Math.max(after,
+        ...directMessages.map(row => row.sequence),
+        ...directMentions.map(row => row.sequence));
       const inbox = stampInbox({
         agentId: memberId,
         roomId,
@@ -5340,10 +5414,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMentions,
         bondProposals,
         peerMessages,
+        cursor: { after: cursorAfter },
         next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
         dmRequests,
       }, memberId);
-      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "next", "dmRequests"]) {
+      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "cursor", "next", "dmRequests"]) {
         inbox[key] = Object.freeze(inbox[key]);
       }
       return Object.freeze(inbox);
