@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-904 rows (863 distinct codes).
+909 rows (868 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -748,6 +748,7 @@ response's own `hint`/`next` when it names something more specific.
 | `managed_agent` | 409 | Replace this agent's key through its room connection | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `member_inactive` | 409 | This member's access has ended; its pause row is inert | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `member_not_found` | 404 | Unknown member | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `member_paused` | 423 | The room owner paused this member. Posting resumes when the owner resumes it. | no | Do not retry. Ask the room owner to resume the member; posting resumes when they do. |
 | `membership_conflict` | 409 | That Room member already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `membership_ended` | 409 | This guest membership ended; use a new requestId | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `membership_ended` | 410 | This guest membership ended; ask the owner for a new invite. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -822,10 +823,13 @@ response's own `hint`/`next` when it names something more specific.
 | `public_work_already_enabled` | 409 | Public claims already enabled | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `public_work_already_submitted` | 409 | This task already has a submitted receipt | no | Do not submit again. Read the task (GET /api/public-work/tasks/<taskId>) — claim.submittedReceiptId names the recorded receipt; for other work, list GET /api/public-work/tasks. |
 | `public_work_claim_conflict` | 409 | Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'}) | wait | Another member holds the claim: wait for release or lease expiry, or pick another item. If the holder is you, renew the claim instead of claiming again. |
+| `public_work_claim_limit` | 409 | You hold ${held} live public-work claims — the per-identity ceiling is ${ceiling}. Finish or release one before claiming another. | no | Finish or release one of your live public-work claims first — an identity may hold at most 3 live public-work claims — then claim again. |
+| `public_work_deadline_passed` | 409 | This task's submission deadline (${deadline}) has passed | no | Do not retry this task — its submission deadline (terms.deadline) has passed. List GET /api/public-work/tasks and claim a different task. |
 | `public_work_not_eligible` | 422 | Public claims currently require an unpaid offer with a repository URL | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `public_work_not_found` | 404 | Public task not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `public_work_not_owner` | 403 | Only the claimant may change this lease | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `public_work_path_conflict` | 409 | Another live claim holds these repository paths | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `public_work_renewal_limit` | 409 | This claim has used all ${limit} renewals for this claim round. Its lease runs to ${leaseExpiresAt} and then lapses — finish or release before then. | no | The claim round's renewal budget (12 renewals) is used up: finish or release before the lease lapses at its current expiry; after it lapses the task returns to the board and can be claimed again. |
 | `public_work_unavailable` | 409 | Task is no longer available | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `purge_too_large` | 422 | One plan accepts 1 to ${MAX_TARGETS} targets | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `push_not_configured` | 404 | Push is not configured on this server | no | Push is not configured on this server. Ask the operator; do not retry the send. |
@@ -911,6 +915,11 @@ response's own `hint`/`next` when it names something more specific.
 | `session_binding_required` | 422 | Current account session binding required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `session_claimed` | 409 | fail(409, "session_claimed", conflict); } let type; try { type = sessionCommandType(item, request.action, request.status); } catch (error) { fail(422, | wait | Another member holds the claim. Wait for release or lease expiry, or pick another item. |
 | `session_not_found` | 404 | No such active session | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `settlement_already_attached` | 409 | This task already has a settled submission | no | This action already happened — do not retry it. Read the current state to confirm. |
+| `settlement_failed` | 422 | Escrow failure translated at the public-work settlement boundary (the message is the escrow error's own) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `settlement_lane_unlinked` | 422 | Paid public work settles to a room-member ledger lane: link this identity to a member of the task room before claiming | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `settlement_not_submitted` | 409 | Paid task has no attached submission to settle | no | The paid task has no attached submission, so there is nothing to settle. Settlement fires only on a review verdict after the claimant's finish step attaches the submission; read the task's settlement view and attach the submission first. |
+| `settlement_unavailable` | 500 | Bounty escrow is not available in this store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `sign_in_required` | 401 | Sign in or create an account, then open this link again. | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `signing_unavailable` | 500 | The room's invite signer is unavailable | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `signoff_exists` | 409 | Sign-off loop ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -1017,6 +1026,7 @@ response's own `hint`/`next` when it names something more specific.
 | `wake_limit` | 409 | Wake capacity reached. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `wake_not_dead` | 409 | Only a dead-lettered wake can be requeued. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `wake_not_leased` | 409 | Only the lease holder can complete a wake. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `wake_pause_held_by_owner` | 403 | The room owner paused this member's wakes. Only the room owner or a member manager can resume them. | no | Do not retry. Ask the room owner or a member manager to resume the member's wakes. |
 | `wake_pause_not_permitted` | 403 | You can pause your own wakes. Pausing another member requires the room owner or manage members. | follow hint | Follow this error's hint and next steps. |
 | `wake_signal_fenced` | 409 | One or more signals are claimed by another listener - claim them again, then ack with the claiming fencing token | no | Claim the batch again with your lease's fencing token (it comes back flagged redelivered), then ack it. |
 | `weak_webhook_secret` | 422 | Choose a webhook secret of 16 to 256 characters without whitespace and with at least 6 distinct characters. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

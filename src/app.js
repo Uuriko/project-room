@@ -8,8 +8,21 @@ import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
+import { workArrivalAnnouncements } from "./work-announcements.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
-import { clipGraphemes } from "./emoji.js";
+// Clip to at most maxUnits UTF-16 units without splitting a grapheme.
+const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
+function clipGraphemes(text, maxUnits) {
+  const value = String(text ?? "");
+  const limit = Number.isInteger(maxUnits) ? maxUnits : value.length;
+  if (value.length <= limit) return value;
+  let taken = 0;
+  for (const { segment } of graphemes.segment(value)) {
+    if (taken + segment.length > limit) break;
+    taken += segment.length;
+  }
+  return value.slice(0, taken);
+}
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
@@ -315,7 +328,8 @@ let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
+let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
+const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 let navigationBoardEpoch = 0;
@@ -393,6 +407,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
+    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
@@ -2297,7 +2312,7 @@ function renderMessages() {
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
   const focusedRect = focused?.getBoundingClientRect();
   const focusedOnScreen = Boolean(focusedRect && focusedRect.bottom > 0 && focusedRect.top < innerHeight);
-  const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
+  const focusAction = focused?.dataset.messageAction;
   const focusedFeedback = focused?.closest(".draft-feedback");
   // A control inside a work card is restored by setTimelineWorkNode when that
   // card is re-rendered, but the interleave can then move the card, and moving
@@ -2365,8 +2380,8 @@ function renderMessages() {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
         const next = document.createElement("div"); next.innerHTML = html;
-        // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        // Reply counts change independently; the selected message text stays put.
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
           if (selector === ".message-files") {
             if (!after) before?.remove();
@@ -2466,7 +2481,7 @@ function renderMessages() {
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
     const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
-      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
+      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction);
     const target = replacement;
     target?.focus({ preventScroll: true });
   }
@@ -2499,10 +2514,9 @@ function draftFeedbackHTML(message) {
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 // UI calming #2: per-message actions collapse to Reply + replies-count inline;
-// Add reaction, Save as result, Pin, Make this work, Record decision and
+// Save as result, Pin, Make this work, Record decision and
 // moderation move into one keyboard- and hover-reachable "⋯" overflow menu.
-// Reactions otherwise surface only through a long-press / right-click sheet
-// (Slack/Discord style) — no always-visible picker. Every action keeps its
+// Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
 function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
@@ -2991,6 +3005,11 @@ function revealWorkTimeline(id) {
 }
 // JDOT-COH-NAV begin
 function revealWork(id) {
+  // #3795: a record id the legacy workItems projection does not hold may be
+  // a board claim — its record lives on the board. Reveal it there instead
+  // of reporting the record missing; deep links, reloads and the
+  // needs-attention Review anchor all arrive through this path.
+  if (state && !Object.hasOwn(state.workItems ?? {}, id)) { void revealClaimRecord(id); return; }
   if (activeWorkNavigationId && activeWorkNavigationId !== id) {
     const previous = workRecord(activeWorkNavigationId)?.querySelector(".work-details");
     if (previous) previous.open = false;
@@ -3070,10 +3089,23 @@ function showWorkDestination(kind, id, presentation = "details") {
   else if (kind === "work") revealWork(id); else revealMessage(id);
   syncWorkReturnControl();
 }
+// #3795: open the board on one claim's record — the destination behind
+// revealWork's claim fallback (deep links and reloads carry no origin, so
+// the return control falls back to "Back to room" like a work deep link).
+async function revealClaimRecord(id) {
+  if (!workNavigationContext() || busy) return;
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || !workNavigationContext()) return;
+  await navigationBoardRevealClaim?.(id);
+  syncWorkReturnControl();
+}
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
   if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
-    notice("That source is no longer available in this room.", true); return false;
+    notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "details";
   const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
@@ -3106,6 +3138,52 @@ function navigateWorkRecord(kind, id, extra = {}) {
   showWorkDestination(kind, id, presentation);
   return true;
 }
+// #3795: navigate to a board claim's record. The destination is the board
+// itself — the claim's card with its record disclosure open — so this
+// mirrors navigateWorkRecord's origin/ticket bookkeeping without a
+// workItems destination: the origin is captured before the board opens,
+// the claim's presence is proven by revealing it, and only then is the
+// record URL pushed, so a claim the board cannot show never becomes a
+// history entry whose Back leads nowhere.
+async function navigateClaimRecord(id) {
+  if (!workNavigationContext() || busy) return false;
+  const target = recordHref("work", id);
+  const origin = { ...captureWorkOrigin(), targetClaimId: id };
+  const current = currentWorkOrigin();
+  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+    // Same record, new surface: refresh the return context, keep the entry.
+    if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
+      { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
+    workHistoryReplayKey = null;
+    if (!$("#board-dialog").open) $("#tasks-board-open").click();
+    if (await navigationBoardReady?.()) await navigationBoardRevealClaim?.(id);
+    syncWorkReturnControl();
+    return true;
+  }
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  if (!await navigationBoardRevealClaim?.(id)) {
+    notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    return false;
+  }
+  if (opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  const ticket = crypto.randomUUID();
+  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
+  workNavigationOrigins.set(ticket, origin);
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
+  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
+  activeWorkNavigation = ticket;
+  // Pre-seed the replay key exactly like navigateWorkRecord, so the pushed
+  // entry's own hashchange/popstate echo dedupes instead of reprocessing.
+  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
+  syncWorkReturnControl();
+  return true;
+}
 async function restoreWorkOrigin(ticket) {
   const origin = currentWorkOrigin(ticket);
   if (!origin || busy) { returnToCurrentRoom(); return; }
@@ -3113,6 +3191,10 @@ async function restoreWorkOrigin(ticket) {
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
   inboxUI?.showRooms();
+  // #3795: a claim record's destination is the board itself; returning to an
+  // origin that was not the board closes it again (a work record's
+  // destination never had it open).
+  if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
   if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
   if (origin.mode) setRequestMode(origin.mode);
@@ -3183,7 +3265,9 @@ function replayWorkNavigation() {
   if (returning) { void restoreWorkOrigin(back); return true; }
   if (targetOrigin && targetOrigin.targetUrl === location.href) {
     activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
-    if ($("#board-dialog").open) $("#board-dialog").close();
+    // A claim record's destination keeps the board open; every other
+    // record destination starts with it closed.
+    if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
     if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
     else revealLocationHash();
@@ -4663,7 +4747,7 @@ function roomActionEntries() {
     { id: "mentions", label: "Mentions", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true, always: true },
     { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
     { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
-    { id: "activity", label: "Activity", words: "activity mentions replies reactions feed unread", always: true },
+    { id: "activity", label: "Activity", words: "activity mentions replies feed unread", always: true },
     { id: "later", label: "Saved for later", words: "later saved bookmarks read later", always: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
@@ -4928,7 +5012,11 @@ $("#main").addEventListener("click", e => {
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
-    navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
+    // #3795: a claim record link (marked data-open-claim), and any record id
+    // the legacy workItems projection does not hold, resolves to the board
+    // claim's record instead of the work timeline.
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork]) void navigateClaimRecord(link.dataset.openWork);
+    else navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
     // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
@@ -6591,15 +6679,15 @@ function scheduleNotifications(delay) {
 }
 // ---- Attention: activity feed, read horizons, saved messages ------------------
 // Write-time personal feed (server/activity.mjs): mentions, replies, thread
-// replies, and reactions fanned out per recipient with their own read state.
-// The Activity dialog pages newest-first with All/Mentions/Replies/Threads/
-// Reactions filters; opening an item jumps to the message and marks it read.
+// replies, and thread replies fanned out per recipient with their own read
+// state. The Activity dialog pages newest-first with All/Mentions/Replies/
+// Threads filters; opening an item jumps to the message and marks it read.
 let savedMessageIds = new Set(), savedIdsBusy = false;
 let activityFilter = "", activityItems = [], activityBefore = null, activityHasMore = false, activityBusy = false, activitySerial = 0;
 let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
-const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in", reaction: "reacted to your message" };
+const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in" };
 let horizonAdvanceTimer = null;
 function nearBottomOfList() {
   const list = $("#message-list");
@@ -6805,7 +6893,7 @@ async function loadActivity(reset) {
     activityBefore = activityItems.length ? activityItems[activityItems.length - 1].id : null;
     activityHasMore = result.hasMore;
     renderActivity();
-    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions, replies, and reactions will appear.");
+    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions and replies will appear.");
   } catch (error) {
     if (serial === activitySerial && generation === client.generation) setText("#activity-status", `Couldn't load activity: ${error.message}`);
   } finally {
@@ -7231,7 +7319,6 @@ const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberI
 const BRIEF_GROUP_LABELS = { outcome: "Results", question: "Asked of you", blocker: "Blockers", decision: "Decisions", other: "Other updates" };
 function briefEventTarget(event) {
   if (event.type === T.MESSAGE_POSTED) return { kind: "message", id: event.data.messageId || event.id };
-  if (event.type === T.MESSAGE_REACTION_SET) return { kind: "message", id: event.data.messageId };
   if (event.data.workItemId) return { kind: "work", id: event.data.workItemId };
   if ([T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(event.type) && event.data.memberId) return { kind: "member", id: event.data.memberId };
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
@@ -7328,6 +7415,28 @@ $("#contribution-open").addEventListener("click", () => {
   if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
   else revealWork(step.id);
 });
+// #3687: arrivals used to surface only as the generic catch-up ping in
+// #rb-status, which names nothing and, being unchanged by a second arrival,
+// announces nothing at all. Diff each incoming log against the event ids this
+// session has already seen and speak every fresh claim, completion, review
+// and decision by another member in the dedicated polite region. A presence
+// boundary (first snapshot, room or generation change) only seeds the seen
+// set: history is not news, and the region restarts empty for the new room.
+let seenLogEventIds = new Set();
+function announceWorkArrivals(eventLog, boundary) {
+  const previous = seenLogEventIds;
+  seenLogEventIds = new Set(eventLog.map(event => event.id));
+  const region = $("#work-announcement");
+  if (boundary) { region.textContent = ""; return; }
+  const fresh = eventLog.filter(event => !previous.has(event.id));
+  if (!fresh.length) return;
+  const text = workArrivalAnnouncements(fresh, {
+    selfId: session?.member?.id,
+    actorName: id => displayName(id),
+    titleFor: id => state.workItems[id]?.title ?? null,
+  });
+  if (text) region.textContent = text;
+}
 function renderReturnBrief({ timelineRendered = false } = {}) {
   clearTimeout(returnClock); returnClock = null;
   const now = Date.now();
@@ -7788,6 +7897,7 @@ const ready = (async () => {
       import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
         .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
       navigationBoardReady = () => controller.whenReady();
+      navigationBoardRevealClaim = id => controller.revealClaim(id);
       return controller;
     },
     // JDOT-COH-NAV end
@@ -7795,12 +7905,25 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
   // JDOT-COH-NAV end
-  const openBoard = () => {
+  // #3688: the native <dialog> close returns focus to whatever was focused
+  // before showModal() — for the board that chain can bottom out at <body>
+  // (palette opened from body focus, or the recorded element removed while
+  // the board was open), stranding keyboard users at the top of the page.
+  // Remember the opener at open time like closeInvitation/closeWorkForm do,
+  // and restore it on close with a stable fallback anchor.
+  let boardOpener = null;
+  const boardAnchorUsable = node => node?.isConnected && node !== document.body && !node.disabled
+    && !node.closest("[hidden]") && !node.closest("dialog") && node.getClientRects().length > 0;
+  const openBoard = (openerHint = null) => {
     // JDOT-COH-NAV begin
     navigationBoardEpoch++;
     // JDOT-COH-NAV end
     const dialog = $("#board-dialog");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      const hinted = openerHint instanceof Element ? openerHint : null;
+      boardOpener = [hinted, document.activeElement].find(boardAnchorUsable) ?? null;
+      dialog.showModal();
+    }
     $("#board-panel").open = true;
     board.sync();
   };
@@ -7808,6 +7931,24 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
   $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
+  $("#board-dialog").addEventListener("close", () => {
+    const opener = boardOpener; boardOpener = null;
+    const closingEpoch = navigationBoardEpoch;
+    setTimeout(() => {
+      // A reopen or a navigation epoch change owns focus now.
+      if ($("#board-dialog").open || closingEpoch !== navigationBoardEpoch) return;
+      // The close event is delivered after the closing flow has run, so by
+      // now a flow that closed the board to show something (work navigation
+      // focuses the record it reveals, a room switch focuses its anchor)
+      // has already placed focus deliberately. Only stranded focus is ours
+      // to repair: the body, or an element left inside the closed dialog.
+      // Anything focused outside the dialog is owned by that flow.
+      const active = document.activeElement;
+      if (active && active !== document.body && !$("#board-dialog").contains(active)) return;
+      const target = [opener, $("#tasks-board-open"), $("#conversation-title")].find(boardAnchorUsable);
+      target?.focus({ preventScroll: true });
+    }, 0);
+  });
   $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
   // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
@@ -7816,7 +7957,7 @@ const ready = (async () => {
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
-  chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
+  chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;

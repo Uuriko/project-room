@@ -1,5 +1,6 @@
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
+import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 // Authenticated hosted MCP profile for the Room Worker.
 //
 // The public join tools stay on POST /mcp when no Authorization header is
@@ -67,9 +68,9 @@ function rpcError(message, code, text) {
   return { jsonrpc: "2.0", id, error: { code, message: text } };
 }
 
-function toolResult(value, isError = false) {
+function toolResult(value, isError = false, redactions = []) {
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text: mcpResultText(value, redactions) }],
     structuredContent: value,
     ...(isError ? { isError: true } : {})
   };
@@ -182,12 +183,6 @@ function validRoomArgs(name, args) {
     const replyOk = args.replyToId === undefined || validId(args.replyToId);
     return idOk && messageOk && replyOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
-  }
-  if (name === "room_react") {
-    const idOk = args.id === undefined || validId(args.id);
-    const activeOk = args.active === undefined || typeof args.active === "boolean";
-    return idOk && activeOk && validId(args.messageId)
-      && typeof args.reaction === "string" && args.reaction.trim().length > 0 && args.reaction.length <= 64;
   }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
@@ -554,11 +549,6 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const messageId = args.messageId ?? id;
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }) };
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
-  }
-  if (name === "room_react") {
-    const id = args.id ?? randomUUID();
-    const data = { messageId: args.messageId, reaction: args.reaction, active: args.active !== false };
-    return commandReceipt(store, secret, roomId, { id, type: "message.reaction_set", data }, "reacted");
   }
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
@@ -941,7 +931,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
+      // A minted invite code is a one-time credential: it rides in
+      // structuredContent only, never in the text block hosts log
+      // verbatim (issue #3750). room_run_action recurses into this same
+      // handler with the inner tool name, so it is covered here too.
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false,
+        name === "room_create_agent_invite" ? [mcpRedaction(value?.code, "structuredContent.code")] : []) };
     } catch (error) {
       const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
@@ -983,7 +979,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_create", "room_join",
   "squads_create", "squads_update_members", "squads_disband",
-  "room_post_message", "room_react",
+  "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",

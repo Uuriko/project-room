@@ -588,11 +588,34 @@ export class AgentHeartbeats {
       reachableUntil,
     });
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId, door });
+    const pausedRooms = this.pausedRoomsOf(agentId);
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
       pendingWakes: page.signals, more: page.more,
+      ...(pausedRooms.length ? { paused: pausedRooms } : {}),
       pushConfigured, pushSuspended, reachability,
     });
+  }
+
+  // R327-1 (r6): the rooms where this identity's member has wakes paused,
+  // with who holds the pause ("owner" or "self"). Empty when nothing is
+  // paused, so callers can spread the field conditionally.
+  pausedRoomsOf(agentId) {
+    let rows = [];
+    try {
+      rows = this.db.prepare(`SELECT l.room_id AS roomId, p.paused_at AS pausedAt, p.reason AS reason, b.paused_role AS role
+        FROM identity_links l JOIN wake_queue_pause p ON p.room_id=l.room_id AND p.member_id=l.member_id
+        LEFT JOIN wake_queue_pause_by b ON b.room_id=l.room_id AND b.member_id=l.member_id
+        WHERE l.identity_id=? ORDER BY l.room_id`).all(agentId);
+    } catch (error) {
+      // A store without the pause tables has nothing paused; never fail the
+      // wake/heartbeat path for it.
+      if (!isMissingTable(error)) throw error;
+      rows = [];
+    }
+    return rows.map(row => Object.freeze({ roomId: row.roomId, pausedAt: row.pausedAt, reason: row.reason ?? null,
+      heldBy: row.role === "self" ? "self" : "owner",
+      resume: row.role === "self" ? "wake_resume lifts your own pause" : "only the room owner or a member manager can resume" }));
   }
 
   // Per-host reachability window (RC-2026-09-24-203):
@@ -980,7 +1003,9 @@ export class AgentHeartbeats {
       "SELECT * FROM agent_wake_signals WHERE agent_id=? AND room_id IS ? AND message_id=?").get(agentId, roomId, messageId);
     // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
     // poll waiter (coalesced duplicates don't — nothing new arrived).
-    if (applied.changes > 0) this._releaseWakeWaiter(agentId, roomId);
+    // R327-1 (r6): a held (paused) room wake does not release the host's
+    // poll; it stays queued until the pause is lifted.
+    if (applied.changes > 0 && !(roomId && this.pausedRoomsOf(agentId).some(p => p.roomId === roomId))) this._releaseWakeWaiter(agentId, roomId);
     return Object.freeze({ enqueued: applied.changes > 0, signal: signalView(row) });
   }
 
@@ -1002,7 +1027,11 @@ export class AgentHeartbeats {
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
       .all(agentId, roomId, roomId, probe).map(signalView);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
-    const combined = [...messages, ...work].sort((a, b) => a.createdAt - b.createdAt);
+    // R327-1 (r6): a paused member's room wakes are HELD, not dropped - they
+    // stay unacknowledged and reappear on resume. The caller learns why from
+    // pausedRoomsOf() (heartbeat and poll carry `paused`).
+    const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
+    const combined = [...messages, ...work].filter(s => !held.has(s.roomId)).sort((a, b) => a.createdAt - b.createdAt);
     const page = combined.slice(0, limit);
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
