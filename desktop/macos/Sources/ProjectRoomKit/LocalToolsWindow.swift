@@ -45,9 +45,8 @@ import CoreGraphics
         permissions.stringValue = "App control: \(snapshot["accessibility"] as? Bool == true ? "Allowed" : "Not allowed") · Screen: \(snapshot["screenCapture"] as? Bool == true ? "Allowed" : "Not allowed")\nFull Disk Access: check macOS settings. Automation requires per-app approval."
     }
     @objc private func copyConnection() {
-        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools").path
-        let config: [String:Any] = ["mcpServers":["project-room-mac":["command":executable,"args":[]]]]
-        if let data = try? JSONSerialization.data(withJSONObject:config,options:[.prettyPrinted,.sortedKeys]), let text = String(data:data,encoding:.utf8) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string) }
+        let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")
+        if let text = try? LocalAgentConfiguration.json(executable: executable, connection: connection.connectionURL) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text,forType:.string) }
     }
     @objc private func openPermissions() {
         let alert = NSAlert(); alert.messageText = "Choose what Project Room can access"
