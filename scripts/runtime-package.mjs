@@ -247,6 +247,7 @@ optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed2551
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-reputation.mjs"); // integration-map slice #4: bounty -> reputation projector (imported by server/bounty-escrow.mjs)
 optional.push("server/reputation.mjs"); // B019: pure reputation tracker with typed signals + bands (imported by server/bounty-reputation.mjs)
+optional.push("server/bounty-epoch-keeper.mjs"); // #3693/#3844: automatic payout-epoch progression (imported by server/jobs.mjs and cloudflare/room.mjs; imports server/bounty-escrow.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)
 optional.push("server/agent-api-keys.mjs"); // Lane D: scoped agent API-key issuance (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/agent-card-signing.mjs"); // RC-2026-09-18-014: Ed25519 card signing/verification (imported by server/agent-directory.mjs; pure, node:crypto only)
@@ -266,6 +267,7 @@ optional.push("server/room-key-presence.mjs"); // Scoped pull-only room credenti
 optional.push("server/agent-heartbeats.mjs"); // RC-2026-09-18-051: wakeable agent presence (imported by server/store.mjs; imports outbound-webhooks.mjs)
 optional.push("server/wake-metrics.mjs"); // #3345: wake-reliability accounting — emission-attempt outcomes + loss-class journal (imported by server/agent-heartbeats.mjs, server/store.mjs, server/work-wakes.mjs, server/work-claim-events.mjs, server/inbox-collab-routes.mjs; pure, no imports)
 optional.push("server/work-wakes.mjs"); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs; pure work-pointer journal)
+optional.push("server/wake-identity-resolution.mjs"); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs", "src/account-setup-ui.js", "src/gmail-ui.js");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)

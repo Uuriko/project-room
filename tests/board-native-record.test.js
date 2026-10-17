@@ -76,14 +76,21 @@ test("the card carries a record disclosure with criteria, evidence and history",
 });
 
 test("the record disclosure shows the delivery bundle on a delivered claim", () => {
+  // The kernel's stored shape (#3547): the bundle's artifact / checks /
+  // criteria plus digest / deliveredBy / deliveredAt — no "result" field
+  // exists on a delivery (an earlier fixture invented one, and the record
+  // rendered it while real evidence stayed hidden).
   const item = claim("wc_4", {
     state: "delivered",
     pullRequest: { url: "https://github.com/o/r/pull/7" },
-    delivery: { digest: DIGEST, deliveredBy: "agent-1", deliveredAt: T0, result: "Shipped the thing" },
+    delivery: { artifact: { kind: "report", ref: "https://example.com/results/wc_4", sha256: DIGEST },
+      checks: [{ name: "unit", result: "pass" }], criteria: [{ criterion: "Done when the tests pass", status: "met" }],
+      digest: DIGEST, deliveredBy: "agent-1", deliveredAt: T0 },
     deliveryGeneration: 1,
   });
   const html = render([item], reviewer);
-  assert.match(html, /Shipped the thing/, "the delivered result is on the record");
+  assert.match(html, /https:\/\/example\.com\/results\/wc_4/, "the delivered artifact is on the record");
+  assert.match(html, /unit/, "the delivered checks are on the record");
   assert.match(html, /data-claim-record="wc_4"/);
 });
 
@@ -95,10 +102,15 @@ test("canReviewClaim accepts a delivered claim (the kernel reviews active or del
   assert.match(html, /data-claim-review="wc_5"/, "the review form renders on the delivered card");
 });
 
+const deliveredBundle = (digest = DIGEST) => ({
+  artifact: { kind: "report", ref: "https://example.com/results/claim", sha256: DIGEST },
+  checks: [{ name: "unit", result: "pass" }], criteria: [],
+  digest, deliveredBy: "agent-1", deliveredAt: T0,
+});
 const approvedDelivered = (id, extra = {}) => claim(id, {
   state: "delivered",
   pullRequest: { url: "https://github.com/o/r/pull/7" },
-  delivery: { digest: DIGEST, deliveredBy: "agent-1", deliveredAt: T0, result: "done" },
+  delivery: deliveredBundle(),
   deliveryGeneration: 1,
   reviews: [{ memberId: "rev-1", verdict: "approve", summary: "looks right", at: "2026-10-16T11:00:00.000Z",
     basis: { version: 1, owner: "agent-1", claimedAt: T0, revision: null, headSha: null, deliveryDigest: DIGEST, deliveryGeneration: 1 } }],
@@ -108,7 +120,7 @@ const approvedDelivered = (id, extra = {}) => claim(id, {
 
 test("currentApprovalFor mirrors the kernel's basis currency incl. the delivery binding", () => {
   assert.ok(currentApprovalFor(approvedDelivered("wc_6"), "rev-1"), "approval against the current delivery counts");
-  const redelivered = approvedDelivered("wc_6", { delivery: { digest: "b".repeat(64), deliveredBy: "agent-1", deliveredAt: T0, result: "again" }, deliveryGeneration: 2 });
+  const redelivered = approvedDelivered("wc_6", { delivery: deliveredBundle("b".repeat(64)), deliveryGeneration: 2 });
   assert.equal(currentApprovalFor(redelivered, "rev-1"), null, "a re-delivery stales an approval bound to the old digest");
   assert.equal(currentApprovalFor(approvedDelivered("wc_6"), "rev-2"), null, "another member's approval is not yours");
   const unattested = approvedDelivered("wc_6", { attestations: [] });
@@ -119,7 +131,7 @@ test("the verify control renders only for the reviewer holding a current approva
   assert.match(render([approvedDelivered("wc_7")], reviewer), /data-claim-action="verify"/);
   assert.doesNotMatch(render([approvedDelivered("wc_7", { reviews: [], attestations: [] })], reviewer), /data-claim-action="verify"/,
     "no approval yet: the act is the review, not the verify");
-  const stale = approvedDelivered("wc_7", { delivery: { digest: "b".repeat(64), deliveredBy: "agent-1", deliveredAt: T0, result: "again" }, deliveryGeneration: 2 });
+  const stale = approvedDelivered("wc_7", { delivery: deliveredBundle("b".repeat(64)), deliveryGeneration: 2 });
   assert.doesNotMatch(render([stale], reviewer), /data-claim-action="verify"/, "a stale approval earns no verify control");
 });
 
@@ -127,13 +139,13 @@ test("the verify control renders only for the reviewer holding a current approva
 
 test("under a reviewed policy the holder finishes to delivered, not done", () => {
   const reviewed = render([claim("wc_8", { reviewPolicy: "distinct_member" })], worker);
-  assert.match(reviewed, /data-claim-action="deliver"/);
+  assert.match(reviewed, /data-claim-deliver="wc_8"/, "the finish is the deliver form — a bare button could not carry the bundle");
   assert.doesNotMatch(reviewed, /data-claim-action="done"/, "done would be refused work_not_delivered");
   const roomPolicy = render([claim("wc_8")], worker, { reviewPolicy: "independent_principal" });
-  assert.match(roomPolicy, /data-claim-action="deliver"/, "the room default policy drives the same choice");
+  assert.match(roomPolicy, /data-claim-deliver="wc_8"/, "the room default policy drives the same choice");
   const selfAttested = render([claim("wc_8")], worker);
   assert.match(selfAttested, /data-claim-action="done"/, "self-attested keeps the single-step finish");
-  assert.doesNotMatch(selfAttested, /data-claim-action="deliver"/);
+  assert.doesNotMatch(selfAttested, /data-claim-deliver/);
 });
 
 // --- what-needs-me sees delivered reviews owed ---

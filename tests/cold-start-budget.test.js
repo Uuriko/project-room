@@ -18,10 +18,12 @@ const EMPTY_UNTIL_CRON = new Set([
   "integrity_snapshot",
   "integrity_job_cursor",
   "integrity_room_state",
-  // A public room page stays empty until an owner opts in. The backfill
-  // cursor is written by cron. Same exceptions as the recovery audit.
+  // A public room page stays empty until an owner opts in, and the recorded
+  // receipts setting is written only when an owner opts in or out. The
+  // backfill cursor is written by cron. Same exceptions as the recovery audit.
   "public_rooms",
   "public_read_model_backfill",
+  "room_public_receipts_setting",
   "private_update_marks",
   "private_update_commands",
   "messages_backfill_cursor",

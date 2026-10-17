@@ -249,6 +249,14 @@ function saveCursor(db, roomId, appliedSeq, eventId, state) {
 // Messages at or below projection.messagesArchive.throughSeq were moved out of
 // the projection and live only in this table; they are not stale rows.
 export function archiveMarker(db, roomId) {
+  // WRITE-PATH-WINS win 5: this runs on message paths (a post whose id is
+  // not in the projection probes for an archived row), and json_extract
+  // must tokenize the whole multi-megabyte projection to prove the marker
+  // absent — the common case. A raw substring probe answers "absent" at
+  // memchr speed; it can only false-positive (a body quoting the key),
+  // never false-negative, because our serializer writes the key verbatim.
+  const probe = db.prepare("SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?").get(roomId);
+  if (!probe?.found) return { throughSeq: 0, count: 0, retainedIds: [], retainedJson: "[]" };
   const row = db.prepare(`SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,
     json_extract(projection, '$.messagesArchive.count') AS count,
     json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?`).get(roomId);
@@ -410,7 +418,8 @@ function loadState(db, roomId, cursor) {
   return { state: replayFrom(0, emptyRoomState()), seq: cursor.applied_seq };
 }
 
-function nextRoom(db) {
+function nextRoom(db, exclude = []) {
+  const excluded = exclude.length ? ` AND r.id NOT IN (${exclude.map(() => "?").join(",")})` : "";
   return db.prepare(`SELECT r.id AS id, r.sequence AS sequence
     FROM rooms r
     LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id
@@ -419,10 +428,22 @@ function nextRoom(db) {
       OR (c.applied_seq > 0 AND NOT EXISTS (
         SELECT 1 FROM events e
         WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
-      )))
+      )))${excluded}
       AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id = r.id)
     ORDER BY r.id
-    LIMIT 1`).get() ?? null;
+    LIMIT 1`).get(...exclude) ?? null;
+}
+
+// True when a room's messages table has replayed to the room's current
+// sequence — the same predicate the parity sweep uses to pick its rooms.
+export function messagesBackfillCaughtUp(db, roomId) {
+  return Boolean(db.prepare(`SELECT 1 FROM rooms r
+    JOIN messages_backfill_cursor c ON c.room_id = r.id
+    WHERE r.id = ? AND c.applied_seq = r.sequence
+      AND ((c.applied_seq = 0 AND r.sequence = 0)
+        OR c.applied_event_id = (
+          SELECT e.id FROM events e WHERE e.room_id = r.id AND e.sequence = c.applied_seq
+        ))`).get(roomId));
 }
 
 function fillRoom(store, room, budget, expired, yieldBetween) {
@@ -471,27 +492,64 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
   return { events, stopped: false, budgetExceeded: false, appliedSeq: seq };
 }
 
+// Errors that indict the store itself (schema/storage), not one room's
+// data: isolating them per room would re-report the same systemic failure
+// once per room and bury the signal, so they still abort the call.
+// Everything else thrown while filling a room is that room's data — a log
+// that can no longer replay to the room's sequence, a malformed event body.
+// Operational failures are recognized by type first: the store's typed
+// storage_unavailable refusal (its transaction has already rolled back,
+// so no partial write exists) and SQLite lock contention (SQLITE_BUSY,
+// primary result code 5) are the environment failing, never the room's
+// data — blaming the room would strand its backfill behind a transient.
+function isRoomDataError(error) {
+  if (error?.code === "storage_unavailable" || error?.code === "SQLITE_BUSY") return false;
+  if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 5) return false;
+  return !/no such (table|column)|missing schema|sqlite|database disk|disk full|readonly database|database is locked/i
+    .test(String(error?.message ?? error));
+}
+
 // Replay message events into the messages table, one budgeted batch. A
 // commit lands every few events with the cursor, so a throw or a deadline
 // keeps the prefix and the next call continues there. Running it again
 // after the log is caught up writes nothing. A replaced log (importEvents)
 // drops that room's rows and starts again.
 //
-// A room whose stored log no longer replays (an event the current reducer
-// rejects, or a head sequence the log does not reach) must not wedge the
-// sweep: the room is diagnosed to the exact event, parked in
-// messages_backfill_blocks, and reported in the result's `blocked` list
-// while every other room proceeds. Parking is deliberate — skipping the
-// event silently would corrupt the table the parity check certifies
-// against the projection; the block names what an operator must repair.
+// Per-room isolation: a room whose stored log no longer replays (an event
+// the current reducer rejects, or a head sequence the log does not reach)
+// must not wedge the sweep — the room is diagnosed to the exact event,
+// parked in messages_backfill_blocks, and named in the result's `failed`
+// list (this call's fresh failures) and its `blocked` list (the standing
+// parked set) while every other room proceeds. A parked room is skipped
+// on later calls until refreshStaleBlocks finds the block stale (the
+// underlying event repaired), so a poisoned room neither wedges the batch
+// nor re-runs forever; its failure stays recorded in the unified
+// integrity surface until the room backfills clean. Parking is deliberate
+// — skipping the event silently would corrupt the table the parity check
+// certifies against the projection; the block names what an operator must
+// repair.
 export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, deadline = Infinity, yieldBetween = () => {} } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not backfill messages");
   if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : MESSAGES_BACKFILL_BATCH;
+  const failed = [];
+  const failedIds = [];
+  // The caller's yield hook is control flow, not room data: tag anything it
+  // throws so the per-room isolation below always lets it propagate. An
+  // interruption mid-batch keeps the committed prefix on the cursor and the
+  // next call resumes — isolating it as a "failed room" would silently
+  // swallow the caller's stop signal.
+  let yieldError = null;
+  const guardedYield = () => {
+    try { yieldBetween(); }
+    catch (error) { yieldError = error; throw error; }
+  };
   // The result's `blocked` list is the full parked set (the durable table),
   // with `fresh` marking blocks recorded or changed by this call — so a
   // caller can surface a new block loudly once and keep the standing set
-  // visible on every later call without re-diagnosing it.
+  // visible on every later call without re-diagnosing it. The result's
+  // `failed` list carries this call's fresh failures for the unified
+  // integrity_failures surface.
   const freshRooms = new Map();
   const allBlocked = () => store.db.prepare(
     "SELECT room_id, sequence, event_id, error FROM messages_backfill_blocks ORDER BY room_id"
@@ -499,7 +557,7 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     roomId: row.room_id, sequence: row.sequence, eventId: row.event_id, error: row.error,
     fresh: freshRooms.get(row.room_id) ?? false
   }));
-  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, blocked: allBlocked() };
+  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, blocked: allBlocked(), failed };
   refreshStaleBlocks(store, freshRooms);
   let events = 0;
   let rooms = 0;
@@ -507,30 +565,36 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
   let appliedSeq = null;
   const seen = new Set();
   while (events < cap) {
-    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked() };
-    const room = nextRoom(store.db);
-    if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked() };
-    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked() };
+    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
+    const room = nextRoom(store.db, failedIds);
+    if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
+    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
     seen.add(room.id);
+    rooms += 1;
     let wrote;
     try {
-      wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, yieldBetween);
+      wrote = fillRoom(store, room, cap - events, () => Date.now() > deadline, guardedYield);
     } catch (error) {
+      if (yieldError) throw yieldError;
+      if (!isRoomDataError(error)) throw error;
       const block = diagnoseBlock(store.db, room.id);
       if (!block) throw error; // not a stored-event failure: propagate as before
+      // Park the room durably (later calls skip it until the block goes
+      // stale) and report it as this call's fresh failure for the unified
+      // integrity_failures surface.
       freshRooms.set(room.id, recordBlock(store, room.id, block));
-      rooms += 1;
+      failed.push({ roomId: room.id, error });
+      failedIds.push(room.id);
       roomId = room.id;
       appliedSeq = readCursor(store.db, room.id)?.applied_seq ?? null;
       continue;
     }
     events += wrote.events;
-    rooms += 1;
     roomId = room.id;
     appliedSeq = wrote.appliedSeq;
-    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked() };
+    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
   }
-  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked() };
+  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
 }
 
 function caughtUpSql(after) {
@@ -600,6 +664,38 @@ export function checkMessagesParity(store) {
   return result.value;
 }
 
+// The deferred integrity batch's parity step. checkMessagesParity keeps its
+// throwing contract for direct callers; here, one room's "messages parity
+// failed" verdict is isolated instead: the room is reported through
+// `report`, the sweep advances past it, and the rooms queued behind it are
+// still checked in the same visit (healthy rooms are certified until one
+// passes or every caught-up room has been attempted). Anything that is not
+// a per-room parity verdict — schema, storage — still throws. A failed
+// room keeps its cleared certification, so the verdict is unchanged; only
+// the blast radius shrinks.
+export function runMessagesParityCheck(store, { report = () => {} } = {}) {
+  if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
+  const failures = [];
+  const attempted = new Set();
+  for (;;) {
+    const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
+    const roomId = nextParityRoom(store.db, sweepAfter);
+    if (!roomId || attempted.has(roomId)) break;
+    attempted.add(roomId);
+    try {
+      const certified = checkMessagesParity(store);
+      report({ roomId, error: null });
+      return { ...certified, failures };
+    } catch (error) {
+      if (!String(error?.message ?? error).startsWith("messages parity failed for ")) throw error;
+      failures.push({ roomId, error });
+      report({ roomId, error });
+      rememberSweep(store, roomId);
+    }
+  }
+  return { ok: failures.length === 0, checked: 0, roomId: null, failures };
+}
+
 function certifyMessagesParity(store) {
   const sweepAfter = store.db.prepare("SELECT sweep_after FROM messages_backfill_cursor WHERE room_id=?").get(SWEEP_ID)?.sweep_after ?? "";
   const roomId = nextParityRoom(store.db, sweepAfter);
@@ -610,7 +706,7 @@ function certifyMessagesParity(store) {
   if (numbers.projectionCount !== numbers.tableCount || numbers.projectionLastSeq !== numbers.tableLastSeq) {
     throw new Error(`messages parity failed for ${roomId}: projection count ${numbers.projectionCount}, table count ${numbers.tableCount}, projection last seq ${numbers.projectionLastSeq}, table last seq ${numbers.tableLastSeq}`);
   }
-  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection));
+  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection), { verifyBodyHashes: true });
   if (hydration.missing.length) throw new Error(`messages parity failed for ${roomId}: stored message body missing`);
   const state = hydration.state;
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
