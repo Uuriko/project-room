@@ -2671,10 +2671,15 @@ paths:
       summary: Public receipts list
       description: >-
         Live public receipts, no login. Always includes public-work
-        receipts. Work-claim receipts (state done, merged pull request)
-        and completed work-item receipts appear only for rooms whose
-        owner turned on Public receipts (room.public_receipts_set,
-        default off). A private room's receipts are absent until that
+        receipts. Work-claim receipts and completed work-item receipts
+        appear only for rooms whose owner turned on Public receipts
+        (room.public_receipts_set, default off). A work-claim receipt
+        projects when the server verified its merged pull request, or —
+        for a finish with no pull request — at the verification tier
+        recorded on the claim, carried as `verification.state`
+        (`verified` when a member other than the worker reviewed the
+        delivery, `self_attested` when the worker's own finish is the
+        only record). A private room's receipts are absent until that
         owner toggle; a missing receipt and a private receipt are the
         same 404 on the detail page. Each item is an unsigned
         project-room-public-receipt/1 record: title, source, room (id
@@ -2736,6 +2741,11 @@ paths:
                         humans: { type: array, items: { type: string } }
                         pullRequest: { type: [string, 'null'] }
                         mergedAt: { type: [string, 'null'] }
+                        verification:
+                          type: object
+                          description: Present only on result-mode work-claim receipts; the verification tier recorded on the claim
+                          properties:
+                            state: { type: string, enum: [verified, self_attested] }
                         hashes: { type: array, items: { type: string } }
                         at: { type: string }
         '422':
@@ -6724,7 +6734,10 @@ paths:
         a 240-char `summary` (the completion note, falling back to the
         title), the completing member (`createdBy`), the completion time
         as a ms epoch (`createdAt`), and `blobs` (sha256 evidence
-        pointers, empty when none). Summaries + blob pointers only — full
+        pointers, empty when none). Each receipt also carries `publicId`
+        and `publicUrl` naming its public twin when one resolves (the
+        room opted in to public receipts and the claim projected), null
+        when it does not. Summaries + blob pointers only — full
         bodies stay on the work-claim read route. Member-only (403
         `not_member`); API keys need `rooms:read`.
       parameters:
@@ -17799,7 +17812,12 @@ components:
         /api/rooms/{roomId}/receipts). `receiptId` is the stable projection
         `"rc_" + workItemId`. `summary` is the first 240 characters of the
         completion note, falling back to the title. `createdAt` is the
-        completion time as a ms epoch. Summaries + blob pointers only —
+        completion time as a ms epoch. `publicId` and `publicUrl` name the
+        receipt's public twin (`wcr_` id and its /receipts/ URL) when one
+        resolves — the room opted in to public receipts and the claim
+        projected (a server-verified merge, or a result-mode finish at its
+        recorded verification tier) — and are null when it does not, so
+        the link is never dead. Summaries + blob pointers only —
         full bodies stay on the work-claim read route.
       type: object
       properties:
@@ -17814,6 +17832,8 @@ components:
         blobs:
           type: array
           items: { type: string }
+        publicId: { type: [string, 'null'], description: "Public twin id (wcr_…), or null when no public projection resolves" }
+        publicUrl: { type: [string, 'null'], description: "Absolute URL of the public twin, or null when none resolves" }
     SpendAllowanceReport:
       allOf:
         - type: object

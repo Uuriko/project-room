@@ -65,7 +65,7 @@ import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
-import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -1659,6 +1659,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Empty public read-model tables. Filling them is the public-read-model
       // cron (or the opt-in write). The constructor does not scan rooms.
       this.db.exec(PUBLIC_READ_MODEL_SCHEMA);
+      // Result-mode receipts (#3636) record their verification tier on the
+      // public row; tables predating the column gain it additively.
+      ensurePublicReceiptVerificationColumn(this.db);
       // Existing directory rows predate the independent feed visibility bit.
       // Default them on so upgrading does not silently hide public work.
       const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
