@@ -4,7 +4,7 @@
 // composer's To picker drops it. Real browser + local HTTP service at phone size.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -14,7 +14,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen, openSettings, closeSettings, openMemberProfile } from "./room-chrome.mjs";
 
-test("revoked identity: People says signed out for good, keeps Remove, To drops the seat", { timeout: 90000 }, async t => {
+for (const theme of ["dark", "light"]) test(`revoked identity (${theme}): People says signed out for good, keeps Remove, To drops the seat`, { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-identity-revoked-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -32,6 +32,7 @@ test("revoked identity: People says signed out for good, keeps Remove, To drops 
     rmSync(directory, { recursive: true, force: true });
   });
   const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" })).newPage();
+  await page.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -53,5 +54,18 @@ test("revoked identity: People says signed out for good, keeps Remove, To drops 
   assert.equal(await row.locator("[data-member-pause]:visible").count(), 0, "Pause has nothing to pause");
   const keptRow = page.locator(`#presence-list .presence-member[data-member-record-id="${kept.identityId}"]`);
   assert.doesNotMatch(await keptRow.innerText(), /Signed out for good/);
+  assert.equal(await page.locator("html").getAttribute("data-theme"), theme === "light" ? "light" : null);
+  const remove = row.locator("[data-member-remove]");
+  await remove.press("Enter");
+  await openMemberProfile(page, gone.identityId);
+  await row.getByRole("button", { name: "Confirm remove", exact: true }).waitFor();
+  await row.locator("[data-member-remove-cancel]").press("Enter");
+  await openMemberProfile(page, gone.identityId);
+  await row.getByRole("button", { name: "Remove", exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "phone viewport has no horizontal overflow");
+  if (process.env.ROOM_TEST_SCREENSHOT_DIR) {
+    mkdirSync(process.env.ROOM_TEST_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(process.env.ROOM_TEST_SCREENSHOT_DIR, `identity-revoked-${theme}.png`) });
+  }
   assert.deepEqual(errors, []);
 });
