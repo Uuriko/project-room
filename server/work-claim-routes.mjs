@@ -58,6 +58,8 @@ import {
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
+import { publicReceiptById } from "./receipts-live.mjs";
+import { publicReceiptUrl, publicWorkClaimReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
@@ -467,6 +469,19 @@ const receiptOf = item => {
   });
 };
 
+// The member receipt names its public twin when one resolves (#3636).
+// The twin id is the projection's deterministic hash; the link is carried
+// only when the anonymous public read would resolve it — the room opted
+// in to public receipts and neither the owner toggle nor an operator
+// unpublish hides it — so the field is never a dead link. No twin: both
+// fields are null, stating plainly that this receipt has no public page.
+const receiptWithPublicLink = (store, roomId, item) => {
+  const receipt = receiptOf(item);
+  const publicId = publicWorkClaimReceiptId(roomId, item.id);
+  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
+  return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+};
+
 const receiptsQueryOf = (reject, params) => {
   if ([...params.keys()].some(key => !RECEIPT_QUERY_PARAMS.includes(key))) {
     reject(422, "invalid_receipt_query", "q, tag, limit and cursor are the accepted query parameters");
@@ -853,7 +868,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const page = ranked.slice(offset, offset + limit);
     const nextOffset = offset + limit;
     return json(res, 200, stampReceipts({
-      receipts: page.map(receiptOf),
+      receipts: page.map(item => receiptWithPublicLink(store, roomId, item)),
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
     }, caller));
   }
@@ -1009,6 +1024,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    // #3880: dependsOn gates the AvailableWork projection (a claim is
+    // claimable only when every dependency is done); the claim write path
+    // must enforce the same definition, or the projection's "claimable"
+    // is unenforced at its own endpoint and direct API/MCP claimers can
+    // take work whose prerequisites are unfinished. The checked set is
+    // the one the claim records — the body's dependsOn when supplied,
+    // else the item's stored list, exactly as claimWork resolves it —
+    // and "done" is the projection's test (availableBoardRows): a usable
+    // claim (not premise-flagged, not superseded) in state "done".
+    const effectiveDeps = data.dependsOn !== undefined ? (data.dependsOn ?? []) : (item.dependsOn ?? []);
+    if (effectiveDeps.length) {
+      const board = registry.list(roomId);
+      const doneIds = new Set(board.filter(entry => entry && !entry.premiseFlag && !entry.supersededBy && entry.state === "done").map(entry => entry.id));
+      const unmet = effectiveDeps.filter(dep => !doneIds.has(dep));
+      if (unmet.length) {
+        const stateOf = id => board.find(entry => entry?.id === id)?.state ?? "missing";
+        reject(409, "work_claim_dependencies_unmet",
+          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.`);
+      }
+    }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {

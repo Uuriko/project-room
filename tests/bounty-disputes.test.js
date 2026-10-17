@@ -1,4 +1,6 @@
-// K007 + dispute-resolution slice 2: escalation-ladder state machine tests.
+// K007 + dispute-resolution slice 2: dispute state machine tests.
+// R-1 (#3726 rider): the appeal/withdraw rungs were removed as unreachable —
+// the tests that pinned them are replaced by a surface-absence pin below.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createDisputes, DisputeError } from "../server/bounty-disputes.mjs";
@@ -46,45 +48,22 @@ test("economic open requires a bond (bond-missing)", () => {
   assert.equal(coord.state, "opened");
 });
 
-test("appeal doubles the bond per tier and returns to adjudicating", () => {
+test("R-1: the appeal/withdraw rungs are gone from the machine surface", () => {
   const disputes = createDisputes();
-  toDecided(disputes);
-  throwsCode(() => disputes.appeal("d1", { by: "dave" }), "bond-missing"); // no bond posted
-  throwsCode(() => disputes.appeal("d1", { by: "dave", bond: 99 }), "invalid_dispute"); // below 2x
-  const appealed = disputes.appeal("d1", { by: "dave", bond: 100 }); // 2x tier-0 bond
-  assert.equal(appealed.state, "appealed");
-  assert.equal(appealed.escalations.length, 1);
-  assert.equal(appealed.escalations[0].tier, 1);
-  assert.equal(disputes.escalate("d1", { decider: "steward-panel" }).tier, 1);
-  // second appeal requires 2x the tier-1 bond (4x the open bond)
-  disputes.decide("d1", { outcome: "rejected", reasonCodes: ["evidence-insufficient"] });
-  throwsCode(() => disputes.appeal("d1", { by: "alice", bond: 199 }), "invalid_dispute");
-  const appealed2 = disputes.appeal("d1", { by: "alice", bond: 200 });
-  assert.equal(appealed2.escalations.length, 2);
-  assert.equal(appealed2.escalations[1].decision, undefined);
+  // Removed in the #3726 rider: no production consumer ever called them
+  // (the escrow drives open/challenge/evidence/seat/decide/finalize only).
+  assert.equal(disputes.appeal, undefined);
+  assert.equal(disputes.escalate, undefined);
+  assert.equal(disputes.withdraw, undefined);
+  assert.equal(disputes.requiredAppealBond, undefined);
+  assert.ok(!disputes.STATES.includes("appealed"));
+  assert.ok(!disputes.STATES.includes("withdrawn"));
 });
 
-test("frivolous ruling forfeits the bond and has no appeal as of right", () => {
+test("frivolous ruling forfeits the bond", () => {
   const disputes = createDisputes();
   const decided = toDecided(disputes, "d1", "frivolous", ["frivolous"]);
   assert.equal(decided.forfeitedBond, BOND);
-  throwsCode(() => disputes.appeal("d1", { by: "alice", bond: 100 }), "frivolous");
-  throwsCode(() => disputes.escalate("d1", { decider: "x" }), "invalid_transition");
-});
-
-test("withdraw forfeits the bond from any non-terminal state", () => {
-  const disputes = createDisputes();
-  disputes.open({ disputeId: "d1", ...ECON, bond: BOND });
-  const w1 = disputes.withdraw("d1", { by: "alice" });
-  assert.equal(w1.state, "withdrawn");
-  assert.equal(w1.forfeitedBond, BOND);
-  disputes.open({ disputeId: "d2", ...ECON, bond: BOND });
-  disputes.challenge("d2", { by: "alice" });
-  disputes.submitEvidence("d2", { by: "bob", summary: "s" });
-  const w2 = disputes.withdraw("d2", { by: "alice" });
-  assert.equal(w2.state, "withdrawn");
-  assert.equal(w2.forfeitedBond, BOND);
-  throwsCode(() => disputes.withdraw("d2"), "invalid_transition");
 });
 
 test("illegal transitions are rejected with invalid_transition", () => {
@@ -99,7 +78,7 @@ test("illegal transitions are rejected with invalid_transition", () => {
   throwsCode(() => disputes.finalize("d1"), "invalid_transition");
 });
 
-test("dispute cost is capped at 25% of the bounty across the whole escalation", () => {
+test("dispute cost is capped at 25% of the bounty across the whole dispute", () => {
   const disputes = createDisputes();
   disputes.open({ disputeId: "d2", bountyId: "b2", bountyAmount: 400, raisedBy: "a", reason: "x", bond: 20 });
   disputes.challenge("d2", { by: "a" });
@@ -110,9 +89,6 @@ test("dispute cost is capped at 25% of the bounty across the whole escalation", 
   disputes.seatDecider("d2", { decider: "v" });
   disputes.decide("d2", { outcome: "upheld", reasonCodes: ["criterion-unmet"] });
   throwsCode(() => disputes.recordCost("d2", 1), "invalid_transition"); // decided: costs frozen
-  disputes.appeal("d2", { by: "a", bond: 40 });
-  disputes.escalate("d2", { decider: "panel" });
-  throwsCode(() => disputes.recordCost("d2", 1), "dispute_cost_capped"); // cap spans tiers
 });
 
 test("unavailable is an overlay, not a state", () => {
@@ -173,34 +149,6 @@ test("finalize fires the single onDisputeFinalized callback once", () => {
   // A second finalize is an illegal transition, so the callback cannot double-fire.
   throwsCode(() => disputes.finalize("d"), "invalid_transition");
   assert.equal(packets.length, 1);
-});
-
-test("withdraw notifies the escrow with a withdrawn terminal", () => {
-  const packets = [];
-  const disputes = createDisputes({ onDisputeFinalized: p => packets.push(p) });
-  disputes.open({ disputeId: "d", bountyId: "bounty-2", bountyAmount: 1000,
-    raisedBy: "alice", reason: "changed mind", bond: 50 });
-  disputes.challenge("d", { by: "bob" });
-  const final = disputes.withdraw("d", { by: "alice" });
-  assert.equal(final.state, "withdrawn");
-  assert.equal(packets.length, 1);
-  assert.equal(packets[0].terminal, "withdrawn");
-  assert.equal(packets[0].outcome, null);
-  assert.equal(packets[0].forfeitedBond, 50); // bond forfeit settles on this packet
-});
-
-test("appealed ladder fires exactly once with the final tier outcome", () => {
-  const packets = [];
-  const disputes = createDisputes({ onDisputeFinalized: p => packets.push(p) });
-  runLadder(disputes);
-  disputes.appeal("d", { by: "bob", bond: 100 });
-  disputes.escalate("d", { decider: "tier2" });
-  disputes.decide("d", { outcome: "split", reasonCodes: ["criterion-unmet"] });
-  disputes.finalize("d");
-  assert.equal(packets.length, 1);
-  assert.equal(packets[0].outcome, "split");
-  assert.equal(packets[0].tier, 1);
-  assert.equal(packets[0].escalations.length, 1);
 });
 
 test("a throwing escrow handler still leaves the dispute terminal", () => {

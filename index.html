@@ -379,6 +379,7 @@
             <button id="thread-mute" class="button ghost" type="button" aria-pressed="false">Mute thread</button>
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
+          <p id="work-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <details id="pinned-panel" class="pinned-panel" hidden>
             <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
             <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
@@ -580,6 +581,11 @@
             <summary class="sidebar-label"><span>Retention</span><span id="retention-alert" class="count-chip" hidden></span></summary>
             <div id="retention-panel-host" class="retention-board"></div>
             <p id="retention-status" class="form-hint" role="status"></p>
+          </details>
+          <details id="bounty-panel" class="sidebar-panel">
+            <summary class="sidebar-label"><span>Bounties &amp; credits</span><span id="bounty-count" class="count-chip"></span></summary>
+            <div id="bounty-board-host" class="bounty-board"></div>
+            <p id="bounty-status" class="form-hint" role="status"></p>
           </details>
           </details>
           <details id="room-tools" class="room-tools"><summary>Suggestions and automations</summary>

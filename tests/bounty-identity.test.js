@@ -193,7 +193,7 @@ test("arbitrator cards are drawn from current membership, not a hardcoded list",
   assert.deepEqual(after, [CODEX, GROK, JILL].sort());
 });
 
-test("a dispute with no eligible seated verifier is honestly unavailable", () => {
+test("a dispute with no eligible seated verifier is refused, bond never locks (#3727)", () => {
   const { escrow, members } = makeEscrow();
   const bounty = post(escrow); // no verifier designated
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
@@ -203,13 +203,16 @@ test("a dispute with no eligible seated verifier is honestly unavailable", () =>
   escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: ATTEST() });
   // Fund the challenger's bond before removing the agent members.
   escrow.transfer(ROOM, { from: JILL, to: OWNER, amount: 10 });
-  // Remove every agent member: arbitration has nobody to seat. The dispute is
-  // still recorded, but marked honestly unavailable — no phantom decider.
+  // Remove every agent member: arbitration has nobody to seat. The dispute
+  // is honestly unavailable and refused — it never opens into the empty
+  // decider seat, so no bond locks into an undecidable record.
   for (const id of [JILL, GROK, INSTINCT, CODEX]) delete members[id];
-  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId,
-    { challenger: OWNER, bond: 2.5, grounds: "x" });
-  assert.equal(dispute.decider, null);
-  assert.match(dispute.unavailable ?? "", /no-designated-verifier/);
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId,
+    { challenger: OWNER, bond: 2.5, grounds: "x" }), "dispute_unavailable");
+  assert.equal(escrow.balances(ROOM, OWNER).payable, 110); // 100 genesis + the 10 transferred in; the refused bond never left
+  assert.equal(escrow.balances(ROOM, OWNER).locked, 0);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "accepted");
+  assert.equal(escrow.verifyConservation(ROOM).ok, true);
 });
 
 test("journal actor kind derives from the membership record, not the lane string", () => {
