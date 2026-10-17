@@ -2223,7 +2223,8 @@ function syncChatSuggestions() {
   const latest = messages.at(-1);
   // "Ask @Agent" is for the channel view: a thread already has its own replies.
   const ask = latest && !currentThreadId
-    ? { members: state.members, replyCount: (conversation.threads.get(latest.id)?.length ?? 1) - 1, now: Date.now() } : null;
+    ? { members: state.members, availability: presenceUnrefreshed || presenceObservationAged() ? new Map() : presenceStates,
+      paused: agentPauses, replyCount: (conversation.threads.get(latest.id)?.length ?? 1) - 1, now: Date.now() } : null;
   const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
     ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions, ask }) : null;
   // A question can cross the wait while nothing else changes, so check again then.

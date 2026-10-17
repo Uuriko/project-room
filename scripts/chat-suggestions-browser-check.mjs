@@ -10,6 +10,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
+import { ensureSidebarOpen } from "./room-chrome.mjs";
 
 for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mobile", { width: 390, height: 844 }]]) {
   test(`chat suggestions ${name}: tap a reply, or turn a request into a task`, { timeout: 60000 }, async t => {
@@ -53,7 +54,7 @@ for (const [name, viewport] of [["desktop", { width: 1360, height: 900 }], ["mob
   });
 }
 
-test("an unanswered question offers Ask @Agent, which only prefills the mention", { timeout: 60000 }, async t => {
+for (const colorScheme of ["dark", "light"]) for (const width of [390, 1360]) test(`an unanswered question suggests an observed agent: ${colorScheme} ${width}`, { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
   f.store.command(f.keys.owner, "commons", { id: "quiet-channel", type: T.CHANNEL_CREATED, data: { channelId: "quiet", name: "quiet" } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -62,7 +63,8 @@ test("an unanswered question offers Ask @Agent, which only prefills the mention"
     await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  const page = await browser.newPage({ viewport: { width: 1360, height: 900 }, reducedMotion: "reduce" }), errors = [];
+  const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme, reducedMotion: "reduce" }), errors = [];
+  await page.addInitScript(theme => localStorage.setItem("project-room-theme", theme), colorScheme);
   page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
   await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -75,14 +77,46 @@ test("an unanswered question offers Ask @Agent, which only prefills the mention"
   assert.equal(await box.locator("[data-suggest-agent]").count(), 0, "no chip before the wait");
   await page.clock.fastForward("02:05");
   const ask = box.locator("[data-suggest-agent]");
+  assert.equal(await ask.count(), 0, "an invited agent with no live observation is not recommended");
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const stream = await fetch(`${origin}/api/rooms/commons/stream`, { headers: { Authorization: `Bearer ${f.keys.producer}` } });
+  assert.equal(stream.status, 200);
+  const reader = stream.body.getReader();
+  t.after(() => reader.cancel());
+  await reader.read();
+  const refresh = async () => {
+    const response = page.waitForResponse(r => r.url().endsWith("/presence"));
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await response;
+  };
+  await refresh();
   await ask.waitFor();
   assert.match(await ask.textContent(), /^Ask @/);
+  const presenceRoute = /\/api\/rooms\/commons\/presence(?:\?|$)/;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route(presenceRoute, async route => { await gate; await route.continue(); });
+  await page.clock.fastForward("01:01");
+  await ask.waitFor({ state: "detached" });
+  release(); await page.unrouteAll({ behavior: "wait" });
+  await refresh(); await ask.waitFor();
+  await page.locator("#message-input").fill("Keep my follow-up");
+  await page.route(presenceRoute, route => route.abort());
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await ask.waitFor({ state: "detached" });
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep my follow-up");
+  assert.equal(await page.locator("#message-list").getByText("Where does the deploy log live?").count(), 1, "a failed availability read preserves the question");
+  await page.unroute(presenceRoute);
+  await refresh(); await ask.waitFor();
+  await page.locator("#message-input").fill("");
+  await ensureSidebarOpen(page);
   await page.locator('#channel-list [data-channel="quiet"]').click();
   assert.equal(await box.locator("[data-suggest-agent]").count(), 0, "a different channel must not retain the previous question's agent suggestion");
+  await ensureSidebarOpen(page);
   await page.locator('#channel-list [data-channel="general"]').click();
   await ask.waitFor();
   const before = f.store.snapshot(f.keys.owner, "commons").state.messages.length;
-  await ask.click();
+  await ask.focus(); await page.keyboard.press("Enter");
   assert.match(await page.locator("#message-input").inputValue(), /^@\S.* $/);
   await box.locator("[data-suggest-agent]").waitFor({ state: "detached" });
   assert.equal(f.store.snapshot(f.keys.owner, "commons").state.messages.length, before, "the tap sends nothing");

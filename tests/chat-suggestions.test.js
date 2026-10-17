@@ -47,14 +47,15 @@ const people = {
 };
 const asked = (body, extra = {}) => ({ id: "q1", authorId: "rae", body, createdAt: "2026-09-28T12:00:00.000Z", ...extra });
 const later = Date.parse("2026-09-28T12:00:00.000Z") + ASK_AGENT_AFTER_MS;
+const availability = new Map([["builder", { state: "listening" }], ["helper", { state: "working" }]]);
 
 test("a longer handle is not an already asked shorter agent", () => {
   assert.deepEqual(
-    askAgentSuggestion(asked("Who should own @Builder2?"), { members: people, now: later }),
+    askAgentSuggestion(asked("Who should own @Builder2?"), { members: people, availability, now: later }),
     { memberId: "builder", name: "Builder" },
   );
-  assert.equal(askAgentSuggestion(asked("@Builder where is the log?"), { members: people, now: later }), null);
-  assert.equal(askAgentSuggestion(asked("@Builder, where is the log?"), { members: people, now: later }), null);
+  assert.equal(askAgentSuggestion(asked("@Builder where is the log?"), { members: people, availability, now: later }), null);
+  assert.equal(askAgentSuggestion(asked("@Builder, where is the log?"), { members: people, availability, now: later }), null);
 });
 
 test("an email address is not an already asked agent", () => {
@@ -84,22 +85,35 @@ test("a unicode email address is not an already asked agent", () => {
 });
 
 test("askAgentSuggestion offers a working agent once a person's question waits", () => {
-  assert.deepEqual(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later }), { memberId: "builder", name: "Builder" });
-  assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later - 1 }), null, "not before the wait");
-  assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, now: later, replyCount: 1 }), null, "a reply answers it");
-  assert.equal(askAgentSuggestion(asked("The deploy log is here."), { members: people, now: later }), null, "not a question");
-  assert.equal(askAgentSuggestion(asked("@Helper where is the log?"), { members: people, now: later }), null, "an agent is already asked");
-  assert.equal(askAgentSuggestion(asked("Where is it?", { authorId: "helper" }), { members: people, now: later }), null, "agents' questions are skipped");
+  assert.deepEqual(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, availability, now: later }), { memberId: "builder", name: "Builder" });
+  assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, availability, now: later - 1 }), null, "not before the wait");
+  assert.equal(askAgentSuggestion(asked("Where is the deploy log?"), { members: people, availability, now: later, replyCount: 1 }), null, "a reply answers it");
+  assert.equal(askAgentSuggestion(asked("The deploy log is here."), { members: people, availability, now: later }), null, "not a question");
+  assert.equal(askAgentSuggestion(asked("@Helper where is the log?"), { members: people, availability, now: later }), null, "an agent is already asked");
+  assert.equal(askAgentSuggestion(asked("Where is it?", { authorId: "helper" }), { members: people, availability, now: later }), null, "agents' questions are skipped");
   assert.equal(askAgentSuggestion(asked("Where is it?"), { members: { rae: people.rae, gone: people.gone }, now: later }), null, "no active agent");
-  assert.equal(askAgentSuggestion(asked("Where is it?", { createdAt: "bad" }), { members: people, now: later }), null);
+  assert.equal(askAgentSuggestion(asked("Where is it?", { createdAt: "bad" }), { members: people, availability, now: later }), null);
 });
 
 test("chatSuggestions adds the agent chip only when asked to look", () => {
   const question = asked("Where is the deploy log?");
   assert.equal(chatSuggestions(question, { viewerId: "rae" }), null);
-  assert.deepEqual(chatSuggestions(question, { viewerId: "rae", ask: { members: people, now: later } }),
+  assert.deepEqual(chatSuggestions(question, { viewerId: "rae", ask: { members: people, availability, now: later } }),
     { messageId: "q1", choices: [], task: false, agent: { memberId: "builder", name: "Builder" } });
-  assert.equal(chatSuggestions(question, { viewerId: "rae", ask: { members: people, now: later }, dismissed: new Set(["q1"]) }), null);
+  assert.equal(chatSuggestions(question, { viewerId: "rae", ask: { members: people, availability, now: later }, dismissed: new Set(["q1"]) }), null);
+});
+
+test("agent recommendations need observed availability and exclude paused agents", () => {
+  const question = asked("Where is the log?");
+  const options = { members: people, now: later };
+  assert.equal(askAgentSuggestion(question, options), null, "permission and membership do not prove availability");
+  for (const state of ["idle", "unknown", "unreachable", "offline"]) {
+    assert.equal(askAgentSuggestion(question, { ...options, availability: new Map([["builder", { state }]]) }), null, state);
+  }
+  assert.deepEqual(askAgentSuggestion(question, { ...options, availability, paused: new Map([["builder", {}]]) }),
+    { memberId: "helper", name: "Helper" }, "a connected conversational agent is useful without accept_work");
+  assert.equal(askAgentSuggestion(asked("@Builder where is the log?"), { ...options, availability: new Map([["helper", { state: "listening" }]]) }), null,
+    "an existing mention remains the person's choice even when that agent is unavailable");
 });
 
 test("the viewer's own question offers no reply choices (projected messages carry authorId)", () => {
