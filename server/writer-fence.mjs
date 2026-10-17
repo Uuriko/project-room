@@ -527,10 +527,17 @@ const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);
 // decision #10): purely additive, created lazily on first backfill pass;
 // older writers have no code path to it.
 const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill", "work_item_board_divergence"]);
+// integrity_failures (integrity batch isolation, #3334, server/store.mjs):
+// durable per-record failure rows the integrity job writes when it isolates
+// a poisoned record instead of wedging the whole batch. Purely additive,
+// created lazily on first record/read — a store that never ran the
+// integrity job has no table, so it is allowed by the recovery audit but
+// never required.
+const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
