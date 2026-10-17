@@ -168,10 +168,17 @@ export class AgentRooms {
     while (rooms.length < pageSize) {
       const seats = identityRoomSeats(this.store.db, identity.identityId, { after: cursor, limit: pageSize + 1 });
       if (seats.length === 0) break;
-      const roomRows = this.store.db.prepare(
-        `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title
-         FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
-      ).all(...seats.map(seat => seat.roomId));
+      // A batch is pageSize + 1 seats (the look-ahead); bind its rooms
+      // rows in slices of at most 100 so no statement passes the
+      // Worker's 100-value Durable Object SQL limit.
+      const roomRows = [];
+      for (let i = 0; i < seats.length; i += pageSize) {
+        const slice = seats.slice(i, i + pageSize);
+        roomRows.push(...this.store.db.prepare(
+          `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title
+           FROM rooms WHERE id IN (${slice.map(() => "?").join(",")})`
+        ).all(...slice.map(seat => seat.roomId)));
+      }
       const roomRowById = new Map(roomRows.map(row => [row.id, row]));
       for (const seat of seats) {
         cursor = seat.roomId;

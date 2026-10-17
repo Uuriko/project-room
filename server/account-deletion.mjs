@@ -114,10 +114,19 @@ const countJournalLegs = (store, accountId) => {
   if (!tableExists(db, "bounty_journal")) return 0;
   const lanes = new Set([accountId]);
   for (const { member_id: memberId } of memberBindings(store, accountId)) lanes.add(canonicalLane(memberId));
-  const placeholders = [...lanes].map(() => "?").join(",");
-  return db.prepare(`SELECT count(*) AS n FROM bounty_journal WHERE account_id IN (${placeholders})`)
-    .get(...lanes)?.n ?? 0;
+  // Durable Object SQL allows 100 bound values per statement. One lane per
+  // room membership passes that at the pilot cap (ACCOUNT_ROOM_LIMIT rooms
+  // plus the account's own lane), so count in disjoint batches.
+  const all = [...lanes];
+  let total = 0;
+  for (let i = 0; i < all.length; i += JOURNAL_LANE_CHUNK) {
+    const chunk = all.slice(i, i + JOURNAL_LANE_CHUNK);
+    total += db.prepare(`SELECT count(*) AS n FROM bounty_journal WHERE account_id IN (${chunk.map(() => "?").join(",")})`)
+      .get(...chunk)?.n ?? 0;
+  }
+  return total;
 };
+const JOURNAL_LANE_CHUNK = 90;
 
 const countMemberIssuedInvites = (store, accountId) => {
   const db = store.db;
