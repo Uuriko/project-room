@@ -1,16 +1,51 @@
-// COVERAGE CREW lane5: unit tests for the pure Updates helpers in
-// src/updates-ui.js (queryFor, visible, validBasis).
-// Authoring gate: these guard the /updates wire queries each filter issues
-// (a wrong query string loads the wrong items), the saved-filter semantics
-// (opening a row marks it read; the saved tab must list read items), and the
-// basis-token gate for marking actions (an invalid basis must force a
-// refresh, never a write). Existing coverage: none — tests/ has zero
-// references to src/updates-ui.js. mountUpdates itself is DOM and client
-// code; the three helpers were extracted as exports without touching their
-// logic so they can be tested without a DOM stub.
+// Updates tab labels, stable wire queries, read-state filtering, and basis-token validation.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { queryFor, visible, validBasis } from "../src/updates-ui.js";
+import { mountUpdates, queryFor, visible, validBasis } from "../src/updates-ui.js";
+
+test("the Read tab keeps its saved filter ID and names itself from its visible label", t => {
+  const created = [];
+  const selectors = new Map();
+  function element(tag) {
+    const node = {
+      tag, dataset: {}, attrs: {}, children: [],
+      append(...children) { this.children.push(...children); },
+      prepend(...children) { this.children.unshift(...children); },
+      setAttribute(name, value) { this.attrs[name] = value; },
+      addEventListener() {},
+      querySelector(selector) {
+        assert.ok(selectors.has(selector), `Unexpected selector: ${selector}`);
+        return selectors.get(selector);
+      }
+    };
+    created.push(node);
+    return node;
+  }
+  for (const selector of [".topbar-actions", ".updates-filters", ".updates-list", "#updates-status",
+    "#updates-summary", "#updates-partial", "#updates-page-announcement", "#updates-load-more", "#updates-close"]) {
+    selectors.set(selector, element("div"));
+  }
+  selectors.set("#main", null);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    createElement: element, body: element("body"),
+    querySelector: selector => {
+      assert.ok(selectors.has(selector), `Unexpected selector: ${selector}`);
+      return selectors.get(selector);
+    }
+  } });
+  t.after(() => {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else delete globalThis.document;
+  });
+  mountUpdates({ client: {} });
+  const tabs = created.filter(node => node.role === "tab");
+  assert.deepEqual(tabs.map(node => node.textContent), ["Needs me", "Mentions", "All activity", "Read"]);
+  const read = tabs.find(node => node.dataset.updateFilter === "saved");
+  assert.equal(read.textContent, "Read");
+  assert.equal(read.attrs["aria-label"], undefined, "the visible Read label supplies the accessible name");
+  assert.equal(read.attrs["aria-labelledby"], undefined);
+});
 
 test("queryFor: each filter issues its documented updates query", () => {
   assert.equal(queryFor("needs"), "state=actionable");
@@ -20,11 +55,14 @@ test("queryFor: each filter issues its documented updates query", () => {
   assert.equal(queryFor("bogus"), "state=actionable");
 });
 
-test("visible: the saved filter lists read items only", () => {
+test("visible: the Read filter lists read items only under the stable saved ID", () => {
   const items = [
     { id: "a", state: "read" },
     { id: "b", state: "unread" },
     { id: "c", state: "read" },
+    { id: "d", state: "handled" },
+    { id: "e", state: "cleared" },
+    { id: "f", state: "answered" },
   ];
   assert.deepEqual(visible(items, "saved").map(item => item.id), ["a", "c"]);
 });
