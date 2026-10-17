@@ -1,8 +1,9 @@
 // Synthetic qualification helpers use the real event and durable rail authority.
 import {randomUUID} from 'node:crypto';
 import {generateReceiptKeyPair,issueVettingReceipt} from '../server/vetting-receipts.mjs';
+import {ownMember} from '../src/events.js';
 export function addRailMember(store,id,kind='human',ownerKey=null){
- if(store.room('commons').state.members[id])return;
+ if(ownMember(store.room('commons').state.members,id))return;
  store.command(ownerKey??store.issueAccessKey('commons','owner'),'commons',{id:randomUUID(),type:'member.added',data:{memberId:id,displayName:id,kind,permissions:kind==='agent'?['accept_work']:[]}});
 }
 export function submittedTrial(store,{id='trial-abc123',candidateId='worker',buyerId='owner',criterion='c1'}={}){

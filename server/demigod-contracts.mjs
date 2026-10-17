@@ -110,7 +110,7 @@ export class DemigodContracts {
     // #1004 follow-up: own-property lookup — an inherited Object.prototype
     // name must never satisfy "distinct active member".
     const worker = workerId ? ownMember(state.members, workerId) : null;
-    if (workerId && (!worker || worker.active === false || workerId === state.room.ownerId || workerId === state.members[actorId]?.id)) railFail(422,"invalid_contract_worker","Worker must be a distinct active member");
+    if (workerId && (!worker || worker.active === false || workerId === state.room.ownerId || workerId === ownMember(state.members,actorId)?.id)) railFail(422,"invalid_contract_worker","Worker must be a distinct active member");
     return this.request(roomId, actorId, { action: 'create', ...input }, () => {
       const offer = this.db.prepare('SELECT * FROM demigod_offer_profiles WHERE profile_id=? AND room_id=?').get(offerProfileId, roomId);
       if (!offer) fail(404, 'demigod_offer_not_found', 'Offer profile not found');

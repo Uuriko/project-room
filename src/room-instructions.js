@@ -1,6 +1,6 @@
 import { CHARTER_TYPE, CHARTER_FIELDS, charterContext, validateCharterData, confirmsCharter } from "./room-charter.js";
 import { retryUnconfirmed } from "./client.js";
-import { EVENT_TYPES as T, ROOM_POLICY_FIELDS, roomPolicy } from "./events.js";
+import { EVENT_TYPES as T, ROOM_POLICY_FIELDS, roomPolicy, ownMember } from "./events.js";
 
 // Room review policy (issue #6 A4 follow-up): the owner sets it here instead of
 // by hand-written command; everyone else sees the policy in force, read only.
@@ -29,7 +29,7 @@ export function installRoomInstructions({ client, getState, onSaved }) {
   const currentPolicy = () => policyKey(roomPolicy(getState()));
   const current = () => charterContext(getState()?.room);
   const owns = e => e && e === entry && e.session === client.session && e.generation === client.generation && client.ownsAccountSession() && getState();
-  const owner = () => { const s = getState(), m = s?.members[client.session?.member.id]; return m?.active === true && m.kind === "human" && m.id === s.room.ownerId; };
+  const owner = () => { const s = getState(), m = ownMember(s?.members, client.session?.member.id); return m?.active === true && m.kind === "human" && m.id === s.room.ownerId; };
   const same = (a, b) => a.revision === b.revision && a.eventId === b.eventId;
   const text = (id, value) => { if ($(id).textContent !== value) $(id).textContent = value; };
   const values = () => Object.fromEntries(fields.map(key => [key, form.elements.namedItem(key).value || null]));
@@ -47,7 +47,7 @@ export function installRoomInstructions({ client, getState, onSaved }) {
   function renderPolicy() {
     const state = getState(), key = currentPolicy(), stored = state.room.policy, isOwner = owner();
     $("room-policy").hidden = false; $("room-policy-owner").hidden = !isOwner;
-    const setBy = stored?.revision ? ` Set by ${state.members[stored.setById]?.displayName ?? "the room owner"} (version ${stored.revision}).` : "";
+    const setBy = stored?.revision ? ` Set by ${ownMember(state.members, stored.setById)?.displayName ?? "the room owner"} (version ${stored.revision}).` : "";
     text("room-policy-current", `${POLICY_LABELS[key]}${setBy}`);
     text("room-policy-help", isOwner
       ? "Applies to outcomes proposed from now on; earlier work keeps its recorded requirements. Proposers see the requirement locked on with the reason."
@@ -82,7 +82,7 @@ export function installRoomInstructions({ client, getState, onSaved }) {
     $("room-instructions-save").textContent = e.uncertain ? "Retry original save" : "Save";
     $("room-instructions-close").disabled = e.busy || policyUI.busy;
     for (const id of ["instructions-use-latest", "instructions-keep-draft"]) $(id).disabled = e.busy;
-    text("room-instructions-version", e.base.revision ? `Version ${e.base.revision} · ${getState().members[e.base.charter.updatedById]?.displayName ?? "Room owner"}` : "Not set");
+    text("room-instructions-version", e.base.revision ? `Version ${e.base.revision} · ${ownMember(getState().members, e.base.charter.updatedById)?.displayName ?? "Room owner"}` : "Not set");
     const status = e.busy ? "Working…" : e.uncertain ? "Save not confirmed. Retry the original before making changes."
       : e.readError || (e.latest ? `Review version ${e.latest.revision} above before choosing which text to save.`
       : changed || e.needsReview ? "Instructions changed. Review latest; your draft is kept." : e.status ?? "");

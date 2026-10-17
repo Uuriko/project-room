@@ -41,6 +41,7 @@
 // Capability descriptor shape: the MCP tool definition ({ name,
 // annotations.readOnlyHint }) or { name, readOnly }.
 
+import { ownMember } from "../src/events.js";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { resolveGrants } from "./grants.mjs"; // UFO-steal slice 1: live grant edges feed the catalog seam
@@ -153,7 +154,7 @@ export function resolveCatalogAgent(store, identity) {
       } catch {
         state = null;
       }
-      const member = state?.members?.[memberId] ?? null;
+      const member = ownMember(state?.members, memberId) ?? null;
       if (!member || member.active === false) continue;
       let tier = null;
       try {

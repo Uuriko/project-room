@@ -55,7 +55,7 @@ export function enforceSpendAllowance(state, command, nowMs, fail = refuse) {
   if (command.type !== T.SESSION_STARTED && command.type !== T.SESSION_STATUS_CHANGED) return;
   const allowance = spendAllowance(state);
   if (!allowance) return;
-  const item = state.workItems?.[command.data.workItemId];
+  const item = state.workItems && Object.hasOwn(state.workItems, command.data.workItemId) ? state.workItems[command.data.workItemId] : undefined;
   if (!item) return; // the applier reports the missing item
   const ledger = spendLedger(state, { nowMs, periodDays: allowance.periodDays });
   const summary = `${dollars(ledger.spentCents)} spent, ${dollars(ledger.reservedCents)} reserved and ${dollars(ledger.heldCents)} held for unreported attempts of a ${dollars(allowance.allowanceCents)} allowance over ${allowance.periodDays} days`;
