@@ -1,7 +1,10 @@
 // Deleted-message rendering (wave finding fix): message.deleted tombstones the
 // projection (body=null, deletedAt). Rendering must honor the tombstone - no
 // null-body crashes in reply previews, search, request or decision labels, and
-// no body-dependent actions on a deleted message. Disposable rooms only.
+// no body-dependent actions on a deleted message. The work-card drafts list is
+// covered too: a deleted proposal draft must not count toward "Drafts (n)",
+// must not be excerpted, and must never make the room unopenable
+// (bug sweep 2026-10-16, CLIENT-CORE Finding 1). Disposable rooms only.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -11,9 +14,12 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { openSearch } from "./room-chrome.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
 
-async function setup(t) {
-  const f = createAcceptanceFixture({ managedProducer: false }), server = createRoomServer({ store: f.store, streamInterval: 40 });
+async function setup(t, seedRoom) {
+  const f = createAcceptanceFixture({ managedProducer: false });
+  if (seedRoom) seedRoom(f);
+  const server = createRoomServer({ store: f.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
@@ -87,4 +93,37 @@ test("deleted messages render a tombstone, never crash, and leave search", { tim
   await page.locator("#search-count", { hasText: "1 match" }).waitFor({ state: "visible" });
   await page.locator("#message-search").fill("orchids");
   await page.locator("#search-count", { hasText: "1 match" }).waitFor({ state: "visible" });
+});
+
+test("a deleted proposal draft does not poison the work card or lock the room", { timeout: 60000 }, async t => {
+  const { page } = await setup(t, ({ store, keys }) => {
+    const cmd = (type, data) => store.command(keys.owner, "commons", { id: randomUUID(), type, data });
+    cmd(T.WORK_PROPOSED, { workItemId: "w-draft-check", title: "Draft deletion check",
+      definitionOfDone: "Room opens with the live drafts listed", accountableMemberId: "owner", mode: "read" });
+    const { revision } = store.room("commons").state.workItems["w-draft-check"];
+    const packetId = randomUUID();
+    for (const [id, body] of [["check-draft-1", "alpha draft proposal text"],
+        ["check-draft-2", "bravo draft proposal text"], ["check-draft-3", "charlie draft proposal text"]])
+      cmd(T.MESSAGE_POSTED, { messageId: id, body, workItemId: "w-draft-check", packetId, basisRevision: revision });
+    // Delete one of three drafts through the command surface (agents/API can delete; the UI cannot).
+    const target = store.room("commons").state.messages.find(m => m.id === "check-draft-1");
+    cmd(T.MESSAGE_DELETED, { messageId: target.id, expectedMessageRevision: target.revision ?? 0, reason: "superseded" });
+  });
+
+  // Sign-in (inside setup) only reaches #main if the first snapshot renders;
+  // the deleted draft's null body used to throw inside the work card and
+  // bounce the user back to the sign-in panel for good.
+  const card = page.locator("#message-list .work-card[data-work-record-id=\"w-draft-check\"]");
+  await card.waitFor({ state: "visible" });
+
+  // Only the two live drafts count toward "Drafts (n)" and are excerpted;
+  // the deleted draft is neither counted nor linked from the card.
+  await card.locator(".work-drafts summary", { hasText: "Drafts (2)" }).waitFor({ state: "visible" });
+  const linked = await card.locator(".work-drafts [data-open-message]").evaluateAll(
+    nodes => nodes.map(node => node.getAttribute("data-open-message")).sort());
+  assert.deepEqual(linked, ["check-draft-2", "check-draft-3"]);
+  const draftsText = await card.locator(".work-drafts").textContent();
+  assert.ok(draftsText.includes("bravo draft proposal text"), "live draft 2 excerpt renders");
+  assert.ok(draftsText.includes("charlie draft proposal text"), "live draft 3 excerpt renders");
+  assert.ok(!draftsText.includes("alpha draft proposal text"), "deleted draft is not excerpted");
 });
