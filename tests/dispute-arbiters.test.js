@@ -40,6 +40,34 @@ test("shared runtime / credential / delegated chain is ineligible", () => {
   assert.equal(arbiters.isIndependent(overlap, EXECUTOR).reason, "delegated chain overlap");
 });
 
+test("challenger cannot seat as decider of their own dispute", () => {
+  const arbiters = createArbiters();
+  // instinct is independent of the executor, but instinct raised the dispute.
+  const r = arbiters.resolveTier1({ verifierId: "instinct", executor: EXECUTOR,
+    challenger: { lane: "instinct" }, lanes: LANES });
+  assert.equal(r.unavailable, "no-arbitrator");
+  assert.match(r.reason, /is the challenger/);
+});
+
+test("designee sharing an identity domain with the challenger is ineligible", () => {
+  const arbiters = createArbiters();
+  // grokbot is independent of this executor, but shares rt-quill-1 with
+  // the challenger.
+  const r = arbiters.resolveTier1({ verifierId: "grokbot", executor: { lane: "someone-else" },
+    challenger: { lane: "challenger-x", runtime: "rt-quill-1" }, lanes: LANES });
+  assert.equal(r.unavailable, "no-arbitrator");
+  assert.match(r.reason, /not independent of the challenger: shared runtime/);
+});
+
+test("a neutral challenger leaves tier-1 seating unchanged", () => {
+  const arbiters = createArbiters();
+  const seated = arbiters.resolveTier1({ verifierId: "instinct", executor: EXECUTOR,
+    challenger: { lane: "codex", runtime: "rt-z", credentialChain: "cred-z", delegatedChain: "john>codex" },
+    lanes: LANES });
+  assert.equal(seated.tier, 1);
+  assert.equal(seated.decider.lane, "instinct");
+});
+
 test("unknown verifier falls through to unavailable, not a silent drop", () => {
   const arbiters = createArbiters();
   const r = arbiters.resolveTier1({ verifierId: "nobody", executor: EXECUTOR, lanes: LANES });

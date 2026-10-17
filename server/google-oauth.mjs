@@ -189,7 +189,7 @@ export class GoogleSignIn {
     return { iss: GOOGLE_ISSUER, sub: claims.sub, exp: claims.exp, iat: claims.iat, email };
   }
 
-  async complete({ callbackUrl }) {
+  async complete({ callbackUrl, expectedSlotToken = undefined }) {
     let url;
     try { url = new URL(callbackUrl); } catch { fail('google_callback_invalid'); }
     const expected = new URL(this.#redirectUri);
@@ -213,6 +213,14 @@ export class GoogleSignIn {
           return e;
         })();
     if (!entry) fail('google_state_invalid');
+    // RFC 6749 section 10.12: the state must be completed by the browser
+    // session that started the flow. Without this binding, an attacker can
+    // capture their own callback URL (state + code) and land a victim who
+    // loads it in the attacker's session (login CSRF). A callback whose
+    // session cookie differs from — or is missing for — the state's slot
+    // fails closed before any provider call. `undefined` keeps the old
+    // unchecked behavior for callers that do not bind a session.
+    if (expectedSlotToken !== undefined && expectedSlotToken !== entry.slotToken) fail('google_state_invalid');
     if (url.searchParams.has('error')) fail('google_consent_denied');
     const code = url.searchParams.get('code');
     if (!opaque(code)) fail('google_callback_invalid');

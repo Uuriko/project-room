@@ -6,7 +6,9 @@
 //
 // Unauthenticated GitHub allows 60 requests an hour per IP, and Workers share
 // that IP. The tick therefore:
-//   - polls only live claims whose pull has no outcome yet
+//   - polls only live claims whose pull has no outcome yet, then — with
+//     whatever candidate capacity and lookup budget remain — done claims
+//     finished by hand as merged, for a one-time verification stamp (#3661)
 //   - sends If-None-Match when it has an ETag (a 304 is not a billed request)
 //   - looks up at most one pull per tick without a token, four with one
 //   - waits out 403/429 until x-ratelimit-reset or retry-after
@@ -21,12 +23,13 @@
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
-import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
+import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
   batchPullOutcome, parsePullRequestUrl, pullLinks, pullRequestDue, pullRequestOutcomeFromApi, pullRequestOutcomeFromWebhook,
-  pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest, usableEtag
+  pullVerificationDue, pullsReadyToSettle, rateLimitUntil, recordPullOutcome, rememberPoll, rollupClaimCi, settlePullRequest,
+  stampVerifiedPullOutcome, usableEtag
 } from "./claim-coordination.mjs";
 
 // #3464: the durable registry decodes stored rows WITHOUT validation while
@@ -266,7 +269,7 @@ function delayFor(item, kind, token) {
 // Stops on a rate limit, a rejected token, or the cron deadline. Does not write.
 export async function collectPullRequestLookups(items, { fetchImpl = fetch, token = null, nowMs = Date.now(), limit = null, deadline = Infinity, yieldBetween = null } = {}) {
   const budget = { remaining: limit ?? (token ? LOOKUP_LIMIT : LOOKUP_LIMIT_NO_TOKEN) };
-  const due = (items ?? []).filter(item => pullRequestDue(item, nowMs) || ciReadDue(item, nowMs));
+  const due = (items ?? []).filter(item => pullRequestDue(item, nowMs) || pullVerificationDue(item, nowMs) || ciReadDue(item, nowMs));
   const results = [];
   const seen = new Map();
   let rateLimitedUntil = null;
@@ -282,6 +285,9 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
     if (budget.remaining <= 0 || rateLimitedUntil) break;
     if (Date.now() > deadline) { budgetExceeded = true; break; }
     const continuing = (item.pullRequest.ciCursor === "status" || item.pullRequest.ciCursor === "checks") && SHA.test(item.ci?.headSha ?? "");
+    // A verification candidate (#3661) gets exactly one lookup: no CI read
+    // rides along on a claim that is already done.
+    const verifyOnly = !pullRequestDue(item, nowMs) && pullVerificationDue(item, nowMs);
     let looked;
     if (continuing) {
       looked = { kind: "open", etag: item.pullRequest.etag, headSha: item.ci.headSha, continued: true };
@@ -290,7 +296,7 @@ export async function collectPullRequestLookups(items, { fetchImpl = fetch, toke
       looked = await lookupPull(item.pullRequest, { fetchImpl, token, nowMs, deadline });
       if (looked.kind === "budget") { budgetExceeded = true; break; }
     }
-    if (looked.kind === "open" && SHA.test(looked.headSha ?? "") && looked.kind !== "rateLimited") {
+    if (looked.kind === "open" && !verifyOnly && SHA.test(looked.headSha ?? "") && looked.kind !== "rateLimited") {
       const signals = await readCommitCi(
         { ...item.pullRequest, ciCursor: continuing ? item.pullRequest.ciCursor : "status" },
         looked.headSha,
@@ -366,6 +372,20 @@ export function commitPullRequestLookup(store, registry, roomId, item, result, n
     const recorded = recordPullOutcome(fresh, result.url, result.kind, nowMs);
     if (!pullsReadyToSettle(recorded)) {
       registry.set(roomId, recorded);
+      return false;
+    }
+    // #3661: a claim finished by hand as merged is never settled by the
+    // poller, but the finisher's assertion can still be verified against
+    // GitHub: persist the stamp (plus its history note) with NO state
+    // transition. Live claims never reach this branch — settlePullRequest
+    // below owns them, and its lapsed-lease guard stays live-only. A pull
+    // found closed against the merged finish is stamped closed and the
+    // contradiction is named on the record and in the operator log.
+    if (fresh.state === "done" && fresh.deliveryMode === "merged") {
+      registry.set(roomId, stampVerifiedPullOutcome(recorded, result.kind, nowMs, { url: result.url, etag: result.etag }));
+      if (result.kind === "closed") {
+        console.warn(`[claim-prs] pull outcome contradiction ${roomId}/${fresh.id}: finished as merged but ${result.url} closed unmerged; outcome stamped closed`);
+      }
       return false;
     }
     if ((recorded.kind === "land" || recorded.kind === "deploy") && batchPullOutcome(recorded) === "merged") {
@@ -499,6 +519,58 @@ function loadDueClaims(store, nowMs) {
   for (const row of rows) {
     const item = store.workClaims.get(row.roomId, row.claimId);
     if (pullRequestDue(item, nowMs)) due.push({ roomId: row.roomId, item });
+  }
+  return due;
+}
+
+// #3661: verify-and-stamp candidates — done claims finished by hand as
+// merged whose pull outcome was never stamped. Lowest priority in the
+// tick: the caller passes only the candidate capacity the live claims
+// left unused (the same 32-row bound), and the shared lookup budget is
+// spent in list order, live claims first, so this class can never starve
+// live settlement. A stamped claim leaves the class forever (the SQL and
+// pullVerificationDue both require an unstamped outcome).
+function loadVerificationClaims(store, nowMs, limit) {
+  if (!(limit > 0)) return [];
+  let rows = [];
+  try {
+    rows = store.db.prepare(`
+      SELECT room_id AS roomId, claim_id AS claimId
+      FROM work_claims
+      WHERE (
+        json_extract(item_json, '$.data.state') = 'done'
+        AND json_extract(item_json, '$.data.deliveryMode') = 'merged'
+        AND typeof(json_extract(item_json, '$.data.pullRequest.url')) = 'text'
+        AND json_extract(item_json, '$.data.pullRequest.outcome') IS NULL
+        AND (json_extract(item_json, '$.data.pullRequest.nextPollAt') IS NULL
+             OR json_extract(item_json, '$.data.pullRequest.nextPollAt') <= ?)
+        AND (json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') IS NULL
+             OR json_extract(item_json, '$.data.pullRequest.rateLimitedUntil') <= ?)
+      ) OR (
+        json_extract(item_json, '$.state') = 'done'
+        AND json_extract(item_json, '$.deliveryMode') = 'merged'
+        AND typeof(json_extract(item_json, '$.pullRequest.url')) = 'text'
+        AND json_extract(item_json, '$.pullRequest.outcome') IS NULL
+        AND (json_extract(item_json, '$.pullRequest.nextPollAt') IS NULL
+             OR json_extract(item_json, '$.pullRequest.nextPollAt') <= ?)
+        AND (json_extract(item_json, '$.pullRequest.rateLimitedUntil') IS NULL
+             OR json_extract(item_json, '$.pullRequest.rateLimitedUntil') <= ?)
+      )
+      ORDER BY COALESCE(
+        json_extract(item_json, '$.data.pullRequest.nextPollAt'),
+        json_extract(item_json, '$.pullRequest.nextPollAt'),
+        0
+      ) ASC
+      LIMIT ?
+    `).all(nowMs, nowMs, nowMs, nowMs, limit);
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
+  const due = [];
+  for (const row of rows) {
+    const item = store.workClaims.get(row.roomId, row.claimId);
+    if (pullVerificationDue(item, nowMs)) due.push({ roomId: row.roomId, item });
   }
   return due;
 }
@@ -726,7 +798,11 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
     const searchSettled = await settleFromSearch(store, { env: env ?? process.env, fetchImpl, token: access, nowMs, deadline });
     return { checked: 0, updated: 0, rateLimited: true, ...(searchSettled ? { searchSettled } : {}), ...skipSummary() };
   }
-  const due = loadDueClaims(store, nowMs);
+  const live = loadDueClaims(store, nowMs);
+  // #3661: verification candidates fill only the candidate capacity the
+  // live claims leave unused, appended after them so the lookup budget is
+  // spent live-first.
+  const due = [...live, ...loadVerificationClaims(store, nowMs, PULL_CANDIDATE_CAP - live.length)];
   if (due.length === 0) return { checked: 0, updated: 0, ...skipSummary() };
   // Claim ids are room-scoped, so lookup results carry their room and the
   // room map is keyed by (roomId, claimId): the same claimId can be due in
@@ -1064,6 +1140,54 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
     });
   }
   return closed;
+}
+
+// #3739: the scheduler-side half of the sweep above. The sweep's only
+// caller is the claim-prs tick, and that job wakes on due probes (an open
+// pull request, an autolink candidate) — in a store where no pull request
+// is waiting it never woke, so the sweep was unreachable however old
+// unclaimed items got. This probe gives the job a wake time for the sweep
+// itself: the earliest dormancy instant (claimUpdatedAt +
+// STALE_UNCLAIMED_DAYS, the same max(last history stamp, updatedAt) the
+// dormancy predicate reads) across unclaimed, unpinned items in rooms
+// that opted in — never-sweep items and unknown-age items can never be
+// closed, so they never schedule a wake. When the previous pass ran
+// inside STALE_SWEEP_INTERVAL_MS the wake defers to that interval, so a
+// backlog larger than one batch drains on the sweep's designed cadence
+// instead of re-waking every scheduler tick. Null when no opted-in room
+// holds a candidate. The sweep re-checks every item with isDormantClaim;
+// this probe only decides whether the job wakes.
+export function staleSweepDueAt(store, _nowMs) {
+  if (!store?.db || !store.workClaims) return null;
+  let row;
+  try {
+    row = store.db.prepare(`SELECT MIN(CAST(ROUND(unixepoch(activity, 'subsec') * 1000) AS INTEGER)) AS activityMs
+      FROM (
+        SELECT MAX(
+            COALESCE(json_extract(item_json, '$.data.updatedAt'), json_extract(item_json, '$.updatedAt'), ''),
+            COALESCE(json_extract(item_json, '$.data.history[#-1].at'), json_extract(item_json, '$.history[#-1].at'), '')
+          ) AS activity
+        FROM work_claims
+        JOIN work_claim_config ON work_claim_config.room_id = work_claims.room_id
+        WHERE json_extract(work_claim_config.config_json, '$.staleSweep') = 1
+          AND COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(COALESCE(json_extract(item_json, '$.data.tags'), json_extract(item_json, '$.tags'), '[]'))
+            WHERE LOWER(CAST(value AS TEXT)) = 'never-sweep'
+          )
+      )`).get();
+  } catch {
+    // Fail soft like the scheduler's other due probes (jobs.mjs read()):
+    // a probe error must never disable the whole claim-prs job, pull
+    // requests included. The probe's SQL is pinned by unit tests against
+    // a real store, so a regression there fails loudly in tests instead.
+    return null;
+  }
+  if (!row || row.activityMs == null) return null;
+  let due = Number(row.activityMs) + STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
+  const last = lastStaleSweep.get(store);
+  if (typeof last === "number" && Number.isFinite(last)) due = Math.max(due, last + STALE_SWEEP_INTERVAL_MS);
+  return due;
 }
 
 // Settle every live claim linked to a closing pull_request webhook payload.

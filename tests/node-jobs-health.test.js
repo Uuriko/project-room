@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { HOUR_MS, JOBS, startNodeScheduler, wireNodeJobs } from "../server/jobs.mjs";
+import { BUDGET_EXHAUSTED_NO_PROGRESS, HOUR_MS, JOB_BUDGET_MS, JOBS, budgetExhaustedWithoutProgress, startNodeScheduler, wireNodeJobs } from "../server/jobs.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 function storeFor(t) {
@@ -72,6 +72,92 @@ test("node scheduler retention job rotates to the next table on each tick", asyn
   clock += HOUR_MS;
   const third = await retentionRun();
   assert.equal(third.table, "web_fetch_log", "the rotation wraps around");
+});
+
+function landQueueRow(store, at) {
+  store.db.prepare(`INSERT INTO land_queue
+    (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, mergeable, behind, checks_state, created_at, updated_at)
+    VALUES ('commons', 'land-1', 'Uuriko/project-room', 1, 'owner', 'owner', 'MERGEABLE', 0, 'SUCCESS', ?, ?)`)
+    .run(at, at);
+}
+
+test("node scheduler gives a later job a full budget window from its own start", async t => {
+  const store = storeFor(t);
+  let clock = Date.now();
+  const passStart = clock;
+  // One pending delivery makes webhook-dispatch due; one open land-queue
+  // item makes land-queue due. Registry order runs webhook-dispatch first.
+  store.db.prepare(`INSERT INTO agent_webhook_deliveries
+    (delivery_id, idempotency_key, subscription_id, agent_id, event_type, payload_json, signature, state, next_attempt_at, created_at, updated_at)
+    VALUES ('d-1', 'k-1', 'sub-1', 'agent-1', 'message.posted', '{}', 'sig', 'pending', 0, ?, ?)`)
+    .run(clock, clock);
+  landQueueRow(store, clock);
+  // The early job burns ten whole budgets of pass time.
+  store.agentPlugin.drainWebhookDeliveries = async () => {
+    clock += 10 * JOB_BUDGET_MS;
+    return { delivered: 1 };
+  };
+  const seen = {};
+  store.landQueue.refreshDue = async ({ deadline }) => {
+    seen.deadline = deadline;
+    seen.startedAt = clock;
+    return { checked: 1, updated: 0, unconfigured: 0, rateLimited: 0 };
+  };
+  const scheduler = startNodeScheduler({ store, env: { GROWTH_WATCH_INTERVAL_MS: "0" }, tickMs: 0, now: () => clock });
+  t.after(() => scheduler.stop());
+  const outcomes = await scheduler.runOnce();
+  assert.equal(outcomes.find(o => o.job === "webhook-dispatch")?.ok, true);
+  assert.equal(outcomes.find(o => o.job === "land-queue")?.ok, true);
+  assert.ok(seen.startedAt > passStart + JOB_BUDGET_MS,
+    "by the time land-queue started, a pass-relative window would already have closed");
+  assert.equal(seen.deadline - seen.startedAt, JOB_BUDGET_MS,
+    "the later job's deadline is measured from its own start, not the pass start");
+});
+
+test("budgetExhaustedWithoutProgress reads the jobs' own summary shapes", () => {
+  // Starved at entry: the claim-prs (#3698) and integrity shapes.
+  assert.equal(budgetExhaustedWithoutProgress({ checked: 0, updated: 0, budgetExceeded: 1 }), true);
+  assert.equal(budgetExhaustedWithoutProgress({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 }), true);
+  // Remaining work is not progress: gmail's pending gauge.
+  assert.equal(budgetExhaustedWithoutProgress({ completed: 0, pending: 3, budgetExceeded: true }), true);
+  // A configured limit is not progress: retention's batchLimit.
+  assert.equal(budgetExhaustedWithoutProgress({ deleted: 0, budgetExceeded: true, batchLimit: 500 }), true);
+  // Progress under exhaustion is cooperative, not starvation.
+  assert.equal(budgetExhaustedWithoutProgress({ checked: 4, updated: 0, budgetExceeded: 1 }), false);
+  assert.equal(budgetExhaustedWithoutProgress({ completed: 2, pending: 3, budgetExceeded: 1 }), false);
+  // No exhaustion signal, no grade.
+  assert.equal(budgetExhaustedWithoutProgress({ checked: 0, updated: 0 }), false);
+  assert.equal(budgetExhaustedWithoutProgress({ checked: 0, updated: 0, budgetExceeded: 0 }), false);
+  assert.equal(budgetExhaustedWithoutProgress(null), false);
+});
+
+test("node scheduler grades a zero-work budget exhaustion instead of recording a plain success", async t => {
+  const store = storeFor(t);
+  const clock = Date.now();
+  landQueueRow(store, clock);
+  let summary = { checked: 0, updated: 0, unconfigured: 0, rateLimited: 0, budgetExceeded: 1 };
+  store.landQueue.refreshDue = async () => summary;
+  const scheduler = startNodeScheduler({ store, env: { GROWTH_WATCH_INTERVAL_MS: "0" }, tickMs: 0, now: () => clock });
+  t.after(() => scheduler.stop());
+  const row = () => scheduler.jobHealth().find(j => j.name === "land-queue");
+
+  const first = (await scheduler.runOnce()).find(o => o.job === "land-queue");
+  assert.equal(first.ok, true, "budget exhaustion is not a failure");
+  assert.equal(first.grade, BUDGET_EXHAUSTED_NO_PROGRESS, "the zero-work exhaustion is named in the pass result");
+  assert.equal(row().lastGrade, BUDGET_EXHAUSTED_NO_PROGRESS);
+  assert.equal(row().consecutiveNoProgressExhaustions, 1);
+  assert.equal(row().consecutiveFailures, 0);
+
+  const second = (await scheduler.runOnce()).find(o => o.job === "land-queue");
+  assert.equal(second.grade, BUDGET_EXHAUSTED_NO_PROGRESS);
+  assert.equal(row().consecutiveNoProgressExhaustions, 2, "consecutive zero-work ticks accumulate");
+
+  summary = { checked: 3, updated: 1, unconfigured: 0, rateLimited: 0, budgetExceeded: 1 };
+  const third = (await scheduler.runOnce()).find(o => o.job === "land-queue");
+  assert.equal(third.ok, true);
+  assert.equal(third.grade, undefined, "progress under exhaustion is cooperative and ungraded");
+  assert.equal(row().lastGrade, null);
+  assert.equal(row().consecutiveNoProgressExhaustions, 0);
 });
 
 test("GET /api/health/jobs on Node includes the jobs list once the scheduler is wired", async t => {
