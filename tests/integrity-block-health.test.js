@@ -95,9 +95,20 @@ for (const runtime of ["worker", "node"]) {
     const parity = fixture.store.db.prepare("SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id='healthy'").get();
     assert.ok(parity.parity_at_seq > 0, "the healthy room reaches parity despite the standing block");
     fixture.repair();
-    at += HOUR_MS;
-    const recovered = await tick();
-    assert.equal(recovered.consecutiveFailures, 0);
+    // Composed with the deferred-batch isolation on main (#3544): the
+    // batch records the park as a durable integrity_failures row, which
+    // targeted re-verification clears on a later rotation tick — so
+    // recovery lands within one full rotation of the repair rather than
+    // necessarily on the first tick after it. The bridge's own count
+    // already reads zero from the first post-repair tick; the recorded
+    // primary failure is preserved until re-verification clears it.
+    let recovered = null;
+    for (let i = 0; i < 12 && !recovered; i++) {
+      at += HOUR_MS;
+      const view = await tick();
+      if (view.consecutiveFailures === 0) recovered = view;
+    }
+    assert.ok(recovered, "health recovers within a rotation after the import repair");
     assert.equal(recovered.lastErrorCode, null);
     assert.equal(recovered.lastSuccessAt, new Date(at).toISOString());
     if (runtime === "worker") assert.equal(recovered.status, "ok");
