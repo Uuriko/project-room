@@ -6462,6 +6462,13 @@ $("#action-form").addEventListener("submit", e => {
       }
       // A rationale can settle after the result changed. Never silently rebase
       // its verdict; uncertain decision retries still reconcile the original.
+      // The gate below reads current state, so re-read first: a send() whose
+      // receipt was applied as a local delta (delta sync) settles without the
+      // snapshot read that used to guarantee this freshness.
+      if (entry.publishRationale && !entry.decisionDispatched) {
+        await client.refresh();
+        if (!owns()) return;
+      }
       if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
         entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
       }

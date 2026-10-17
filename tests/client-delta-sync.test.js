@@ -79,6 +79,27 @@ test("a stream message.posted applies locally with no snapshot re-read", async t
   assert.equal(f.client.deltaStats.fallback, 0);
 });
 
+test("a delta advances catchUpCursor only across the viewer's own unbroken run (R28-1 mirror)", async t => {
+  const f = fixture(t, { read: () => ({ ...full(9, history()), catchUpCursor: 9 }), page: () => assert.fail("no paging") });
+  await f.warm();
+  // The reducer only admits posts by room members; enroll the peer whose
+  // event must break the run.
+  f.client.live.snapshot.state.members.peer = { ...member, id: "peer", displayName: "Peer" };
+  // Own event with the boundary at the held head: the run continues, so the
+  // boundary follows — the viewer's own writes are not news (first-use).
+  f.notify(receipt(10, envelope(T.MESSAGE_POSTED, 10, { body: "mine", channelId: "general" }))); await f.settle();
+  assert.equal(f.seen.at(-1).catchUpCursor, 10, "own event extends the boundary");
+  // A peer's event is news: the boundary stays behind it.
+  f.notify(receipt(11, event({ type: T.MESSAGE_POSTED, actorId: "peer", roomId: "commons", at: at(11), data: { body: "theirs", channelId: "general" } }))); await f.settle();
+  assert.equal(f.seen.at(-1).sequence, 11);
+  assert.equal(f.seen.at(-1).catchUpCursor, 10, "a peer's event does not extend the boundary");
+  // A later own event does not resurrect the run: the server's boundary is
+  // anchored at the stored cursor, so it still stops at the peer's event.
+  f.notify(receipt(12, envelope(T.MESSAGE_POSTED, 12, { body: "mine again", channelId: "general" }))); await f.settle();
+  assert.equal(f.seen.at(-1).catchUpCursor, 10, "an own event after a peer's stays behind the boundary");
+  assert.deepEqual(f.reads, [], "every step applied as a delta");
+});
+
 test("a message.edited delta rewrites the record and serves read-model history", async t => {
   const f = fixture(t, { read: () => full(9, history()), page: () => assert.fail("no paging") });
   await f.warm();

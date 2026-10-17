@@ -995,7 +995,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         store.authenticate(token, roomId, binding);
         const headNow = typeof store.headSequence === "function" ? store.headSequence(roomId) : headKnown;
         lastFullAt = Date.now();
-        if (headNow !== headKnown) pump();
+        if (headNow !== headKnown) { pump(); return; }
+        // The head read proves the rooms row is readable, but the stream's
+        // own read path is eventsAfter: a failure that manifests only there
+        // must still surface as an interruption, never silence, or the
+        // client waits forever on a stream that can no longer serve it.
+        // One indexed event at the recheck cadence keeps that detection
+        // without restoring per-tick reads; an event the stamp missed
+        // (a store that appends without the watch) pumps as before.
+        const page = store.eventsAfter(token, roomId, cursor, 1, binding);
+        if (page.events.length || page.next !== cursor) pump();
       } catch (error) {
         if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
           end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');

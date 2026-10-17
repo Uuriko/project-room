@@ -471,6 +471,16 @@ export class RoomClient {
     this.rawTail = tail;
     state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
     const snapshot = { ...live.snapshot, sequence: receipt.sequence, state };
+    // R28-1 mirror: a read-derived snapshot carries the server's
+    // catchUpCursor — the stored cursor extended past the viewer's own
+    // unbroken run of events (store.catchUpCursor). A delta carries no
+    // fresh cursor fields, so extend the boundary locally under exactly
+    // the server's rule: the event is the viewer's own and the boundary
+    // already reached the held head, i.e. the run continues unbroken.
+    // Any other event, or a boundary behind the head, leaves it as the
+    // last read reported it — never past someone else's event.
+    if (Number.isSafeInteger(live.snapshot.catchUpCursor) && live.snapshot.catchUpCursor === this.sequence
+      && event.actorId === this.session?.member?.id) snapshot.catchUpCursor = receipt.sequence;
     this.sequence = receipt.sequence;
     this.held = { ...held, messages: Array.isArray(state.messages) ? state.messages.slice() : null, fullSequence: receipt.sequence };
     this.live = { generation: this.generation, session: this.session, snapshot };
