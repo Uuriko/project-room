@@ -4605,6 +4605,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
+  // R350-n1 (Fo 13936, option b): revoke() deliberately leaves room links
+  // alone, so an agent that revokes its own identity secret stays an active
+  // member. Member views carry a read-time identityRevoked flag for seats
+  // whose linked identity secret is revoked; membership and the projection
+  // are unchanged (the flag is on copies), so it is reversible and additive.
+  withIdentityRevoked(roomId, room) {
+    const rows = this.db.prepare(`SELECT l.member_id AS memberId FROM identity_links l
+      JOIN agent_identities i ON i.identity_id=l.identity_id
+      WHERE l.room_id=? AND i.revoked_at IS NOT NULL`).all(roomId);
+    if (!rows.length) return room;
+    const members = { ...room.state.members };
+    for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
+    return { ...room, state: { ...room.state, members } };
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
@@ -4613,7 +4627,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
-      const room = this.room(roomId);
+      const room = this.withIdentityRevoked(roomId, this.room(roomId));
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
