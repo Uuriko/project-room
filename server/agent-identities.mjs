@@ -56,6 +56,22 @@ export function ensureIdentitySecretSchema(db) {
   // that omits the secret still matches the built-in fallback verifier.
   if (!columns.has("fallback_secret_hash")) db.exec("ALTER TABLE agent_identities ADD COLUMN fallback_secret_hash TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS agent_identities_fallback_secret_hash ON agent_identities(fallback_secret_hash) WHERE fallback_secret_hash IS NOT NULL");
+
+  // R306: rotation receipts. A rotation whose response was lost strands the
+  // agent: the old secret is retired and the replacement was only in the
+  // lost body. The receipt journals the pre-rotation hash keyed to the
+  // caller's requestId, so a retry that presents that old secret inside a
+  // short TTL re-rotates and shows a fresh replacement. Outside the TTL,
+  // or with any other requestId, the old secret stays dead.
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_identity_rotation_receipts (
+    identity_id TEXT NOT NULL REFERENCES agent_identities(identity_id),
+    request_id TEXT NOT NULL,
+    pre_hash TEXT NOT NULL,
+    pre_fallback_hash TEXT,
+    pre_legacy_hash TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (identity_id, request_id)
+  )`);
 }
 
 // Additive columns for anonymous-mint budgets and inactivity expiry.
@@ -687,12 +703,18 @@ export class AgentIdentities {
         // The permissions the owner supplies now win; the stale record's
         // grants must not come back silently.
         const samePermissions = JSON.stringify([...roomMember.permissions].sort()) === JSON.stringify([...permissions].sort());
+        // The link row is written BEFORE the member command: reactions to
+        // the join (guide assignment, claim wakes) resolve the member's
+        // addressability through identity_links (#3266 made it the only
+        // source), so the binding must already exist while the command's
+        // events apply. The surrounding transaction keeps the pair atomic —
+        // a failed command rolls the row back with everything else.
+        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+          .run(roomId, identityId, resolvedMemberId, this.store.now());
         if (roomMember.active === false || !samePermissions) {
           this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
             data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } }, expectedSessionBinding);
         }
-        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-          .run(roomId, identityId, resolvedMemberId, this.store.now());
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
@@ -712,11 +734,13 @@ export class AgentIdentities {
       assertNotReservedRoleName(memberName); // Q3-D: and when the identity joins a room
       const checked = checkAgentDisplayName(memberName, { activeNames });
       if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
+      // Link row first, member command second — see the re-link branch
+      // above: join reactions resolve addressability through identity_links.
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+        .run(roomId, identityId, resolvedMemberId, this.store.now());
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
         data: { memberId: resolvedMemberId, displayName: memberName, kind: "agent", permissions, identityId,
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
-      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-        .run(roomId, identityId, resolvedMemberId, this.store.now());
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);
@@ -903,7 +927,17 @@ export class AgentIdentities {
   // not survive the rotation. The same invariant revoke() enforces — a
   // rotated identity must not keep operating through a key it minted
   // earlier — holds here too.
-  rotate(identityId, secret) {
+  rotate(identityId, secret, requestId = null) {
+    if (requestId !== null) {
+      if (typeof requestId !== "string" || !requestId) fail(422, "invalid_request_id", "requestId must be a non-empty string when present");
+      // A live receipt plus the pre-rotation secret is the client whose
+      // rotation response was lost: re-rotate and show a fresh replacement
+      // (R306). Everything else falls through to the ordinary path, which
+      // answers exactly as before — a presentable secret rotates, a dead
+      // one 401s. The TTL is the same 10 minutes link codes use.
+      const retried = this.rotateFromReceiptIfMatched(identityId, secret, requestId);
+      if (retried) return retried;
+    }
     const identity = this.authenticateIdentitySecret(identityId, secret);
     forgetIdentityVerifier(secret);
     return this.store.transaction(() => {
@@ -920,8 +954,98 @@ export class AgentIdentities {
         .run(next.secretHash, next.fallbackHash, identityId, row.secretHash);
       if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
       const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
+      // Any rotation the CURRENT holder performs (this call, however it
+      // got here) proves the credential is not lost: earlier receipts
+      // would let a stale pre-rotation secret re-rotate after the secret
+      // has moved on, so they die here (landing lane, 13518). Only the
+      // receipt-triggered re-rotation (rotateFromReceipt) keeps its row,
+      // so the same lost client can retry within the TTL.
+      this.db.prepare("DELETE FROM agent_identity_rotation_receipts WHERE identity_id=?").run(identityId);
+      if (requestId !== null) {
+        // Journal the pre-rotation hash for the uncertain-retry path. The
+        // pre-rotation secret authenticates nothing else from now on.
+        const pre = this.verifierColumns(secret);
+        this.db.prepare("INSERT OR REPLACE INTO agent_identity_rotation_receipts(identity_id, request_id, pre_hash, pre_fallback_hash, pre_legacy_hash, created_at) VALUES(?,?,?,?,?,?)")
+          .run(identityId, requestId, pre.secretHash, pre.fallbackHash, legacyIdentityHash(secret), this.store.now());
+      }
       return { identityId, displayName: identity.displayName, secret: newSecret, rotatedAt: this.store.now(), revokedApiKeys };
     });
+  }
+
+  static ROTATION_RECEIPT_TTL_MS = 10 * 60 * 1000;
+
+  // R306: the uncertain-retry path. A live receipt for this requestId plus
+  // the matching pre-rotation secret re-rotates and returns a fresh
+  // replacement; anything else returns null and the caller falls through
+  // to the ordinary authenticated path. The route consults this BEFORE its
+  // owner check, because the retired secret must not be able to pass
+  // that check — that is exactly the failure being repaired.
+  rotateFromReceiptIfMatched(identityId, secret, requestId) {
+    if (typeof requestId !== "string" || !requestId) return null;
+    if (typeof secret !== "string" || !secret.startsWith(IDENTITY_SECRET_PREFIX)) return null;
+    const receipt = this.rotationReceipt(identityId, requestId);
+    if (!receipt || !this.matchesRotationReceipt(receipt, secret)) return null;
+    return this.rotateFromReceipt(identityId, receipt);
+  }
+
+  // The live rotation receipt for (identity, requestId), or null. Rows
+  // older than the TTL read as absent: the old secret is simply dead again.
+  rotationReceipt(identityId, requestId) {
+    return this.db.prepare(
+      "SELECT request_id AS requestId, pre_hash AS preHash, pre_fallback_hash AS preFallbackHash, pre_legacy_hash AS preLegacyHash, created_at AS createdAt " +
+      "FROM agent_identity_rotation_receipts WHERE identity_id=? AND request_id=? AND created_at > ?"
+    ).get(identityId, requestId, this.store.now() - AgentIdentities.ROTATION_RECEIPT_TTL_MS) ?? null;
+  }
+
+  matchesRotationReceipt(receipt, secret) {
+    if (typeof secret !== "string" || !secret.startsWith(IDENTITY_SECRET_PREFIX)) return false;
+    const cols = this.verifierColumns(secret);
+    if (receipt.preHash === cols.secretHash) return true;
+    if (receipt.preFallbackHash && cols.fallbackHash && receipt.preFallbackHash === cols.fallbackHash) return true;
+    return Boolean(receipt.preLegacyHash) && receipt.preLegacyHash === legacyIdentityHash(secret);
+  }
+
+  // R306 retry: the receipt (requestId + pre-rotation secret) authorizes a
+  // fresh rotation. The replacement from the lost response is retired with
+  // the store hash it lives in; the receipt keeps the ORIGINAL pre-rotation
+  // hash, so a client that lost every response can retry with its own
+  // secret until the TTL runs out.
+  rotateFromReceipt(identityId, receipt) {
+    return this.store.transaction(() => {
+      const row = this.db.prepare("SELECT revoked_at AS revokedAt, secret_hash AS secretHash, display_name AS displayName FROM agent_identities WHERE identity_id=?").get(identityId);
+      if (!row) fail(404, "identity_not_found", "No such agent identity");
+      if (row.revokedAt !== null) fail(409, "identity_revoked", "This identity's secret is revoked; it cannot rotate");
+      const newSecret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
+      const next = this.verifierColumns(newSecret);
+      const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
+        .run(next.secretHash, next.fallbackHash, identityId, row.secretHash);
+      if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during rotation; re-read state and retry");
+      const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
+      return { identityId, displayName: row.displayName, secret: newSecret, rotatedAt: this.store.now(), revokedApiKeys, duplicate: true };
+    });
+  }
+
+  // R305-1: a credential-less replay of a redemption that minted the
+  // identity is the client that lost the 201 — the original secret died in
+  // that lost response, so retiring it strands nobody. Rotate a fresh one
+  // and show it in the replay response. The redeem receipt (one-time code
+  // + client requestId) is what authorizes this call, and the scoped-key
+  // revocation keeps the rotation invariant: nothing minted under the dead
+  // secret survives it. Runs inside the caller's redeem transaction.
+  rotateForReplay(identityId) {
+    const row = this.db.prepare("SELECT revoked_at AS revokedAt, secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(identityId);
+    if (!row) fail(404, "identity_not_found", "No such agent identity");
+    if (row.revokedAt !== null) fail(409, "identity_revoked", "This identity's secret is revoked; it cannot rotate");
+    const newSecret = `${IDENTITY_SECRET_PREFIX}${base64url(randomBytes(32))}`;
+    const next = this.verifierColumns(newSecret);
+    const changed = this.db.prepare("UPDATE agent_identities SET secret_hash=?, fallback_secret_hash=?, revoked_at=NULL WHERE identity_id=? AND revoked_at IS NULL AND secret_hash=?")
+      .run(next.secretHash, next.fallbackHash, identityId, row.secretHash);
+    if (changed.changes !== 1) fail(409, "secret_changed", "The secret changed during redemption replay; re-read state and retry");
+    const revokedApiKeys = this.store.agentPlugin ? this.store.agentPlugin.revokeApiKeysForIdentity(identityId) : 0;
+    // The replay rotated from a one-time-code receipt, not from the
+    // identity credential: any earlier rotation receipt is stale now.
+    this.db.prepare("DELETE FROM agent_identity_rotation_receipts WHERE identity_id=?").run(identityId);
+    return { secret: newSecret, rotatedAt: this.store.now(), revokedApiKeys };
   }
 
   // Owner-only: revoke an identity secret. The secret stops authenticating
@@ -949,6 +1073,9 @@ export class AgentIdentities {
       // after the leak response, and the revoked secret cannot unsubscribe.
       const disabledWebhooks = this.store.agentPlugin?.disableWebhooksForIdentity
         ? this.store.agentPlugin.disableWebhooksForIdentity(identityId) : 0;
+      // Revoke is final: no receipt may rotate a retired secret back to
+      // life (landing lane, 13518).
+      this.db.prepare("DELETE FROM agent_identity_rotation_receipts WHERE identity_id=?").run(identityId);
       return { identityId, displayName: identity.displayName, revoked: true, revokedAt, revokedApiKeys, disabledWebhooks };
     });
   }

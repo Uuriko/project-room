@@ -18,6 +18,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
 import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
+import { canonicalLane } from "./bounty-escrow.mjs";
 import { ServiceError } from "./store.mjs";
 import {
   ACTIONS,
@@ -32,18 +33,19 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.5.0",
+  version: "1.6.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
     + "stitch data, inbox handoff packets, SLA breach alerts, channel update journals, account setup answers, "
-    + "terms-of-service acceptance, bounty payment journal entries, "
+    + "terms-of-service acceptance, "
     + "and profile data. Guest invites, share links, "
     + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
     + "and their messages and files are purged. Security audit rows, inbox/email "
     + "command receipts, abuse "
-    + "reports, operator unpublish records, and "
+    + "reports, operator unpublish records, bounty payment journal "
+    + "entries, and "
     + "the deactivated account tombstone are retained under legal hold; "
     + "room history already shared with other members is room-owned and is "
     + "not rewritten. A shared room with other members and no other owner "
@@ -66,7 +68,6 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
     Object.freeze({ category: "oauth_tokens", description: "Third-party OAuth grants (authorization codes, access and refresh tokens) are deleted and revoked; connectors lose access immediately." }),
     Object.freeze({ category: "analytics", description: "Analytics events attributed to the account (analytics_events) are permanently deleted." }),
-    Object.freeze({ category: "bounty_journal", description: "Bounty payment journal entries attributed to the account (bounty_journal) are permanently deleted." }),
     Object.freeze({ category: "profile", description: "The account row is deactivated (active=0), its auth epoch is rotated so no residual credential can authenticate, and display name / avatar are scrubbed." }),
   ]),
   retained: Object.freeze([
@@ -76,6 +77,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "unpublish_records", reason: "public_unpublish rows are the live unpublish state consulted by the public read model; deleting them would re-expose unpublished content." }),
     Object.freeze({ category: "profile_tombstone", reason: "The account id remains as a deactivated tombstone (active=0, profile scrubbed) so retained audit rows stay attributable. It can never sign in again." }),
     Object.freeze({ category: "room_history", reason: "Room events already shared with other members (messages, work history) are room-owned history and are not rewritten when another owner remains; only the member binding is removed. Sole ownership of a shared room blocks deletion until that ownership is transferred." }),
+    Object.freeze({ category: "bounty_journal", reason: "bounty_journal entries are the room's tamper-evident payment ledger (#3550): every entry is one leg of a two-account movement, hash-chained to the account's other entries and cited by counterparties' signed receipts. Deleting one account's legs would orphan the counterparty legs, break the hash chain and the conservation audit, and void those receipts. Entries stay in place, attributed only to the deactivated account tombstone — profile scrubbed, credentials and memberships purged — like the retained audit rows." }),
   ]),
 });
 
@@ -99,6 +101,20 @@ const countDerivedInbox = (store, accountId) => DERIVED_INBOX_TABLES
 // maps the account to its member id in each room.
 const memberBindings = (store, accountId) =>
   store.db.prepare("SELECT room_id, member_id FROM member_accounts WHERE account_id=?").all(accountId);
+
+// #3550: journal legs attributed to the account = rows keyed by the account
+// id itself plus rows keyed by the canonical ledger lane of every room
+// membership the account holds (escrow writes legs under
+// canonicalLane(member_id), not under the login account id).
+const countJournalLegs = (store, accountId) => {
+  const db = store.db;
+  if (!tableExists(db, "bounty_journal")) return 0;
+  const lanes = new Set([accountId]);
+  for (const { member_id: memberId } of memberBindings(store, accountId)) lanes.add(canonicalLane(memberId));
+  const placeholders = [...lanes].map(() => "?").join(",");
+  return db.prepare(`SELECT count(*) AS n FROM bounty_journal WHERE account_id IN (${placeholders})`)
+    .get(...lanes)?.n ?? 0;
+};
 
 const countMemberIssuedInvites = (store, accountId) => {
   const db = store.db;
@@ -425,14 +441,20 @@ export function inventoryFromStore(store, accountId, rooms = null) {
     analytics: {
       itemCount: countWhereIfExists(store, "analytics_events", "account_id", accountId),
     },
-    // WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge
-    // deletes for account targets (purge-registry.mjs, action "delete")
-    // survived self-serve deletion. Purge them like every other
-    // account-owned row; nothing here is a legal-hold category.
-    // (direct_channel_sends, quarantine_thread_splits, spam_quarantine are
-    // Fo's #2229 territory — folded into derived_inbox there, not duplicated.)
+    // #3550: the bounty journal is RETAINED under legal hold, not purged.
+    // #2737 (WAVE-500 G1) deleted the account's legs to mirror the operator
+    // purge, but every journal entry is one leg of a two-account movement:
+    // deleting one side orphaned the counterparty legs, broke the
+    // per-account hash chain and the conservation audit, and voided signed
+    // receipts citing the entries. Like the inbox command receipts above,
+    // the journal is a tamper-evident ledger other members' proofs depend
+    // on; the legs stay in place, attributed only to the deactivated
+    // account tombstone. (The operator purge registry is unchanged: an
+    // operator room purge still removes the room's whole ledger.)
     bounty_journal: {
-      itemCount: countWhereIfExists(store, "bounty_journal", "account_id", accountId),
+      itemCount: countJournalLegs(store, accountId),
+      legalHold: true,
+      legalHoldReason: "Bounty payment journal entries are the room's tamper-evident payment ledger: each entry is one leg of a two-account movement, hash-chained per account and cited by counterparties' signed receipts. Deleting them would orphan counterparty legs and break the chain, so they are retained, attributed only to the deactivated account tombstone.",
     },
     // SEC-04: handoff packets, SLA alerts, and channel journals carry private
     // thread content and metadata keyed by account.
@@ -629,11 +651,11 @@ const EXECUTORS = {
   },
   analytics: (store, accountId) =>
     deleteWhereIfExists(store, "analytics_events", "account_id", accountId),
-  // WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge
-  // deletes for account targets (purge-registry.mjs, action "delete").
-  // Tables are created by their own modules, so skip any this store lacks.
-  bounty_journal: (store, accountId) =>
-    deleteWhereIfExists(store, "bounty_journal", "account_id", accountId),
+  // #3550: bounty_journal deliberately has NO executor. The category is
+  // retained under legal hold (see RETENTION_POLICY / the inventory), so
+  // executeAccountDeletion never runs a purge step for it. Do not re-add a
+  // delete here: removing one account's journal legs orphans its
+  // counterparties' legs and breaks the journal hash chain.
   profile: (store, accountId) => {
     return store.db.prepare(`UPDATE accounts SET active=0, auth_epoch=auth_epoch+1,
       display_name=NULL, avatar_url=NULL, onboarded=1 WHERE id=?`).run(accountId).changes;

@@ -409,5 +409,8 @@ export default {
   "entry.signedOut": "Not signed in",
   "entry.connection": "Not connected · sign in required",
   "entry.refresh": "Refresh connection",
-  "result.discuss": "Discuss result"
+  "result.discuss": "Discuss result",
+  "record.invalidView": "Choose a supported record view.",
+  "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
+  "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>"
 };

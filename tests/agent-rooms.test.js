@@ -633,7 +633,7 @@ test("room-create kind 422 teaches the allowed kinds (RC-2026-09-18-021)", async
 // #597/#643: the agent owner administers by ID on its identity bearer —
 // reports, access review, diagnostics, agent connections, share links —
 // while a non-owner agent member is denied on each. Guest-agent mint passes
-// the owner gate but stays account-bound (403 account_session_required).
+// the owner gate but stays account-bound (403 guest_invite_account_session_required, #3432).
 test("HTTP: agent owner administers by ID; non-owner agent is denied", async t => {
   const { store, post, origin } = await httpFixture(t);
   const get = (path, token) => fetch(`${origin}${path}`, {
@@ -665,7 +665,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
     requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(guestMint.status, 403);
-  assert.equal(guestMint.body?.error?.code, "account_session_required");
+  assert.equal(guestMint.body?.error?.code, "guest_invite_account_session_required");
   // A non-owner agent member: denied on every admin surface.
   const other = await post("/room/api/agent-identities", { data: { displayName: "Other Agent" } });
   store.identities.link(ownerSecret, "owner-den", {
@@ -679,7 +679,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
     requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(otherMint.status, 403);
-  assert.notEqual(otherMint.body?.error?.code, "account_session_required");
+  assert.notEqual(otherMint.body?.error?.code, "guest_invite_account_session_required");
 });
 
 test("the auto-claimed starter task carries the retention ack with the 24h SLA", async t => {
