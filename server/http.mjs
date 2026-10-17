@@ -5165,9 +5165,21 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const tail = Number(params.get("tail"));
           return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), store.redactionMessages(roomId)));
         }
+        // B4 agent read-path: server-side type/mentions filters + an opt-in
+        // compact shape. With none of the new parameters present the
+        // response is byte-identical to the unfiltered read.
+        const compactParam = params.get("compact");
+        if (compactParam !== null && !["1", "0", "true", "false"].includes(compactParam)) {
+          reject(422, "invalid_event_cursor", "compact must be 1 or 0");
+        }
+        const typeParam = params.get("type");
         return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"), expectedSessionBinding: fence }), store.redactionMessages(roomId)));
+          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"),
+            types: typeParam === null ? null : typeParam.split(",").map(part => part.trim()).filter(part => part.length > 0),
+            mentions: params.get("mentions"),
+            compact: compactParam === "1" || compactParam === "true",
+            expectedSessionBinding: fence }), store.redactionMessages(roomId)));
       }
       if (route === "agent-inbox" && req.method === "GET") {
         // RC-2026-09-18-012: agent-scoped unified inbox. Agent members only
@@ -5180,11 +5192,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!granted) reject(403, "insufficient_scope", "API key lacks the inbox:read scope");
         }
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && (!/^[1-9]\d*$/.test(params.get("limit")) || Number(params.get("limit")) > 200))
-          reject(422, "invalid_inbox_selection", "Choose a limit of 1..200");
+        if ([...params.keys()].some(key => !["limit", "after", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("limit") && (!/^[1-9]\d*$/.test(params.get("limit")) || Number(params.get("limit")) > 200)
+          || params.has("after") && !/^(0|[1-9]\d*)$/.test(params.get("after")))
+          reject(422, "invalid_inbox_selection", "Choose a limit of 1..200 and an after of 0 or more");
         return json(res, 200, store.agentInbox(selected.token, roomId, {
-          limit: params.has("limit") ? Number(params.get("limit")) : 50, expectedSessionBinding: fence }));
+          limit: params.has("limit") ? Number(params.get("limit")) : 50,
+          after: params.has("after") ? Number(params.get("after")) : 0,
+          expectedSessionBinding: fence }));
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
