@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, chmodSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync as rawMkdtempSync, mkdirSync, chmodSync, writeFileSync, rmSync } from 'node:fs';
+import { after as afterAllTests } from 'node:test';
+// TST-04 fixture hygiene: remove every temp dir this file creates.
+const tempDirs = [];
+const mkdtempSync = (prefix, options) => {
+  const dir = rawMkdtempSync(prefix, options);
+  tempDirs.push(dir);
+  return dir;
+};
+afterAllTests(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkSocketDir } from '../bridge/lib/tenants.mjs';

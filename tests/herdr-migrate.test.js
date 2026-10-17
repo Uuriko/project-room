@@ -6,7 +6,18 @@
 
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync as rawMkdtempSync, rmSync } from "node:fs";
+import { after as afterAllTests } from "node:test";
+// TST-04 fixture hygiene: remove every temp dir this file creates.
+const tempDirs = [];
+const mkdtempSync = (prefix, options) => {
+  const dir = rawMkdtempSync(prefix, options);
+  tempDirs.push(dir);
+  return dir;
+};
+afterAllTests(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 

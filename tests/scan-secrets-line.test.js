@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync as rawMkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { after as afterAllTests } from "node:test";
+// TST-04 fixture hygiene: remove every temp dir this file creates.
+const tempDirs = [];
+const mkdtempSync = (prefix, options) => {
+  const dir = rawMkdtempSync(prefix, options);
+  tempDirs.push(dir);
+  return dir;
+};
+afterAllTests(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
