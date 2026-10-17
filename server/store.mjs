@@ -45,7 +45,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -1106,7 +1106,7 @@ function roomSchemaStamp() {
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1844,6 +1844,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      // MSG-2 blocks: rooms parked on an un-replayable event, named for the
+      // operator. Unfenced and additive, like the cursor.
+      this.db.exec(MESSAGES_BACKFILL_BLOCKS_SCHEMA);
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
       }
@@ -2049,23 +2052,40 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ON CONFLICT(singleton) DO UPDATE SET step=excluded.step`).run(next);
     });
     let ran = 0;
+    let backfillBlocked = [];
     while (ran < 2) {
       if (Date.now() > deadline) {
         // A step that finished is not run again on the next tick.
         if (ran > 0) remember(step);
-        return { ran, next: step, budgetExceeded: 1 };
+        return { ran, next: step, budgetExceeded: 1, ...(backfillBlocked.length ? { blocked: backfillBlocked } : {}) };
       }
+      let stepResult;
       try {
-        steps[step][1]();
+        stepResult = steps[step][1]();
       } catch (error) {
         throw tagIntegritySubcheck(error, steps[step][0]);
+      }
+      if (steps[step][0] === "messages_backfill" && Array.isArray(stepResult?.blocked)) {
+        backfillBlocked = stepResult.blocked;
       }
       step = (step + 1) % steps.length;
       ran += 1;
       await yieldBetween();
     }
+    // A newly parked room is surfaced once as a named failure (the block
+    // record carries the room, sequence, event id and error) instead of an
+    // anonymous throw every tick; the step cursor is deliberately not
+    // remembered, so the next tick re-runs this step, finds the room
+    // parked, and advances. Steady-state ticks return the block list in
+    // the result, where the job summary keeps it visible.
+    const freshBlock = backfillBlocked.find(block => block.fresh);
+    if (freshBlock) {
+      throw tagIntegritySubcheck(new Error(
+        `messages backfill blocked in room ${freshBlock.roomId} at sequence ${freshBlock.sequence} (event ${freshBlock.eventId ?? "none"}): ${freshBlock.error}`
+      ), "messages_backfill");
+    }
     remember(step);
-    return { ran, next: step };
+    return { ran, next: step, ...(backfillBlocked.length ? { blocked: backfillBlocked } : {}) };
   }
 
   ensureIntegrityRoomState() {
@@ -4443,6 +4463,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Replacing history may preserve the head id and sequence. Invalidate
       // message replay snapshots and full-record certification explicitly.
       this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+      // A parked room's block described the replaced log; it does not carry.
+      this.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
