@@ -4935,7 +4935,7 @@ $("#main").addEventListener("click", e => {
   // JDOT-COH-NAV end
   if (link.dataset.openMessage) {
     if (narrowSearch.matches && link.closest("#search-results")) { searchCollapsed = true; $("#search-results").hidden = true; }
-    history.replaceState(null, "", recordHref("message", link.dataset.openMessage));
+    pushMessageLink(link.dataset.openMessage);
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
@@ -4952,9 +4952,30 @@ $("#main").addEventListener("click", e => {
     revealRoom();
   }
 });
+// Opening a message link adds a history entry, so phone and browser Back
+// return to the channel, thread and scroll position the person left. Only an
+// opaque ticket goes into history; the view itself stays in memory.
+const messageReturns = new Map();
+function pushMessageLink(id) {
+  const ticket = crypto.randomUUID();
+  messageReturns.set(ticket, { roomId: session?.roomId, channelId: activeChannelId, threadId: currentThreadId, scrollTop: $("#message-list").scrollTop });
+  if (messageReturns.size > 50) messageReturns.delete(messageReturns.keys().next().value);
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomMessageReturn: ticket }, "", location.href);
+  history.pushState({ roomMessageTarget: ticket }, "", recordHref("message", id));
+}
+function restoreMessageReturn() {
+  const view = messageReturns.get(history.state?.roomMessageReturn);
+  if (!view || !state || busy || view.roomId !== session?.roomId) return false;
+  if (view.channelId !== activeChannelId) setActiveChannel(view.channelId);
+  switchThread(view.threadId && conversation.threads.has(view.threadId) ? view.threadId : null);
+  requestAnimationFrame(() => { $("#message-list").scrollTop = view.scrollTop; });
+  return true;
+}
 // History can change the room query as well as the fragment. Those entries
 // need popstate dispatch even when the browser does not emit hashchange.
 window.addEventListener("popstate", () => {
+  if (restoreMessageReturn()) return;
   // JDOT-COH-NAV begin
   if (replayWorkNavigation()) return;
   // JDOT-COH-NAV end
