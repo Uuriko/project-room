@@ -18,7 +18,7 @@ import {
 } from "../server/work-item-board.mjs";
 import { availableWorkInRoom } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { updateWork } from "../server/work-claims.mjs";
+import { updateWork, releaseExpired, claimWork } from "../server/work-claims.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const T0 = "2026-10-01T00:00:00.000Z";
@@ -125,6 +125,94 @@ test("mapping: an expired lease reads as unclaimed with the scope cleared", () =
   assert.equal(row.owner, null);
   assert.deepEqual(row.files, []);
   assert.equal(row.leaseExpiresAt, null);
+});
+
+test("mapping: working with a lapsed lease -> in_progress under the holder, lease-free (#3711)", () => {
+  // The item door still shows the holder working (claim liveness there is
+  // per-event; no claim.renewed has arrived), so the card stays
+  // in_progress under the holder — but the lapsed lease itself must not
+  // be copied onto the row: the kernel's lease-free shape is both lease
+  // fields null, and a lease-free row is never swept. The claim's scope
+  // still rides, exactly as it does for a live claim.
+  const row = boardClaimForWorkItem(
+    item({ state: "working", claim: liveClaimFields({ expiresAt: at(5 * H) }) }),
+    factsFor([]), { nowMs: NOW });
+  assert.equal(row.state, "in_progress");
+  assert.equal(row.owner, "worker");
+  assert.equal(row.claimedAt, at(2 * H));
+  assert.equal(row.leaseStartAt, null);
+  assert.equal(row.leaseExpiresAt, null);
+  assert.deepEqual(row.files, ["server/**"]);
+  assert.equal(row.repo, "Uuriko/project-room");
+});
+
+test("mapping: blocked with a lapsed lease -> blocked under the holder, lease-free (#3711)", () => {
+  const blockEvent = ev("work.blocked", 4 * H, "worker", { workItemId: "task-a", reason: "waiting on API" });
+  const blocked = item({
+    state: "blocked", claim: liveClaimFields({ expiresAt: at(5 * H) }),
+    blocker: { reason: "waiting on API", nextAction: "ping them", eventId: blockEvent.id },
+  });
+  const row = boardClaimForWorkItem(blocked, factsFor([blockEvent]), { nowMs: NOW });
+  assert.equal(row.state, "blocked");
+  assert.equal(row.owner, "worker");
+  assert.equal(row.leaseStartAt, null);
+  assert.equal(row.leaseExpiresAt, null);
+  assert.ok(row.premiseFlag);
+});
+
+test("projection + sweep: a lapsed item lease never oscillates and never re-emits lease_expired (#3711)", () => {
+  const working = item({ state: "working", claim: liveClaimFields({ expiresAt: at(5 * H) }) });
+  let row = boardClaimForWorkItem(working, factsFor([]), { nowMs: NOW });
+  let releases = 0;
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    const [swept] = releaseExpired([row], NOW + cycle * H);
+    if (swept.state === "unclaimed") releases += 1;
+    assert.equal(swept.state, "in_progress", `cycle ${cycle}: sweep must not release a lease-free projection`);
+    assert.equal(swept.owner, "worker");
+    assert.equal((swept.history ?? []).filter(stamp => stamp.action === "lease_expired").length, 0);
+    const reprojected = boardClaimForWorkItem(working, factsFor([]), { nowMs: NOW + cycle * H, existing: swept });
+    assert.ok(sameClaimRow(reprojected, row), `cycle ${cycle}: re-projection must be idempotent`);
+    row = reprojected;
+  }
+  assert.equal(releases, 0);
+});
+
+test("projection + sweep: a lease that lapses AFTER projection is released exactly once (#3711)", () => {
+  // Projected while live, the lease is real: when it lapses the sweep
+  // releases the stored row once (one lease_expired). Every later
+  // re-projection is lease-free, so the same lapse can never emit again
+  // and the row settles instead of oscillating.
+  const working = item({ state: "working", claim: liveClaimFields({ expiresAt: at(12 * H) }) });
+  let row = boardClaimForWorkItem(working, factsFor([]), { nowMs: NOW });
+  assert.equal(row.leaseExpiresAt, at(12 * H));
+  let releases = 0;
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    const [swept] = releaseExpired([row], NOW + 3 * H + cycle * H);
+    if (row.state !== "unclaimed" && swept.state === "unclaimed") releases += 1;
+    row = boardClaimForWorkItem(working, factsFor([]), { nowMs: NOW + 3 * H + cycle * H, existing: swept });
+    assert.equal(row.state, "in_progress");
+    assert.equal(row.leaseExpiresAt, null);
+  }
+  assert.equal(releases, 1);
+});
+
+test("projection: a live lease projects held — sweep leaves it and a second member cannot claim it (#3711)", () => {
+  const row = boardClaimForWorkItem(
+    item({ state: "working", claim: liveClaimFields() }),
+    factsFor([]), { nowMs: NOW });
+  assert.equal(row.state, "in_progress");
+  assert.equal(row.owner, "worker");
+  assert.equal(row.leaseExpiresAt, at(30 * H));
+  const [swept] = releaseExpired([row], NOW);
+  assert.equal(swept.state, "in_progress");
+  assert.equal(swept.owner, "worker");
+  assert.throws(() => claimWork(row, "someone-else", { now: NOW }), /already in_progress/);
+  const claimed = boardClaimForWorkItem(
+    item({ state: "accepted", claim: liveClaimFields() }),
+    factsFor([]), { nowMs: NOW });
+  assert.equal(claimed.state, "claimed");
+  assert.equal(claimed.leaseExpiresAt, at(30 * H));
+  assert.throws(() => claimWork(claimed, "someone-else", { now: NOW }), /held by worker/);
 });
 
 test("mapping: working read-mode item (no claim exists) -> in_progress under its accountable member", () => {
@@ -595,8 +683,8 @@ test("sync: the mirror's caps and occupied-successor refusal still roll commands
   assert.equal(f.item("task-cap-b").claim, null); // the command rolled back, projection included
 
   // Occupied successor: a live board-native claim sits at the -next id.
-  const { createWork, claimWork } = await import("../server/work-claims.mjs");
-  const foreign = claimWork(createWork({ id: "task-cap-a-next", title: "Someone else's" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
+  const { createWork, claimWork: claimWorkDirect } = await import("../server/work-claims.mjs");
+  const foreign = claimWorkDirect(createWork({ id: "task-cap-a-next", title: "Someone else's" }, { now: Date.now(), agentId: "owner" }), "owner", { now: Date.now() });
   f.store.workClaims.set("commons", foreign);
   assert.throws(
     () => f.mutate(f.workerKey, "handoff", "work.handoff_recorded", "task-cap-a", {
