@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { openCatchUp, closeCatchUp, openSettings } from "./room-chrome.mjs";
+import { openCatchUp, closeCatchUp, openSettings, ensureSidebarOpen } from "./room-chrome.mjs";
 
 test("recipe strip: catch-up and next-work chips render from committed state; dismissal is local only", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -64,3 +64,69 @@ test("recipe strip: catch-up and next-work chips render from committed state; di
   await strip.screenshot({ path: "test-results/starter-recipe-strip.png" });
   assert.deepEqual(errors, []);
 });
+
+for (const kind of ["work", "request"]) for (const [width, theme] of [[1280, "dark"], [390, "light"]]) {
+  test(`recipe destination ${kind} at ${width}px ${theme} preserves thread drafts and Back`, { timeout: 60000 }, async t => {
+    const f = createAcceptanceFixture({ dmConsent: true });
+    const server = createRoomServer({ store: f.store, streamInterval: 40 });
+    let browser;
+    t.after(async () => {
+      await browser?.close(); server.closeStreams(); server.closeAllConnections();
+      if (server.listening) await new Promise(resolve => server.close(resolve));
+      f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+    });
+    const send = (role, type, data) => f.store.command(f.keys[role], "commons", { id: crypto.randomUUID(), type, data });
+    send("owner", "channel.created", { channelId: "side", name: "side" });
+    send("owner", "message.posted", { messageId: "origin-thread", body: "Keep this discussion", channelId: "side" });
+    send("owner", "message.posted", { messageId: "origin-reply", body: "A reply", replyToId: "origin-thread" });
+    if (kind === "work") send("owner", "work.proposed", { workItemId: "destination-work", title: "Inspect suggested work", definitionOfDone: "Inspected", accountableMemberId: "owner", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false });
+    else send("guest", "message.posted", { messageId: "destination-request", body: "Please inspect this request", toMemberId: "owner", requestKind: "reply" });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    const page = await browser.newPage({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
+    page.setDefaultTimeout(8000);
+    const errors = []; page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page, f.keys.owner);
+    await page.evaluate(value => document.documentElement.dataset.theme = value, theme);
+    await page.locator("#message-input").fill("Room draft stays here");
+    await ensureSidebarOpen(page); await page.locator('[data-channel="side"]').click();
+    await page.locator("#message-input").fill("Channel draft stays here");
+    await page.locator('[data-message-record-id="origin-thread"] [data-message-action="thread"]').click();
+    await page.locator("#message-input").fill("Thread draft stays here");
+    const before = f.store.snapshot(f.keys.owner, "commons").state;
+    await openSettings(page, "room-tools");
+    const selector = `[data-recipe-action="${kind === "work" ? "focus-work" : "open-chat"}"]`;
+    const suggestion = page.locator(selector);
+    await suggestion.focus(); await page.keyboard.press("Enter");
+    const target = page.locator(kind === "work" ? '[data-work-record-id="destination-work"]' : '[data-message-record-id="destination-request"]');
+    await target.waitFor({ state: "visible" });
+    await page.waitForFunction(() => document.activeElement?.matches('[data-work-record-id="destination-work"], [data-message-record-id="destination-request"]'));
+    if (kind === "work") assert.equal(await target.locator("details.work-details").evaluate(node => node.open), true);
+    else assert.equal(await target.locator('[data-message-action="request-answered"]').isVisible(), true);
+    assert.equal(await page.locator("#message-input").inputValue(), "Room draft stays here");
+    assert.equal(await page.locator("#request-mode-bar").isVisible(), false, "inspection does not start an answer");
+    mkdirSync("test-results", { recursive: true });
+    await page.screenshot({ path: `test-results/recipe-${kind}-${theme}.png`, fullPage: true });
+    await page.locator("#work-navigation-return").click();
+    await page.waitForFunction(() => document.querySelector("#message-input").value === "Thread draft stays here");
+    await page.locator("#thread-back").click();
+    assert.equal(await page.locator("#message-input").inputValue(), "Channel draft stays here");
+    assert.deepEqual(f.store.snapshot(f.keys.owner, "commons").state.workItems, before.workItems);
+    assert.deepEqual(f.store.snapshot(f.keys.owner, "commons").state.messages, before.messages);
+    if (kind === "request") {
+      await openSettings(page, "room-tools");
+      const staleControl = await suggestion.evaluate(node => node.outerHTML);
+      send("guest", "reply_request.cancelled", { requestMessageId: "destination-request", expectedRequestRevision: 0, reason: "Resolved elsewhere" });
+      await suggestion.waitFor({ state: "detached" });
+      // Reproduce a retained control clicked after its underlying request changed.
+      await page.locator("#recipe-strip").evaluate((node, html) => node.insertAdjacentHTML("beforeend", html), staleControl);
+      await suggestion.click();
+      assert.equal(await page.locator("#settings-dialog").isVisible(), true);
+      assert.equal(await page.locator("#message-input").inputValue(), "Channel draft stays here");
+      assert.equal(f.store.snapshot(f.keys.owner, "commons").state.replyRequests["destination-request"].status, "cancelled");
+      assert.deepEqual(f.store.snapshot(f.keys.owner, "commons").state.messages, before.messages);
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    assert.deepEqual(errors, []);
+  });
+}

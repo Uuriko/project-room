@@ -1910,7 +1910,7 @@ function recipeChipHtml(r) {
     label = `Next step: ${esc(r.outcome.label)}`;
     action = r.outcome.workItemId
       ? `<button type="button" class="button ghost" data-recipe-action="focus-work" data-work-id="${esc(r.outcome.workItemId)}" aria-label="Open suggested work: ${esc(r.outcome.label)}">Open work</button>`
-      : `<button type="button" class="button ghost" data-recipe-action="open-chat" aria-label="Open suggested request: ${esc(r.outcome.label)}">Open request</button>`;
+      : `<button type="button" class="button ghost" data-recipe-action="open-chat" data-request-id="${esc(r.outcome.requestId)}">Open request</button>`;
   } else {
     label = `"${esc(r.outcome.title ?? r.outcome.workItemId)}" has waited over a day for review`;
     action = `<button type="button" class="button ghost" data-recipe-action="draft-review" data-work-id="${esc(r.outcome.workItemId)}" data-to="${esc(r.outcome.toMemberId)}">Draft a review request</button>`;
@@ -2913,13 +2913,19 @@ $("#recipe-strip").addEventListener("click", event => {
   const control = event.target.closest("[data-recipe-action]");
   if (!control) return;
   const action = control.dataset.recipeAction;
+  if (action === "open-chat" || action === "focus-work") {
+    if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")
+      || client.session !== session || !client.ownsAccountSession()) return;
+    const current = activeRecipes(state, session.member.id).find(recipe => recipe.id === "suggest-next-work");
+    const id = action === "focus-work" ? control.dataset.workId : control.dataset.requestId;
+    if (!id || id !== (action === "focus-work" ? current?.outcome.workItemId : current?.outcome.requestId)) {
+      syncRecipeStrip(); return;
+    }
+    navigateWorkRecord(action === "focus-work" ? "work" : "message", id);
+    return;
+  }
   $("#settings-dialog").close();
   if (action === "open-catch-up") openCatchUp();
-  if (action === "open-chat") { $("#message-input").focus(); }
-  if (action === "focus-work") {
-    const card = document.getElementById(workDomId(control.dataset.workId));
-    card?.scrollIntoView({ block: "nearest", behavior: "instant" }); card?.focus({ preventScroll: true });
-  }
   if (action === "draft-review") {
     const item = state?.workItems?.[control.dataset.workId];
     if (!item) return;
