@@ -90,8 +90,8 @@
     "src/gmail-ui.js": "sha256:3fbd569b20d6065a6f949ae9fbd19f1e5a855248389e9cced604c7e52a239ef4",
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
-    "src/human-experience.css": "sha256:e8156fefde03ebfcab5b3b76affadc50f65f040367a3781fa3f5bfc812d227b0",
-    "src/human-experience.js": "sha256:03e6eb17d58c00fd6bf9dd7100ceecfe49dee2dd4eb738dc72041f7186f82968",
+    "src/human-experience.css": "sha256:434e824703f54e083048e5b92cdb296cd486947384750ee5dc90f4cdf369daa7",
+    "src/human-experience.js": "sha256:6b6cfdef0bbbe86f73cab288310f6aa270edfc164e86ffeb029e3574cd94570b",
     "src/human-push-display.js": "sha256:05ff1c242ec98a3fee2bd677eb924873cb7b664523b3fd8401f81726258dbae6",
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
     "src/inbox-client.js": "sha256:49c5a629886ab5fb6a304be3a5194a2e8b629a2f4a49ca4757522a186514fcdd",
@@ -148,8 +148,8 @@
     "src/work-selectors.js": "sha256:6eb2cf9117fd6b8b8223023f2069d4fe18d2ce30a1ed3142524ea4859f92daf7",
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
-    "strings/en.js": "sha256:756151713c92a9674490b778a9e57477c679618b42a6a031db3dc002c28b6131",
-    "strings/en.json": "sha256:bfacd96974225bffb72dbe49f96ecf5062ecf0c3d4c877a2665265b83cc84864"
+    "strings/en.js": "sha256:fc7173dcf76c1aa71b85cd9d45d337256ae915029219440b76c065a4e1fca6e2",
+    "strings/en.json": "sha256:eb0eabe77af20a45ecc38a11de015e04a12c04ffede581c3f32aa9c706f2cd98"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:3d49dedbf8f41adf17b4760a6a5de03d617160d13fa4f38989c29c2754662c7b",
