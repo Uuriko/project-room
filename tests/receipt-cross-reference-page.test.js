@@ -60,7 +60,7 @@ function seedReadTables(db) {
     id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL,
     origin_room_id TEXT, room_id TEXT, room_title TEXT,
     agents_json TEXT NOT NULL, humans_json TEXT NOT NULL,
-    pull_request TEXT, merged_at TEXT, hashes_json TEXT NOT NULL,
+    pull_request TEXT, merged_at TEXT, verification_state TEXT, hashes_json TEXT NOT NULL,
     at TEXT NOT NULL, start_href TEXT NOT NULL)`);
 }
 
