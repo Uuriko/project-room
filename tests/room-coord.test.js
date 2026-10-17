@@ -158,8 +158,10 @@ test('done closes a claimed or blocked item by moving it through in progress', a
 
   await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member' });
   await claimAndVerify(owner, 'needs-review', { memberId: 'owner', leaseHours: 1 });
+  // #3546: the close command cannot finish reviewed work — it must be
+  // delivered, then verified by its reviewer.
   await assert.rejects(closeClaim(owner, 'needs-review', { memberId: 'owner', note: 'shipped' }),
-    error => error instanceof CoordError && error.code === 'work_review_rejected');
+    error => error instanceof CoordError && error.code === 'work_not_delivered');
   assert.equal((await owner.workClaimGet('needs-review')).state, 'in_progress');
 });
 

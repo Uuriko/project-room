@@ -245,9 +245,12 @@ function downgradeTo(fixture, version) {
 // work_item_board_backfill is excluded for the same reason: it is
 // decision-#10 migration bookkeeping that opening a current store writes
 // (its per-room marker), not user data this schema migration must
-// preserve byte-identically. sqlite internal tables carry no user data.
+// preserve byte-identically. work_item_board_divergence is the same
+// class: the #3607 divergence snapshot the open-time pass (re)computes
+// per room, derived monitor state rather than user data. sqlite
+// internal tables carry no user data.
 function snapshot(db, stripAttachmentMessageId) {
-  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'room_schema_stamp' AND name != 'work_item_board_backfill' ORDER BY name").all().map(r => r.name);
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != 'room_schema_stamp' AND name != 'work_item_board_backfill' AND name != 'work_item_board_divergence' ORDER BY name").all().map(r => r.name);
   const out = {};
   for (const table of tables) {
     let columns = "*";

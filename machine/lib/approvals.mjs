@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { APPROVAL_TTL_MS } from "./protocol.mjs";
+import { APPROVAL_TTL_MS, ERROR } from "./protocol.mjs";
 import { listEvents, postMessage } from "./room.mjs";
 import { configHome } from "./config.mjs";
 
@@ -105,4 +105,37 @@ export async function takeApproval({ home = configHome(), origin, roomId, secret
   current.used = true;
   save(home, latest);
   return { ok: true };
+}
+
+// Research r6 (R327-1): one wake-based wait for an approval decision. take()
+// scans the room once up front (catches a decision that landed while the
+// machine was down), then again when the wake poll reports a release or every
+// scanMs as a safety net for an answer the server raised no wake for.
+// Research r7: stopped() is checked around every wait so a room Pause that
+// lands mid-wait ends the wait at once (the server releases the held poll).
+export async function waitForDecision({ take, poll = null, clock = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)), deadline, scanMs = 5000, stopped = () => false }) {
+  const decided = taken => taken?.ok === true || taken?.reason === ERROR.APPROVAL_DENIED;
+  let taken = await take();
+  if (decided(taken)) return { taken };
+  let lastScan = clock(), backoff = 250;
+  while (clock() <= deadline && !stopped()) {
+    const remaining = Math.max(0, deadline - clock());
+    if (!poll) {
+      await sleep(Math.min(40, remaining));
+      taken = await take();
+      if (decided(taken)) return { taken };
+      continue;
+    }
+    const asked = clock();
+    const page = await poll(Math.min(remaining, scanMs));
+    if (stopped()) break;
+    const released = Boolean(page?.ok) && page.value?.timedOut === false;
+    if (released || clock() - lastScan >= scanMs) {
+      lastScan = clock();
+      taken = await take();
+      if (decided(taken)) return { taken };
+    }
+    if (!released && clock() - asked < 50) { await sleep(Math.min(backoff, Math.max(remaining, 1))); backoff = Math.min(backoff * 2, 1000); }
+  }
+  return { taken: null };
 }

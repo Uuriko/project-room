@@ -32,12 +32,12 @@ const runScript = (rel, args, { env = {}, input = "" } = {}) => new Promise((res
 // ---- L-33: NaN failureThreshold fails closed to the default breaker ----
 
 
-// ---- L-34: reactions on deleted messages are refused ----
+// ---- L-34: votes on deleted polls are refused ----
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-test("L-34: setMessageReaction on a deleted message throws 'Message was deleted'", () => {
+test("L-34: poll.voted on a deleted poll throws 'Message was deleted'", () => {
   const dir = mkdtempSync(join(tmpdir(), "lowd-l34-"));
   try {
     const store = new RoomStore(join(dir, "room.sqlite"));
@@ -46,10 +46,10 @@ test("L-34: setMessageReaction on a deleted message throws 'Message was deleted'
     let n = 0;
     const send = (type, data) =>
       store.command(owner, "commons", { id: `e${(n += 1)}`, type, data });
-    send(T.MESSAGE_POSTED, { messageId: "m1", body: "hello" });
+    send(T.MESSAGE_POSTED, { messageId: "m1", body: "Pick", kind: "poll", poll: { question: "Pick", options: ["a", "b"] } });
     send(T.MESSAGE_DELETED, { messageId: "m1", expectedMessageRevision: 0 });
     assert.throws(
-      () => send(T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "👍", active: true }),
+      () => send(T.POLL_VOTED, { messageId: "m1", option: 0, active: true }),
       /Message was deleted/,
     );
   } finally { rmSync(dir, { recursive: true, force: true }); }
