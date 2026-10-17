@@ -50,7 +50,10 @@ function matchingRows(db, entry, kind, id) {
     params.push(id);
   }
   if (!parts.length) return 0;
-  if (RETIRED_TABLES.includes(entry.table) && !db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(entry.table)) return 0;
+  // Mirrors purgeTable in server/operator-purge.mjs: an optional entry
+  // (retired tables, lazy-additive tables like the #3345 wake-accounting
+  // pair) counts as zero rows while the table is absent.
+  if (entry.optional && !db.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?").get(entry.table)) return 0;
   return db.prepare(`SELECT count(*) AS n FROM ${entry.table} WHERE ${parts.join(" OR ")}`).get(...params).n;
 }
 

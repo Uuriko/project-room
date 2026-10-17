@@ -70,6 +70,8 @@ import { accessReviewReport } from "./access-review.mjs";
 import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests, REQUEST_TTL_MS } from "./access-requests.mjs";
 import { attentionReport } from "./owner-attention.mjs";
+import { ownerOverview } from "./owner-overview.mjs";
+import { nodeJobHealth } from "./jobs.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
@@ -2179,6 +2181,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
         return json(res, 200, store.accountRooms(token, binding, { after: url.searchParams.get("after") }));
+      }
+      if (url.pathname === "/api/owner/overview" && req.method === "GET") {
+        // #3342 Owner Cockpit slice 1: account-scoped cross-room Decisions +
+        // Exceptions read model. Same auth funnel as /api/account-rooms
+        // (account session cookie + session binding); the fan-out is in
+        // server/owner-overview.mjs.
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
+        if (url.searchParams.getAll("window").length > 1) reject(422, "invalid_overview_query", "window must be a single value");
+        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth: nodeJobHealth }, token, binding, Date.now(),
+          { window: url.searchParams.get("window") ?? "7d", after: url.searchParams.get("after") }));
       }
       if (url.pathname === "/api/account-rooms" && req.method === "POST") {
         // Issue #6 A2: create a room for the signed-in account. Account session
@@ -5070,6 +5083,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
+        // Research r7, opt-in: ROOM_PAUSE_BLOCKS_POSTS=1 makes an owner's
+        // Pause also stop the paused member from POSTING in that room. A
+        // pause the member set on itself never blocks. Default off: blocking
+        // posts is an owner/product decision, not part of the pause default.
+        if (process.env.ROOM_PAUSE_BLOCKS_POSTS === "1" && auth?.member) {
+          const memberPause = store.wakeQueue.pauseStatus(roomId, auth.member.id);
+          if (memberPause && memberPause.heldBy !== "self") reject(423, "member_paused", "The room owner paused this member. Posting resumes when the owner resumes it.");
+        }
         // RC-2026-09-23-100: per-guest message token bucket (chat spam
         // mitigation). The per-request scope gate in RoomStore#command is
         // the authority boundary; this is volume control.

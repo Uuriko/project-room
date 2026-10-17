@@ -532,5 +532,13 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // delivered state exact and nothing replays.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null && hasMore ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
+  // R327-1 (r6): tell a paused agent it is paused. Items stay readable (this
+  // is a read surface) but carry paused:true; `paused` names each paused room
+  // and who holds the pause.
+  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p => !allowedRooms || allowedRooms.includes(p.roomId)) ?? [];
+  if (pausedRooms.length) {
+    const held = new Set(pausedRooms.map(p => p.roomId));
+    for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
+  }
+  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
 }

@@ -11,7 +11,6 @@ A `KNOWN` entry is an already-triaged miss. The suite stays green while it is li
 | `tests/qa2/agent-journeys.test.js` | the task id in `KNOWN` (it now passes `pass^k`) and/or `KNOWN_UNDISCOVERABLE` (the route is now in public discovery) |
 | `scripts/qa2/authz-matrix.mjs` | the role in that action's `known` list |
 | `scripts/qa2/baselines/mcp-conformance-baseline.yml` | the scenario id (a stale baseline entry fails the conformance run) |
-| `.github/workflows/qa2-synthetic.yml` | the matching `--known` waiver on the public-pages step, and the `J5` exception on the journey step once the production journey passes J5 |
 | `scripts/qa2/abuse-guards.mjs` | nothing to delete: this checker has no waiver list, so a guard that stops refusing fails the run |
 
 Today: J5 passes and is discoverable (#1304 points room-create `next` at `/agent-invites`), so it is not in `KNOWN` or `KNOWN_UNDISCOVERABLE`. J11 is discoverable (#1310 puts `room.archived` on the public agent card), so it is not in `KNOWN_UNDISCOVERABLE`. J8 is still undiscoverable (work-claim create and states are not in the public corpus). The owner-reassign waiver (`QA2-F`) is gone: #1303 and #1309 let the room owner reassign or release any claim, and creating a claim needs the owner or a contribute, review, or collaborate profile, so a chat agent and a share-link guest are denied. Production had not deployed #1304 when this landed (`sourceRevision` `22adbde4`), so the synthetic journey step still accepts a J5 miss until that deploy is live; delete the exception once the production journey passes J5. #1313 documented JSON-RPC 4xx for `/mcp`, `/room/mcp`, and `/a2a` so those bodies match the published schema. `scripts/qa2/fuzz.sh` passed the hard gate on that tree (3066 generated, 3066 passed, seed 20261001), and the nightly fuzz job is that hard gate. Spec drift stays in the uploaded artifact.
@@ -115,6 +114,5 @@ QA2_E2E=1 node --test --test-concurrency=1 tests/qa2/*.test.js
 | --- | --- | --- |
 | `qa2-agent-eval.yml` | pull requests that touch `server/`, `src/`, or `deploy/` (and the QA2 scripts, tests, OpenAPI, and package manifests), plus nightly at 09:41 UTC | throwaway local server |
 | `qa2-fuzz.yml` | nightly at 10:23 UTC, and manual dispatch | throwaway local server |
-| `qa2-synthetic.yml` | every 6 hours at minute 47, and manual dispatch | `https://room.trydemigod.com` |
 
-The production run is the stall probe, the public-pages gate (with the waivers listed in the workflow), and one synthetic journey. That journey archives its room and revokes its identities before it exits.
+Production is covered by `live-smoke.yml` and the 5-minute external probe Worker; the former 6-hour qa2-synthetic job was removed after failing every run.

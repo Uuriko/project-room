@@ -33,6 +33,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
+  "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
   "room_assistant_config", "room_assistant_runs", "room_assistant_ops",
   "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests", // Additive private record-only rails; older writers have no routes.
@@ -436,6 +437,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
   "operator_actions",
+  // wake_queue_pause_by (R327-1: who set a member's wake pause) is purely
+  // additive and intentionally NOT fenced, same as wake_queue_pause's sibling
+  // registries: the patch ships it as a separate schema string (the
+  // guest_selfserve pattern) so stores from the pre-pause-by window verify
+  // all-or-nothing under allowAbsent without forcing operator reconciliation,
+  // and WakeQueue.verifySchema() on open is the integrity gate.
+  "wake_queue_pause_by",
   // squads (plan-squads): named groups with goal, roster, and thread channel.
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
@@ -498,17 +506,22 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
 // agent_wake_room_activity (room-attributed listener activity), created
 // lazily on first room-scoped poll/heartbeat.
 const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
+// Wake-reliability accounting (#3345, server/wake-metrics.mjs): counters +
+// loss journal, purely additive, created lazily on first recorded outcome;
+// kind/timestamp/subject only, never content. Older writers have no code
+// path to them.
+const WAKE_METRICS_ADDITIVE_TABLES = Object.freeze(["agent_wake_counters", "agent_wake_failures"]);
 // runOnce replay journal (server/run-once.mjs): purely additive, created
 // lazily on first table-backed runOnce() use.
 const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);
 // workItems -> board claims backfill marker (server/work-item-board.mjs,
 // decision #10): purely additive, created lazily on first backfill pass;
 // older writers have no code path to it.
-const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill"]);
+const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill", "work_item_board_divergence"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
