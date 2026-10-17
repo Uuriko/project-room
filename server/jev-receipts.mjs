@@ -1,3 +1,14 @@
+// VACUOUS-BY-DESIGN — LABEL VERDICT (find:jev-receipts-001, T-4):
+// this gate is INTENTIONALLY unable to fail anything. `enforced: false`
+// is hard-coded below, the wiring accepts every receipt regardless of
+// the score, and the thresholds are proposed, not enforced. That is the
+// design, not a defect: the score exists to OBSERVE would-be verdicts
+// in shadow mode before anyone trusts them. Do not cite a jev receipt
+// score as a gate result, a verification, or evidence a receipt was
+// checked. Graduating this gate (making it enforce) is a product
+// decision that must change `enforced`, the wiring, and this header
+// together — it is not a bug fix.
+//
 // Jev-harness receipt-acceptance gate (shadow mode first).
 //
 // The second Jev decision edge: accepting a work receipt. When a work claim

@@ -62,3 +62,22 @@ test("ready latency past three times the baseline is inconclusive after one retr
   assert.deepEqual(verdict.inconclusive, ["ready"]);
   assert.deepEqual(verdict.failures, []);
 });
+
+test("a measured path whose baseline median is null FAILS as no-baseline (vacuous guard hardened, find:baseline-001)", () => {
+  // agentMcp ships in the committed baseline with medianMs: null — before
+  // T-4 the Number.isFinite guard silently skipped its comparison, so no
+  // measured time, however slow, could ever fail.
+  const verdict = evaluateGate(runs("agentMcp", {
+    closeReachable: false, firstPost: { t: 999999, calls: 99 }, firstClose: null, steps: [],
+  }), baseline);
+  assert.equal(verdict.pass, false);
+  assert.equal(verdict.failures[0].path, "agentMcp");
+  assert.equal(verdict.failures[0].reason, "no-baseline");
+});
+
+test("a measured path with no baseline entry is reported ungated, not silently skipped", () => {
+  const verdict = evaluateGate(runs("brandNewPath", {
+    closeReachable: false, firstPost: { t: 100, calls: 1 }, firstClose: null, steps: [],
+  }), baseline);
+  assert.deepEqual(verdict.ungated, ["brandNewPath"]);
+});

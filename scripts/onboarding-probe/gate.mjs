@@ -2,6 +2,15 @@
 // A path fails when it is more than 20% slower, uses more than 1.2 times the
 // calls, or loses a step the baseline could reach. Exactly 20% still passes.
 // A newly reachable close is an improvement. Ready-latency jitter is inconclusive.
+//
+// Vacuity hardening (T-4, find:baseline-001): a baseline entry whose
+// medianMs is null used to disable the comparison silently (the
+// Number.isFinite guard just skipped it), so agentMcp/agentCode could
+// never fail. Now a measured path whose baseline median is null FAILS
+// with reason "no-baseline" — the remedy is to measure a real baseline
+// or remove the path from the gate. A measured path with no baseline
+// entry at all is reported in `ungated` (and printed by the CLI)
+// instead of being silently skipped.
 import { appendFileSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -38,8 +47,9 @@ export function evaluateGate(runs, baseline, ready = {}) {
   const failures = [];
   const improvements = [];
   const inconclusive = [];
+  const ungated = [];
   if (ready.inconclusive) {
-    return { pass: true, failures, improvements, inconclusive: ["ready"] };
+    return { pass: true, failures, improvements, inconclusive: ["ready"], ungated };
   }
   const byPath = new Map();
   for (const run of runs) {
@@ -50,7 +60,7 @@ export function evaluateGate(runs, baseline, ready = {}) {
   }
   for (const [name, samples] of byPath) {
     const baselinePath = baseline.paths?.[name];
-    if (!baselinePath) continue;
+    if (!baselinePath) { ungated.push(name); continue; }
     const metrics = samples.map(pathMetric);
     if (metrics.every(item => item.status === "not_available")) {
       inconclusive.push(name);
@@ -70,6 +80,10 @@ export function evaluateGate(runs, baseline, ready = {}) {
       failures.push({ path: name, step: "firstClose", reason: "unreachable" });
       continue;
     }
+    if (!Number.isFinite(baselinePath.medianMs)) {
+      failures.push({ path: name, step: baselinePath.step, reason: "no-baseline" });
+      continue;
+    }
     const current = median(usable.map(item => item.t));
     const calls = median(usable.map(item => item.calls));
     const step = usable[0].step;
@@ -80,7 +94,7 @@ export function evaluateGate(runs, baseline, ready = {}) {
       failures.push({ path: name, step, reason: "more-calls" });
     }
   }
-  return { pass: failures.length === 0, failures, improvements, inconclusive };
+  return { pass: failures.length === 0, failures, improvements, inconclusive, ungated };
 }
 
 function readJson(file) {
@@ -98,6 +112,7 @@ if (isMain) {
   const verdict = evaluateGate(runs, baseline, { inconclusive: result.ready?.inconclusive === true });
   const line = verdict.pass ? "onboarding probe gate: pass" : "onboarding probe gate: fail";
   console.log(line);
+  if (verdict.ungated?.length) console.log(`UNGATED (no baseline entry — not compared): ${verdict.ungated.join(", ")}`);
   if (verdict.inconclusive.length) console.log(`inconclusive: ${verdict.inconclusive.join(", ")}`);
   for (const failure of verdict.failures) console.log(`fail ${failure.path} ${failure.step} ${failure.reason}`);
   for (const name of verdict.improvements) console.log(`improved ${name}`);

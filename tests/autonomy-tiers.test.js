@@ -152,6 +152,14 @@ test("enforcement: humans are never tier-restricted", async t => {
   const w = f.propose("owner run", "owner");
   f.startSession("owner", w, { maxSpendCents: 100 });
   f.send("guest", T.MESSAGE_POSTED, { messageId: randomUUID(), body: "human guest acts" });
+  // Assertions (T-4, find:autonomy-tiers-001): "does not throw" alone would
+  // also pass if a human write were silently dropped. Pin the effects:
+  // the owner's session actually started despite the t1 row, and both
+  // human messages actually landed in room state.
+  assert.equal(sessionRecord(f.state().workItems[w]).status, "processing", "owner session lands despite a t1_readonly tier row");
+  const bodies = (f.state().messages ?? []).map(m => m.body ?? m.data?.body);
+  assert.ok(bodies.includes("owner acts"), "owner message landed in state");
+  assert.ok(bodies.includes("human guest acts"), "human guest message landed in state");
 });
 
 test("enforceAutonomyTiers is a no-op for t2 agents and ignores malformed input", async t => {

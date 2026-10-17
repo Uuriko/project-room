@@ -102,7 +102,7 @@ test('runEval: solver throwing mid-run aborts with an error naming the task id',
         t2Ran = true;
         return {};
       },
-      scorers: {},
+      scorers: { any: () => 1 },
     });
   } catch (e) { err = e; }
   assert.ok(err, 'runEval must reject when the solver throws');
@@ -132,7 +132,7 @@ test('runEval: outcome missing trajectory defaults to []', async () => {
   const report = await runEval({
     tasks: [{ id: 't1' }, { id: 't2' }],
     solver: (task) => (task.id === 't1' ? { finalAnswer: 'x' } : { trajectory: ['step'] }),
-    scorers: {},
+    scorers: { any: () => 1 },
   });
   assert.deepEqual(report.results[0].trajectory, []);
   assert.deepEqual(report.results[1].trajectory, ['step'], 'present trajectory must survive');
@@ -145,7 +145,7 @@ test('runEval: duplicate task ids throw a clear error before running anything', 
     runEval({
       tasks: [{ id: 'dup' }, { id: 'dup' }],
       solver: () => { ran = true; return {}; },
-      scorers: {},
+      scorers: { any: () => 1 },
     }),
     /duplicate task id "dup"/,
     'error must name the duplicated id'
@@ -153,13 +153,19 @@ test('runEval: duplicate task ids throw a clear error before running anything', 
   assert.equal(ran, false, 'no task may run before the duplicate check');
 });
 
-test('runEval: empty scorers object means every task passes (vacuous pass, documented)', async () => {
+test('runEval: empty or omitted scorers REFUSES to run (vacuous pass hardened, find:evals-harness-001)', async () => {
   const { runEval } = await import('../evals/index.mjs');
-  const report = await runEval({
-    tasks: [{ id: 't1' }, { id: 't2' }],
-    solver: () => ({}),
-    scorers: {},
-  });
-  assert.ok(report.results.every((r) => r.passed === true));
-  assert.deepEqual(report.summary, { total: 2, passed: 2, failed: 0 });
+  let solverRan = false;
+  const solver = () => { solverRan = true; return {}; };
+  await assert.rejects(
+    runEval({ tasks: [{ id: 't1' }], solver, scorers: {} }),
+    /at least one scorer/,
+    'an empty scorers object must refuse, not pass every task vacuously'
+  );
+  await assert.rejects(
+    runEval({ tasks: [{ id: 't1' }], solver }),
+    /at least one scorer/,
+    'an omitted scorers object must refuse, not pass every task vacuously'
+  );
+  assert.equal(solverRan, false, 'no task may run before the scorer check');
 });
