@@ -160,6 +160,15 @@ export class WakeQueue {
     const receipts = this.db.prepare("SELECT count(*) n FROM wake_queue_commands WHERE room_id=? AND member_id=?").get(roomId, memberId).n;
     if (receipts >= wakeQueueLimits.receipts) fail(409, "wake_limit", "Wake capacity reached.");
   }
+  // The active cap bounds every transition that creates a new active
+  // (pending/leased) row - a fresh enqueue, enqueue recycling a 'done' row,
+  // and requeue flipping a 'dead' row back to pending alike - or the cap is
+  // bypassed through whichever transition skips the check. Coalescing an
+  // already pending/leased row creates no active row and is not checked.
+  activeCapacity(roomId, memberId) {
+    const active = this.db.prepare("SELECT count(*) n FROM wake_queue WHERE room_id=? AND member_id=? AND state IN ('pending','leased')").get(roomId, memberId).n;
+    if (active >= wakeQueueLimits.active) fail(409, "wake_limit", "Wake capacity reached.");
+  }
   // enqueue coalesces: one row per queue key. A still-pending wake absorbs the
   // new intent and keeps the earliest due time; a leased one is left alone; a
   // done one starts a fresh cycle; a dead one stays parked until requeue.
@@ -187,8 +196,10 @@ export class WakeQueue {
       const row = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, auth.member.id, request.queueKey);
       if (row?.state === "dead") fail(409, "wake_dead", "This wake is parked as dead letters; requeue it explicitly.");
       this.receiptCapacity(roomId, auth.member.id);
-      const active = this.db.prepare("SELECT count(*) n FROM wake_queue WHERE room_id=? AND member_id=? AND state IN ('pending','leased')").get(roomId, auth.member.id).n;
-      if (!row && active >= wakeQueueLimits.active) fail(409, "wake_limit", "Wake capacity reached.");
+      // A fresh row and a recycled 'done' row both create a new active row;
+      // only coalescing a pending/leased row does not, so only those two
+      // paths are exempt from the active cap.
+      if (!row || row.state === "done") this.activeCapacity(roomId, auth.member.id);
       let receipt;
       if (row && (row.state === "pending" || row.state === "leased")) {
         if (row.state === "pending") {
@@ -277,6 +288,8 @@ export class WakeQueue {
       const row = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, auth.member.id, request.queueKey);
       if (row?.state !== "dead") fail(409, "wake_not_dead", "Only a dead-lettered wake can be requeued.");
       this.receiptCapacity(roomId, auth.member.id);
+      // Flipping a dead row back to pending creates a new active row.
+      this.activeCapacity(roomId, auth.member.id);
       this.db.prepare("UPDATE wake_queue SET state='pending',due_at=?,attempts=0,lease_owner=NULL,lease_expires_at=NULL,last_error=NULL,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?")
         .run(request.dueAt, now, roomId, auth.member.id, request.queueKey);
       const receipt = { requestId: request.requestId, queueKey: request.queueKey, state: "pending", coalesced: false, dueAt: request.dueAt };

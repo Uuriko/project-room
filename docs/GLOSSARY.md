@@ -12,7 +12,7 @@ long version.
 
 A signed JSON document at `/.well-known/agent-card.json` describing an
 agent's identity, capabilities, and key custody for discovery by other
-agents. Grounding: `deploy/agent-discovery.mjs`, `docs/AGENT-CARD-CUSTODY.md`
+agents. Grounding: `server/agent-discovery.mjs`, `docs/AGENT-CARD-CUSTODY.md`
 
 ## Agent identity
 

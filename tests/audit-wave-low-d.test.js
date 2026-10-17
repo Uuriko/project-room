@@ -32,12 +32,12 @@ const runScript = (rel, args, { env = {}, input = "" } = {}) => new Promise((res
 // ---- L-33: NaN failureThreshold fails closed to the default breaker ----
 
 
-// ---- L-34: reactions on deleted messages are refused ----
+// ---- L-34: votes on deleted polls are refused ----
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-test("L-34: setMessageReaction on a deleted message throws 'Message was deleted'", () => {
+test("L-34: poll.voted on a deleted poll throws 'Message was deleted'", () => {
   const dir = mkdtempSync(join(tmpdir(), "lowd-l34-"));
   try {
     const store = new RoomStore(join(dir, "room.sqlite"));
@@ -46,10 +46,10 @@ test("L-34: setMessageReaction on a deleted message throws 'Message was deleted'
     let n = 0;
     const send = (type, data) =>
       store.command(owner, "commons", { id: `e${(n += 1)}`, type, data });
-    send(T.MESSAGE_POSTED, { messageId: "m1", body: "hello" });
+    send(T.MESSAGE_POSTED, { messageId: "m1", body: "Pick", kind: "poll", poll: { question: "Pick", options: ["a", "b"] } });
     send(T.MESSAGE_DELETED, { messageId: "m1", expectedMessageRevision: 0 });
     assert.throws(
-      () => send(T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "👍", active: true }),
+      () => send(T.POLL_VOTED, { messageId: "m1", option: 0, active: true }),
       /Message was deleted/,
     );
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -121,11 +121,59 @@ test("L-45: shQuote makes hostile values inert inside single quotes", async () =
 });
 
 test("L-45: --print-cron emits no unquoted hostile characters", async () => {
+  const { shQuote } = await import("../scripts/backup-verify.mjs");
+  const hostileTo = 'x";touch /tmp/lowd-pwned';
   const { stdout, code } = await runScript("scripts/backup-verify.mjs",
-    ["--print-cron", "--db", "a'b", "--to", 'x";touch /tmp/lowd-pwned', "--schedule", "hourly"]);
+    ["--print-cron", "--db", "a'b", "--to", hostileTo, "--schedule", "hourly"]);
   assert.equal(code, 0);
   assert.ok(stdout.includes("'a'\\''b'"), `db not quoted as expected:\n${stdout}`);
   assert.ok(!stdout.includes('"a\'b"'), `db appears double-quoted:\n${stdout}`);
+
+  // Every segment backup-verify.mjs shQuote's individually in the cron line
+  // (cd root, --db, --to, --schedule, and the log path) must appear in its
+  // single-quoted form — previously only the --db segment was asserted, so
+  // dropping shQuote from any other segment (e.g. the hostile --to) went
+  // unnoticed.
+  const cronLine = stdout.split("\n").find((line) => line.startsWith("* * * * *"));
+  assert.ok(cronLine, `no cron line emitted:\n${stdout}`);
+  // The script derives its root from its own URL, so it carries a trailing
+  // slash on top of the repo root this test resolves.
+  const root = `${repoRoot}/`;
+  const logPath = join(resolve(repoRoot, hostileTo), "backup-verify.log");
+  const quotedSegments = [
+    ["cd root", `cd ${shQuote(root)} &&`],
+    ["--db", `--db ${shQuote("a'b")}`],
+    ["--to", `--to ${shQuote(hostileTo)}`],
+    ["--schedule", `--schedule ${shQuote("hourly")}`],
+    ["log path", `>> ${shQuote(logPath)}`],
+  ];
+  for (const [name, segment] of quotedSegments) {
+    assert.ok(cronLine.includes(segment),
+      `${name} segment not single-quoted as ${segment}:\n${cronLine}`);
+  }
+
+  // No segment may appear in its raw, unquoted form either.
+  const rawSegments = [
+    ["cd root", `cd ${root} `],
+    ["--db", "--db a'b"],
+    ["--to", `--to ${hostileTo}`],
+    ["--schedule", "--schedule hourly"],
+    ["log path", `>> ${logPath}`],
+  ];
+  for (const [name, segment] of rawSegments) {
+    assert.ok(!cronLine.includes(segment),
+      `${name} segment appears unquoted (${segment}):\n${cronLine}`);
+  }
+
+  // Strongest form: once every single-quoted span ( honouring the '\''
+  // escape shQuote emits for embedded quotes) is stripped, no hostile
+  // character or payload fragment may remain anywhere in the cron line.
+  const unquotedRemainder = cronLine.replace(/'(?:[^']|'\\'')*'/g, "");
+  assert.equal(unquotedRemainder,
+    "* * * * * cd  && node scripts/backup-verify.mjs --db  --to  --schedule  >>  2>&1",
+    `unexpected unquoted content in cron line:\n${cronLine}`);
+  assert.ok(!unquotedRemainder.includes("touch") && !unquotedRemainder.includes("/tmp/lowd-pwned"),
+    `hostile payload survives outside single quotes:\n${cronLine}`);
 });
 
 // ---- L-46: room-templates is a recognized action again ----

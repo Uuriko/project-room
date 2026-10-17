@@ -177,6 +177,33 @@ test("request shape is identical whether or not the email has an account", async
   assert.ok(store.db.prepare("SELECT count(*) AS n FROM account_magic_codes").get().n >= 2);
 });
 
+const throwingMailer = error => createMagicLinkMailer({ send: async () => { throw error; } });
+const providerRefusal = () => Object.assign(
+  new Error("magic link email failed to send (HTTP 422): {\"message\":\"The example.com domain is not verified\"}"),
+  { providerStatus: 422 });
+const providerOutage = () => Object.assign(
+  new Error("magic link email failed to send (HTTP 503)"), { providerStatus: 503 });
+
+test("provider refusal of the recipient still answers sent, indistinguishably (#3529)", async t => {
+  const { origin } = await startServer(t, throwingMailer(providerRefusal()));
+  const slot = await openSlot(origin);
+  for (const email of ["refused@example.com", "deliverable@example.org"]) {
+    const res = await requestCode(origin, slot, email);
+    assert.equal(res.status, 200, email);
+    assert.deepEqual(await res.json(), { status: "sent" }, "refused and delivered requests share one shape");
+  }
+});
+
+test("transient provider failure surfaces as a retryable 500, never a fake sent (#3529)", async t => {
+  const { origin } = await startServer(t, throwingMailer(providerOutage()));
+  const slot = await openSlot(origin);
+  const res = await requestCode(origin, slot, "during-outage@example.com");
+  assert.equal(res.status, 500);
+  const body = await res.json();
+  assert.equal(body.error.code, "internal_error");
+  assert.notEqual(body.status, "sent", "an outage is never reported as a delivered send");
+});
+
 test("per-email rate limit throttles repeat requests", async t => {
   const { origin } = await startServer(t);
   const slot = await openSlot(origin);
@@ -224,4 +251,35 @@ test("magic email preserves invitation context and refuses unsafe targets before
   assert.equal(sent.length, 1);
   assert.equal(sent[0].returnTo, returnTo);
   assert.equal((await consumeCode(origin, slot, "target@example.com", sent[0].code)).status, 201, "valid continuation keeps real code redemption intact");
+});
+
+test("signin-options publicly advertises mail configuration for the logged-out wall (#3341)", async t => {
+  // Configured memory mailer (startServer default): mail reads true, and
+  // no account session or slot is needed to learn it.
+  const configured = await startServer(t);
+  const res = await fetch(`${configured.origin}/api/auth/signin-options`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.providers.mail.configured, true);
+  for (const provider of ["github", "google", "passkey", "mail"]) {
+    assert.equal(typeof body.providers[provider].configured, "boolean", `${provider} advertises a boolean`);
+  }
+  assert.ok(!("methods" in body) && !("emailVerification" in body), "no account-shaped fields leak into the public feed");
+  // Wrong method is a 405, like /api/auth/methods.
+  const postRes = await fetch(`${configured.origin}/api/auth/signin-options`, { method: "POST" });
+  assert.equal(postRes.status, 405);
+});
+
+test("signin-options reports mail unconfigured on a stock deployment (#3341)", async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+  });
+  const res = await fetch(`http://127.0.0.1:${server.address().port}/api/auth/signin-options`);
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).providers.mail.configured, false);
 });

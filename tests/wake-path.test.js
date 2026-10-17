@@ -14,7 +14,7 @@ import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
-import { agentCard } from "../deploy/agent-discovery.mjs";
+import { agentCard } from "../server/agent-discovery.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const T0 = 1_750_000_000_000;
@@ -69,14 +69,49 @@ const pushFailuresOf = (hb, agentId = "ai_testagent", hostId = "host-1") => {
 test("heartbeat validates cadenceSeconds", t => {
   const { hb } = unit(t);
   for (const bad of [0, -5, NaN, Infinity, "300", null]) {
-    if (bad === null) continue; // null means "absent"
+    if (bad === null) continue; // null is the explicit clear, not an invalid value (pinned below)
     assert.throws(() => hb.heartbeat({ ...wakeable(), cadenceSeconds: bad }), err =>
       err instanceof HeartbeatError && err.status === 422 && /cadenceSeconds/.test(err.message), `cadence ${String(bad)}`);
   }
   const { host } = hb.heartbeat({ ...wakeable(), cadenceSeconds: 300 });
   assert.equal(host.cadenceSeconds, 300);
   const bare = hb.heartbeat({ ...wakeable("host-2") });
-  assert.equal(bare.host.cadenceSeconds, null, "absent cadence reads null");
+  assert.equal(bare.host.cadenceSeconds, null, "a host that never declared a cadence reads null");
+});
+
+test("cadence is sticky: omit preserves, a value replaces, explicit null clears", t => {
+  const { hb } = unit(t);
+  const storedCadence = () => hb.db.prepare(
+    "SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+    .get("ai_testagent", "host-1")?.cadenceSeconds ?? null;
+  const declared = hb.heartbeat({ ...wakeable(), cadenceSeconds: 300 });
+  assert.equal(declared.host.cadenceSeconds, 300);
+  // Rotation review P5-F2: a bare heartbeat (no cadenceSeconds key at all)
+  // used to reset the stored declaration to null, collapsing the host's
+  // presence window to the 180s default. Omission now preserves it —
+  // in the response, in the stored row, and in the presence read.
+  const bare = hb.heartbeat({ ...wakeable() });
+  assert.equal(bare.host.cadenceSeconds, 300, "omitted cadenceSeconds preserves the stored declaration");
+  assert.equal(storedCadence(), 300, "the stored row keeps the declaration");
+  assert.equal(bare.reachability.reachableUntil - bare.host.lastSeenAt, 450_000,
+    "the preserved cadence keeps its stretched window (300s x 1.5)");
+  assert.equal(hb.statusOf("ai_testagent").hosts.find(h => h.hostId === "host-1").cadenceSeconds, 300,
+    "presence reads the preserved declaration");
+  // An explicit value replaces the declaration.
+  const replaced = hb.heartbeat({ ...wakeable(), cadenceSeconds: 60 });
+  assert.equal(replaced.host.cadenceSeconds, 60);
+  assert.equal(storedCadence(), 60);
+  // An explicit null is the clear: back to no declaration and the
+  // 180s default window.
+  const cleared = hb.heartbeat({ ...wakeable(), cadenceSeconds: null });
+  assert.equal(cleared.host.cadenceSeconds, null, "explicit null clears the declaration");
+  assert.equal(storedCadence(), null, "the stored row is cleared");
+  assert.equal(cleared.reachability.reachableUntil - cleared.host.lastSeenAt, 180_000,
+    "a cleared cadence reads the 180s default window");
+  // Omission after a clear keeps it cleared — preserve means preserve
+  // the current state, not resurrect an earlier declaration.
+  const after = hb.heartbeat({ ...wakeable() });
+  assert.equal(after.host.cadenceSeconds, null);
 });
 
 test("heartbeat validates pushNotification shape", t => {
@@ -549,4 +584,67 @@ test("pushNotify on an unknown identity never throws", async t => {
   hb.pushNotify({ identityId: "ai_ghost", eventType: "dm.posted", roomId: "r", id: "g1", ts: T0 });
   await hb.flushPushes();
   assert.ok(true, "fire-and-forget ignores unknown identities silently");
+});
+
+const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
+  headers: secret ? { authorization: `Bearer ${secret}` } : {},
+});
+
+// ---- Durable wake contract (#3257) ----
+// Bond proposals, thread assignments, and land updates must enqueue a
+// durable agent_wake_signals row like mentions/DMs do — the push doorbell
+// alone is fire-and-forget, its failures are counter-only, and a bond
+// proposal expires unseen after 7 days when the doorbell misses.
+
+test("trigger: bond proposal enqueues a durable bond wake that survives a dead push endpoint (#3257)", async t => {
+  const { f, origin, transport, identity } = await triggerFixture(t, "bondagent");
+  const proposer = f.store.identities.create("bond-proposer");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: proposer.identityId, memberId: "proposer",
+    displayName: "Proposer", permissions: ["accept_work"],
+  });
+  setTier(f.store.db, "commons", "proposer", "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  // Fault injection: the doorbell endpoint is dead (D5's proof shape).
+  transport.setStatus(500);
+  const proposed = f.store.command(proposer.secret, "commons", {
+    id: randomUUID(), type: "bond.propose", data: { to: identity.identityId, scopes: ["peer.dm"] },
+  });
+  assert.equal(proposed.event.type, "bond.proposed");
+  const bondId = proposed.event.data.bondId;
+  await f.store.agentHeartbeats.flushPushes();
+  assert.ok(transport.calls.length >= 1, "the doorbell was still attempted");
+  const rows = f.store.db.prepare("SELECT * FROM agent_wake_signals WHERE agent_id=?").all(identity.identityId);
+  assert.equal(rows.length, 1, "exactly one durable wake signal for the proposal");
+  assert.equal(rows[0].kind, "bond");
+  assert.equal(rows[0].room_id, "commons");
+  assert.equal(rows[0].message_id, bondId);
+  // The durable channel carries it even though the doorbell failed: the
+  // party's next wake poll shows the bond wake, and ack drains it.
+  const poll = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
+  assert.deepEqual(poll.pendingWakes.map(w => [w.kind, w.messageId]), [["bond", bondId]]);
+  const ack = await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [rows[0].signal_id] }, identity.secret)).json();
+  assert.deepEqual(ack.acknowledged, [rows[0].signal_id]);
+  const quiet = await (await get(origin, "/api/agent-wakes/poll?hostId=push-host&waitMs=0", identity.secret)).json();
+  assert.deepEqual(quiet.pendingWakes, []);
+  // The proposer is never woken about their own proposal.
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE agent_id=?")
+    .get(proposer.identityId).n, 0);
+});
+
+test("trigger: collab assignment enqueues a durable assignment wake (#3257)", async t => {
+  const { f, origin, identity } = await triggerFixture(t, "taskagent");
+  const assignRes = await post(origin, "/api/rooms/commons/collab/assignments", {
+    threadId: randomUUID(), assignee: { kind: "agent", id: "taskagent" },
+  }, f.keys.owner);
+  assert.equal(assignRes.status, 201, "assignment created");
+  const { assignmentId } = await assignRes.json();
+  await f.store.agentHeartbeats.flushPushes();
+  const rows = f.store.db.prepare("SELECT * FROM agent_wake_signals WHERE agent_id=?").all(identity.identityId);
+  assert.equal(rows.length, 1, "exactly one durable wake signal for the assignment");
+  assert.equal(rows[0].kind, "assignment");
+  assert.equal(rows[0].room_id, "commons");
+  assert.equal(rows[0].message_id, assignmentId);
+  const beat = await (await post(origin, "/api/agent-heartbeats", { hostId: "push-host", mode: "wakeable" }, identity.secret)).json();
+  assert.deepEqual(beat.pendingWakes.map(w => [w.kind, w.messageId]), [["assignment", assignmentId]],
+    "the assignee's next heartbeat carries the assignment wake");
 });

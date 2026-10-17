@@ -9,6 +9,18 @@ export function extractEmailAddresses(value) {
   return (value.match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)+/gi) ?? []);
 }
 
+// Whether an email href/src value points at a scriptable scheme. Every
+// \x00-\x20 character is removed before the comparison — the same
+// normalization the server-side sanitize-html applies — because browsers
+// strip tab/newline out of the scheme when parsing a URL: an href of
+// "java<TAB>script:alert(1)" (what "java&#9;script:..." decodes to)
+// executes on click even though it never literally starts with
+// "javascript:".
+export function isBlockedEmailUrl(value) {
+  const normalized = String(value).replace(/[\x00-\x20]+/g, '').toLowerCase();
+  return normalized.startsWith('javascript:') || normalized.startsWith('data:text/html');
+}
+
 // Maps Gmail API error codes to the user-facing message shown in the workspace.
 export function gmailErrorText(error) {
   return ['gmail_reconnect_required', 'gmail_write_permission_required'].includes(error.code)
@@ -53,11 +65,10 @@ export function installGmailWorkspace({ api, ownerKey, onConnectionsChanged = ()
     for (const el of doc.querySelectorAll('*')) {
       for (const attr of [...el.attributes]) {
         const name = attr.name.toLowerCase();
-        const value = attr.value.trim().toLowerCase();
         if (name.startsWith('on')) {
           el.removeAttribute(attr.name);
         } else if ((name === 'href' || name === 'src' || name === 'xlink:href') &&
-                   (value.startsWith('javascript:') || value.startsWith('data:text/html'))) {
+                   isBlockedEmailUrl(attr.value)) {
           el.removeAttribute(attr.name);
         }
       }

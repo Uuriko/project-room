@@ -3,7 +3,7 @@
 // They do not read the secret or assemble the Authorization header themselves.
 // Later auth changes belong in this file.
 import { roomMcpUrlForHost } from "../src/room-mcp-join.js";
-import { edgeDoorApiPath } from "../deploy/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
 import { keychainLookup, keychainStore } from "./keychain.mjs";
 
 export function bearerHeader(secret) {

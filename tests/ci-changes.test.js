@@ -38,6 +38,32 @@ test("coverage classification does not disturb the browser/eval outputs", () => 
   assert.equal(docsOnly.browser, false);
   assert.equal(docsOnly.eval, false);
   const serverOnly = classifyChanges(["server/store.mjs"]);
-  assert.equal(serverOnly.browser, false);
   assert.equal(serverOnly.eval, true);
+});
+
+test("browser runs when server code changes (the checks create the real server)", () => {
+  // Nearly every browser check imports createRoomServer from
+  // server/http.mjs, and a few spawn server.mjs; a server-only PR must not
+  // skip the suite that runs against that server.
+  assert.equal(classifyChanges(["server/http.mjs"]).browser, true);
+  assert.equal(classifyChanges(["server/store.mjs"]).browser, true);
+  assert.equal(classifyChanges(["server/routes/table.mjs"]).browser, true);
+  assert.equal(classifyChanges(["server.mjs"]).browser, true);
+});
+
+test("browser runs when a shared browser-check helper changes", () => {
+  // These helpers are imported by suite checks but are not themselves
+  // named in package.json's test:browser script.
+  assert.equal(classifyChanges(["scripts/acceptance-fixture.mjs"]).browser, true);
+  assert.equal(classifyChanges(["scripts/auth-signin.mjs"]).browser, true);
+  assert.equal(classifyChanges(["scripts/room-chrome.mjs"]).browser, true);
+  assert.equal(classifyChanges(["scripts/helpers/google-oauth-fixture.mjs"]).browser, true);
+  // server/ modules the checks import (transitively, via the server).
+  assert.equal(classifyChanges(["server/room-entry.mjs"]).browser, true);
+});
+
+test("browser still skips when the diff cannot affect the checks", () => {
+  assert.equal(classifyChanges(["docs/INDEX.md"]).browser, false);
+  assert.equal(classifyChanges(["scripts/deploy-recovery.mjs"]).browser, false);
+  assert.equal(classifyChanges(["machine/test/machine.test.mjs"]).browser, false);
 });

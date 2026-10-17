@@ -1,8 +1,9 @@
-// Room-native spend grants: per-agent capability="spend" edges with credit
-// caps, plus the charge-then-forward trust boundary for priced MCP tools.
+// Room-native spend grants: per-agent capability="spend" edges with caps
+// denominated in cents, plus the charge-then-forward trust boundary for
+// priced MCP tools.
 //
 // Design: ~/workspace/research_notes/spend-primitive-design-2026-10-04.md
-// (§3a–§3c, MVP items 1–3 and 5). Credits-denominated, fully reversible:
+// (§3a–§3c, MVP items 1–3 and 5). Cents-denominated, fully reversible:
 // removing every priced tool from PRICED_MCP_TOOLS returns the room to
 // exactly its previous behavior.
 //
@@ -45,10 +46,19 @@
 //     the lease and releases their room reservations. It runs
 //     opportunistically at the top of authorizeSpend's transaction, so
 //     the cap math always sees live reservations; no separate reaper
-//     process is needed (#1525).
+//     process is needed (#1525). The settle paths enforce the lease in
+//     the transition itself (#3268): a post-lease settle deterministically
+//     records no charge whether or not the reaper has run yet — the row
+//     stays 'reserved' for the reaper (or a void) to release, exactly as
+//     a crashed caller's orphan does.
 //
 // Money is integer cents as TEXT (string-decimal, no floats, D12). Only the
-// "credits" denomination exists in v1; "usdc" issuance is refused fail-closed.
+// "cents" denomination exists in v1; "usdc" issuance is refused fail-closed.
+// (#3305: the unit was always integer cents — the pre-rename label for this
+// denomination was "credits", which collided with the bounty ledger's
+// credit (1 credit = 1000 milli-credits). No conversion exists between the
+// two units and none is implied by the rename; stored "credits" labels are
+// converged to "cents" in ensureSpendGrantsSchema.)
 //
 // Tables are registered in server/writer-fence.mjs and the schema is ensured
 // from the writer boot path next to ensureGrantsSchema. This module does not
@@ -59,13 +69,13 @@ import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
-import { spendPricingEnabled } from "../src/events.js";
+import { ownMember, spendPricingEnabled } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
-export const SPEND_DENOMINATION = "credits";
+export const SPEND_DENOMINATION = "cents";
 
 // Priced MCP tools, integer cents per call. The price ALSO lives in each
-// tool's public description ("[paid: room-credits] N credits per call") —
+// tool's public description ("[paid: room-cents] N cents per call") —
 // the description is advertising, the runtime charge here is authoritative
 // (the x402 doctrine). Removing a tool from this map un-prices it
 // completely: no other code path charges.
@@ -95,7 +105,7 @@ export const SPEND_GRANTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS spend_grant_terms (
   room_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
-  denomination TEXT NOT NULL DEFAULT 'credits',
+  denomination TEXT NOT NULL DEFAULT 'cents',
   cap_cents TEXT NOT NULL,
   per_tx_cap_cents TEXT NOT NULL,
   allowlist TEXT NULL,
@@ -134,7 +144,7 @@ CREATE TABLE IF NOT EXISTS spend_room_reservations (
   amount_cents TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   created_at INTEGER NOT NULL,
-  PRIMARY KEY (room_id, nonce)
+  PRIMARY KEY (room_id, agent_id, nonce)
 );
 CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
   ON spend_room_reservations (room_id, status);
@@ -142,12 +152,46 @@ CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
 
 export function ensureSpendGrantsSchema(db) {
   db.exec(SPEND_GRANTS_SCHEMA);
+  // #3305: pre-rename grant rows stored the denomination label "credits"
+  // for what was always integer cents. Converge the LABEL only — no cap,
+  // price, or authorization changes meaning. Idempotent: once converged
+  // this matches zero rows.
+  db.exec(`UPDATE spend_grant_terms SET denomination = 'cents' WHERE denomination = 'credits'`);
   // #1525: lease expiry on reserves — additive column, following the
   // codebase's column-migration pattern (agent-identities, credentials):
   // existing databases converge via ALTER TABLE, rows written before the
   // fix backfill NULL and the reaper reads their deadline from created_at.
   if (!db.prepare(`SELECT 1 FROM pragma_table_info('spend_authorizations') WHERE name='expires_at'`).get())
     db.exec("ALTER TABLE spend_authorizations ADD COLUMN expires_at INTEGER");
+  // #3376/#3383: room reservations are per-agent state, keyed exactly like
+  // the authorizations they back. The original (room_id, nonce) PK let two
+  // agents collide on one nonce (raw constraint error) and let one agent's
+  // settle/void release another's reservation. Rebuild pre-fix tables in
+  // place, rows preserved; a fresh table already has the widened PK. The
+  // rebuild follows the codebase's rename-aside pattern (share_links
+  // _legacy_v34 and siblings): the old table is renamed away and the
+  // canonical table name is recreated, so no transient table name ever
+  // enters the DDL the application-table registry scans.
+  const reservationsSql = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'spend_room_reservations'`).get()?.sql ?? "";
+  if (reservationsSql && !/PRIMARY KEY\s*\(\s*room_id\s*,\s*agent_id\s*,\s*nonce\s*\)/.test(reservationsSql)) {
+    db.exec(`ALTER TABLE spend_room_reservations RENAME TO spend_room_reservations_pre3376;
+    CREATE TABLE spend_room_reservations (
+      room_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      nonce TEXT NOT NULL,
+      amount_cents TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (room_id, agent_id, nonce)
+    );
+    INSERT INTO spend_room_reservations
+      (room_id, agent_id, nonce, amount_cents, status, created_at)
+      SELECT room_id, agent_id, nonce, amount_cents, status, created_at FROM spend_room_reservations_pre3376;
+    DROP TABLE spend_room_reservations_pre3376;
+    CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
+      ON spend_room_reservations (room_id, status);`);
+  }
 }
 
 // #1525: the reservation lease. Ten minutes is comfortably longer than
@@ -257,6 +301,23 @@ function authorizationsTotal(db, roomId, agentId) {
   return Number(row?.total ?? 0);
 }
 
+// #3302: settled priced-tool charges inside the allowance period. The
+// projection ledger behind spendAllowanceReport counts work-session
+// spend only; tool charges live in spend_authorizations, and the room
+// reservation that represented a charge in flight is released at
+// settle — so without this sum a settled charge stopped counting
+// against the room allowance the moment it landed, and sequential
+// charges accumulated without bound. Windowed by settled_at at/after
+// the period start, matching spendLedger's rolling-period semantics.
+function settledToolChargesCents(db, roomId, sinceMs) {
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(CAST(price_cents AS INTEGER)), 0) AS total
+     FROM spend_authorizations
+     WHERE room_id = ? AND status = 'settled' AND settled_at >= ?`
+  ).get(roomId, sinceMs);
+  return Number(row?.total ?? 0);
+}
+
 export function remainingSpendCents(db, roomId, agentId) {
   const grant = resolveSpendGrant(db, roomId, agentId);
   if (!grant) return 0;
@@ -331,15 +392,15 @@ export function revokeSpendGrant(db, roomId, agentId, { nowMs = Date.now() } = {
 }
 
 function paymentRefusal({ roomId, agentId, toolName, priceCents, reason, extra = {} }) {
-  const price = `${priceCents} credit${priceCents === 1 ? "" : "s"}`;
+  const price = `${priceCents} cent${priceCents === 1 ? "" : "s"}`;
   const obtain = `Ask the room owner for a spend grant (POST /api/rooms/${roomId}/spend-grants).`;
   const messages = {
     no_spend_grant: `Payment required: ${toolName} costs ${price} per call and ${agentId} holds no live spend grant. ${obtain} No call was made and nothing was charged.`,
     grant_expired: `Payment required: ${toolName} costs ${price} per call and ${agentId}'s spend grant has expired. ${obtain} No call was made and nothing was charged.`,
     grant_revoked: `Payment required: ${toolName} costs ${price} per call and ${agentId}'s spend grant was revoked. ${obtain} No call was made and nothing was charged.`,
-    cap_exceeded: `Payment required: ${toolName} costs ${price} per call but ${agentId}'s spend grant has ${extra.remainingCents} credits remaining. Ask the room owner to raise the cap. No call was made and nothing was charged.`,
-    per_tx_cap_exceeded: `Payment required: ${toolName} costs ${price} per call, above ${agentId}'s per-call cap of ${extra.perTxCapCents} credits. Ask the room owner to raise the per-call cap. No call was made and nothing was charged.`,
-    room_allowance_exceeded: `Payment required: ${toolName} costs ${price} per call but the room's spend allowance has ${extra.roomHeadroomCents} credits of headroom left. Ask the room owner to raise the allowance. No call was made and nothing was charged.`,
+    cap_exceeded: `Payment required: ${toolName} costs ${price} per call but ${agentId}'s spend grant has ${extra.remainingCents} cents remaining. Ask the room owner to raise the cap. No call was made and nothing was charged.`,
+    per_tx_cap_exceeded: `Payment required: ${toolName} costs ${price} per call, above ${agentId}'s per-call cap of ${extra.perTxCapCents} cents. Ask the room owner to raise the per-call cap. No call was made and nothing was charged.`,
+    room_allowance_exceeded: `Payment required: ${toolName} costs ${price} per call but the room's spend allowance has ${extra.roomHeadroomCents} cents of headroom left. Ask the room owner to raise the allowance. No call was made and nothing was charged.`,
   };
   return refuse(402, "payment_required", messages[reason] ?? messages.no_spend_grant, {
     tool: toolName, priceCents, denomination: SPEND_DENOMINATION, reason,
@@ -379,13 +440,20 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
   if (tierOf(db, roomId, agentId) === "t1_readonly")
     refuse(403, "spend_grant_denied", "t1_readonly agents cannot hold spend grants");
 
+  // #1525 + #3377: crash recovery. Void reservations orphaned past their
+  // lease (a caller crashed between reserve and settle/void) BEFORE the cap
+  // math below, so they can never permanently consume grant cap or room
+  // allowance. Runs on every authorization — the next priced call after a
+  // crash reaps what the crashed one left behind. The reap runs in its OWN
+  // transaction, ahead of the authorization transaction: every refusal
+  // below throws, and a throw inside the shared transaction rolled the
+  // reap back with it, stranding the headroom until some later authorize
+  // happened to commit (a revoked grant refused forever and never reaped
+  // at all). The voided-replay path below already follows this rule —
+  // recovery commits before any refusal is raised.
+  reapExpiredSpendAuthorizations(db, { roomId, nowMs });
+
   const outcome = transact(db, () => {
-    // #1525: crash recovery. Void reservations orphaned past their lease
-    // (a caller crashed between reserve and settle/void) BEFORE the cap
-    // math below, so they can never permanently consume grant cap or room
-    // allowance. Runs on every authorization — the next priced call after
-    // a crash reaps what the crashed one left behind.
-    reapExpiredSpendAuthorizations(db, { roomId, nowMs });
     // Replay first: a re-presented nonce never authorizes twice, no matter
     // the cap state. 'settled' returns its receipt (exactly-once charging
     // for completed-request replay, no fresh headroom needed); 'reserved'
@@ -463,7 +531,15 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
             VALUES (?, ?, ?, ?, 'active', ?)`)
           .run(roomId, agentId, nonce, intToCents(roomReserved), nowMs);
     } catch (error) {
-      if (String(error?.code).includes("SQLITE_CONSTRAINT"))
+      // #3383: recognize constraint violations on both driver shapes —
+      // better-sqlite3-style SQLITE_CONSTRAINT* codes, and node:sqlite's
+      // ERR_SQLITE_ERROR, which carries the detail only in the message.
+      // Checking the code for "SQLITE_CONSTRAINT" alone left this 409
+      // conversion dead on node:sqlite and the raw database error escaped.
+      const errorCode = String(error?.code ?? "");
+      const isConstraint = errorCode.includes("SQLITE_CONSTRAINT")
+        || (errorCode === "ERR_SQLITE_ERROR" && /constraint failed/i.test(String(error?.message ?? "")));
+      if (isConstraint)
         refuse(409, "duplicate_nonce", "This spend authorization was already recorded; no double charge", {
           tool: toolName, priceCents, denomination: SPEND_DENOMINATION, agentId, roomId, nonce,
         });
@@ -478,13 +554,18 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     });
   }
 
-  const transition = (to, settledAt) => {
-    const info = db.prepare(`UPDATE spend_authorizations SET status = ?, settled_at = ?
+  // The settle transition lives in settleAuthorization below — one
+  // implementation shared by this handle and the standalone settleSpend
+  // (#3390). Only the void transition remains local: void is NOT
+  // lease-gated (releasing an expired reservation is cleanup, never a
+  // charge — #3268), so it differs from settle in exactly that guard.
+  const voidTransition = () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided', settled_at = NULL
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-      .run(to, settledAt, roomId, agentId, nonce);
+      .run(roomId, agentId, nonce);
     return info.changes > 0;
   };
-  const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, nonce);
+  const releaseRoomReservation = () => releaseRoomReservationRow(db, roomId, agentId, nonce);
   const remainingNowCents = () => {
     const grant = resolveSpendGrant(db, roomId, agentId, { nowMs: Date.now() });
     if (!grant) return "0";
@@ -510,26 +591,32 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
     priceCents: replayedReserved ? outcome.priceCents : priceCents,
     remainingAfterCents: replayedReserved ? remainingNowCents() : intToCents(outcome.remainingAfter),
     ...(replayedReserved ? { replayed: "reserved" } : {}),
-    settle() {
-      const moved = transition("settled", Date.now());
-      releaseRoomReservation();
-      // Single-use grants are consumed by their first settled call.
-      if (moved) {
-        const terms = rowToTerms(db.prepare(
-          `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
-        if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
-      }
-      return moved;
+    settle(nowMs = Date.now()) {
+      // #3268: the settle instant is the lease check, so it is injectable
+      // like authorizeSpend's nowMs; production callers pass nothing. The
+      // body is settleAuthorization — shared with the standalone form.
+      const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
+      return settleAuthorization(db, { roomId, agentId, nonce, at });
     },
-    void() { const moved = transition("voided", null); releaseRoomReservation(); return moved; },
+    void() {
+      return transact(db, () => {
+        const moved = voidTransition();
+        releaseRoomReservation();
+        return moved;
+      });
+    },
   });
 }
 
 // Room-allowance reservations are released on settle AND on void: the
-// allowance is only consumed by settled charges. Idempotent.
-function releaseRoomReservationRow(db, roomId, nonce) {
+// allowance is only consumed by settled charges. Idempotent. The release
+// is scoped to the authorization's own agent (#3376): a reservation backs
+// exactly one agent's authorization, and only that agent's settle/void (or
+// the reaper acting on that agent's expired row) may release it — keyed
+// (room_id, nonce) alone, one agent could free another's allowance.
+function releaseRoomReservationRow(db, roomId, agentId, nonce) {
   db.prepare(`UPDATE spend_room_reservations SET status = 'released'
-    WHERE room_id = ? AND nonce = ? AND status = 'active'`).run(roomId, nonce);
+    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'active'`).run(roomId, agentId, nonce);
 }
 
 // #1525: the reaper. A reservation that is still 'reserved' past its lease
@@ -554,26 +641,63 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
       db.prepare(`UPDATE spend_authorizations SET status = 'voided'
         WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
         .run(row.room_id, row.agent_id, row.nonce);
-      releaseRoomReservationRow(db, row.room_id, row.nonce);
+      releaseRoomReservationRow(db, row.room_id, row.agent_id, row.nonce);
     }
     return expired.length;
   });
 }
 
-export function settleSpend(db, { roomId, agentId, nonce } = {}) {
-  const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
-    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-    .run(Date.now(), roomId, agentId, nonce);
-  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
-  return info.changes > 0;
+// #2959 + #3268 + #3390: the ONE settle implementation, shared by the
+// authorize handle's settle() and the standalone settleSpend below — the
+// two public forms must never carry different money semantics.
+// - #3268: the transition is lease-aware, with the reaper's exact
+//   deadline — COALESCE(expires_at, created_at + lease) for pre-#1525
+//   rows — and its exact boundary (a reservation at its deadline is
+//   expired), evaluated at the settle instant `at`. A post-lease settle
+//   returns false and leaves the row 'reserved' for the reaper or a
+//   void, whether or not the reaper has already run.
+// - #2959: the transition, the room-reservation release, and the
+//   single-use revocation are one atomic unit. Splitting them left a
+//   settled authorization whose room reservation stayed 'active'
+//   forever (the reaper only voids still-'reserved' rows) — or a
+//   settled single-use grant that was never revoked — if the process
+//   died or a write failed between the steps.
+// - #3390: single-use consumption (read the CURRENT terms, revoke the
+//   edge on a real transition) used to live only in the handle's
+//   settle(), so a single-use grant settled through this standalone
+//   form stayed live and reusable. Release and consumption happen only
+//   on a real transition: a settle that did not move the row changes
+//   nothing else.
+function settleAuthorization(db, { roomId, agentId, nonce, at }) {
+  return transact(db, () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
+        AND COALESCE(expires_at, created_at + ?) > ?`)
+      .run(at, roomId, agentId, nonce, RESERVE_LEASE_MS, at);
+    const moved = info.changes > 0;
+    if (moved) releaseRoomReservationRow(db, roomId, agentId, nonce);
+    if (moved) {
+      const terms = rowToTerms(db.prepare(
+        `SELECT * FROM spend_grant_terms WHERE room_id = ? AND agent_id = ?`).get(roomId, agentId));
+      if (terms?.singleUse) revokeGrant(db, roomId, agentId, SPEND_CAPABILITY);
+    }
+    return moved;
+  });
+}
+
+export function settleSpend(db, { roomId, agentId, nonce, nowMs = Date.now() } = {}) {
+  const at = Number.isSafeInteger(nowMs) ? nowMs : Date.now();
+  return settleAuthorization(db, { roomId, agentId, nonce, at });
 }
 
 export function voidSpend(db, { roomId, agentId, nonce } = {}) {
-  const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
-    WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
-    .run(roomId, agentId, nonce);
-  if (info.changes > 0) releaseRoomReservationRow(db, roomId, nonce);
-  return info.changes > 0;
+  return transact(db, () => {
+    const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
+      WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
+      .run(roomId, agentId, nonce);
+    if (info.changes > 0) releaseRoomReservationRow(db, roomId, agentId, nonce);
+    return info.changes > 0;
+  });
 }
 
 // The trust-boundary entry point for MCP dispatch. Returns null when no
@@ -595,6 +719,13 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   const priceCents = priceForTool(name, room.state);
   if (priceCents === null) return null;
   const nowMs = store.now();
+  // #3377: reap BEFORE the projection snapshot and the charge transaction
+  // below. This wrapper's store.transaction is the outermost transaction
+  // on the production path — a reap left inside authorizeSpend's own
+  // transaction scope would still share it and roll back with a refused
+  // charge. Reaping here commits independently (the reaper transacts on
+  // its own) and the snapshot then prices against the reaped state.
+  reapExpiredSpendAuthorizations(store.db, { roomId, nowMs });
   const report = spendAllowanceReport(room.state, nowMs);
   // The check+reserve MUST run inside the store's platform transaction.
   // authorizeSpend's transact() now delegates to the store's platform
@@ -608,13 +739,46 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
     toolName: name,
     priceCents,
     nonce: randomUUID(),
-    // Cumulative enforcement: the projection snapshot is the base and
-    // authorizeSpend serializes every in-flight room reservation against
-    // it in the same transaction as the grant reservation.
+    // Cumulative enforcement: the committed base (session spend from the
+    // projection PLUS settled tool charges in the period, #3302) is the
+    // base and authorizeSpend serializes every in-flight room reservation
+    // against it in the same transaction as the grant reservation.
     roomAllowanceCents: report.allowance ? report.allowance.allowanceCents : null,
-    roomCommittedCents: report.committedCents,
+    roomCommittedCents: report.allowance
+      ? report.committedCents + settledToolChargesCents(store.db, roomId, Date.parse(report.period.since))
+      : report.committedCents,
     nowMs,
   }));
+}
+
+// #3269: the ONE charge-then-forward path every transport runs a priced
+// operation through. Before this helper, the charge lived only in the MCP
+// profiles' dispatch wrappers, so the REST twins of bounty_post /
+// room_put_file / add_land_item executed free and ungated — the spend
+// grant's permission, per-agent cap, room allowance, and single-use
+// consumption were all void at the REST door. Semantics (identical at every
+// door): charge before the operation runs; settle after success; void on
+// any failure; void when the result is an idempotent replay/duplicate (the
+// original call already paid). A null secret (non-room credential modes:
+// account sessions, browser cookies) or a null charge (unpriced tool,
+// human, room owner, pricing disabled) runs the operation untouched.
+// opts.unwrap maps a transport's outcome envelope to the operation value
+// (hosted stdio returns { value, isError }); opts.isErrorOutcome marks an
+// envelope as failed; opts.isReplay marks an envelope as a replay.
+export async function withSpendCharge(store, secret, name, args, operation, opts = {}) {
+  if (typeof secret !== "string" || secret.length === 0) return operation();
+  const spend = chargeSpendBeforeCall(store, secret, name, args);
+  if (!spend) return operation();
+  let result;
+  try {
+    result = await operation();
+  } catch (error) { spend.void(); throw error; }
+  const value = opts.unwrap ? opts.unwrap(result) : result;
+  if (opts.isErrorOutcome && opts.isErrorOutcome(result)) spend.void();
+  else if (opts.isReplay && opts.isReplay(result)) spend.void();
+  else if (value && typeof value === "object" && (value.duplicate === true || value.idempotentReplay === true)) spend.void();
+  else spend.settle();
+  return result;
 }
 
 // --- HTTP management routes (mirroring server/grants.mjs) ---
@@ -633,7 +797,7 @@ export function issueSpendGrantRoute(store, token, roomId, request, expectedSess
     const room = store.room(roomId);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
-    if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     // #1521: this call mints money — a grants:issue delegate cannot issue
     // a spend grant to themselves (a reproduced 1,000,000-cent self-issued
     // grant row was the proof). The room owner is full authority
@@ -662,7 +826,7 @@ export function revokeSpendGrantRoute(store, token, roomId, agentId, expectedSes
     const room = store.room(roomId);
     const nowMs = store.now();
     requireGrantManagement({ db: store.db, roomId, state: room.state, actor: auth.member, nowMs });
-    if (!room.state.members?.[agentId]) refuse(404, "member_not_found", `No member ${agentId} in this room`);
+    if (!ownMember(room.state.members, agentId)) refuse(404, "member_not_found", `No member ${agentId} in this room`);
     const revoked = revokeSpendGrant(store.db, roomId, agentId, { nowMs });
     return { roomId, agentId, revoked, evaluatedThrough: store.room(roomId).sequence };
   });

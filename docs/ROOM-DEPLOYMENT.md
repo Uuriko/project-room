@@ -1,5 +1,11 @@
 # Deploy runbook
 
+## Canonical runtime
+
+**The Cloudflare Worker + Durable Object is the canonical — and only — production runtime for Project Room.** The same server code also runs under plain Node, but Node is a **dev/test/pilot runtime only**: it is how the service runs locally, in CI, and in the invite-only VPS pilot. Node is not a production candidate and is not a storage failover for the Durable Object. When a change behaves differently across the two runtimes, the Worker/Durable Object behavior is the correct one and the Node difference is the bug.
+
+The VPS pilot (systemd units and Caddyfile in `deploy/`) is **parked** as of 2026-10-13: treated as dead for planning, kept in tree for reference, and not part of the release lane below. Unpark it only by an explicit decision recorded here.
+
 Three Workers run the same code. Only one of them owns production data.
 
 | Script | Role | How it is reached |
@@ -10,7 +16,7 @@ Three Workers run the same code. Only one of them owns production data.
 
 The entry script is still named `project-room-staging`. That name is historical. Do not rename the deployed script: the getdasha route and email routing are bound to it. `wrangler.jsonc` cannot carry comments (`JSON.parse` reads it), so this page and `cloudflare/README.md` are where the role is named. The entry's role is entry, not a second room.
 
-Isolated staging is the place a schema or constructor change runs before production. It does not see production rows. The Worker, the workflow, and the secret names are in [STAGING.md](STAGING.md). Gmail stays off on every deploy (`ROOM_GMAIL_ENABLED=0`, and keep `ROOM_GMAIL_PILOT_ONLY=1`). Turning Gmail on is a separate release after the [Gmail setup requirements](history/GMAIL-SETUP.md).
+Isolated staging is the place a schema or constructor change runs before production. It does not see production rows. The Worker, the workflow, and the secret names are in [STAGING.md](STAGING.md). Gmail stays off on every deploy (`ROOM_GMAIL_ENABLED=0`, and keep `ROOM_GMAIL_PILOT_ONLY=1`). Turning Gmail on is a separate release after the [Gmail setup requirements](../archive/docs/history/GMAIL-SETUP.md).
 
 Run the commands below from `cloudflare/` unless a command says otherwise. `--keep-vars` leaves secrets and dashboard text bindings in place. Do not put secret values in the repo.
 
@@ -157,8 +163,7 @@ second failed run in a row notifies once. Later failures in that same incident
 do not notify again. When a later run passes, the Worker sends one recovery
 notice and clears the incident.
 
-The 6-hour GitHub schedules stay the deep checks: `live-smoke.yml` and
-`qa2-synthetic.yml`. This Worker is the 5-minute outage signal.
+The 6-hour GitHub schedule `live-smoke.yml` stays the deep check. This Worker is the 5-minute outage signal.
 
 Notices go to two destinations. Each one stays quiet until its secret is set.
 The Worker never writes the token or the webhook URL into the notice or the

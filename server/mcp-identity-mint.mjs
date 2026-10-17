@@ -9,13 +9,14 @@ import { mcpInvalidRequest } from './mcp-arg-errors.mjs';
 // door, an identity alone grants nothing.
 import { IDENTITY_MINT_MCP_TOOLS } from '../src/room-mcp-join.js';
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
+import { mcpResultText } from './mcp-result-text.mjs';
 import { ServiceError } from './service-error.mjs';
 import { noteIdentityMint } from './growth-loop.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const result = (id, value, isError = false) => ({
+const result = (id, value, isError = false, redactions = []) => ({
   jsonrpc: '2.0', id,
-  result: { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, ...(isError ? { isError: true } : {}) }
+  result: { content: [{ type: 'text', text: mcpResultText(value, redactions) }], structuredContent: value, ...(isError ? { isError: true } : {}) }
 });
 
 const displayNameField = {
@@ -72,14 +73,13 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
   if (!selected) return mcpCallError(requestId, { reason: 'unknown_tool', tool: name });
   const problems = diagnoseArguments(selected.inputSchema, args);
   if (problems) return mcpCallError(requestId, { reason: 'invalid_arguments', tool: name, ...problems });
+  let created;
   try {
     // Same anonymous mint as POST /api/agent-identities: per-address,
     // per-network, and daily budgets plus proof-of-work live inside create.
-    const created = store.identities.create(args.displayName, {
+    created = store.identities.create(args.displayName, {
       anonymous: { address: String(remoteAddress ?? ''), proof: args.proof }
     });
-    noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ''), session: null, accountId: null });
-    return result(requestId, created);
   } catch (error) {
     if (error instanceof ServiceError) {
       // 428 proof_required carries the proof recipe in detail so the client
@@ -91,4 +91,21 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
     }
     return result(requestId, { status: 500, code: 'internal', message: 'Request could not be completed' }, true);
   }
+  // create() has already committed the identity, and `created` carries the
+  // one-time secret and privateKey that are never shown again. The growth
+  // bookkeeping is post-mint and best-effort: if it throws, it must not mask
+  // the successful mint or permanently lose those one-time values.
+  try {
+    noteIdentityMint(store, created.identityId, { address: String(remoteAddress ?? ''), session: null, accountId: null });
+  } catch (error) {
+    console.error('identity mint bookkeeping failed:', error?.message ?? error);
+  }
+  // The one-time secret and privateKey ride in structuredContent only:
+  // the text block is what hosts display and log verbatim, so repeating
+  // the credentials there persists them in transcripts (issue #3750).
+  // A duplicate-recovery mint carries no secret; its redactions skip.
+  return result(requestId, created, false, [
+    { secret: created.secret, where: 'structuredContent.secret' },
+    { secret: created.privateKey, where: 'structuredContent.privateKey' }
+  ]);
 }

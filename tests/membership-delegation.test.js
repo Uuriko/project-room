@@ -55,7 +55,7 @@ function requestAccess(requests, requester, requestId) {
   return requests.request("commons", {
     identityId: requester.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId
-  });
+  }, requester.secret);
 }
 
 test("owner can grant membership administration to a linked agent identity", t => {
@@ -439,7 +439,7 @@ test("a delegate with no work permissions can still admit with read/chat access 
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   delegation.grant(ownerToken, "commons", { identityId: bare.identityId });
   const requester = store.identities.create("Requesting Agent 2");
-  const req = requests.request("commons", { identityId: requester.identityId, displayName: "Requesting Agent 2", requestedPermissions: ["steer", "verify"], requestId: "ar_bare_delegate" });
+  const req = requests.request("commons", { identityId: requester.identityId, displayName: "Requesting Agent 2", requestedPermissions: ["steer", "verify"], requestId: "ar_bare_delegate" }, requester.secret);
   assert.throws(() => requests.decide(bare.secret, "commons", req.requestId, { decision: "approve" }),
     err => err.status === 403 && /Cannot grant permissions not held: steer, verify/.test(err.message));
   const decided = requests.decide(bare.secret, "commons", req.requestId, { decision: "approve", permissions: [] });

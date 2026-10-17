@@ -70,6 +70,9 @@ export const ALLOWLIST = [
   /GSM7_BASIC\s*=\s*".*/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret.
     // Anchored to the assignment and spanning the value: the charset splits into several high-entropy tokens.
   /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
+  /room\.trydemigod\.com\/receipts\/pwr_[0-9a-f]{64}/, // public-work receipt URLs: a pwr_ id is a
+    // published content identifier — the anonymous gallery lists every one — not a credential.
+    // (F2/README link one real receipt as the worked example.)
   /hidden_files\/claimbond-shadow\/BASELINE-2026-10-05\.md/, // server/claim-reputation.mjs:4 —
     // relative path to the P0 shadow-mode baseline doc, in a header comment. A file path,
     // not a credential; the high-entropy detector joins the path's tokens into a match.
@@ -120,6 +123,11 @@ export const ALLOWLIST = [
     // example.invalid URL token; obvious placeholder, not a credential
   /token=not-for-export/, // scripts/result-copy-browser-check.mjs:23 —
     // example.invalid URL token; obvious placeholder, not a credential
+  /\/api\/agent-wakes\/poll\?hostId=my-runtime/, // server/agent-discovery.mjs —
+    // onboarding-skill docs example of the wake poll URL (Step 5b). No
+    // credentials on the line; the query string trips the high-entropy
+    // detector. Overlaps only the docs URL span, so a real secret on the
+    // same line still flags (per-finding allowlist).
 
 ];
 
@@ -129,10 +137,18 @@ export const ALLOWLIST = [
 export const SAFE_ENTROPY_TOKENS = [
   // Public release artifact URLs in the herdr pin manifest; they contain no
   // credentials. Exact tokens retain scanning of all neighboring values.
+  // Both releases are listed: pkg-v2 is the pin this branch introduces,
+  // pkg-v1 is still the pin on origin/main, whose tree is scanned with this
+  // same config by the zero-false-positives-on-main test. Drop the pkg-v1
+  // entries once main's pin manifest is on pkg-v2.
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-linux-aarch64",
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-linux-x86_64",
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-macos-aarch64",
   "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v1/herdr-macos-x86_64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-linux-aarch64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-linux-x86_64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-macos-aarch64",
+  "https://github.com/Uuriko/herdr/releases/download/demigod/pkg-v2/herdr-macos-x86_64",
   // Public operator runbook socket-path example; not an authentication token.
   "HERDR_SOCKET_PATH=/srv/herdr/tenants/T/socket/herdr.sock",
   "ROOM_WATCH_WATERMARK:-$HOME/workspace/goals/agent-swarm-coordination/hidden_files/room-watch-watermark.txt",
@@ -146,6 +162,24 @@ export const SAFE_ENTROPY_TOKENS = [
   // allowlist (server/usdc-payouts.mjs). World-readable on-chain; grant nothing.
   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
   "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC on Solana
+  // Public directory-listing target URL from scripts/listings.json (the
+  // listing check tracks this public PR). World-readable; grants
+  // nothing. Surfaced when E7 Phase 4 moved listings.json from docs/
+  // (unscanned prose) into scripts/ (tree-scanned).
+  "https://github.com/ARUNAGIRINATHAN-K/awesome-ai-agents-2026/pull/309",
+  // Repo-relative archive paths cited by maintained docs/code after the
+  // E7 Phase 2 history move (docs/history/ -> archive/docs/history/).
+  // File paths, not credentials; the dated filenames push the joined
+  // path token over the entropy threshold.
+  "archive/docs/history/DESIGN-2026-09-20.md", // DESIGN.md citation
+  "archive/docs/history/EXPORT-RETENTION-DELETION.md", // server/room-export-html.mjs header citation
+  "archive/docs/history/SAFE-DIAGNOSTICS.md", // docs/INCIDENT-RUNBOOK.md companion citation (also embedded in server/wiki-data.mjs)
+  "archive/docs/history/V8-RECOVERY-RUNBOOK.md", // docs/INCIDENT-RUNBOOK.md companion citation (also embedded in server/wiki-data.mjs)
+  // Repo-relative archive paths cited after the E7 Phase 3 archive
+  // moves. File paths, not credentials; the dated filenames push the
+  // joined path token over the entropy threshold.
+  "archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt", // DESIGN.md citation
+  "archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md", // scripts/grok-room-host.mjs pointer string
 ];
 
 // Directories scanned: source code where a real secret could hide.

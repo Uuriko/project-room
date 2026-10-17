@@ -8,7 +8,7 @@ import { hashPassword, verifyPassword } from "../src/password-auth.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { request as httpRequest } from "node:http";
 
-async function fixture(t, configured = true, { noticeFails = false } = {}) {
+async function fixture(t, configured = true, { noticeFails = false, sendError = null } = {}) {
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom());
   for (const [id, email] of [["reset-owner", "owner@example.com"], ["unrelated", "other@example.com"]]) {
@@ -23,6 +23,7 @@ async function fixture(t, configured = true, { noticeFails = false } = {}) {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const configuredMailer = createMagicLinkMailer({ baseUrl: origin, send: async payload => {
+    if (sendError) throw sendError;
     if (noticeFails && payload.purpose === "password-reset-complete") throw new Error("synthetic notification failure");
     sent.push(payload);
   } });
@@ -57,6 +58,28 @@ test("reset request is nonenumerating and actual delivered URL retains destinati
   assert.equal(unknown.status, 401);
   assert.equal((await unknown.json()).error.code, "invalid_password_reset");
   assert.equal(verifyPassword("original-password", f.store.accountLogins.readPasswordVerifier("reset-owner")), true);
+});
+
+test("provider refusal of the recipient still answers sent on reset request, indistinguishably (#3529)", async t => {
+  const refusal = Object.assign(new Error("magic link email failed to send (HTTP 422): domain refused"), { providerStatus: 422 });
+  const f = await fixture(t, true, { sendError: refusal }), slot = await f.openSlot();
+  for (const email of ["owner@example.com", "unknown@example.com", "qa@example.com"]) {
+    const response = await f.post(requestPath, slot, { email });
+    assert.equal(response.status, 200, email);
+    assert.deepEqual(await response.json(), { status: "sent" }, "refusal is indistinguishable from delivery");
+  }
+  assert.equal(f.sent.length, 0, "the provider accepted nothing");
+});
+
+test("transient provider failure on reset request surfaces as a retryable 500 (#3529)", async t => {
+  const outage = Object.assign(new Error("magic link email failed to send (HTTP 503)"), { providerStatus: 503 });
+  const f = await fixture(t, true, { sendError: outage }), slot = await f.openSlot();
+  const response = await f.post(requestPath, slot, { email: "owner@example.com" });
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.equal(body.error.code, "internal_error");
+  assert.notEqual(body.status, "sent", "an outage is never reported as a delivered send");
+  assert.equal(f.sent.length, 0);
 });
 
 test("foreign-account mismatch does not burn proof; reset ends target sessions but preserves unrelated/agent authority", async t => {

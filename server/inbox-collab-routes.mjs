@@ -20,6 +20,7 @@
 // and by the queue itself (approval_not_human).
 import { ServiceError } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
+import { recordWakeEvent } from "./wake-metrics.mjs";
 
 const STATUS_BY_CODE = new Map(Object.entries({
   assign_invalid: 422, assign_conflict: 409, assign_forbidden: 403, assign_not_assigned: 404,
@@ -113,19 +114,37 @@ function handleInboxCollabCore({ req, res, url, store, roomId, auth, collabRoute
           // offline agent with a push subscription. Member id resolves to the
           // agent identity via identity_links; pushNotify itself gates on the
           // agent being offline. Never fails the assignment.
+          // #3257: enqueue the durable wake signal first — the doorbell is
+          // fire-and-forget, so without a signal row an assignee whose push
+          // endpoint is dead (or unconfigured) never learns of the assignment
+          // on any later heartbeat or poll.
+          let assigneeId = null;
           try {
-            const assigneeId = record?.assignee?.kind === "agent" && typeof record.assignee.id === "string"
+            assigneeId = record?.assignee?.kind === "agent" && typeof record.assignee.id === "string"
               ? record.assignee.id : null;
             if (assigneeId) {
               const link = store.db.prepare(
                 "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?")
                 .get(roomId, assigneeId);
               if (link?.identityId) {
+                store.agentHeartbeats.enqueueWake({ agentId: link.identityId, kind: "assignment",
+                  roomId, messageId: assignmentId });
                 store.agentHeartbeats.pushNotify({ identityId: link.identityId,
                   eventType: "assignment.created", roomId, id: assignmentId, ts: store.now() });
+              } else {
+                // #3345: an agent assignee with no identity link can never
+                // be woken — count the loss instead of skipping silently.
+                recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+                  event: "suppressed_no_identity", kind: "assignment", subjectId: assigneeId,
+                  reason: "no_identity_link" });
               }
             }
-          } catch { /* the push path never fails the assignment */ }
+          } catch {
+            // The notification path never fails the assignment — but #3345
+            // makes its failures countable instead of invisible.
+            recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+              event: "failed", kind: "assignment", subjectId: assigneeId, reason: "enqueue_error" });
+          }
           return json(res, 201, { assignmentId, assignment: record });
         }
         if (req.method === "GET") {

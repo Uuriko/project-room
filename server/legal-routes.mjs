@@ -6,8 +6,9 @@ import {
 import {
   LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
+import { workItemBoardDivergence } from "./work-item-board.mjs";
 
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);
 const REPORT_FIELDS = ["kind", "target", "body", "bucket", "nonce"];
@@ -74,7 +75,11 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
   if (pathname === "/api/health/jobs") {
     if (!read) reject(405, "method_not_allowed", "Method not allowed");
     const jobs = nodeJobHealth();
+    // D.2.3 monitor (#3607): the workItem/board divergence aggregate
+    // from the per-room snapshots. Zero is the only healthy value.
+    const divergence = workItemBoardDivergence(store);
     json(res, 200, { schema: "room.job-health/1", publicReports: countOpenPublicReports(store), servedBy: "node",
+      workItemBoard: { divergedRooms: divergence.divergedRooms, divergedRows: divergence.divergedRows },
       ...(jobs ? { generatedAt: new Date(store.now()).toISOString(), jobs } : {}) }, head);
     return true;
   }

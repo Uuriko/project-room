@@ -1,13 +1,16 @@
 // Personal attention surfaces: activity feed, read horizons, saved messages,
-// thread mutes. Write-time fan-out for mention/reply/thread_reply/reaction
+// thread mutes. Write-time fan-out for mention/reply/thread_reply
 // events (per-recipient rows, like mention_states), plus read/unread state per
 // item. This is the explicit-triage companion to the cursor-derived
 // notifications feed (server/notifications.mjs): notifications derive from the
 // event tail, activity rows are fanned out at write time and carry their own
-// read state, reactions, and thread replies.
+// read state and thread replies.
 //
 // Tables:
 //   activity_events  one row per (recipient, triggering message, actor)
+//   activity_fanout_failures  #3261 journal of fan-out failures awaiting
+//                    replay (the fan-out is write-time only, so without it
+//                    a failure was a permanent, invisible loss)
 //   read_horizons    per-member "read up to" marker, room-wide or per thread
 //   saved_messages   per-member saved ("later") messages
 //   thread_mutes     per-member muted threads (shared table with
@@ -17,7 +20,7 @@
 //
 // The store (server/store.mjs) owns persistence and calls recordActivityEvents
 // inside the command transaction, next to trackMentions: an activity row is
-// never recorded without its triggering message/reaction. Fan-out never
+// never recorded without its triggering message. Fan-out never
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
@@ -27,7 +30,9 @@ import { messageInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-export const ACTIVITY_TYPES = Object.freeze(["mention", "reply", "thread_reply", "reaction"]);
+// 'reaction' stays in the table CHECK for rows written before reactions were
+// removed (2026-10); reads skip them.
+export const ACTIVITY_TYPES = Object.freeze(["mention", "reply", "thread_reply"]);
 export const isActivityType = value => ACTIVITY_TYPES.includes(value);
 
 export const activitySchema = `
@@ -46,6 +51,20 @@ export const activitySchema = `
   );
   CREATE INDEX IF NOT EXISTS activity_events_feed ON activity_events(room_id, user_id, read_at, id DESC);
   CREATE INDEX IF NOT EXISTS activity_events_type ON activity_events(room_id, user_id, type, id DESC);
+  CREATE TABLE IF NOT EXISTS activity_fanout_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    command_type TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    recovered_at INTEGER,
+    UNIQUE(room_id, event_id)
+  );
+  CREATE INDEX IF NOT EXISTS activity_fanout_failures_pending
+    ON activity_fanout_failures(room_id, recovered_at);
   CREATE TABLE IF NOT EXISTS read_horizons (
     room_id TEXT NOT NULL REFERENCES rooms(id),
     member_id TEXT NOT NULL,
@@ -68,6 +87,9 @@ export const activitySchema = `
 // no statement (e.g. a trailing -- comment).
 
 // A DM message is visible only to its author and its recipient.
+// A message from the projection, else its current record from the messages table
+// (archived messages are no longer in the projection).
+const messageOrArchived = (store, roomId, id) => store.room(roomId).state.messages.find(m => m.id === id) ?? store.archivedMessage(roomId, id);
 const dmVisible = (message, memberId) =>
   !message?.toMemberId || message.authorId === memberId || message.toMemberId === memberId;
 
@@ -110,7 +132,45 @@ function identityNamesFor(store, roomId) {
 // recipient qualifies for several types, the most direct one wins
 // (mention > reply > thread_reply). Muted threads generate no thread_reply
 // rows. DM scoping: a DM's events only ever reach the DM's two parties.
+//
+// #3261: the fan-out is atomic per call. Store transaction semantics
+// differ across runtimes (the Durable Object adapter does not nest the
+// same way), so atomicity is implemented here instead of with a
+// savepoint: applyFanOut records every mutation it makes, and any throw
+// runs the compensating undo before the error propagates — a failed
+// fan-out leaves neither partial inserts nor a half-applied retraction.
+// The caller logs + journals the failure (journalActivityFanoutFailure)
+// and retryActivityFanoutFailures replays it once the fault clears.
 export function recordActivityEvents(store, roomId, state, senderId, command, incoming) {
+  const applied = { inserted: [], retracted: [] };
+  try {
+    applyActivityFanOut(store, roomId, state, senderId, command, incoming, applied);
+  } catch (error) {
+    compensateActivityFanOut(store, applied);
+    throw error;
+  }
+}
+
+function compensateActivityFanOut(store, applied) {
+  // Best-effort undo; a compensation failure is logged, never thrown —
+  // it must not mask the original fan-out error.
+  for (const id of applied.inserted) {
+    try { store.db.prepare("DELETE FROM activity_events WHERE id=?").run(id); }
+    catch (error) { console.error("activity fan-out compensation (delete) failed:", error?.message ?? error); }
+  }
+  for (const row of applied.retracted) {
+    try {
+      store.db.prepare(
+        `INSERT OR IGNORE INTO activity_events
+         (id,room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
+         VALUES(?,?,?,?,?,?,?,?,?,?)`)
+        .run(row.id, row.room_id, row.type, row.actor_id, row.actor_name, row.message_id,
+          row.thread_id, row.user_id, row.created_at, row.read_at);
+    } catch (error) { console.error("activity fan-out compensation (restore) failed:", error?.message ?? error); }
+  }
+}
+
+function applyActivityFanOut(store, roomId, state, senderId, command, incoming, applied) {
   const db = store.db, now = store.now();
   const members = state?.members ?? {};
   const messages = state?.messages ?? [];
@@ -158,29 +218,57 @@ export function recordActivityEvents(store, roomId, state, senderId, command, in
        (room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
        VALUES(?,?,?,?,?,?,?,?,NULL)`);
     for (const [userId, info] of recipients) {
-      insert.run(roomId, info.type, senderId, actorName, messageId, info.threadId, userId, now);
+      const result = insert.run(roomId, info.type, senderId, actorName, messageId, info.threadId, userId, now);
+      if (result.changes > 0) applied.inserted.push(result.lastInsertRowid);
     }
     return;
   }
-  if (command.type === T.MESSAGE_REACTION_SET) {
-    const data = command.data ?? {};
-    const message = messages.find(m => m.id === data.messageId);
-    if (!message) return;
-    if (data.active === true) {
-      if (message.authorId === senderId) return; // no self-events
-      db.prepare(
-        `INSERT OR IGNORE INTO activity_events
-         (room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
-         VALUES(?,?,?,?,?,?,?,?,NULL)`)
-        .run(roomId, "reaction", senderId, actorName, message.id, "", message.authorId, now);
-    } else if (data.active === false) {
-      // Toggle-off retracts the still-unread event.
-      db.prepare(
-        `DELETE FROM activity_events
-         WHERE room_id=? AND type='reaction' AND message_id=? AND actor_id=? AND user_id=? AND read_at IS NULL`)
-        .run(roomId, message.id, senderId, message.authorId);
-    }
+}
+
+// #3261: durably journal a fan-out failure with everything a replay needs.
+// Called from the store's command path after recordActivityEvents throws
+// (and has already compensated its partial mutations). One row per room
+// event; a repeat failure refreshes the row and clears any recovery stamp.
+export function journalActivityFanoutFailure(store, { roomId, senderId, command, incoming, error }) {
+  const payload = JSON.stringify({
+    senderId,
+    command: { type: command.type, data: command.data ?? {} },
+    eventId: incoming.id,
+  });
+  store.db.prepare(
+    `INSERT INTO activity_fanout_failures
+     (room_id, event_id, command_type, actor_id, payload, error, created_at, recovered_at)
+     VALUES(?,?,?,?,?,?,?,NULL)
+     ON CONFLICT(room_id, event_id) DO UPDATE SET
+       payload=excluded.payload, error=excluded.error, recovered_at=NULL`)
+    .run(roomId, incoming.id, command.type, senderId, payload,
+      String(error?.message ?? error).slice(0, 500), store.now());
+}
+
+// #3261: replay pending fan-out failures for a room against its current
+// state. The fan-out's INSERT OR IGNORE makes replay idempotent; rows that
+// still fault stay pending for the next attempt. Returns the count
+// recovered. Bounded per call — the store invokes this opportunistically
+// after each successful command in the room.
+export function retryActivityFanoutFailures(store, roomId, limit = 25) {
+  const db = store.db;
+  const rows = db.prepare(
+    "SELECT * FROM activity_fanout_failures WHERE room_id=? AND recovered_at IS NULL ORDER BY id LIMIT ?")
+    .all(roomId, limit);
+  let recovered = 0;
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.payload);
+      const state = store.room(roomId)?.state;
+      if (!state) continue;
+      recordActivityEvents(store, roomId, state, payload.senderId,
+        { type: payload.command.type, data: payload.command.data }, { id: row.event_id });
+      db.prepare("UPDATE activity_fanout_failures SET recovered_at=? WHERE id=?")
+        .run(store.now(), row.id);
+      recovered += 1;
+    } catch { /* still faulted — stays pending for the next attempt */ }
   }
+  return recovered;
 }
 
 // --- HTTP-facing reads/writes (membership re-checked on every call) ----------
@@ -208,7 +296,7 @@ function viewerEnvelope(auth, roomId) {
 // tombstones are honoured. DM rows for conversations the viewer is not a
 // party to are dropped (fail closed), mirroring the pins route.
 function eventView(store, roomId, row, memberId, floor = null) {
-  const message = store.room(roomId).state.messages.find(m => m.id === row.message_id);
+  const message = messageOrArchived(store, roomId, row.message_id);
   // PRIV-2: a since_join reader's activity follows the same floor as every
   // other message read. A mention recorded before removal stays in the table
   // after reactivation; the body must not come back with it.
@@ -246,7 +334,7 @@ export function listActivity(store, token, roomId, params = {}, expectedSessionB
     let hasMore = false;
     let scanned = 0;
     while (items.length <= count && scanned < 2000) {
-      const clauses = ["room_id=?", "user_id=?"];
+      const clauses = ["room_id=?", "user_id=?", "type<>'reaction'"];
       const args = [roomId, member.id];
       if (type) { clauses.push("type=?"); args.push(type); }
       if (cursor !== null) { clauses.push("id<?"); args.push(cursor); }
@@ -276,7 +364,7 @@ export function activityUnreadCount(store, token, roomId, expectedSessionBinding
     const floor = store.historyFloor(roomId, member.id);
     const rows = store.db.prepare(
       `SELECT * FROM activity_events
-       WHERE room_id=? AND user_id=? AND read_at IS NULL`).all(roomId, member.id);
+       WHERE room_id=? AND user_id=? AND read_at IS NULL AND type<>'reaction'`).all(roomId, member.id);
     const byType = Object.fromEntries(ACTIVITY_TYPES.map(t => [t, 0]));
     for (const row of rows) {
       const view = eventView(store, roomId, row, member.id, floor);
@@ -361,9 +449,12 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
   const member = auth.member;
   return store.transaction(() => {
     if (lastReadMessageId !== null) {
-      const message = store.room(roomId).state.messages.find(m => m.id === lastReadMessageId);
-      // Same answer for a DM the reader is not party to as for an unknown id.
-      if (!message || !dmVisible(message, member.id)) fail(404, "message_not_found", "No such message in this room");
+      const message = messageOrArchived(store, roomId, lastReadMessageId);
+      // Same answer for a DM the reader is not party to, and for a message
+      // from before a since_join reactivation, as for an unknown id.
+      if (!message || !dmVisible(message, member.id) || !messageInHistory(message, store.historyFloor(roomId, member.id))) {
+        fail(404, "message_not_found", "No such message in this room");
+      }
     }
     const now = store.now();
     store.db.prepare(
@@ -377,7 +468,7 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
 // --- saved messages -----------------------------------------------------------
 
 function savedView(store, roomId, row, memberId, floor = null) {
-  const message = store.room(roomId).state.messages.find(m => m.id === row.message_id);
+  const message = messageOrArchived(store, roomId, row.message_id);
   // PRIV-2: a since_join reader's saved list follows the same floor as every
   // other message read.
   if (!message || !dmVisible(message, memberId) || !messageInHistory(message, floor)) return null;
@@ -419,7 +510,7 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
   const auth = authed(store, token, roomId, expectedSessionBinding);
   const member = auth.member;
   return store.transaction(() => {
-    const message = store.room(roomId).state.messages.find(m => m.id === data.messageId);
+    const message = messageOrArchived(store, roomId, data.messageId);
     if (!message || !dmVisible(message, member.id)) fail(404, "message_not_found", "No such message in this room");
     if (data.saved && !messageInHistory(message, store.historyFloor(roomId, member.id))) fail(404, "message_not_found", "No such message in this room");
     if (data.saved && message.deletedAt) fail(409, "message_deleted", "A deleted message cannot be saved");

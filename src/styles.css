@@ -185,8 +185,6 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .mention-option { display: flex; align-items: center; justify-content: space-between; gap: .75rem; width: 100%; min-height: 44px; padding: .4rem .7rem; border: 0; border-radius: .35rem; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .mention-option span { color: var(--muted); font-size: .68rem; }
 .mention-option.active, .mention-option:hover { background: #1d2734; }
-.emoji-list { max-height: 16rem; overflow: auto; }
-.emoji-glyph { font-size: 1.25rem; }
 .composer > label { display: block; margin-bottom: .45rem; }
 .form-hint { margin: .45rem 0 0; color: var(--muted); font-size: .69rem; }
 #human-push-button { margin-top: .45rem; }
@@ -327,16 +325,23 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 /* Typing indicator: ephemeral ambient presence above the composer. */
 .typing-indicator { padding: .15rem 1.25rem; color: var(--muted); font-size: var(--text-xs); font-style: italic; }
 .typing-indicator[hidden] { display: none; }
-.composer-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 40px; align-items: end; gap: .5rem; padding: .5rem; border: 1px solid #50515f; border-radius: .75rem; background: var(--panel-raised); }
+.composer-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px 44px; align-items: end; gap: .5rem; padding: .5rem; border: 1px solid #50515f; border-radius: .75rem; background: var(--panel-raised); }
 .composer-row:focus-within { border-color: var(--blue); }
 .composer-row textarea { grid-column: 2; min-height: 3rem; max-height: 25dvh; border: 0; border-radius: .35rem; background: transparent; padding: .45rem .25rem; }
 .composer-row textarea:focus { outline: 0; }
 .composer-row #request-reply { grid-column: 2; grid-row: 2; justify-self: end; align-self: center; min-height: 32px; padding: .2rem .55rem; font-size: .75rem; white-space: nowrap; }
 .composer-attach { grid-column: 3; grid-row: 1 / span 2; align-self: end; }
-.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; }
+.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; min-height: 44px; min-width: 44px; }
 .composer-attachments, .message-files { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .35rem; }
 .file-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: 100%; padding: .15rem .45rem; border: 1px solid var(--line); border-radius: 999px; font-size: .8rem; }
 .file-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; min-height: 1.5rem; }
+/* 360px phones: a long attachment filename must truncate inside the message
+   column instead of forcing horizontal overflow. The first child carries the
+   filename (the download button in messages, the label span in the composer);
+   the remove/status controls after it stay fully visible. The full name stays
+   in the button's aria-label. */
+.file-chip { min-width: 0; }
+.file-chip > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #message-form.composer-drop { outline: 2px dashed var(--blue); outline-offset: 2px; }
 .composer-add { display: inline-grid; place-items: center; width: 36px; min-height: 36px; height: 36px; border-radius: .4rem; border: 0; background: transparent; color: var(--muted); font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .composer-add:hover { background: rgb(255 255 255 / 6%); }
@@ -356,7 +361,10 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 /* antislop #6: on the sign-in surfaces, text links are real tap targets
    (14 px text, 44 px row) inside the form steps. The welcome view and chat
    rows keep the compact size above. */
-#auth-signin-ui .text-button, #agent-auth-step .text-button { min-height: 44px; font-size: var(--text-sm); }
+/* #agent-signin-ui is the agent sign-in component's mount on its own
+   page (/agent-signin) — the same 44px floor applies there. */
+#auth-signin-ui .text-button, #agent-signin-ui .text-button { min-height: 44px; font-size: var(--text-sm); }
+#join-account-rooms-link { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); }
 /* UI calming #2: the "⋯" overflow menu holds Save as result / Pin / Make this
    work / Record decision / moderation; it fades in with the other actions.
    The fade targets the summary only, never the <details> itself: opacity < 1
@@ -384,6 +392,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .message-more-menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 30; display: grid; gap: .1rem; min-width: 12rem; padding: .35rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel-raised); box-shadow: var(--shadow); }
 /* Flipped upward by JavaScript when there isn't room below (near the composer). */
 .message-more-up .message-more-menu { top: auto; bottom: calc(100% + .25rem); }
+.message-more-start .message-more-menu { right: auto; left: 0; }
 .message-more-menu .message-to-work { padding: .5rem .6rem; text-align: left; font-size: .78rem; }
 .message-more[open] .message-more-menu .message-to-work { opacity: 1; }
 @media (hover: hover) and (pointer: fine) {
@@ -544,11 +553,22 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #connection-explanation { position: absolute; z-index: 15; top: 100%; right: 1rem; margin: .25rem 0 0; width: min(26rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--panel-raised); box-shadow: var(--shadow); line-height: 1.5; overflow-wrap: anywhere; }
 #people-hint:empty { display: none; }
 /* #662: owner "needs your attention" card. */
-.needs-attention { margin: 0 1rem .75rem; padding: .85rem 1rem; border: 1px solid var(--line); border-radius: .65rem; background: rgb(255 255 255 / 4%); }
+.needs-attention { margin: 0 1rem .5rem; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: .65rem; background: rgb(255 255 255 / 4%); }
 .needs-attention[hidden] { display: none; }
 .attention-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .5rem; flex-wrap: wrap; }
 .attention-header h3 { margin: 0; font-size: 1rem; display: flex; align-items: center; gap: .5rem; min-width: 0; }
 .attention-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--accent, #d97706); color: #fff; font-size: .8rem; font-weight: 700; }
+.attention-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+/* The preview is a glance, not a reading surface: one ellipsized line per item so a long
+   room keeps its reading window. Open activity has the full text. */
+/* min-width: 0 lets the nowrap line shrink to the card; without it the line's full
+   length sets the page's minimum width and a phone's layout viewport grows with it. */
+.needs-attention { min-width: 0; }
+#activity-preview-list { grid-template-columns: minmax(0, 1fr); }
+#activity-preview-list > li { min-width: 0; }
+#activity-preview-list .rb-event-link { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#activity-preview-list .rb-actor, #activity-preview-list .rb-detail, #activity-preview-list time { display: inline; }
+#activity-preview-list time { margin: 0 .4rem; color: var(--muted); }
 .attention-list { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
 .attention-item { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .75rem; padding: .6rem .75rem; border: 1px solid var(--line-soft); border-radius: .5rem; background: rgb(255 255 255 / 2%); }
 .attention-body { flex: 1 1 18rem; min-width: 0; }
@@ -708,20 +728,23 @@ button, .button, .message-to-work { min-height: 44px; }
 .message:focus-visible, .message-list:focus-visible, .work-card:focus-visible, .presence-member:focus-visible, .event-list li:focus-visible, #room-title:focus-visible, #conversation-title:focus-visible, #thread-title:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 .message-time { margin-left: .2rem; text-decoration: none; }
 .message-time time { color: var(--muted); }
+/* Timestamp permalinks are standalone controls, not inline prose links. */
+@media (pointer: coarse), (max-width: 500px) {
+  .message-time { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding-inline: .2rem; }
+}
 .message-links { flex-wrap: wrap; gap: .3rem 1rem; }
 .message-to-work, .thread-link { font-size: .875rem; }
 .thread-link { padding: .4rem .65rem; border: 1px solid #374b68; border-radius: .45rem; background: #172335; color: #bcd5ff; }
 .reply-preview { display: block; padding: .3rem 0; }
-.reactions { display: flex; flex-wrap: wrap; gap: .35rem; margin: .4rem 0 .15rem; }
-.reaction { display: inline-flex; align-items: center; justify-content: center; gap: .3rem; min-width: 44px; min-height: 44px; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--muted); font-size: .875rem; }
-.reaction.used { color: var(--text); background: #1a2940; }
-.reaction[aria-pressed="true"] { color: #d5e4ff; background: #21385c; border-color: var(--blue); }
-.reaction:hover { border-color: var(--blue); }
 button:disabled { cursor: wait; opacity: .6; }
 .new-messages-button { display: block; align-self: center; max-width: calc(100% - 2rem); margin: .35rem 1rem; padding: .45rem 1rem; border: 1px solid #66668b; border-radius: 99px; color: var(--text); background: #37374e; font-size: .8rem; }
 .count-chip { padding-inline: .6rem; white-space: nowrap; }
 @media (max-width: 500px) {
-  .thread-bar { flex-direction: column; align-items: stretch; gap: .5rem; }
+  /* One row: Back, the title and Mute, so a thread keeps room for its replies. */
+  .thread-bar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .5rem; padding: .4rem .75rem; }
+  .thread-bar h3 { margin: 0; font-size: var(--text-md); }
+  .thread-bar p { font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread-bar button { min-height: 44px; padding-inline: .6rem; }
   .conversation-header { flex-wrap: wrap; }
 }
 
@@ -847,8 +870,6 @@ button:disabled { cursor: wait; opacity: .6; }
 .message-list { padding-inline: 1.25rem; }
 .pinned-chip { border: 0; padding: 0; text-transform: none; font-size: .75rem; }
 .message-links { display: inline-flex; flex-wrap: wrap; gap: .75rem; vertical-align: top; }
-.reaction { border-color: var(--line-soft); }
-.reaction:hover { background: var(--panel-raised); }
 .composer-toolbar { flex-wrap: wrap; }
 .composer-toolbar select { width: auto; max-width: min(100%, 16rem); border-color: transparent; background: transparent; padding-left: 0; font-size: .875rem; }
 .audience-note { color: var(--muted); font-size: .75rem; }
@@ -1216,7 +1237,7 @@ summary { overflow-wrap: anywhere; }
 /* Issue #6 B2: pinned messages (chip styling consolidated above with .pinned-chip). */
 .pinned-panel { margin: 0 1rem .25rem; padding: 0 .75rem; border: 1px solid var(--line-soft); border-radius: .75rem; background: rgb(255 255 255 / 2%); }
 .pinned-panel > .section-summary { min-height: 40px; }
-.pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; }
+.pinned-list { list-style: none; margin: 0; padding: 0 0 .6rem; display: grid; gap: .5rem; max-height: min(30dvh, 16rem); overflow-y: auto; overscroll-behavior: contain; }
 .pinned-item { display: grid; grid-template-columns: 1fr auto; gap: .1rem .75rem; padding: .5rem .6rem; border: 1px solid var(--line-soft); border-radius: .6rem; }
 .pinned-item .pinned-link { grid-column: 1; font-size: .78rem; }
 .pinned-item .pinned-body { grid-column: 1; margin: 0; color: #dfe5ed; font-size: .9rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1280,32 +1301,6 @@ summary { overflow-wrap: anywhere; }
 #agent-invite-link { overflow-wrap: anywhere; }
 .agent-invite-instructions pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; }
 
-/* Reactions are conversation content; the picker lives in a long-press /
-   right-click sheet, never as a permanent affordance under each message. */
-.reactions:empty { display: none; }
-@media (hover: hover) and (pointer: fine) {
-  .reactions .reaction { min-height: 28px; min-width: 36px; padding: .1rem .45rem; }
-}
-
-/* Reaction sheet: search plus a grid. Opened by long-press, right-click, or
-   Add reaction. Bottom sheet on touch, centered on desktop. */
-#reaction-sheet:not([open]) { display: none; }
-#reaction-sheet[open] { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: .9rem; background: var(--panel-raised); box-shadow: var(--shadow); padding: 1rem 1.1rem 1.1rem; width: min(26rem, calc(100vw - 2rem)); max-width: min(26rem, calc(100vw - 2rem)); max-height: min(32rem, calc(100dvh - 2rem)); }
-#reaction-sheet::backdrop { background: rgb(0 0 0 / 45%); }
-.reaction-sheet-label { margin: 0 0 .25rem; font-weight: 600; }
-.reaction-search { width: 100%; min-height: 44px; margin: .35rem 0 .15rem; }
-.reaction-sheet-options { overflow: auto; margin: .35rem 0 .8rem; min-height: 0; flex: 1; }
-.reaction-sheet-heading { margin: .55rem 0 .2rem; color: var(--muted); font-size: .75rem; }
-.reaction-sheet-empty { margin: .6rem 0; color: var(--muted); }
-.reaction-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: .2rem; }
-.reaction-pick { min-width: 44px; min-height: 44px; padding: 0; border: 1px solid transparent; border-radius: .5rem; background: transparent; font-size: 1.35rem; line-height: 1; cursor: pointer; }
-.reaction-pick:hover { border-color: var(--muted); background: var(--panel); }
-.reaction-pick:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-.reaction-pick[aria-pressed="true"] { border-color: var(--blue); background: #21385c; }
-@media (hover: none), (pointer: coarse) {
-  #reaction-sheet[open] { position: fixed; inset: auto 0 0 0; margin: 0; max-width: none; width: 100%; border-radius: 1.1rem 1.1rem 0 0; border-bottom: none; padding-bottom: calc(1.1rem + env(safe-area-inset-bottom)); max-height: min(70dvh, 32rem); }
-  .reaction-pick { min-width: 48px; min-height: 48px; font-size: 1.5rem; }
-}
 
 .join-account-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
 #join-account-choices { padding-bottom: .75rem; margin-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
@@ -1426,7 +1421,7 @@ summary { overflow-wrap: anywhere; }
 }
 /* Popovers anchor to the action row, not to a trigger shifted by a thread link. */
 .message-links { position: relative; }
-.composer-row { grid-template-columns: auto minmax(0, 1fr) 36px 40px; }
+.composer-row { grid-template-columns: auto minmax(0, 1fr) 36px 44px; }
 .sidebar-head { margin: 0; padding: 0; }
 .sidebar-head .room-overview-open { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-width: 0; padding: .35rem; border: 0; border-radius: .4rem; background: transparent; color: var(--text); text-align: left; }
 .sidebar-head .room-overview-open:hover { background: var(--panel-raised); }
@@ -1441,7 +1436,7 @@ summary { overflow-wrap: anywhere; }
 .composer-row .composer-add { grid-column: 1; grid-row: 2; justify-self: start; }
 .composer-row #request-reply { grid-column: 2; grid-row: 2; }
 .composer-attach { grid-column: 3; grid-row: 2; }
-.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; }
+.composer-row > button[type="submit"] { grid-column: 4; grid-row: 2; min-height: 44px; min-width: 44px; }
 @media (max-width: 520px) {
   .composer-row #request-reply { padding-inline: .35rem; font-size: .68rem; }
 }
@@ -1512,7 +1507,6 @@ summary { overflow-wrap: anywhere; }
 }
 
 /* Keep contextual controls within the conversation rather than above its header. */
-.reaction-options { top: calc(100% + .25rem); bottom: auto; z-index: 45; }
 #session-menu-panel #connection-details { margin: 0; padding: .4rem .6rem; }
 #session-menu-panel #connection-details > summary { min-height: 32px; font-size: .875rem; }
 
@@ -1684,8 +1678,6 @@ summary { overflow-wrap: anywhere; }
 /* Visible entry routes, each opening a focused sign-in flow. */
 .signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }
 .signin-entry-routes #agent-signin-button { justify-self: start; min-height: 44px; font-size: var(--text-sm); color: var(--muted); text-decoration: none; }
-#agent-auth-step { margin-top: 1rem; }
-#agent-auth-back { min-height: 44px; }
 
 #auth-signin-ui form { display: grid; gap: .75rem; }
 #auth-signin-ui [data-signin-panel] { display: grid; gap: .75rem; }
@@ -1764,7 +1756,7 @@ summary { overflow-wrap: anywhere; }
 [data-signin-form="password"] > .form-hint { grid-column: 1 / -1; margin: 0; }
 
 /* The entrance offers two choices; explanation and agent entry live in More. */
-@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: RoomWordmark; src: url("/og/fonts/Inter-Regular.woff2") format("woff2"), url("/og/fonts/Inter-Regular.ttf") format("truetype"); font-display: swap; }
 #auth-panel.auth-panel { width: min(100% - 3rem, 25rem); max-width: 25rem; margin: clamp(5rem, 18vh, 12rem) auto 3rem; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .auth-panel #auth-title { font-family: RoomWordmark, var(--font-sans); font-size: var(--text-wordmark); font-weight: 400; letter-spacing: -.07em; line-height: 1.1; text-align: center; margin-bottom: 2.75rem; white-space: normal; }
 .signin-welcome { display: grid; gap: .75rem; }
@@ -1777,8 +1769,9 @@ summary { overflow-wrap: anywhere; }
 .signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: var(--text-sm); }
 #signin-entry-routes { margin-top: .6rem; }
 #signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
+#signin-entry-routes #join-code-link { justify-self: center; display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); text-decoration: none; }
 [data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
-#terms-notice { order: 3; margin: .5rem 0 0; font-size: var(--text-xs); text-align: center; }
+#terms-notice { margin: .5rem 0 0; font-size: var(--text-xs); text-align: center; }
 @media (max-width: 520px) { #auth-panel.auth-panel { margin-top: 22vh; } }
 
 .app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
@@ -1790,3 +1783,7 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .join-agent .connect-steps { margin: .5rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: var(--text-sm); }
 .join-agent .connect-steps li { margin: .35rem 0; }
 .join-agent .connect-steps strong { color: var(--text); }
+
+.inline-result { min-width: 0; margin-block: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.inline-result h2 { margin-block: 0 var(--space-2); font-size: var(--text-lg); }
+.inline-result .portable-actions { flex-wrap: wrap; }

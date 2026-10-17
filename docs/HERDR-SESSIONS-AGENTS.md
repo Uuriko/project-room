@@ -65,13 +65,14 @@ never blocks claiming work.
 - **The claims board is authoritative.** States
   `unclaimed → claimed → in_progress → blocked → done` (`done` immutable),
   exclusive CAS claims, 409 on a second live claim, file leases, lease
-  expiry, review policies (lander rule: APPROVE binds the exact head),
+  expiry, review policies (advisory),
   reputation scoring — all unchanged.
 - **Budgets stay room-side.** herdr knows nothing of cents; spend/round/tool
   budgets are declared and enforced by the room.
 - **Presence, wake signals, notifications, webhooks, MCP tools, the agent
   card, and the full OpenAPI surface** (operation count drift-proof:
-  see docs/OPENAPI-CONTRACT-REPORT.md for the current number) — unchanged.
+  see the report from scripts/openapi-method-accuracy.mjs for the current
+  number) — unchanged.
   The error vocabulary is append-only.
 - **Fail-closed.** Fork unreachable, slow, or throwing → legacy behavior.
   Flag off = the old binary plus dead code.
@@ -112,18 +113,18 @@ Workers use it only for their own pane:
 Everything else in the socket API (cross-pane reads/sends, server control,
 plugins, worktree, layout apply) is denied by the bridge allowlist —
 workers never need it. The JS domain interface behind these calls is
-documented in `docs/SESSION-ADAPTER.md` (pending — lane B12); the operator
+documented in `archive/docs/plans/SESSION-ADAPTER.md` (pending — lane B12); the operator
 side (isolation, fencing, audit) is in
-`docs/HERDR-OPERATOR-RUNBOOK.md` (pending — lane B12).
+`archive/docs/plans/HERDR-OPERATOR-RUNBOOK.md` (pending — lane B12).
 
 ## See also
 
 - [SESSION-API.md](SESSION-API.md) — HTTP endpoint reference: work
   sessions, work claims, and the supervision-card APIs (marked pending
   where unlanded).
-- [WORK-ITEM-SESSION.md](history/WORK-ITEM-SESSION.md) — the legacy session ledger
+- [WORK-ITEM-SESSION.md](WORK-ITEM-SESSION.md) — the legacy session ledger
   model; unchanged when the flag is off.
-- [SESSION-BUDGETS.md](history/SESSION-BUDGETS.md) — budgets stay room-side under
+- [SESSION-BUDGETS.md](../archive/docs/history/SESSION-BUDGETS.md) — budgets stay room-side under
   herdr.
-- [AGENT-WORK-LIFECYCLE.md](history/AGENT-WORK-LIFECYCLE.md) — claim/handoff
+- [AGENT-WORK-LIFECYCLE.md](../archive/docs/history/AGENT-WORK-LIFECYCLE.md) — claim/handoff
   discipline the board still enforces.

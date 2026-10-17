@@ -53,6 +53,46 @@ function fixture(t, route) {
 
 const history = ["m1", "m2", "m3", "m4", "m5"].map(message);
 
+test('activity headers negotiate without changing URLs and full audit ignores a late lean response', async t => {
+  const seen = [], headers = []; let release;
+  const client = new RoomClient({ events: null, auditView: 'activity', onSnapshot: value => seen.push(value), fetcher: async (url, options) => {
+    headers.push(options.headers['X-Project-Room-Audit-View']);
+    if (headers.length === 1) {
+      await new Promise(resolve => { release = resolve; });
+      return response({ ...full(9, [message('m1')]), auditView: 'activity', auditVersion: 1 });
+    }
+    assert.equal(url, RECENT);
+    return response({ ...full(10, [message('m1')]), state: { messages: [message('m1')], eventLog: [{ id: 'full-audit-event' }] } });
+  } });
+  client.session = identity(); t.after(() => client.disconnect());
+  const pending = client.refresh(); await new Promise(resolve => setImmediate(resolve));
+  const record = client.setAuditView('full'); release(); await pending; await record;
+  assert.deepEqual(headers, ['activity-v1', undefined]);
+  assert.equal(seen.length, 1, 'late partial audit is not shown after Record requested full');
+  assert.equal(seen[0].state.eventLog[0].id, 'full-audit-event');
+});
+
+test('a server ignoring activity negotiation remains usable and default clients request the full audit', async t => {
+  for (const auditView of ['activity', 'full']) {
+    let header; const seen = [];
+    const client = new RoomClient({ events: null, auditView, onSnapshot: value => seen.push(value), fetcher: async (_url, options) => {
+      header = options.headers['X-Project-Room-Audit-View']; return response(full(1, [message('m1')]));
+    } });
+    client.session = identity(); t.after(() => client.disconnect()); await client.refresh();
+    assert.equal(seen.length, 1); assert.equal(header, auditView === 'activity' ? 'activity-v1' : undefined);
+  }
+});
+
+test('a full Record read refuses a partial activity response instead of presenting it as complete', async t => {
+  let calls = 0; const seen = [];
+  const client = new RoomClient({ events: null, auditView: 'activity', onSnapshot: value => seen.push(value), fetcher: async () => {
+    calls++; return response({ ...full(1, [message('m1')]), auditView: 'activity', auditVersion: 1 });
+  } });
+  client.session = identity(); t.after(() => client.disconnect());
+  await client.refresh(); await assert.rejects(client.setAuditView('full'));
+  assert.equal(calls, 2); assert.equal(seen.length, 1);
+});
+
 test("a new message on the stream re-reads only the newest messages and keeps older history", async t => {
   const f = fixture(t, url => url === FULL ? full(9, history) : recent(10, [message("m4"), message("m5"), message("m6")], 3));
   await f.warm();
@@ -226,4 +266,47 @@ test("a window that already holds the whole room counts as a full read: no fill,
   assert.deepEqual(reads, [RECENT], "no background fill for a room the window already covers");
   client.connect();
   assert.match(urls.at(-1), /\/stream\?after=11(&|$)/, "the stream resumes after the window read, not from 0");
+});
+
+test("a background fill refused with 401 ends access once, stops retrying and never shows a connection error", async t => {
+  const statuses = [], reads = [];
+  const refused = { ok: false, status: 401, json: async () => ({ error: { code: "invalid_session", message: "Sign in again" } }) };
+  const client = new RoomClient({ onSnapshot: () => {}, onStatus: text => statuses.push(text), fetcher: async url => {
+    reads.push(url);
+    return url === RECENT ? response(recent(9, [message("m3"), message("m4"), message("m5")], 2)) : refused;
+  } });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  await client.refresh();
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.deepEqual(reads, [RECENT, FULL], "one window read, one fill, no retries after a 401");
+  assert.equal(client.session, null, "access ended");
+  assert.equal(statuses.some(text => /Connection interrupted/.test(text)), false);
+});
+
+test("an edit that arrives while only the first window is held reads the full snapshot, not another window", async t => {
+  const edited = history.map(item => item.id === "m1" ? { ...item, body: "edited" } : item);
+  const f = fixture(t, url => url === FULL ? full(10, edited) : recent(10, [message("m3"), message("m4"), message("m5")], 2));
+  await f.client.refresh(); // first window only: the 250ms fill has not run yet
+  assert.equal(f.client.heldMessages().partial, true);
+  await f.client.refresh(hint(10, "message.edited", { messageId: "m1" }));
+  assert.deepEqual(f.reads.slice(0, 2), [RECENT, FULL]);
+  assert.equal(f.seen.at(-1).state.messages.find(item => item.id === "m1").body, "edited");
+  assert.equal(f.client.heldMessages().partial, false);
+});
+
+test("an aborted first window read reports the interruption, then the retry is windowed again, not a full read", async t => {
+  const statuses = [], reads = [];
+  let failNext = true;
+  const client = new RoomClient({ onSnapshot: () => {}, onStatus: text => statuses.push(text), fetcher: async url => {
+    reads.push(url);
+    if (failNext) { failNext = false; throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" }); }
+    return response(recent(9, [message("m3"), message("m4"), message("m5")], 2));
+  } });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  await assert.rejects(client.refresh(), /aborted/);
+  assert.equal(client.heldMessages(), null, "nothing is held after the failed read");
+  await client.refresh();
+  assert.deepEqual(reads, [RECENT, RECENT], "a client holding nothing asks for the window again");
 });

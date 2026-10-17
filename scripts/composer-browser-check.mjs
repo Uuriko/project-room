@@ -72,10 +72,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
     await input.fill("x".repeat(65531) + " :fire");
     assert.equal(await input.getAttribute("aria-invalid"), "true");
-    await page.locator('#emoji-list [data-emoji="🔥"]').click();
-    assert.equal((await input.inputValue()).length, 65535);
-    assert.equal(await input.getAttribute("aria-invalid"), null, "picker replacement clears the derived overflow error");
-    assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
+    assert.equal(await page.locator('#emoji-list').count(), 0);
     const longValid = "a".repeat(4001);
     await input.fill(longValid);
     assert.equal(await lengthStatus.isVisible(), false, "ordinary valid text stays quiet");
@@ -184,71 +181,34 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await input.fill("");
     await input.click();
     await page.keyboard.type(":fire");
-    const emojiList = page.locator("#emoji-list");
-    await emojiList.waitFor({ state: "visible" });
-    assert.equal(await emojiList.getAttribute("role"), "listbox");
-    assert.equal(await emojiList.locator('[role="option"]').first().getAttribute("aria-selected"), "true");
-    await page.keyboard.press("Enter");
-    assert.equal(await input.inputValue(), "🔥 ");
-    assert.equal((await input.inputValue()).includes(":fire"), false);
-    assert.equal(await emojiList.isHidden(), true);
-    assert.equal(await mentionList.isHidden(), true);
-    await input.fill("");
+    assert.equal(await page.locator('#emoji-list, #reaction-sheet, [data-message-action="add-reaction"]').count(), 0);
+    assert.equal(await input.inputValue(), ':fire');
+    await input.fill('');
     const topic = page.locator('[data-message-record-id="topic"]');
-    assert.equal(await topic.locator('.reactions button').count(), 0, "no unused reaction pills beneath messages");
-    assert.equal(await topic.locator('.reaction-options').count(), 0, "no always-visible reaction picker");
-    // Add Reaction lives in the ⋯ menu and opens a reaction sheet (long-press /
-    // right-click open it too). Tapping a reaction toggles it and closes the sheet.
-    const moreActions = topic.locator('summary[aria-label="More actions for this message"]');
-    await moreActions.focus();
-    await page.keyboard.press("Enter");
-    await topic.locator('button[data-message-action="add-reaction"]').click();
-    const sheet = page.locator("#reaction-sheet");
-    const THINKING = "\u{1F914}";
-    const LIKE = "\u{1F44D}";
-    await sheet.waitFor({ state: "visible" });
-    assert.equal(await page.evaluate(() => document.activeElement.id), "reaction-search");
-    send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: true });
-    await topic.locator(`.reactions [data-reaction="${THINKING}"]`).waitFor();
-    assert.equal(await sheet.isVisible(), true, "live changes keep the open sheet");
-    send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: false });
-    await topic.locator(`.reactions [data-reaction="${THINKING}"]`).waitFor({ state: "detached" });
-    const sheetLike = sheet.locator(`[data-reaction="${LIKE}"]`).first();
-    assert.equal(await sheetLike.isVisible(), true);
-    const sheetBounds = await sheet.boundingBox();
-    assert.ok(sheetBounds.x >= 0 && sheetBounds.x + sheetBounds.width <= viewport.width, "sheet fits narrow and desktop screens");
-    await sheetLike.click();
-    await sheet.waitFor({ state: "hidden" });
-    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="topic"] [data-reaction="${glyph}"]`).getAttribute("aria-pressed") === "true", "\u{1F44D}");
-
-    assert.equal(await topic.locator('.reactions button').count(), 1, "only the used reaction remains visible");
-    assert.equal(await page.evaluate(() => document.activeElement.closest("li.message")?.dataset.messageRecordId), "topic", "closing the sheet returns focus to the message");
-    const like = topic.locator('[data-reaction="\u{1F44D}"]');
-
+    const pin = topic.locator('[data-message-action="pin"]');
+    await topic.locator('.message-more > summary').click();
     // Error toasts persist until dismissed and can be selected/copied; successes still auto-clear.
     await page.route("**/api/rooms/commons/commands", route => route.fulfill({
-      status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "unavailable", message: "Reaction store unavailable" } })
+      status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "unavailable", message: "Pin store unavailable" } })
     }));
     const toast = page.locator("#status");
-    await like.click();
+    await pin.click();
     await page.waitForFunction(() => document.querySelector("#status").classList.contains("error"));
-    assert.match(await toast.locator(".status-text").textContent(), /Reaction store unavailable/);
+    assert.match(await toast.locator(".status-text").textContent(), /Pin store unavailable/);
     assert.equal(await toast.getAttribute("role"), "alert");
     assert.equal(await toast.getAttribute("aria-live"), "assertive");
     assert.deepEqual(await toast.evaluate(node => [getComputedStyle(node).pointerEvents, getComputedStyle(node).userSelect]), ["auto", "text"]);
     const dismiss = toast.getByRole("button", { name: "Dismiss error" });
     assert.equal(await dismiss.isVisible(), true);
-    assert.equal(await toast.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node.querySelector(".status-text")); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); const text = selection.toString(); selection.removeAllRanges(); return text; }).then(t => /Reaction store unavailable/.test(t)), true, "error text is selectable");
+    assert.equal(await toast.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node.querySelector(".status-text")); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); const text = selection.toString(); selection.removeAllRanges(); return text; }).then(t => /Pin store unavailable/.test(t)), true, "error text is selectable");
     await dismiss.click();
     assert.equal(await toast.textContent(), "");
     assert.equal(await toast.evaluate(node => node.classList.contains("visible")), false);
     assert.equal(await toast.getAttribute("role"), "status");
     await page.unroute("**/api/rooms/commons/commands");
-    await page.locator('[data-message-record-id="topic"] button[data-reaction="\u{1F44D}"]').click();
-    // A cleared reaction detaches its chip (only used reactions stay visible),
-    // so wait for detachment rather than an aria-pressed=false state that the
-    // new UI never renders.
-    await topic.locator('button[data-reaction="\u{1F44D}"]').waitFor({ state: "detached" });
+    await topic.locator('.message-more > summary').click();
+    await pin.click();
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] [data-message-action="pin"]').getAttribute('aria-pressed') === 'true');
     await openSearch(page);
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
@@ -401,6 +361,64 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(rotated);
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.equal(await input.inputValue(), ""); assert.equal(await status.textContent(), "");
+    assert.deepEqual(errors, []);
+  });
+}
+
+// R26-1 (QA loop r26, 2026-10-10): a member who is reading a little above the
+// newest message (on a phone the Room card alone leaves a fresh load ~150 px off
+// the bottom) sends a message. Their own message must come into view, and the
+// "N new messages · jump to latest" pill must not count it.
+const OWN_SEND_SIZES = [["phone 390", { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }], ["desktop 1280", { viewport: { width: 1280, height: 860 } }]];
+for (const [label, size] of OWN_SEND_SIZES) {
+  test(`(${label}) after returning to unread history, sending brings your own message into view, with no "new message" pill for it`, { timeout: 60000 }, async t => {
+    const directory = mkdtempSync(join(tmpdir(), "room-own-send-"));
+    const store = new RoomStore(join(directory, "room.sqlite"));
+    store.initialize(initialRoom());
+    const owner = store.issueAccessKey("commons", "owner");
+    const send = (type, data) => store.command(owner, "commons", { id: crypto.randomUUID(), type, data });
+    send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
+    send(T.MESSAGE_POSTED, { messageId: "hello", body: "Welcome, Maya" });
+    const maya = store.issueAccessKey("commons", "maya");
+    const server = createRoomServer({ store, streamInterval: 40 });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+    t.after(async () => {
+      await browser.close(); server.closeStreams(); server.closeAllConnections();
+      await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true });
+    });
+    const page = await (await browser.newContext({ ...size, reducedMotion: "reduce" })).newPage();
+    page.setDefaultTimeout(10000);
+    const errors = []; page.on("pageerror", e => errors.push(e.message));
+    await page.goto(origin);
+    await page.locator("#auth-panel").waitFor({ state: "visible" });
+    await signInFixture(page, maya);
+    await page.locator("#main").waitFor({ state: "visible" });
+    await page.locator("#message-list").getByText("Welcome, Maya").waitFor();
+    await page.waitForTimeout(1500); // Maya has read the room; her read cursor is saved.
+    // While Maya is away the room moves on: she comes back to unread history.
+    for (let i = 0; i < 24; i++) send(T.MESSAGE_POSTED, { messageId: `m${i}`, body: `While you were away ${i}` });
+    await page.reload();
+    await page.locator("#main").waitFor({ state: "visible" });
+    await page.locator("#message-list").getByText("While you were away 23").waitFor({ state: "attached" });
+    await page.waitForTimeout(500);
+    // Maya reads a little above the newest message (on a phone the Room card and
+    // composer status alone push the list ~150 px off the bottom after load).
+    await page.locator("#message-list").evaluate(l => { l.scrollTop = Math.max(0, l.scrollHeight - l.clientHeight - 200); });
+    await page.waitForTimeout(200);
+    const list = page.locator("#message-list");
+    for (const [n, body] of [[1, "first thing I say here"], [2, "and a second one"]]) {
+      await page.locator("#message-input").fill(body);
+      await page.locator('#message-form button[type="submit"]').click();
+      const mine = list.locator("li").filter({ hasText: body }).last();
+      await mine.waitFor({ state: "visible" });
+      await page.waitForTimeout(400);
+      const box = await list.boundingBox(), row = await mine.boundingBox();
+      assert.ok(row.y + row.height <= box.y + box.height + 1 && row.y >= box.y - 1,
+        `send ${n}: own message is inside the visible message list (row ${Math.round(row.y)}-${Math.round(row.y + row.height)}, list ${Math.round(box.y)}-${Math.round(box.y + box.height)})`);
+      assert.equal(await page.locator("#new-messages-button").isVisible(), false, `send ${n}: no "jump to latest" pill for your own message`);
+    }
     assert.deepEqual(errors, []);
   });
 }

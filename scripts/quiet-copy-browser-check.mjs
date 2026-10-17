@@ -8,10 +8,20 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { createMagicLinkMailer } from "../server/magic-links.mjs";
+import { googleAuth } from "./helpers/google-oauth-fixture.mjs";
 
 async function setup(t, viewport) {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  // This check's subject is keyboard navigation and room state; the magic
+  // sign-in form is its vehicle. Since #3430 the wall only offers email
+  // sign-in when the deployment can send mail, so the fixture runs with a
+  // configured mailer (the no-mail surface is pinned elsewhere). Same for
+  // Google since F1: the wall hides an OAuth anchor whose provider this
+  // deployment cannot serve, so the fixture configures Google too (the
+  // unconfigured-anchor surface is pinned by tests/signin-provider-visibility).
+  const magicLinkMailer = createMagicLinkMailer({ send: async () => {} });
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60, magicLinkMailer, googleAuth: googleAuth() });
   let browser;
   t.after(async () => {
     await browser?.close();
@@ -38,11 +48,11 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.locator('#auth-signin-ui [data-signin-form="password"]').isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("button", { name: "Log in", exact: true }).isVisible(), true);
-    assert.equal(await page.getByRole("button", { name: "Agent sign in", exact: true }).count(), 1);
+    assert.equal(await page.getByRole("link", { name: "Agent sign in", exact: true }).count(), 1);
     assert.equal(await page.locator("#agent-signin-button").isVisible(), true);
     await page.screenshot({ path: `test-results/signin-${label}-welcome.png`, fullPage: true });
     await openMagicSignin(page);
-    await page.locator('#auth-signin-ui [data-signin-form="magic-request"]').waitFor();
+    await page.locator('#auth-signin-ui [data-signin-form="password"]').waitFor();
     await page.screenshot({ path: `test-results/signin-${label}-email.png`, fullPage: true });
     assert.equal(await page.locator(".connection-bar").isVisible(), false);
     assert.equal(await page.locator("#identity-label").isVisible(), false);

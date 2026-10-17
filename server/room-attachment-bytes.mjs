@@ -40,18 +40,32 @@ export const mcpAttachmentBodyBytes = base64LengthForBytes(attachmentLimits.file
 
 const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
 
+// Encoding validity ONLY (#3436): the size cap is not part of this check.
+// Folding it in made every over-cap upload report as an encoding error and
+// left the 413 branch below unreachable for base64 input.
 export function validAttachmentData(value) {
-  if (typeof value !== "string" || value.length > base64LengthForBytes(attachmentLimits.fileBytes)) return false;
+  if (typeof value !== "string") return false;
   if (value.length % 4 !== 0) return false;
   if (value.length > 0 && !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return false;
   return true;
 }
 
+// Exact decoded byte count of a well-formed base64 string, computed before
+// decoding so an over-cap payload is refused for its size, not its shape.
+export function base64DecodedLength(value) {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
+}
+
 function decodeData(value) {
   if (!validAttachmentData(value)) fail(422, "invalid_attachment", "data must be canonical base64 with no whitespace");
+  // Size before decode, naming the limit and the actual size (#3436; the AX
+  // *_too_large recovery reads the limit from the message).
+  const decodedLength = base64DecodedLength(value);
+  if (decodedLength > attachmentLimits.fileBytes)
+    fail(413, "attachment_too_large", `File is ${decodedLength} bytes; the room attachment size limit is ${attachmentLimits.fileBytes} bytes`);
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) fail(422, "invalid_attachment", "data must be canonical base64 with no whitespace");
-  if (bytes.length > attachmentLimits.fileBytes) fail(413, "attachment_too_large", "File exceeds the room attachment size limit");
   return bytes;
 }
 
@@ -147,11 +161,19 @@ export class RoomAttachmentBytes {
   // Visibility rule (2026-09-24, #983): a staged file is visible only to
   // its uploader; a file committed onto a DM (toMemberId) is visible only
   // to the message author and recipient. Everything else stays room-wide.
+  // Fail closed (#2950): a committed file whose bound message no longer
+  // resolves in the projection (history replaced via importEvents, or the
+  // projection rebuilt/compacted while the attachment row survived) must
+  // not become room-visible — without the message there is no proof the
+  // file was not a DM. Only the uploader keeps access: commit() proved
+  // the uploader authored the bound message, so they were a party to it
+  // whether it was a DM or a public post.
   visibleTo(row, messages, memberId) {
     if (row.state === "staged") return row.uploader_id === memberId;
     if (row.message_id) {
       const message = messages.get(row.message_id);
-      if (message?.toMemberId) {
+      if (!message) return row.uploader_id === memberId;
+      if (message.toMemberId) {
         return message.authorId === memberId || message.toMemberId === memberId;
       }
     }
@@ -159,7 +181,10 @@ export class RoomAttachmentBytes {
   }
 
   messageIndex(roomId) {
-    return new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    const byId = new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    // A file committed onto an archived DM must keep the DM's visibility rule:
+    // a missing message would read as room-wide.
+    return { get: id => byId.get(id) ?? this.store.archivedMessage(roomId, id) };
   }
 
   list(token, roomId) {

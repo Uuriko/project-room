@@ -1,5 +1,5 @@
 // Cold-start friction: MCP error shapes, room-create defaults, land-queue
-// pr_not_found, room_react, and replyToId.
+// pr_not_found, and replyToId.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,7 +14,7 @@ import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { handleMcpJoinRpc } from "../server/mcp-http.mjs";
 import { CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { agentErrorAx, errorCategory } from "../src/agent-error.mjs";
-import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../deploy/agent-discovery.mjs";
+import { discoveryDoc, llmsTxt, wellKnownMcpJson } from "../server/agent-discovery.mjs";
 import { EVENT_TYPES as T, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 
 function setup(t) {
@@ -60,7 +60,7 @@ test("MCP tools/call names unknown_tool, auth_required, and invalid_arguments", 
   assert.equal(missing.error.data.invalid.arguments, "must be an object");
 });
 
-test("authenticated MCP reports field reasons and serves room_react plus replyToId", async t => {
+test("authenticated MCP reports field reasons and serves replyToId", async t => {
   const { store, rooms } = setup(t);
   const identity = store.identities.create("Ada");
   const created = rooms.create(identity.secret, { title: "Ada room", purpose: "Ship the first post" });
@@ -101,15 +101,6 @@ test("authenticated MCP reports field reasons and serves room_react plus replyTo
   });
   assert.equal(reply.result.structuredContent.command.data.replyToId, post.command.data.messageId);
 
-  const reacted = await call("room_react", {
-    roomId: created.roomId, messageId: post.command.data.messageId, reaction: "like"
-  });
-  assert.equal(reacted.result.structuredContent.command.type, "message.reaction_set");
-  assert.equal(reacted.result.structuredContent.command.data.active, true);
-  const cleared = await call("room_react", {
-    roomId: created.roomId, messageId: post.command.data.messageId, reaction: "like", active: false
-  });
-  assert.equal(cleared.result.structuredContent.command.data.active, false);
 
   const bonds = await call("bond.list", { roomId: created.roomId });
   assert.equal(bonds.error, undefined);
@@ -156,18 +147,18 @@ test("room create defaults kind, roomId, and displayName and names the bad field
   });
 });
 
-test("a missing reaction active is invalid_arguments and a no-bearer 401 preserves saved-connection guidance", t => {
+test("a missing poll vote active is invalid_arguments and a no-bearer 401 preserves saved-connection guidance", t => {
   const { store } = setup(t);
   const key = store.issueAccessKey("commons", "owner");
   assert.throws(() => store.command(key, "commons", {
-    id: randomUUID(), type: T.MESSAGE_REACTION_SET, data: { messageId: "topic", reaction: "like" }
+    id: randomUUID(), type: T.POLL_VOTED, data: { messageId: "topic", option: 0 }
   }), error => {
     assert.equal(error.status, 422);
     assert.equal(error.code, "invalid_arguments");
     assert.equal(errorCategory(error.status, error.code), "input");
     const ax = agentErrorAx({ httpStatus: error.status, code: error.code, message: error.message });
     assert.equal(ax.reason, "invalid_arguments");
-    assert.match(ax.hint, /active/);
+    assert.match(ax.hint, /named fields/);
     assert.equal(ax.next.some(step => step.tool === "room_read_work"), false);
     return true;
   });
@@ -213,7 +204,7 @@ test("llms.txt exposes connection commands and /.well-known/mcp points at hosted
   assert.equal(doc.type, "application/mcp-server-card+json; charset=utf-8");
   assert.equal(doc.body, wellKnownMcpJson());
   const card = JSON.parse(doc.body);
-  assert.equal(card.url, "https://www.getdasha.com/room/mcp");
+  assert.equal(card.url, "https://room.trydemigod.com/mcp");
   assert.equal(card.auth.mint, "https://room.trydemigod.com/api/agent-identities");
   assert.equal(discoveryDoc("/.well-known/mcp.json").body, doc.body);
   assert.equal(discoveryDoc("/room/.well-known/mcp").body, doc.body);

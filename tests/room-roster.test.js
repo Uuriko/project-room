@@ -256,7 +256,7 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, /id="agent-connect-title">Add agent</);
   assert.match(app, /syncComposerChrome/);
   assert.match(app, /escapeChatAction, messageCluster/);
-  assert.match(app, /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills/);
+  assert.match(app, /kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery/);
   assert.match(app, /replyAuthorToAddress/);
   assert.match(app, /shouldAddressPresenceClick\(e\.target\)/);
   assert.match(app, /grouped-time/);
@@ -277,7 +277,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(html, />Mentions</);
   assert.match(app, /parseSearchQuery/);
   assert.match(app, /mentionsFilterOn/);
-  assert.match(app, /reactionPills/);
   assert.doesNotMatch(app, /details class="reactions"/);
   assert.doesNotMatch(app, /reaction-menu/);
   assert.match(html, /id="people-panel"/);

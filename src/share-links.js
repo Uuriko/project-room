@@ -1,6 +1,8 @@
 import { publicJoinInviteHref } from "./room-deep-link.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
 import { canInviteMembers } from "./events.js";
+import { stashPendingJoin, clearPendingJoin } from "./invite-context.js";
+import { uiText } from "./strings.js";
 
 // Kept in this module so the browser asset list does not need a new file.
 export function inviteMessage(title) {
@@ -10,9 +12,11 @@ export function inviteMessage(title) {
 
 export function deadInviteCopy() {
   return {
-    title: "This invite has ended",
-    scope: "Unable to open this invitation. Ask the person who invited you for a fresh link.",
-    status: "This invite is unavailable. Sign in and request access.",
+    title: uiText("join.dead.title"),
+    scope: uiText("join.dead.scope"),
+    status: uiText("join.dead.status"),
+    signedInStatus: uiText("join.dead.signedInStatus"),
+    roomsLink: uiText("join.dead.roomsLink"),
   };
 }
 
@@ -81,6 +85,13 @@ export const canRetryInvitation = error => interrupted(error) || error?.status =
 // Raw transport text ("signal is aborted without reason", "Unexpected token '<'") is not a user message.
 export function requestFailureMessage(error) {
   return interrupted(error) || error instanceof SyntaxError ? "The connection was interrupted and the result could not be confirmed" : error.message;
+}
+// Join a failure message and a recovery hint into one sentence. The base may
+// already end with a period (service messages do; the interrupted text above
+// does not), so strip before joining — never "Try again in a moment.. Draft
+// kept." (#3597).
+export function failureTextWithHint(error, hint) {
+  return `${requestFailureMessage(error).replace(/[.\s]+$/, "")}. ${hint}`;
 }
 export function invitationFailureMessage(error) {
   if (interrupted(error)) {
@@ -181,6 +192,13 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     } finally { button.disabled = false; }
   }
   const shareLinksPendingFragment = () => `#join/${joinSecret}${joinFocus ? `/${joinFocus.kind}/${encodeURIComponent(joinFocus.id)}` : ""}`;
+  // R70-1: a plain reload before sign-up drops the #join/ fragment, because
+  // consumeJoinFragment strips it from the address bar at boot. Mirror the
+  // live join link into sessionStorage while the Join dialog holds it, so the
+  // existing one-shot restore (takeRestoredJoin) re-opens the dialog after the
+  // reload. Cleared when the dialog settles (see the close handler), so a
+  // completed, dismissed or superseded join cannot resurrect from the mirror.
+  const mirrorJoin = () => { if (joinSecret) stashPendingJoin(window.sessionStorage, shareLinksPendingFragment()); };
   async function applyAccountDefaults(version) {
     let session;
     try { session = accountClient.currentSession("joining this room", { authenticated: true }); } catch { return; }
@@ -505,6 +523,8 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#share-link-form").addEventListener("submit", async event => {
     event.preventDefault(); const version = managementVersion, generation = client.generation;
     if (!managementCurrent(version, generation)) return;
+    // The disabled button stops a native click, not a scripted or repeated submit.
+    if (creating) return;
     const request = pendingCreate ||= { requestId: crypto.randomUUID(), linkToken: newToken(),
       expiresAt: Date.now() + Number($("#share-link-expiry").value) * 3600000,
       maxJoins: Number($("#share-link-limit").value), expectedMemberRevision: getState().members[getSession().member.id].revision,
@@ -524,7 +544,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#share-link-url").value = inviteUrl;
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
-      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full permissions. Share it only with people and agents you trust."; }
+      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full working permissions (not membership administration). Share it only with people and agents you trust."; }
       else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
       $("#share-link-url").dataset.linkId = result.link.id;
       $("#share-link-result").hidden = false;
@@ -592,12 +612,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const uncertain = readUncertainJoin();
     const resume = !fragment.reviewSession && uncertain && uncertain.linkToken === fragment.token ? uncertain : null;
     if (resume) redemptionId = resume.redemptionId;
-    onAccountSignin(null);
+    onAccountSignin(null); mirrorJoin();
     $("#join-account-choices").hidden = true; $("#join-account-auth").hidden = true;
     $("#join-link-form").reset(); $("#join-link-form").hidden = true;
     $("#shared-agent-details").hidden = true; $("#shared-agent-details").open = false; $("#shared-agent-instructions").value = "";
     $("#join-link-retry").hidden = true;
     $("#join-link-retry").textContent = "Retry";
+    $("#join-account-signin").hidden = false; $("#join-account-guest-hint").hidden = false;
+    const roomsLinkReset = $("#join-account-rooms-link"); if (roomsLinkReset) roomsLinkReset.hidden = true;
     $("#join-access-details").open = false; $("#join-switch-warning").hidden = true;
     $("#join-link-permissions").textContent = ""; $("#join-link-expiry").textContent = "";
     $("#join-link-submit").textContent = "Join room"; $("#join-link-signout").hidden = true;
@@ -678,12 +700,27 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       }
       if (!resume && error?.code === "link_unavailable") {
         const dead = deadInviteCopy();
+        // A signed-in person needs neither the Log in choice nor the guest
+        // hint; they keep the fresh-link ask and a link back to their rooms.
+        const signedIn = Boolean(accountClient.session?.authenticated);
+        const roomsLink = $("#join-account-rooms-link");
         $("#join-link-title").textContent = dead.title;
         $("#join-link-scope").textContent = dead.scope;
+        $("#join-account-signin").hidden = signedIn;
+        $("#join-account-guest-hint").hidden = signedIn;
+        if (roomsLink) {
+          roomsLink.hidden = !signedIn;
+          roomsLink.textContent = dead.roomsLink;
+          roomsLink.setAttribute("href", humanJoinShareBase());
+          // r136: a dead link's fragment still sits in the pending-join mirror,
+          // so a plain trip to / would re-open this same dialog. Drop the
+          // mirror before the app root loads.
+          roomsLink.addEventListener("click", () => clearPendingJoin(window.sessionStorage));
+        }
         $("#join-account-choices").hidden = false;
         $("#join-link-form").hidden = true;
         $("#join-link-retry").hidden = true;
-        joinStatus(dead.status);
+        joinStatus(signedIn ? dead.signedInStatus : dead.status);
         return;
       }
       $("#join-link-scope").textContent = "Unable to open this invitation.";
@@ -710,7 +747,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   $("#join-link-name").addEventListener("invalid", () => joinStatus("Enter the name to show in this room."));
   $("#join-account-back").addEventListener("click", () => {
     if (joining || !canLeaveAccountSignin()) return;
-    onAccountSignin(null); $("#join-account-auth").hidden = true;
+    onAccountSignin(null); mirrorJoin(); $("#join-account-auth").hidden = true;
     $("#join-account-choices").hidden = true; $("#join-link-form").hidden = false;
     $("#join-link-name").focus();
   });
@@ -828,6 +865,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   joinDialog.addEventListener("cancel", event => { if (joining || !canLeaveAccountSignin()) event.preventDefault(); });
   joinDialog.addEventListener("close", () => {
     onAccountSignin(null);
+    // R70-1: the dialog settled (joined, dismissed or superseded); drop the
+    // reload mirror so the stale link cannot re-open on a later reload.
+    clearPendingJoin(window.sessionStorage);
     joinVersion++;
     const pendingToken = joinSecret, pendingFocus = joinFocus, attempted = joinAttempted, landed = joinLanded, roomTitle = previewRoomTitle;
     joinSecret = null; redemptionId = null; joined = null; joinFocus = null; previewRoomId = null; previewRoomTitle = null;

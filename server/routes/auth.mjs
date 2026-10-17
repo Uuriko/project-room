@@ -3,12 +3,14 @@
 // Email verification, password set, recovery codes, and OAuth stay on the
 // legacy chain. Handler bodies keep their checks; the dispatcher only
 // adds 405 Allow for a wrong method on one of these paths.
+// GET /api/auth/signin-options (H3, #3341) lives in its own table group
+// (server/routes/signin-options.mjs) — this group stays POST-only.
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "../service-error.mjs";
-import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery } from "../magic-links.mjs";
+import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery, attemptAuthMailDelivery } from "../magic-links.mjs";
 import { normalizeEmail } from "../account-login-methods.mjs";
-import { resolvePasskeyParams } from "../account-passkeys.mjs";
+import { resolvePasskeyParams, passkeyUserLabel, PASSKEY_RP_NAME } from "../account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../../src/password-auth.mjs";
 
 const objectResponse = Object.freeze({ type: "object" });
@@ -80,7 +82,14 @@ export async function handleAuthGroup(ctx) {
   // Delivery does not change the signup response, but a failure is logged
   // (redacted) so operators can see why mail is not arriving.
   const deliverSignupMail = fn => attemptMailDelivery(fn, "signup");
+  // Sign-in and reset requests answer indistinguishably whether or not the
+  // address is deliverable (#3529): a provider refusal for the recipient is
+  // absorbed (and logged), while a transient provider failure still throws
+  // so the request surfaces as retryable instead of a fake "sent".
+  const deliverAuthMail = (fn, kind) => attemptAuthMailDelivery(fn, kind);
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
+
+
 
   // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
   //
@@ -119,7 +128,7 @@ export async function handleAuthGroup(ctx) {
       magicEmailLimit(magicRequestEmailLimiter, normalized);
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issueMagicCode({ email: normalized });
-      await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "magic-request");
       return json(res, 200, { status: "sent" });
     }
     const data = await body(req);
@@ -200,8 +209,8 @@ export async function handleAuthGroup(ctx) {
     if (requesting) {
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issuePasswordResetCode({ email: normalized });
-      await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
-        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
+        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "password-reset-request");
       return json(res, 200, { status: "sent" });
     }
     const verifyResetSlot = () => {
@@ -311,6 +320,12 @@ export async function handleAuthGroup(ctx) {
     if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
       reject(401, "invalid_credentials", "Invalid email or password");
     }
+    // A pass against the dummy is not authentication: with no real account
+    // or no real verifier there is nothing to sign in to. Answer exactly
+    // like a wrong password so the response never reveals which case it was.
+    if (!accountId || !verifier) {
+      reject(401, "invalid_credentials", "Invalid email or password");
+    }
     const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
     store.accountLogins.touchMethod(accountId, passwordMethod.id);
     const loggedIn = finishPasswordSlot(loginToken, accountId, data.sessionRevision, passwordMethod.id);
@@ -339,6 +354,11 @@ export async function handleAuthGroup(ctx) {
     verifyChangeSession();
     const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
     if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+      reject(401, "invalid_credentials", "The current password is incorrect");
+    }
+    // An account with no password set has no current password to match; the
+    // dummy verifier must never stand in for one.
+    if (!verifier) {
       reject(401, "invalid_credentials", "The current password is incorrect");
     }
     const policy = checkPasswordPolicy(data.newPassword);
@@ -372,7 +392,7 @@ export async function handleAuthGroup(ctx) {
       reject(422, "invalid_passkey_request", "authenticatorSelection must be an object");
     }
     return json(res, 200, passkeys().beginRegistration({ accountId: auth.account.id, rpId: params.rpId,
-      rpName: params.rpId, userName: data.userName ?? auth.account.id, authenticatorSelection: data.authenticatorSelection }));
+      rpName: PASSKEY_RP_NAME, userName: data.userName ?? passkeyUserLabel(store, auth.account.id), authenticatorSelection: data.authenticatorSelection }));
   }
   if (url.pathname === "/api/auth/passkey/register/finish" && req.method === "POST") {
     checkOrigin(req, true);
@@ -508,10 +528,32 @@ async function postGuestUpgradeConfirm(ctx) {
   const accountId = session.account.id;
   // Someone took the address since the code went out: same answer as a bad code.
   if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
-  store.accountLogins.consumeEmailVerifyCode({ accountId, email, code: data.code.trim() });
-  const method = store.accountLogins.linkPasswordMethod(accountId, { email, verifier: hashPassword(data.password) });
-  store.accountLogins.markEmailVerified(accountId, email);
-  store.accountLogins.touchMethod(accountId, method.id);
+  const verifier = hashPassword(data.password);
+  // #2956: burn the code, link the magic method (consume does both), link
+  // the password, and mark verified in ONE transaction. Previously each
+  // step committed on its own, so a linkPasswordMethod failure after the
+  // consume (e.g. a racing tab set a password first) left the code spent
+  // and a magic method behind, and guestSession then refused any retry.
+  // An invalid code is the one failure that must COMMIT: consume counts
+  // the miss before throwing, and rolling that back would let an attacker
+  // retry forever — so return it and throw only after the transaction,
+  // exactly like the password-reset consume above.
+  const consumeFailure = store.transaction(() => {
+    // Recheck inside the writer fence so an address taken, or a password
+    // set, between the checks above and this transaction is seen here.
+    if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
+    try {
+      store.accountLogins.consumeEmailVerifyCode({ accountId, email, code: data.code.trim() });
+    } catch (error) {
+      if (error instanceof ServiceError && error.code === "invalid_email_code") return error;
+      throw error;
+    }
+    const method = store.accountLogins.linkPasswordMethod(accountId, { email, verifier });
+    store.accountLogins.markEmailVerified(accountId, email);
+    store.accountLogins.touchMethod(accountId, method.id);
+    return null;
+  });
+  if (consumeFailure) throw consumeFailure;
   return json(res, 200, { status: "upgraded", email });
 }
 

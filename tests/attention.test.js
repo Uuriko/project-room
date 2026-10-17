@@ -69,6 +69,25 @@ test("digest choice batches attention to the chosen hour; quiet hours still win"
   assert.equal(f.deliverable().held[0].heldUntil, f.at() + 90 * 60000, "a digest boundary inside quiet hours moves to the window end");
 });
 
+test("digest wake due before today's digest hour is deliverable once that hour has passed", t => {
+  const f = fixture(t);
+  f.prefs({ delivery: "digest", digestHour: 9 });
+  f.set(8); f.enqueue(); // wake due 08:00; its digest moment is today 09:00
+  f.set(10); // queried at 10:00, after today's digest hour
+  const view = f.deliverable();
+  assert.deepEqual(view.deliverNow, ["recipe:draft-catch-up"], "the 09:00 digest moment has passed, so the wake delivers now - not tomorrow");
+  assert.equal(view.held.length, 0);
+  assert.equal(view.heldUntil, null);
+  // A wake that only becomes due after today's digest hour still waits for tomorrow's.
+  f.enqueue({ queueKey: "recipe:suggest-next", intent: { recipe: "suggest-next" } }); // due 10:00
+  const mixed = f.deliverable();
+  assert.deepEqual(mixed.deliverNow, ["recipe:draft-catch-up"], "the earlier wake stays deliverable alongside a held one");
+  assert.equal(mixed.held.length, 1);
+  assert.equal(mixed.held[0].queueKey, "recipe:suggest-next");
+  assert.equal(mixed.held[0].heldUntil, f.at() + 23 * HOUR, "due after the digest hour, held until tomorrow 09:00");
+  assert.equal(mixed.heldUntil, f.at() + 23 * HOUR, "the view's heldUntil is the earliest held wake's release");
+});
+
 test("done-when: held delivery never changes canonical work or marks intent handled", t => {
   const f = fixture(t);
   f.prefs({ quietStart: 22 * 60, quietEnd: 7 * 60 });

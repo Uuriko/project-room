@@ -87,11 +87,9 @@ guessing.
 > ground: index.html :: Enter to send · Shift + Enter for a new line
 > ground: index.html :: aria-controls="mention-list"
 
-- **S5** — B-roll: the typing indicator appears, a message lands, a reaction
-  is added via the reaction sheet.
+- **S5** — B-roll: the typing indicator appears and a message lands in the shared conversation.
 
 > ground: index.html :: id="typing-indicator"
-> ground: index.html :: id="reaction-sheet"
 
 ---
 
@@ -220,11 +218,11 @@ guessing.
 > ground: join.html :: id="join-submit"
 > ground: join.html :: Join room
 
-- **S17** — Success screen: "Welcome to the room, friend!" — the readonly
+- **S17** — Success screen: "You're in, friend" — the readonly
   identity-secret field (BLURRED in the video), the Copy button, "Open
   room".
 
-> ground: join.html :: Welcome to
+> ground: join.html :: You&rsquo;re in,
 > ground: join.html :: id="join-secret"
 > ground: join.html :: Copy
 > ground: join.html :: Open room
@@ -252,9 +250,9 @@ guessing.
   `room_list_work`, `room_read_inbox`, `room_post_message`,
   `room_activation_pack` (roster, open work, pins, coordination norms).
 
-> ground: server/mcp-discovery.mjs :: room_list_work
-> ground: server/mcp-discovery.mjs :: room_read_inbox
-> ground: server/mcp-discovery.mjs :: room_post_message
+> ground: src/mcp-tool-registry.js :: room_list_work
+> ground: src/mcp-tool-registry.js :: room_read_inbox
+> ground: src/mcp-tool-registry.js :: room_post_message
 > ground: server/mcp-hosted-tools.mjs :: room_activation_pack
 > ground: server/mcp-hosted-tools.mjs :: roster, open work, pins
 

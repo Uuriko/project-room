@@ -154,7 +154,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.locator(".board-empty").waitFor();
   assert.equal(await page.locator(".board-empty").innerText(), "Claim work here so people and agents don't collide.");
   assert.equal(await page.locator("#board-new-item").count(), 1);
-  assert.match(await page.locator(".live-chip").innerText(), /Deploy status unknown|Live matches main|Live is behind main/);
+  assert.match(await page.locator(".live-chip").innerText(), /Deploy status unknown|Live matches main|Live differs from main|Live is behind main/);
   await page.locator("#board-new-item [name=title]").fill("Fix login copy");
   await page.locator("#board-new-item [name=files]").fill("src/board-ui.js");
   await page.locator("#board-new-item button[type=submit]").click();
@@ -471,11 +471,16 @@ function seedClaim(store, item) {
 
 // Rendering, dependency navigation and readiness are the UI boundary here.
 // The projection matrix separately owns classification/old-completion filtering.
-// Quarantined flakes (tests/quarantine.json): both browser tests below fail
-// intermittently on green main. They run in the non-blocking lane
-// (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
-test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+// Both formerly quarantined board browser tests have been repaired and
+// re-admitted to the blocking suite (#3291 via PR #3338; the draft-PR
+// linking test via the #3290 repair), and tests/quarantine.json is empty.
+// Timeout budget: this journey makes two full viewport passes plus a
+// held-route refresh race. Measured on a CPU-oversubscribed runner (load
+// ~13 on 2 cores) completed passes take 79-103s and one run was censored by
+// the old 120s cap at 121s; on CI the whole test takes ~4s. 240s is ~2x the
+// worst measured loaded pass. It is a cap, not a wait: every in-page wait
+// keeps its original 8s default and no assertion changes.
+test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 240000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
@@ -513,7 +518,11 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
+  // Explicit navigation timeout: the 8s default timeout also governs goto,
+  // and a cold page boot under load exceeds it (measured: goto timed out at
+  // 8000ms on a loaded runner while the same boot completes in ~2s unloaded).
+  // 30s covers the boot only; every in-page wait below keeps the 8s default.
+  await page.goto(origin, { timeout: 30000 });
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const snapshot = () => ({
@@ -527,6 +536,9 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.keyboard.press("Control+k");
     await page.locator("#room-actions-query").waitFor({ state: "visible" });
     await page.locator("#room-actions-query").fill("board");
+    // Ensure the filter applied and Board is the actionable item before Enter;
+    // otherwise Enter can fire with a stale list and never open the dialog.
+    await page.locator('#room-actions-list button[data-room-action="board"]').waitFor({ state: "visible" });
     await page.locator('[data-room-action="board"]').press("Enter");
     await dialog.waitFor({ state: "visible" });
   };
@@ -717,7 +729,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // Authoring gate: the real browser owns form availability, approval copy and
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
-test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
@@ -824,6 +836,13 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal(await card.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-review");
     assert.equal(await card.locator(".claim-pr a").getAttribute("href"), pullRequest);
     assert.match(await card.locator(".claim-reviews").innerText(), /previous approval.*does not qualify for current work/);
+    // Wait on the focus condition itself before asserting it, the same way
+    // the refreshed-claim assert below does. The 2026-10-06 CI failures
+    // (false !== true, ~2.1 s) were this snapshot race in the second phase:
+    // the status text can land while an SSE repaint has replaced the input
+    // node and focus restoration is still a beat behind, so a one-shot
+    // read — or a handle resolved before the repaint — samples the gap.
+    await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
     // Query the current input and active element in one browser turn: SSE
     // refresh may replace an element handle while restoring focus correctly.
     assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
@@ -880,6 +899,11 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
     refreshRelease.resolve();
     await (await delivered).finished();
+    // One animation frame is a fixed wait, not proof the retired response
+    // was processed: under load its load continuation can run after the
+    // frame. Wait for the page's network to settle (the pattern the held
+    // Board retirement test uses), then a frame, before sampling focus.
+    await page.waitForLoadState("networkidle");
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
     assert.equal(await page.evaluate(() => document.activeElement?.id), "board-close", "retired refresh cannot steal focus");
     assert.equal(requests.length, 2, "a changed claim round does not trigger an automatic retry");
@@ -1183,4 +1207,67 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
   } finally {
     await drainBoardRoutes(page, ...holds.map(entry => entry.release));
   }
+});
+
+// #3688: closing the board must hand keyboard focus to a stable anchor —
+// the element that opened it when that element survives, otherwise the
+// conversation title — never <body>. The native <dialog> return chain
+// bottoms out at <body> when the palette was opened from body focus, and
+// when the recorded opener is removed while the board is open.
+test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const dialog = page.locator("#board-dialog");
+  const focusLandsOn = id => page.waitForFunction(expected => document.activeElement?.id === expected, id);
+  const closeWithEscape = async () => {
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+  };
+
+  // A backdrop click is not a close path: the dialog stays open.
+  await openBoard(page);
+  await page.mouse.click(8, 8);
+  assert.equal(await dialog.evaluate(node => node.open), true, "backdrop click does not close the board");
+  await closeWithEscape();
+
+  // Surviving opener: focus starts in the composer, the palette carries it
+  // into the board, and both close paths hand it back to the composer.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("message-input");
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.locator("#board-close").click();
+  await dialog.waitFor({ state: "hidden" });
+  await focusLandsOn("message-input");
+
+  // No opener: the palette was opened from body focus, so the fallback
+  // anchor — the conversation title — takes focus instead of <body>.
+  await page.evaluate(() => document.activeElement?.blur());
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+
+  // Opener removed while the board is open: the same fallback applies.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.evaluate(() => document.querySelector("#message-input").remove());
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
 });

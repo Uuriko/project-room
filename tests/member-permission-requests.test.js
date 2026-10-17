@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { AccessRequests } from "../server/access-requests.mjs";
+import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { MemberPermissionRequests } from "../server/member-permission-requests.mjs";
+import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "../server/routes/member-permissions.mjs";
 
 // These real HTTP/store cases own the room-authenticated member contract.
@@ -111,10 +112,10 @@ test("member requests retain their rate limit, and retries do not spend it", asy
   assert.equal((await f.request("/api/rooms/commons/access-requests", f.owner)).body.requests.length, 5);
 });
 
-test("ordinary public admission still returns a join request", async t => {
+test("ordinary admission with identity proof still returns a join request", async t => {
   const f = await setup(t);
   const identity = f.store.identities.create("New Joiner");
-  const joined = await f.request("/api/access-requests", null, { roomId: "commons", identityId: identity.identityId,
+  const joined = await f.request("/api/access-requests", identity.secret, { roomId: "commons", identityId: identity.identityId,
     displayName: "New Joiner", requestedPermissions: ["accept_work"], requestId: "ordinary_join" });
   assert.equal(joined.status, 201);
   assert.equal(joined.body.kind, "join");
@@ -193,6 +194,31 @@ test("RT handler rows preserve the GET queue and share quota across both POST al
   await assert.rejects(invoke("GET", "/api/rooms/commons/access-requests", null), error => error.status === 403);
 });
 
+test("replaying a requestId with different permissions or note conflicts instead of returning the old request", async t => {
+  const f = await setup(t);
+  const original = await f.ask({ permissions: ["accept_work"], note: "first note", requestId: "replay_conflict" });
+  assert.equal(original.status, 201);
+  assert.deepEqual(original.body.requestedPermissions, ["accept_work"]);
+  assert.equal(original.body.note, "first note");
+  // Identical replay is a true idempotent retry and still returns the original.
+  const retry = await f.ask({ permissions: ["accept_work"], note: "first note", requestId: "replay_conflict" });
+  assert.equal(retry.status, 201);
+  assert.deepEqual(retry.body.requestedPermissions, ["accept_work"]);
+  // Same requestId with expanded permissions must not silently echo the old request.
+  const changedPermissions = await f.ask({ permissions: ["accept_work", "complete_work"], note: "first note", requestId: "replay_conflict" });
+  assert.equal(changedPermissions.status, 409);
+  assert.equal(changedPermissions.body.error.code, "request_conflict");
+  // Same requestId with a different note must also conflict.
+  const changedNote = await f.ask({ permissions: ["accept_work"], note: "different note", requestId: "replay_conflict" });
+  assert.equal(changedNote.status, 409);
+  assert.equal(changedNote.body.error.code, "request_conflict");
+  // The stored request is untouched by the conflicting replays.
+  const queue = await f.request("/api/rooms/commons/access-requests", f.owner);
+  assert.equal(queue.body.requests.length, 1);
+  assert.deepEqual(queue.body.requests[0].requestedPermissions, ["accept_work"]);
+  assert.equal(queue.body.requests[0].note, "first note");
+});
+
 test("a member without membership administration cannot decide a permission upgrade (HTTP)", async t => {
   const f = await setup(t);
   // The decider holds the requested permission but no manage_members grant:
@@ -206,4 +232,34 @@ test("a member without membership administration cannot decide a permission upgr
   assert.equal(refused.body.error.code, "access_denied");
   assert.deepEqual(f.store.roomAuthority("commons").members[f.memberId].permissions, [],
     "the requester's permissions are unchanged");
+});
+
+// #3745: the member create path shares the join path's cap and its lazy
+// expiry. With no reader materializing expiry, a member's lapsed upgrade
+// rows consumed the cap forever; the create now expires the caller's own
+// lapsed rows before counting. Service-level so the clock (backdating)
+// and the rate limiter are both under the test's control.
+test("lapsed member pendings are expired on create and do not consume the cap (#3745)", t => {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  const owner = store.issueAccessKey("commons", "owner");
+  const identity = store.identities.create("Member Requester");
+  store.identities.link(owner, "commons", { identityId: identity.identityId, permissions: [] });
+  const access = new AccessRequests(store, {
+    rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 })
+  });
+  const memberRequests = new MemberPermissionRequests(access, 5);
+  t.after(() => store.close());
+  const ask = requestId => memberRequests.request(identity.secret, "commons",
+    { permissions: ["accept_work"], requestId });
+  for (let i = 0; i < 5; i++) assert.equal(ask(`mp_lapse_${i}`).status, "pending");
+  // Past the TTL with no reader: the rows are still stored pending.
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(Date.now() - REQUEST_TTL_MS - 1000);
+  assert.equal(ask("mp_lapse_new").status, "pending");
+  assert.equal(store.db.prepare(
+    "SELECT count(*) AS n FROM access_requests WHERE status='expired'").get().n, 5);
+  // Live pendings still refuse at the cap exactly as before.
+  for (let i = 0; i < 4; i++) assert.equal(ask(`mp_live_${i}`).status, "pending");
+  assert.throws(() => ask("mp_live_over"), err => err.code === "too_many_requests");
 });

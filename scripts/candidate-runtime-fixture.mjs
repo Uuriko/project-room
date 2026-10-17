@@ -1,9 +1,9 @@
 // Test-only packaging of allowlisted working files. Never a release certificate.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, cpSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntimePackage } from './runtime-package.mjs';
-import { publicAssetPaths } from '../deploy/public-assets.mjs';
+import { publicAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 
 export function candidateRuntimeFixture(repository, directory) {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim();
@@ -65,12 +65,12 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
   paths.add('src/board-ui.js'); paths.add('src/board-keyboard.mjs'); paths.add('src/board-mine.js'); paths.add('src/first-room-copy.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
-  paths.add('deploy/agent-discovery.mjs');
-  paths.add('deploy/capabilities.mjs'); // #601: build-time route-family inventory (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/procedures-index.mjs'); // W008: baked shared-procedure index (imported by deploy/agent-discovery.mjs)
-  paths.add('deploy/room-entry.mjs');
+  paths.add('server/agent-discovery.mjs');
+  paths.add('server/capabilities.mjs'); // #601: build-time route-family inventory (imported by server/agent-discovery.mjs)
+  paths.add('server/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by server/agent-discovery.mjs)
+  paths.add('server/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by server/agent-discovery.mjs)
+  paths.add('server/procedures-index.mjs'); // W008: baked shared-procedure index (imported by server/agent-discovery.mjs)
+  paths.add('server/room-entry.mjs');
   paths.add('server/guest-agent-links.mjs');
   paths.add('server/agent-invites.mjs');
   paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
@@ -98,7 +98,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/membership-delegation.mjs'); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
   paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
   paths.add('server/wake-queue-limits.mjs'); // Burs-IA A2: wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf)
-  paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by deploy/agent-discovery.mjs)
+  paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
   paths.add('server/discoverability.mjs'); // Burs-IA A1: Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
   paths.add('server/attention.mjs');
   paths.add('server/room-lifecycle.mjs');
@@ -162,10 +162,11 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/web-fetch.mjs'); // RC-2026-09-23-102: room-side web fetch (imported by server/http.mjs + server/store.mjs)
   paths.add('server/web-research.mjs'); // RC-2026-09-24-310: knowledge router (imported by server/store.mjs)
   paths.add('server/owner-attention.mjs'); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
+  paths.add('server/owner-overview.mjs'); // #3342: cross-room owner overview read model (imported by server/http.mjs)
   paths.add('server/open-questions.mjs'); // F1: open-questions radar read (imported by server/http.mjs)
   paths.add('src/room-layout.js');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
-  paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
+  paths.add('src/owner-cockpit.js'); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
   paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
@@ -187,11 +188,22 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/receipt-cards.mjs'); // in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
   paths.add('server/room-guide.mjs'); // Room Guide demo agent (imported by cloudflare/room.mjs)
   paths.add('server/starter-room.mjs'); // starter seed (imported by server/room-lifecycle.mjs)
-  paths.add('deploy/public-search.mjs'); // public search assets (imported by server/http.mjs)
+  paths.add('server/public-search.mjs'); // public search assets (imported by server/http.mjs)
   paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
   paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
-  paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by deploy/public-search.mjs)
-  for (const path of publicAssetPaths) paths.add(path);
+  paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by server/public-search.mjs)
+  // Decision #36 (#3254, Option A): the generated agent pages are build
+  // output and are never committed, so a pristine checkout legitimately
+  // lacks them. Take only the pages the source tree actually has: the
+  // runtime package ships them when present and omits them when absent,
+  // and packagedPaths must mirror that exact set for the package-count
+  // contract in tests/runtime-package.test.js. Every other declared asset
+  // stays fail-closed — a missing committed file still throws at the
+  // copy loop below.
+  for (const path of publicAssetPaths) {
+    if (generatedAgentPages.includes(path) && !existsSync(join(repository, path))) continue;
+    paths.add(path);
+  }
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
   // No private state, credentials, docs or real checkout Git metadata.
   for (const path of paths) {

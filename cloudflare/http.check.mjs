@@ -37,6 +37,13 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     await json(await call('/api/rooms/commons/commands', { data: {
       id: randomUUID(), type: 'message.posted', data: { messageId: 'presence-time-probe', body: 'Timestamp adapter probe' }
     }, headers: { Authorization: `Bearer ${ownerKey}` } }), 201);
+    const fullAudit = await json(await call('/api/rooms/commons?messages=recent', { headers: { Authorization: `Bearer ${ownerKey}` } }));
+    const activity = await json(await call('/api/rooms/commons?messages=recent', { headers: { Authorization: `Bearer ${ownerKey}`, 'X-Project-Room-Audit-View': 'activity-v1' } }));
+    assert.equal(activity.auditView, 'activity'); assert.equal(activity.auditVersion, 1);
+    assert.deepEqual(activity.state.messages, fullAudit.state.messages);
+    assert.equal(activity.sequence, fullAudit.sequence);
+    assert.ok(fullAudit.state.eventLog.some(e => e.type === 'message.posted'));
+    assert.equal(activity.state.eventLog.some(e => e.type === 'message.posted'), false);
     const presenceProbe = await json(await call('/api/rooms/commons/presence', {
       headers: { Authorization: `Bearer ${ownerKey}` }
     }));
@@ -157,12 +164,23 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     }
     const healthShape = async path => json(await call(path));
     const leftoverHealth = await healthShape('/room/health');
-    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging' });
+    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer' });
     assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
     assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/api/healthz'), leftoverHealth);
+    // #3274: the Worker's origin guard for operational GETs answers with the
+    // standard error envelope, not a bare { error: { code, message } }.
+    const foreignOrigin = await call('/api/health', { headers: { Origin: 'https://foreign.example' } });
+    assert.equal(foreignOrigin.status, 403);
+    const foreignBody = await foreignOrigin.json();
+    assert.equal(foreignBody.error.code, 'origin_denied');
+    assert.equal(typeof foreignBody.hint, 'string');
+    assert.ok(foreignBody.hint.length > 0);
+    assert.ok(Array.isArray(foreignBody.next));
+    assert.equal(typeof foreignBody.operationId, 'string');
+    assert.equal(typeof foreignBody.category, 'string');
     const ready = await json(await call('/api/ready'));
     assert.equal(ready.status, 'ready');
     assert.equal(ready.mode, 'cloudflare-staging');
@@ -235,6 +253,26 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await json(nativeExchange, 201), { status: 'signed_in' });
     assert.match(nativeExchange.headers.get('set-cookie'), /^__Host-account_session=.*HttpOnly.*Secure/);
     await json(await call('/api/auth/desktop/session', { data: nativeProof }), 401);
+    // Target the actual native slot on Worker SQLite, not its retired OAuth grant.
+    const nativeCookie = nativeExchange.headers.get('set-cookie').split(';')[0];
+    const nativeView = await json(await call('/api/account-session', { headers: { Cookie: nativeCookie } }));
+    assert.equal(nativeView.authenticated, true);
+    const inventory = await json(await call('/api/account/sessions', { headers: mailHeaders }));
+    const nativeEntry = inventory.sessions.find(item => item.method === 'desktop');
+    assert.ok(nativeEntry);
+    assert.equal(nativeEntry.current, false);
+    assert.equal(nativeEntry.methodRef, 'project-room-macos');
+    await json(await call(`/api/account/sessions/${nativeEntry.id}`, {
+      method: 'DELETE', headers: { ...mailHeaders, Origin: origin }
+    }));
+    const nativeHeaders = { Cookie: nativeCookie, 'X-Session-Binding': nativeView.sessionBinding };
+    await json(await call('/api/account/sessions', { headers: nativeHeaders }), 401);
+    await json(await call(`/api/account/sessions/${nativeEntry.id}`, {
+      method: 'DELETE', headers: { ...mailHeaders, Origin: origin }
+    }), 404);
+    const remainingSessions = await json(await call('/api/account/sessions', { headers: mailHeaders }));
+    assert.deepEqual(remainingSessions.sessions, inventory.sessions.filter(item => item.id !== nativeEntry.id));
+    assert.equal(remainingSessions.sessions.filter(item => item.current).length, 1);
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
     const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
     assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);
@@ -334,6 +372,47 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(noSource.collaboration, { version: 1, status: 'accountable', offer: null });
     assert.equal((await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
     assert.deepEqual(await json(await call('/api/rooms/commons', { headers: guestHeaders })), beforeRead);
+    // Durable discussion checkpoints must survive the actual Workers SQLite
+    // adapter without accepting stale historical text as a safe append delta.
+    const durablePath = '/api/rooms/commons/work-discussion?workItemId=selected%3Atask';
+    const durableRead = async suffix => json(await call(durablePath + suffix, { headers: guestHeaders }));
+    const durableCommand = async (type, data) => json(await call('/api/rooms/commons/commands', {
+      headers: ownerHeaders, data: { id: randomUUID(), type, data }
+    }), 201);
+    const durableStart = await durableRead('&consistent=true');
+    assert.equal(typeof durableStart.discussion.resumeToken, 'string');
+    const resumeSuffix = token => '&resumeToken=' + encodeURIComponent(token);
+    const quietResume = await durableRead(resumeSuffix(durableStart.discussion.resumeToken));
+    assert.deepEqual(quietResume.discussion.items, []);
+    assert.equal(typeof quietResume.discussion.resumeToken, 'string');
+    await durableCommand('message.posted', { messageId: 'durable-append', workItemId: 'selected:task', body: 'New durable context' });
+    const appended = await durableRead(resumeSuffix(quietResume.discussion.resumeToken));
+    assert.deepEqual(appended.discussion.items.map(item => item.message.id), ['durable-append']);
+    assert.equal(appended.discussion.items[0].message.body, 'New durable context');
+    assert.equal(typeof appended.discussion.resumeToken, 'string');
+    await durableCommand('message.edited', { messageId: 'durable-append', expectedMessageRevision: 0, body: 'Corrected durable context' });
+    const expectDiscussionReset = async suffix => {
+      const value = await json(await call(durablePath + suffix, { headers: guestHeaders }), 409);
+      assert.equal(value.error.code, 'discussion_reset_required');
+      assert.equal(JSON.stringify(value).includes('New durable context'), false, 'reset returns no old discussion content');
+    };
+    await expectDiscussionReset(resumeSuffix(appended.discussion.resumeToken));
+    const afterEdit = await durableRead('&consistent=true');
+    assert.equal(afterEdit.discussion.items.find(item => item.message.id === 'durable-append').message.body, 'Corrected durable context');
+    await durableCommand('message.deleted', { messageId: 'durable-append', expectedMessageRevision: 1 });
+    await expectDiscussionReset(resumeSuffix(afterEdit.discussion.resumeToken));
+    const afterDelete = await durableRead('&consistent=true');
+    assert.equal(typeof afterDelete.discussion.resumeToken, 'string');
+    assert.equal(JSON.stringify(afterDelete).includes('Corrected durable context'), false);
+    for (const id of ['durable-page-a', 'durable-page-b']) {
+      await durableCommand('message.posted', { messageId: id, workItemId: 'selected:task', body: id });
+    }
+    const durablePage = await durableRead('&consistent=true&limit=1');
+    assert.equal(durablePage.discussion.hasMore, true);
+    assert.equal(durablePage.discussion.resumeToken, null, 'partial pages cannot advance the completed checkpoint');
+    assert.equal(typeof durablePage.discussion.nextCursor, 'string');
+    await durableCommand('message.edited', { messageId: 'durable-page-b', expectedMessageRevision: 0, body: 'Changed during paging' });
+    await expectDiscussionReset('&cursor=' + encodeURIComponent(durablePage.discussion.nextCursor));
     const offerPath = '/api/rooms/commons/work-context?workItemId=selected%3Atask';
     const offerHeaders = { ...guestHeaders, 'X-Project-Room-Offer-Context': '1' };
     const emptyOffers = await json(await call(offerPath, { headers: offerHeaders }));

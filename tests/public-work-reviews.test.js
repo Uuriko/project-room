@@ -60,7 +60,17 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   assert.equal(accepted.review.state, 'accepted'); assert.equal(accepted.review.revision, 1);
   assert.equal(accepted.authority.canDecide, false);
   f.reopen(); assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
-  assert.deepEqual(f.store.publicWorkClaims.receipt(id), f.receipt);
+  // #3546: acceptance stamps the public receipt's verified successor state;
+  // everything the receipt was issued with (artifact, checks, identity) is
+  // otherwise exactly as submitted — no executed checks ran in this flow,
+  // so the level stays the honest "hash_only" under a verified state.
+  const stamped = f.store.publicWorkClaims.receipt(id);
+  assert.equal(stamped.state, 'verified');
+  assert.equal(stamped.verified.by, 'owner');
+  assert.equal(stamped.verification, 'hash_only');
+  const receiptRest = { ...stamped };
+  delete receiptRest.verified;
+  assert.deepEqual({ ...receiptRest, state: 'submitted' }, f.receipt);
   assert.deepEqual(f.store.publicWorkClaims.artifact(id), artifact);
   assert.equal(f.store.workClaims.get(kernel.namespaceId, kernel.taskId).state, 'done');
   assert.deepEqual(f.store.db.prepare('SELECT * FROM bounty_journal ORDER BY seq').all(), balances);
@@ -83,7 +93,8 @@ test('CAS, exact tuple and room isolation refuse stale or unauthorized decisions
   try { assert.throws(() => otherService.decide('commons', 'owner', id, f.input('other-connection', 0, { decision: 'rejected' })), code('stale_review')); } finally { concurrent.close(); }
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('concurrent', 0, { decision: 'accepted' })), code('stale_review'));
   assert.equal(f.service().decide('commons', 'owner', id, f.input('explicit-after-revision', 1, { decision: 'accepted' })).review.revision, 2);
-  assert.equal(f.store.publicWorkClaims.receipt(id).state, 'submitted');
+  // #3546: the accepted decision is the receipt's verified successor state.
+  assert.equal(f.store.publicWorkClaims.receipt(id).state, 'verified');
 });
 
 test('mixed acceptance requires real authorized exact-current PASS and survives restart', t => {
@@ -124,6 +135,28 @@ test('linked identity alias cannot review own submission and revoked owner canno
   human.service().decide('commons', 'owner', human.receipt.receiptId, args);
   human.alter(state => { state.members.owner.active = false; });
   assert.throws(() => human.service().decide('commons', 'owner', human.receipt.receiptId, args), code('review_forbidden'));
+});
+
+test('completed review replay returns the recorded outcome after standing, archive and policy changes, while fresh requests still face current checks', t => {
+  // #2945: replay lookup must precede scope()'s archive/policy throws and
+  // the current-permission check, or a retry of a completed action fails
+  // instead of returning the outcome the caller may have lost.
+  const f = fixture(t), id = f.receipt.receiptId, args = f.input('replayable-accept', 0, { decision: 'accepted' });
+  const accepted = f.service().decide('commons', 'owner', id, args);
+  f.alter(state => { state.members.owner.permissions = ['read']; });
+  assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
+  assert.throws(() => f.service().decide('commons', 'owner', id, { ...args, reason: 'Changed' }), code('request_id_reused'));
+  assert.throws(() => f.service().decide('commons', 'owner', id, f.input('fresh-after-standing-loss', 1, { decision: 'rejected' })), code('review_forbidden'));
+  f.alter(state => { state.room.archivedAt = '2026-10-13T00:00:00.000Z'; });
+  assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
+  assert.throws(() => f.service().decide('commons', 'owner', id, f.input('fresh-after-archive', 1, { decision: 'rejected' })), code('room_archived'));
+
+  const linked = fixture(t, 'human_with_agent_review', true), linkedId = linked.receipt.receiptId;
+  const passArgs = linked.input('replayable-pass', 0, { verdict: 'PASS' });
+  const passed = linked.service().verify('commons', 'reviewer', linkedId, passArgs);
+  linked.alter(state => { state.workItems['linked-work'].state = 'superseded'; });
+  assert.deepEqual(linked.service().verify('commons', 'reviewer', linkedId, passArgs), passed);
+  assert.throws(() => linked.service().verify('commons', 'reviewer', linkedId, linked.input('fresh-after-policy-change', 1, { verdict: 'PASS' })), code('review_policy_changed'));
 });
 
 test('outside producer sees only own sanitized feedback without membership or private reviewer facts', t => {

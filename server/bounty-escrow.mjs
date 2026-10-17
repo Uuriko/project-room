@@ -238,6 +238,7 @@ export const bountyEscrowSchema = `
     amount_millis INTEGER NOT NULL CHECK(amount_millis > 0),
     poster TEXT NOT NULL,
     verifier TEXT,
+    dispute_decider TEXT,
     approval_mode TEXT NOT NULL DEFAULT 'legacy' CHECK(approval_mode IN ('legacy','human','agent')),
     claimant TEXT,
     state TEXT NOT NULL,
@@ -719,6 +720,7 @@ export class BountyEscrow {
     this._arbiters = createArbiters();
     this._settlementActor = null; // transient: who the dispute settlement is attributed to
     this._settlementSigned = null; // transient: signed receipts issued by a dispute settlement
+    this._settlementDecidedEvent = null; // transient: bounty.decided event emitted by a dispute settlement
     this._disputeSettling = null; // transient: bounty id whose finality is unfrozen inside its own dispute settlement
     this._rubricCheckTransient = null; // transient: arbiter's rubric re-check, consumed by the dispute settlement's resolution
     // Receipt signer: createReceiptSigner({ seedHex, ref }) from
@@ -955,7 +957,7 @@ export class BountyEscrow {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
       bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
-        "rubric_json", "rubric_hash", "rubric_version", "approval_mode"],
+        "rubric_json", "rubric_hash", "rubric_version", "approval_mode", "dispute_decider"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -990,6 +992,7 @@ export class BountyEscrow {
     // "written before tracks existed" (or a null-track kind like
     // genesis/transfer); nothing reads the column yet.
     addCol("bounty_records", "state_changed_ms INTEGER");
+    addCol("bounty_records", "dispute_decider TEXT");
     addCol("bounty_records", "snoozed_until_ms INTEGER");
     addCol("bounty_records", "decline_reason TEXT");
     addCol("bounty_records", "duplicate_of TEXT");
@@ -1124,8 +1127,15 @@ export class BountyEscrow {
 
   _requirePayable(roomId, accountId, amountMillis, what) {
     const payable = this._balanceMillis(roomId, accountId, "payable");
-    if (payable < amountMillis)
-      fail("insufficient_funds", `${what}: ${accountId} holds ${toCredits(payable)} payable credits, needs ${toCredits(amountMillis)}`);
+    if (payable < amountMillis) {
+      // Human copy (#3438): name the account holder by display name, never
+      // the raw identity id, and state the remedy — what was needed, what
+      // is available, and what to do next.
+      const member = this._memberOf(roomId, accountId);
+      const holder = member && typeof member.displayName === "string" && member.displayName
+        ? member.displayName : "This account";
+      fail("insufficient_funds", `${what}: ${holder} holds ${toCredits(payable)} payable credits, needs ${toCredits(amountMillis)}. Reduce the amount to at most ${toCredits(payable)} credits, or add credits first.`);
+    }
   }
 
   // --- events ---------------------------------------------------------------
@@ -1265,6 +1275,7 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
+      disputeDecider: row.dispute_decider ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -1289,12 +1300,12 @@ export class BountyEscrow {
 
   _saveBounty(bounty) {
     const at = isoNow(this.nowMs());
-    this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?,
+    this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?, dispute_decider=?,
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
       evidence_json=?, attestation_json=?, resolution_json=?,
       rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, updated_at=? WHERE bounty_id=?`)
-      .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier,
+      .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier, bounty.disputeDecider ?? null,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
         bounty.snoozedUntilMs ?? null, bounty.declineReason ?? null, bounty.duplicateOf ?? null, bounty.label ?? null,
@@ -1311,6 +1322,7 @@ export class BountyEscrow {
     return {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amountMillis: row.amount_millis, poster: row.poster, verifier: row.verifier, claimant: row.claimant,
+      disputeDecider: row.dispute_decider ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, stateChangedMs: row.state_changed_ms, deadlineMs: row.deadline_ms,
       challengeEndsMs: row.challenge_ends_ms, disputeId: row.dispute_id, disputeOpenedMs: row.dispute_opened_ms,
@@ -1369,7 +1381,7 @@ export class BountyEscrow {
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
   // locked, so posting never needs funds.
-  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, approvalMode = "human", rubric = null, actor } = {}) {
+  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, disputeDeciderId = null, approvalMode = "human", rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
@@ -1396,6 +1408,24 @@ export class BountyEscrow {
           check(GENESIS_LANES.includes(verifier), "invalid_input", "verifier must be one of the room's agent lanes");
         check(verifier !== lane, "invalid_input", "the verifier must be a third lane, distinct from the poster");
       }
+      let decider = null;
+      if (disputeDeciderId !== null && disputeDeciderId !== undefined) {
+        // The designated dispute decider is the tier-1 arbiter seated by
+        // disputeBounty (through the same resolveTier1 path as the
+        // verifier) when no verifier designation seats one. The office is
+        // adjudication, not work verification, so any current member may
+        // hold it — human-mode rooms seat human reviewers in the role —
+        // but it is always a third party, never the poster, and seating
+        // re-checks independence from the claimant. Without a membership
+        // source the decider must still be a genesis lane.
+        const members = this._members(roomId);
+        decider = members === null
+          ? canonicalLane(disputeDeciderId)
+          : this._requireLane(roomId, disputeDeciderId, "dispute decider");
+        if (members === null)
+          check(GENESIS_LANES.includes(decider), "invalid_input", "dispute decider must be one of the room's lanes");
+        check(decider !== lane, "invalid_input", "the dispute decider must be a third lane, distinct from the poster");
+      }
       // Agent-approve mode needs its approver up front: the designated
       // verifier is the only identity that may render the verdict.
       check(approvalMode !== "agent" || verifier !== null, "invalid_input",
@@ -1407,12 +1437,12 @@ export class BountyEscrow {
       const at = isoNow(this.nowMs());
       const bountyId = this._nextBountyId(roomId);
       this.db.prepare(`INSERT INTO bounty_records
-        (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, approval_mode, claimant, state, state_changed_ms,
+        (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, dispute_decider, approval_mode, claimant, state, state_changed_ms,
          deadline_ms, challenge_ends_ms, dispute_id, dispute_opened_ms, snoozed_until_ms, decline_reason,
          duplicate_of, label, evidence_json, attestation_json, resolution_json,
          rubric_json, rubric_hash, rubric_version, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, approvalMode, null, "proposed", this.nowMs(),
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, decider, approvalMode, null, "proposed", this.nowMs(),
           deadlineMs, null, null, null, null, null, null, null, null, null, null,
           rubricJson, rubricHash, 1, at, at);
       this.db.prepare(`INSERT INTO bounty_rubric_versions
@@ -1676,6 +1706,14 @@ export class BountyEscrow {
       const act = this._actorFor(roomId, actor, lane);
       const bounty = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId)
         ?? fail("unknown_bounty", `unknown bounty "${bountyId}"`));
+      // #3008: the poster may not claim their own bounty. Every later guard
+      // assumes poster != claimant (acceptance must come from an identity
+      // distinct from the claimant; the claimant cannot dispute their own
+      // submission), so a self-claim dead-ends in-review with the escrowed
+      // amount and the anti-flake bond locked until deadline expiry — and,
+      // if a second member accepted, would farm reputation/earnings from the
+      // poster's own escrowed credits.
+      check(lane !== bounty.poster, "not_authorized", "the poster cannot claim their own bounty");
       check(bounty.state === "funded" || bounty.state === "claimed", "invalid_state",
         `bounty is ${bounty.state}, not open for claims — only funded bounties are claimable`);
       if (bounty.state === "claimed") fail("already_claimed", "this bounty is already claimed");
@@ -2252,6 +2290,23 @@ export class BountyEscrow {
       .run(dispute.disputeId, roomId, JSON.stringify(encodeRow(BOUNTY_DISPUTE_ROW_KIND, dispute)), at);
   }
 
+  // #3275: the dispute machine lives in a caller-owned in-memory Map
+  // (this._disputeRecords) that no store transaction covers: when a
+  // transaction rolls back, the persisted dispute snapshot reverts but the
+  // Map keeps whatever the machine last wrote, so the two stores disagree
+  // for the life of the process (a restart silently "heals" the machine
+  // from the DB). The write-through invariant — every machine transition is
+  // persisted in the same transaction via _persistDispute — means the
+  // record held at transaction entry IS the persisted record, so restoring
+  // that snapshot on failure makes the machine a function of persisted
+  // state again. A null/undefined snapshot means the dispute did not exist
+  // at entry and must not exist after a rollback either.
+  _restoreDisputeRecord(disputeId, snapshot) {
+    if (!this._disputeRecords) return;
+    if (snapshot === null || snapshot === undefined) this._disputeRecords.delete(disputeId);
+    else this._disputeRecords.set(disputeId, snapshot);
+  }
+
   // Arbitrator cards are drawn from CURRENT room membership — never a
   // hardcoded lane list. A lane that leaves (or never joined) cannot be
   // seated; the dispute path then reports honestly-unavailable.
@@ -2278,6 +2333,15 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(!bounty.disputeId, "dispute_exists", "this bounty already has a dispute");
       check(bounty.state === "submitted" || bounty.state === "accepted", "invalid_state", `bounty is ${bounty.state}, not disputable`);
+      // The challenge window IS the dispute window for an accepted bounty:
+      // at challengeEndsMs the keeper auto-approves, so a dispute filed at
+      // or after close could never be a sponsor protection — it could only
+      // freeze a settled payout until the timeout default pays it out
+      // anyway (#3703). Submitted work has no verdict to protect yet and
+      // is not window-bound.
+      if (bounty.state === "accepted" && bounty.challengeEndsMs !== null
+          && this.nowMs() >= bounty.challengeEndsMs)
+        fail("invalid_state", "the challenge window for this bounty has closed");
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
@@ -2307,15 +2371,29 @@ export class BountyEscrow {
         this._persistDispute(roomId, dispute);
         dispute = machine.submitEvidence(disputeId, { by: lane, summary: grounds });
         this._persistDispute(roomId, dispute);
-        // Seat the decider: the designated third-lane verifier (tier 1) is the
-        // only authorized decider in slice 1. Panel-majority voting arrives
-        // in a later slice, so without a designated verifier there is no
-        // authorized decider: the dispute is marked honestly unavailable and
-        // the 14-day timeout default (RELEASE) is the backstop.
+        // Seat the decider: the designated tier-1 arbiter is the only
+        // authorized decider in slice 1 — the bounty's designated dispute
+        // decider when one was named at post time, else its designated
+        // verifier. Panel-majority voting arrives in a later slice, so
+        // without a designation there is no authorized decider: the
+        // dispute is marked honestly unavailable and the 14-day timeout
+        // default (RELEASE) is the backstop.
+        const designatedDecider = bounty.disputeDecider ?? bounty.verifier;
         let seating = null;
-        if (bounty.verifier)
-          seating = this._arbiters.resolveTier1({ verifierId: bounty.verifier,
-            executor: { lane: bounty.claimant }, lanes: this._laneCards(roomId) });
+        if (designatedDecider) {
+          const lanes = this._laneCards(roomId);
+          // Lane cards enumerate agent members; a designated HUMAN decider
+          // (a human-mode room's named reviewer) is seated from their live
+          // membership instead. Independence from the claimant remains
+          // resolveTier1's check, unchanged.
+          if (!lanes.some(card => card.lane === designatedDecider)) {
+            const member = this._memberOf(roomId, designatedDecider);
+            if (member && member.active !== false)
+              lanes.push({ lane: designatedDecider, trust_level: "standard" });
+          }
+          seating = this._arbiters.resolveTier1({ verifierId: designatedDecider,
+            executor: { lane: bounty.claimant }, lanes });
+        }
         if (!seating || seating.unavailable) {
           dispute = machine.markUnavailable(disputeId,
             seating?.reason ?? "no-designated-verifier: panel-majority voting is not in slice 1");
@@ -2324,15 +2402,24 @@ export class BountyEscrow {
         }
         this._persistDispute(roomId, dispute);
       } catch (error) {
+        // #3275: the machine Map is not transactional — a rollback here
+        // must not leave a phantom dispute the DB never committed.
+        this._restoreDisputeRecord(disputeId, null);
         if (error instanceof DisputeError) fail("invalid_input", error.message);
         throw error;
       }
       bounty.disputeId = disputeId; bounty.disputeOpenedMs = this.nowMs();
-      this._transition(bounty, "disputed");
-      this._saveBounty(bounty);
-      const event = this._event(roomId, "bounty.disputed",
-        { bountyId, actor: act, before: fromState, after: "disputed",
-          data: { disputeId, bond: toCredits(bondMillis), decider: dispute.decider ?? null, unavailable: dispute.unavailable } });
+      let event;
+      try {
+        this._transition(bounty, "disputed");
+        this._saveBounty(bounty);
+        event = this._event(roomId, "bounty.disputed",
+          { bountyId, actor: act, before: fromState, after: "disputed",
+            data: { disputeId, bond: toCredits(bondMillis), decider: dispute.decider ?? null, unavailable: dispute.unavailable } });
+      } catch (error) {
+        this._restoreDisputeRecord(disputeId, null);
+        throw error;
+      }
       return { bounty: this._getBounty(roomId, bountyId),
         dispute: { disputeId, state: dispute.state, decider: dispute.decider ?? null, unavailable: dispute.unavailable,
           bond: toCredits(bondMillis), raisedBy: lane },
@@ -2364,33 +2451,61 @@ export class BountyEscrow {
       // Attribute the inline settlement to the decider whose ruling caused it.
       this._settlementActor = act;
       this._settlementSigned = [];
+      this._settlementDecidedEvent = null;
       this._rubricCheckTransient = checkedRubric;
+      // #3275: snapshot the in-memory dispute record before the machine
+      // mutates it. decide/finalize mutate the Map first (finalize marks
+      // the record notified/resolved BEFORE the settlement callback runs),
+      // so a settlement throw rolls the DB back while the machine keeps the
+      // decided/finalized state — the bounty stays `disputed` in the DB
+      // while the machine refuses every re-decision with a ghost
+      // "cannot move resolved -> ..." error. On ANY failure in this
+      // transaction the outer store transaction rolls the DB back to the
+      // snapshot below; restoring the Map entry to the same snapshot keeps
+      // the two stores consistent and the dispute decidable again.
+      // Deep copy, not a reference: decide/finalize mutate the record in
+      // place, so a by-reference "snapshot" would mutate along with it and
+      // the restore below would restore the decided state it exists to undo.
+      const disputeBefore = dispute ? JSON.parse(JSON.stringify(dispute)) : dispute;
       try {
-        const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
-        this._persistDispute(roomId, decided);
-        const finalized = this._disputes.finalize(bounty.disputeId); // fires onDisputeFinalized -> escrow settlement
-        this._persistDispute(roomId, finalized);
+        try {
+          const decided = this._disputes.decide(bounty.disputeId, { outcome, reasonCodes, decider: lane });
+          this._persistDispute(roomId, decided);
+          const finalized = this._disputes.finalize(bounty.disputeId); // fires onDisputeFinalized -> escrow settlement
+          this._persistDispute(roomId, finalized);
+        } catch (error) {
+          if (error instanceof DisputeError) fail("invalid_input", error.message);
+          throw error;
+        } finally {
+          this._settlementActor = null;
+          this._rubricCheckTransient = null;
+        }
+        const signed = this._settlementSigned ?? [];
+        this._settlementSigned = null;
+        const settled = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId));
+        // The settlement itself emitted bounty.decided (in _settleDispute, so
+        // keeper settlements emit it too); reuse that event for the receipt.
+        // The inline emission remains only as a fallback for a finalize whose
+        // settlement was a no-op (already settled), preserving the receipt
+        // contract without ever double-emitting.
+        const event = this._settlementDecidedEvent ?? this._event(roomId, "bounty.decided",
+          { bountyId, actor: act, before: "disputed", after: settled.state,
+            data: { disputeId: bounty.disputeId, outcome, resolution: settled.resolution,
+              // Reputation projection reads these (server/bounty-reputation.mjs).
+              claimant: bounty.claimant,
+              challenger: this._disputeRecords.get(bounty.disputeId)?.raisedBy ?? null,
+              // Slice #4 + #6: the verifier whose pinned-rubric acceptance is
+              // on trial — an "upheld" outcome overturns it (acceptance_overturned).
+              verifier: bounty.attestation?.recordedBy ?? null } });
+        this._settlementDecidedEvent = null;
+        return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
+          receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
       } catch (error) {
-        if (error instanceof DisputeError) fail("invalid_input", error.message);
+        this._restoreDisputeRecord(bounty.disputeId, disputeBefore);
+        this._settlementSigned = null;
+        this._settlementDecidedEvent = null;
         throw error;
-      } finally {
-        this._settlementActor = null;
-        this._rubricCheckTransient = null;
       }
-      const signed = this._settlementSigned ?? [];
-      this._settlementSigned = null;
-      const settled = this._mutable(this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId));
-      const event = this._event(roomId, "bounty.decided",
-        { bountyId, actor: act, before: "disputed", after: settled.state,
-          data: { disputeId: bounty.disputeId, outcome, resolution: settled.resolution,
-            // Reputation projection reads these (server/bounty-reputation.mjs).
-            claimant: bounty.claimant,
-            challenger: this._disputeRecords.get(bounty.disputeId)?.raisedBy ?? null,
-            // Slice #4 + #6: the verifier whose pinned-rubric acceptance is
-            // on trial — an "upheld" outcome overturns it (acceptance_overturned).
-            verifier: bounty.attestation?.recordedBy ?? null } });
-      return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
-        receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
     });
   }
 
@@ -2468,9 +2583,15 @@ export class BountyEscrow {
             amountMillis: amount, kind: "attribute", bountyId, lotId, memo: "split: attribute before split", actor,
             receipt: { type: "attributed", payload: { claimant: worker } } }));
         }
-        this._requireFinalityMove(bounty, "approve");
-        this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
-          amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
+        // A 1-milli award splits to a zero worker half (floor(1/2) = 0) and
+        // the journal rejects zero-amount movements: vest only a positive
+        // half. The poster half (amount - workerHalf) is always >= 1 milli,
+        // so the refund below always moves.
+        if (workerHalf > 0) {
+          this._requireFinalityMove(bounty, "approve");
+          this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
+            amountMillis: workerHalf, kind: "approve", bountyId, lotId, memo: "split: worker half vests", actor });
+        }
         this._requireFinalityMove(bounty, "refund");
         collect(this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: bounty.poster, state: "payable" },
           amountMillis: posterHalf, kind: "refund", bountyId, lotId, memo: "split: poster half refunds", actor,
@@ -2480,9 +2601,15 @@ export class BountyEscrow {
             amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
       } else {
         // RELEASE: the award vests with the worker (swept at the epoch, 1% fee
-        // then); the challenger's bond compensates the worker for the delay —
-        // in full, no fee on penalty compensation. A forfeited bond (frivolous
-        // ruling, withdrawn challenge) goes to the room pool instead.
+        // then); on a DECIDED release the challenger's bond compensates the
+        // worker for the delay — in full, no fee on penalty compensation. A
+        // forfeited bond (frivolous ruling, withdrawn challenge) goes to the
+        // room pool instead. A TIMEOUT default is a no-verdict settlement:
+        // the reputation projector already scores it as the challenger's
+        // loss (dispute_lost), so the bond follows the forfeiture precedent
+        // to the pool — never to the claimant. Compensating the claimant on
+        // timeout made a confederate dispute a free money pump on any
+        // bounty whose dispute could not be decided (#3702).
         if (awardFrom.state === "locked") {
           this._requireFinalityMove(bounty, "attribute");
           collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
@@ -2493,7 +2620,7 @@ export class BountyEscrow {
         this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
           amountMillis: amount, kind: "approve", bountyId, lotId, memo: `dispute ${outcome}: award vests`, actor });
         if (typeof bondSnapshot === "number") {
-          if (forfeited)
+          if (forfeited || terminal === "timeout")
             this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: POOL_ACCOUNT, state: "payable" },
               amountMillis: bondSnapshot, kind: "bond-forfeit", bountyId, lotId: newId("lot_"), memo: `dispute ${outcome}: bond forfeited to pool`, actor });
           else
@@ -2524,6 +2651,25 @@ export class BountyEscrow {
       actor });
     this._event(roomId, settleKind === "cancel" ? "bounty.refunded" : "bounty.released",
       { bountyId, actor, before: "disputed", after: bounty.state, data: { resolution: bounty.resolution } });
+    // Every dispute settlement is a decision, so it emits bounty.decided
+    // here — the single settlement path all outcomes pass through (decider
+    // ruling via _onDisputeFinalized, keeper terminal retry, and the keeper
+    // 14-day timeout-default, which reaches no other producer). Without
+    // this, timeout-default settlements never landed on the event stream
+    // and the reputation projector (server/bounty-reputation.mjs) never
+    // applied their signals. Outcome-less settlements (a withdrawn dispute
+    // carries no verdict) emit nothing, as before.
+    if (typeof outcome === "string" && outcome.length > 0) {
+      this._settlementDecidedEvent = this._event(roomId, "bounty.decided",
+        { bountyId, actor, before: "disputed", after: bounty.state,
+          data: { disputeId: bounty.disputeId, outcome, resolution: bounty.resolution,
+            // Reputation projection reads these (server/bounty-reputation.mjs).
+            claimant: bounty.claimant,
+            challenger: challenger ?? null,
+            // Slice #4 + #6: the verifier whose pinned-rubric acceptance is
+            // on trial — an "upheld" outcome overturns it (acceptance_overturned).
+            verifier: bounty.attestation?.recordedBy ?? null } });
+    }
     return signed;
   }
 
@@ -2631,21 +2777,29 @@ export class BountyEscrow {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     // Sweep what is actually approved (a split leaves only the worker's half
     // here); the 1% fee applies only on payouts that actually release.
+    // The approved bucket can legitimately be ZERO: a split of a 1-milli
+    // bounty vests floor(1/2) = 0 with the worker (#3263). The claim-bond
+    // settlement and the terminal transition must not be gated on the
+    // payout amount — with 0 approved there is simply no payout/fee move
+    // (the journal rejects zero-amount movements), but the bounty still
+    // completes to `paid` (worker 0, fee 0) and the bond still comes home.
     const amount = this._approvedMillis(roomId, bounty.claimant, bountyId);
-    check(amount > 0, "invalid_state", "nothing approved to sweep");
     const fee = Math.floor(amount * FEE_NUMERATOR / FEE_DENOMINATOR);
     const earner = amount - fee;
     const lotId = newId("lot_");
-    // Finality: payout requires the bounty to sit in approved (vested).
-    this._requireFinalityMove(bounty, "payout");
-    const movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
-      amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
-      receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
-        grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
-    if (fee > 0) {
-      this._requireFinalityMove(bounty, "fee");
-      this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
-        amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
+    let movement = null;
+    if (amount > 0) {
+      // Finality: payout requires the bounty to sit in approved (vested).
+      this._requireFinalityMove(bounty, "payout");
+      movement = this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: bounty.claimant, state: "payable" },
+        amountMillis: earner, kind: "payout", bountyId, lotId, memo: `epoch payout (99% of ${toCredits(amount)})`, actor,
+        receipt: { type: "payout-released", payload: { netAmountMillis: String(earner), feeAmountMillis: String(fee),
+          grossAmountMillis: String(amount), paidTo: bounty.claimant, poolAccount: POOL_ACCOUNT } } });
+      if (fee > 0) {
+        this._requireFinalityMove(bounty, "fee");
+        this._move({ roomId, at, from: { account: bounty.claimant, state: "approved" }, to: { account: POOL_ACCOUNT, state: "payable" },
+          amountMillis: fee, kind: "fee", bountyId, lotId, memo: "1% room-pool fee on released payout", actor });
+      }
     }
     // The claim bond was an anti-flake lock, not a fee: it comes home now.
     this._settleClaimBond(bounty, at, { forfeit: false, actor });
@@ -2657,7 +2811,7 @@ export class BountyEscrow {
     this._saveBounty(bounty);
     this._event(roomId, "bounty.paid",
       { bountyId, actor, before: "approved", after: "paid", data: { earner: bounty.claimant, paid: toCredits(earner), fee: toCredits(fee) } });
-    return { paid: toCredits(earner), fee: toCredits(fee), signed: movement.receipt ? [movement.receipt] : [] };
+    return { paid: toCredits(earner), fee: toCredits(fee), signed: movement?.receipt ? [movement.receipt] : [] };
   }
 
   // One mechanical pass over a single bounty; returns { action, signed } or null.
@@ -2724,23 +2878,44 @@ export class BountyEscrow {
       const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
+        // #3275: each bounty's keeper action is atomic. Keeper actions are
+        // multi-move (_settleDispute, _sweep), so catching an error inside
+        // the single epoch transaction would COMMIT whatever moves already
+        // landed and strand the bounty half-settled — despite the comment
+        // below. Run the action in an isolated (nested) transaction: a
+        // savepoint on Node, a nested transactionSync on the Durable
+        // Object — the store's existing transact-nesting pattern. A throw
+        // rolls back ONLY this bounty's writes; the epoch then records the
+        // failure and continues with nothing applied for that bounty. The
+        // summary is updated only after the isolated transaction succeeds,
+        // so summary bookkeeping can never claim a rolled-back action.
+        const disputeRecord = bounty.disputeId ? this._disputeRecords?.get(bounty.disputeId) : undefined;
+        const disputeBefore = disputeRecord ? JSON.parse(JSON.stringify(disputeRecord)) : disputeRecord;
         try {
-          if (bounty.state === "approved") {
-            const { paid, fee, signed } = this._sweep(bounty, at, RULE_ACTOR);
-            summary.swept.push(bounty.bountyId); summary.paid.push({ bountyId: bounty.bountyId, paid, fee });
-            if (signed.length) { summary.signedReceipts ??= {}; summary.signedReceipts[bounty.bountyId] = signed; }
-          } else {
+          const outcome = this.store.transaction(() => {
+            if (bounty.state === "approved") {
+              const { paid, fee, signed } = this._sweep(bounty, at, RULE_ACTOR);
+              return { swept: true, paid, fee, signed };
+            }
             const pass = this._keeperPass(bounty, now, at);
-            const action = pass?.action ?? null;
-            if (action === "approved") summary.approved.push(bounty.bountyId);
-            else if (action === "refunded") summary.refunded.push(bounty.bountyId);
-            else if (action === "released") summary.released.push(bounty.bountyId);
-            else if (action === "expired-unfunded") summary.expiredUnfunded.push(bounty.bountyId);
-            if (pass?.signed?.length) { summary.signedReceipts ??= {}; summary.signedReceipts[bounty.bountyId] = pass.signed; }
+            return { swept: false, action: pass?.action ?? null, signed: pass?.signed ?? [] };
+          }, { isolated: true });
+          if (outcome.swept) {
+            summary.swept.push(bounty.bountyId); summary.paid.push({ bountyId: bounty.bountyId, paid: outcome.paid, fee: outcome.fee });
+            if (outcome.signed.length) { summary.signedReceipts ??= {}; summary.signedReceipts[bounty.bountyId] = outcome.signed; }
+          } else {
+            if (outcome.action === "approved") summary.approved.push(bounty.bountyId);
+            else if (outcome.action === "refunded") summary.refunded.push(bounty.bountyId);
+            else if (outcome.action === "released") summary.released.push(bounty.bountyId);
+            else if (outcome.action === "expired-unfunded") summary.expiredUnfunded.push(bounty.bountyId);
+            if (outcome.signed.length) { summary.signedReceipts ??= {}; summary.signedReceipts[bounty.bountyId] = outcome.signed; }
           }
         } catch (error) {
           // The keeper is mechanical but never half-applies: one bounty
-          // failing must not wedge the epoch. Record and continue.
+          // failing must not wedge the epoch. Record and continue — the
+          // isolated rollback above means "failed" is "nothing applied",
+          // and the in-memory dispute record is restored to match (#3275).
+          if (bounty.disputeId) this._restoreDisputeRecord(bounty.disputeId, disputeBefore);
           summary.failed = summary.failed ?? [];
           summary.failed.push({ bountyId: bounty.bountyId, code: error.code ?? "error", message: error.message });
         }

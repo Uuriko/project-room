@@ -33,7 +33,6 @@ export const jevAdmissionPaths = Object.freeze([
   "join:first-room",      // POST /join (+ /room/join, /api/join), personal first room
   "agent-invite:redeem",  // POST /api/agent-invites/redeem
   "guest-invite:redeem",  // POST /api/guest-invites/redeem (signed card verified)
-  "guest-agent-link:join",// POST /api/guest-agent-links/join
   "share-link:join-agent",// POST /api/share-links/join-agent
   "access-request:approve", // access-request approval (POST .../access-requests/{id}/decide)
 ]);
@@ -99,7 +98,11 @@ function sybilNameScore(displayName, existingDisplayNames) {
   let similarity = 0, closest = null;
   for (const other of existingDisplayNames) {
     const candidate = other.toLowerCase().trim();
-    if (!candidate || candidate === lowered) continue;
+    if (!candidate) continue;
+    // An exact match is the strongest impersonation signal (similarity 1.0
+    // per archive/docs/history/JEV-GATES.md). The wiring excludes the joining
+    // member itself from existingDisplayNames, so an exact match here
+    // always means someone else's name.
     const distance = levenshtein(lowered, candidate);
     const sim = 1 - distance / Math.max(lowered.length, candidate.length);
     if (sim > similarity) { similarity = sim; closest = other; }

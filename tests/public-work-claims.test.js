@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkClaims, publicWorkClaimsSchema } from '../server/public-work-claims.mjs';
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from '../server/public-work-claim-fence.mjs';
+import { unpublishPublic } from '../server/legal-store.mjs';
 
 // Real store/identity/offer/lease boundary; registration/HTTP/workerd keepers
 // independently own transport and old-writer fencing. No registry doubles.
@@ -36,7 +37,7 @@ const code = expected => error => error.code === expected;
 
 test('cold public index and strict shared repository path locks work without private membership', t => {
   const f = fixture(t), [a, b] = f.identities;
-  assert.deepEqual(f.service().list(), { tasks: [], nextCursor: null });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
   const first = f.enable('first:task', ['src']); f.enable('second.task', ['src/file.js']); f.enable('third-task', ['docs/readme.md']);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links').get().n, 0);
   assert.equal(f.service().list({ limit: 1 }).nextCursor, 'first:task');
@@ -70,7 +71,7 @@ test('lease expiry/reclaim rejects prior generations and exact retries survive w
   assert.deepEqual(f.service().act('lease-task', a.secret, 'claim', claim('a', { leaseHours: 1 })), first);
   assert.deepEqual(f.service().act('lease-task', b.secret, 'claim', claim('b')), second);
   assert.equal(f.service().act('lease-task', b.secret, 'release', owned('release', 2)).task.claim.state, 'unclaimed');
-  assert.deepEqual(f.service().list(), { tasks: [], nextCursor: null });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
 });
 
 test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks without asserting acceptance', t => {
@@ -91,6 +92,37 @@ test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks wi
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_receipts').get().n, 1);
   f.store.projectOffers.transition('commons', 'owner', 'receipt-task', 'withdraw', { requestId: 'withdraw', expectedRevision: 2 });
   assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
+});
+
+test('operator unpublish hides a public-work receipt and its full artifact at the public-work door', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('unpublish-receipt-task');
+  f.service().act('unpublish-receipt-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('unpublish-receipt-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Secret submitted work', checksReported: [] }));
+  assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
+  // Receipt-level takedown: both the receipt and its artifact must 404, like the sibling receipts door.
+  unpublishPublic(f.store.db, { kind: 'receipt', id: result.receipt.receiptId, byAccount: 'operator', now: f.store.now() });
+  assert.throws(() => f.service().receipt(result.receipt.receiptId), code('public_receipt_not_found'));
+  assert.throws(() => f.service().artifact(result.receipt.receiptId), code('public_receipt_not_found'));
+  // Room-level takedown hides a different receipt from the same room too.
+  f.enable('unpublish-room-task', ['room-task.js']);
+  f.service().act('unpublish-room-task', a.secret, 'claim', claim('claim-room'));
+  const roomResult = f.service().act('unpublish-room-task', a.secret, 'finish', owned('finish-room', 1, { artifactText: 'Room submitted work', checksReported: [] }));
+  assert.deepEqual(f.service().receipt(roomResult.receipt.receiptId), roomResult.receipt);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: f.store.now() });
+  assert.throws(() => f.service().receipt(roomResult.receipt.receiptId), code('public_receipt_not_found'));
+  assert.throws(() => f.service().artifact(roomResult.receipt.receiptId), code('public_receipt_not_found'));
+});
+
+test('operator unpublish removes public-work tasks from the list and detail reads', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('unpublish-listed-task');
+  f.service().act('unpublish-listed-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('unpublish-listed-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Submitted work', checksReported: [] }));
+  // Before takedown the task advertises itself, including the submitted receipt id.
+  assert.equal(f.service().read('unpublish-listed-task').claim.submittedReceiptId, result.receipt.receiptId);
+  assert.deepEqual(f.service().list().tasks.map(task => task.taskId), ['unpublish-listed-task']);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: f.store.now() });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
+  assert.throws(() => f.service().read('unpublish-listed-task'), code('public_work_not_found'));
 });
 
 test('a reused identity cannot submit an earlier generation after release and reclaim', t => {
@@ -177,12 +209,16 @@ test('explicit match claims exactly one task and retry retains chosen outcome th
 });
 
 test('matching exposes continuation when the first hundred tasks are held and rejects invalid cursors', t => {
-  const f = fixture(t), [a, b] = f.identities;
+  const f = fixture(t), [, b] = f.identities;
   f.store.initialize(initialRoom('overflow'));
+  // The 100 holds are spread across 100 identities: since #3707 one
+  // identity may hold at most 3 live public-work claims, so a single
+  // holder for the whole page would be the squat that ceiling refuses.
+  const holders = Array.from({ length: 100 }, (_, n) => f.store.identities.create('Page holder ' + n));
   for (let n = 0; n < 101; n++) {
     const id = 'page-' + String(n).padStart(3, '0');
     f.enable(id, ['files/' + id], { kind: 'unpaid' }, 'main', n === 100 ? 'overflow' : 'commons');
-    if (n < 100) f.service().act(id, a.secret, 'claim', claim('hold-' + id));
+    if (n < 100) f.service().act(id, holders[n].secret, 'claim', claim('hold-' + id));
   }
   const page = f.service().match(null, {});
   assert.deepEqual(page.recommendations, []); assert.equal(page.inspected, 100);

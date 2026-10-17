@@ -1,5 +1,4 @@
-import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
-import { normalizePoll, pollOptionEmojis } from "./polls.js";
+import { normalizePoll } from "./polls.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -51,7 +50,7 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
-  MESSAGE_REACTION_SET: "message.reaction_set",
+  POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
   CHANNEL_CREATED: "channel.created",
@@ -99,6 +98,11 @@ export const EVENT_TYPES = Object.freeze({
   BOND_ACTIVATED: "bond.activated",
   BOND_REVOKED: "bond.revoked",
   DM_POSTED: "dm.posted",
+  // DM-consent receipt. The consent state lives in the dm_consents side
+  // table (server/dm-consents.mjs); this event is the thin sequenced record
+  // so a pair member's open session refreshes live. server/dm-consents.mjs
+  // appends it; server/dm-event-visibility.mjs hides it from non-parties.
+  DM_CONSENT_CHANGED: "dm.consent_changed",
   // Land queue receipt. The land_queue table is the source of truth; this
   // event is the thin wake record (pr, head, state, what changed).
   LAND_UPDATED: "land.updated",
@@ -119,6 +123,8 @@ export const EVENT_TYPES = Object.freeze({
 export const DEFAULT_CHANNEL_ID = "general";
 export const MAX_CHANNELS_PER_ROOM = 50;
 export const CHANNEL_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,47}$/;
+
+const JOINED_VIA_REFUSED = "invalid joinedVia";
 
 export function normalizeChannelName(name) {
   const normalized = typeof name === "string" ? name.trim().toLowerCase().replace(/\s+/g, "-") : "";
@@ -167,6 +173,10 @@ export function roomPolicy(state) {
 // Rooms that never record the event keep no `room.trust` field, so replay of
 // older logs stays byte-identical.
 export const TRUST_OFF_CODE = "trust_off";
+// A post into an archived channel is a conflict with the archive state, not a
+// bad command: docs/openapi.yaml "Room channels (Phase 2)" documents 409
+// channel_archived. The reducer carries the code and the command surface maps it.
+export const CHANNEL_ARCHIVED_CODE = "channel_archived";
 export const trustOffMessage = targetId =>
   `Room Trust is off: cross-owner assign and wake are blocked${targetId ? ` (${targetId})` : ""}. Ask the room owner to turn Trust on.`;
 
@@ -174,8 +184,10 @@ export const trustOffMessage = targetId =>
 // "all": members read the whole history. "since_join": a member reads
 // messages and events from their own join onward. The owner and members who
 // hold manage_members always read everything. Without a recorded setting,
-// rooms created with historyDefaultsVersion 1 start link guests and agent
-// guests at their join point; older rooms keep "all" for everyone.
+// link guests and agent guests start at their join point in every room. Rooms
+// created before historyDefaultsVersion 1 get the same computed default
+// (Potter, Oct 10 2026); nothing is written, so old logs replay unchanged, and
+// an owner's explicit "all" still gives guests the full history.
 export const HISTORY_VISIBILITIES = Object.freeze(["all", "since_join"]);
 export const HISTORY_DEFAULTS_VERSION = 1;
 export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html"]);
@@ -188,7 +200,7 @@ export function historyVisibility(state) {
   const value = HISTORY_VISIBILITIES.includes(stored?.value) ? stored.value : null;
   return {
     value,
-    guestsSinceJoin: value === null && state?.room?.historyDefaultsVersion === HISTORY_DEFAULTS_VERSION,
+    guestsSinceJoin: value === null,
     revision: Number.isSafeInteger(stored?.revision) ? stored.revision : 0,
     setById: typeof stored?.setById === "string" ? stored.setById : null,
     setAt: typeof stored?.setAt === "string" ? stored.setAt : null
@@ -201,7 +213,10 @@ export function memberHistoryVisibility(state, memberId) {
   if (Array.isArray(member?.permissions) && member.permissions.includes("manage_members")) return "all";
   const setting = historyVisibility(state);
   if (setting.value) return setting.value;
-  return setting.guestsSinceJoin && isHistoryGuestMemberId(memberId) ? "since_join" : "all";
+  // An agent that joined through a guest share link keeps its identity id as
+  // its member id, so member.added records how it joined (historyGuest).
+  const historyGuest = isHistoryGuestMemberId(memberId) || member?.historyGuest === true;
+  return setting.guestsSinceJoin && historyGuest ? "since_join" : "all";
 }
 // --- end PRIV-2 ---
 
@@ -398,6 +413,13 @@ export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work",
 // invite_member holders may mint these without holding them; they cannot
 // grant manage_members/decide/invite_member via invite-code.
 export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
+// Permissions no invitation mechanism may ever confer, whichever door the
+// invitation comes through: membership administration, decisions, and
+// inviting stay with members who hold them directly, never with whoever
+// redeems an invite. The agent-invite door refuses them at mint
+// (server/agent-invites.mjs) and the share-link grant is capped by the same
+// set (server/share-links.mjs, #3549) — one definition, every door.
+export const NEVER_GRANT = Object.freeze(["manage_members", "decide", "invite_member"]);
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
 // Owner, manage_members, or invite_member (agents may hold invite_member
@@ -440,8 +462,16 @@ export const DISPLAY_NAME_POLICY_VERSION = 1;
 // stamped events.
 export const PIN_DM_PARTY_POLICY_VERSION = 1;
 
+// Prototype names are denied as ids even when they satisfy the charset, so
+// a plain object keyed by id can never resolve (or be assigned) through
+// Object.prototype. Callers that validate user-supplied ids check
+// isReservedId first so the rejection can name the real cause instead of
+// collapsing into a charset error (#3013).
+export const RESERVED_IDS = Object.freeze(["constructor", "prototype", "__proto__"]);
+export const isReservedId = value => typeof value === "string" && RESERVED_IDS.includes(value);
+
 export function validId(value) {
-  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value);
+  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/.test(value) && !isReservedId(value);
 }
 
 // #1004 follow-up: member projections are plain objects from JSON.parse, so
@@ -494,8 +524,40 @@ export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
 
+// #3408: applyEvent used to open with a whole-state structuredClone. The
+// clone measured 78-98% of applyEvent's cost, and ~75% of the cloned bytes
+// are replay bookkeeping (eventLog + the two seen maps) that the persisted
+// projection discards. The bookkeeping needs container isolation, not deep
+// copies:
+//   - eventLog is append-only here (one push per applied event) and its
+//     entries are the applied envelopes, which no handler or consumer
+//     mutates once logged (the newest entry is the caller's own `incoming`
+//     object even under a full structuredClone);
+//   - seenEvents values are fingerprint strings and seenIdempotencyKeys
+//     values are event-id strings — immutable, replaced wholesale per key.
+// So the bookkeeping containers get fresh shallow copies (each returned
+// state owns its array/maps, so pushes and key sets never leak across
+// states) while every content branch keeps the full structuredClone.
+// The returned state is value-identical to the structuredClone result;
+// the #3408 replay-equivalence digest chains pin that claim.
+function cloneStateForApply(current) {
+  const state = { ...current };
+  if (Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
+  if (current.seenEvents && typeof current.seenEvents === "object") {
+    state.seenEvents = { ...current.seenEvents };
+  }
+  if (current.seenIdempotencyKeys && typeof current.seenIdempotencyKeys === "object") {
+    state.seenIdempotencyKeys = { ...current.seenIdempotencyKeys };
+  }
+  for (const key of Object.keys(state)) {
+    if (key === "eventLog" || key === "seenEvents" || key === "seenIdempotencyKeys") continue;
+    state[key] = structuredClone(current[key]);
+  }
+  return state;
+}
+
 export function applyEvent(current, incoming) {
-  const state = structuredClone(current);
+  const state = cloneStateForApply(current);
   validateEnvelope(incoming);
   // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
   // so the stored fingerprint agrees with the logged (post-handler) event.
@@ -551,7 +613,10 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
-    [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    // Reactions were removed (2026-10). Old logs still carry
+    // message.reaction_set; replay skips them.
+    "message.reaction_set": () => {},
+    [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
     [EVENT_TYPES.CHANNEL_CREATED]: createChannel,
@@ -589,6 +654,7 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.BOND_ACTIVATED]: recordBond,
     [EVENT_TYPES.BOND_REVOKED]: recordBond,
     [EVENT_TYPES.DM_POSTED]: recordPeerDm,
+    [EVENT_TYPES.DM_CONSENT_CHANGED]: recordDmConsentChange,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
     [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
@@ -916,6 +982,7 @@ function addMember(state, incoming) {
   // Round-2 #101: a member record may be bound to a global agent identity.
   if (incoming.data.identityId != null
     && (typeof incoming.data.identityId !== "string" || incoming.data.identityId.length > 64)) throw new Error("identityId must be a short string");
+  if (incoming.data.historyGuest != null && incoming.data.historyGuest !== true) throw new Error("Invalid historyGuest");
   if (incoming.data.agentType != null
     && (typeof incoming.data.agentType !== "string" || !/^[a-z][a-z0-9-]{0,31}$/.test(incoming.data.agentType))) {
     throw new Error("agentType must be a short catalog id");
@@ -923,6 +990,9 @@ function addMember(state, incoming) {
   // Referral attribution: optional, validated, never self-referential. The
   // referrer must already be a member — checked at record time; the event
   // handler guards the shape so a corrupt log cannot forge it.
+  // Only the one-time agent code path stamps this (server/agent-invites.mjs). It lets the
+  // minter see "joined with a one-time code" in Updates; any other value is refused.
+  if (incoming.data.joinedVia != null && incoming.data.joinedVia !== "one-time-code") throw new Error(JOINED_VIA_REFUSED);
   if (incoming.data.referredBy != null) {
     if (typeof incoming.data.referredBy !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(incoming.data.referredBy)) {
       throw new Error("referredBy must be a member id");
@@ -951,6 +1021,10 @@ function addMember(state, incoming) {
     // ACT-1a: Room Guide is an agent member the analytics path treats as system.
     // Omitted unless set, so older projections replay byte-identically.
     ...(incoming.data.system === true ? { system: true } : {}),
+    // priv-share-link-agent-reads-full-history: set when an agent joins through
+    // a guest share link. It reads like a link guest under the default history
+    // setting. Omitted otherwise so older projections replay byte-identically.
+    ...(incoming.data.historyGuest === true ? { historyGuest: true } : {}),
     accountableHumanId: incoming.data.accountableHumanId || (incoming.data.kind === "human" ? memberId : state.room.ownerId),
     permissions: [...incoming.data.permissions],
     // #643: explicit delegation marker. Set only when the owner granted
@@ -1024,8 +1098,11 @@ function changeMemberAccess(state, incoming) {
   // grant (or strip) administration on a non-owner agent.
   const isOwnerGrant = incoming.actorId === state.room.ownerId;
   validatePermissions(incoming.data.permissions, member.kind, false, isOwnerGrant);
+  // A self-leave with unchanged permissions grants and removes no authority,
+  // so the scoped-administration rule does not apply to it. Without this,
+  // an invite_member-only human could not leave (account deletion: 422).
   if (incoming.data.authorityPolicyVersion === MEMBERSHIP_AUTHORITY_POLICY_VERSION) {
-    requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
+    if (!isLeaveRequest(state, incoming)) requireScopedMemberAdministration(state, incoming.actorId, member.id, member, incoming.data.permissions);
   } else if (incoming.data.authorityPolicyVersion != null && incoming.data.authorityPolicyVersion !== 1) {
     throw new Error("Unsupported membership authority policy");
   }
@@ -1177,7 +1254,11 @@ function postMessage(state, incoming) {
   }
   const channel = state.channels[channelId];
   if (!channel) throw new Error("Unknown channel");
-  if (channel.archivedAt) throw new Error("Channel is archived");
+  if (channel.archivedAt) {
+    const error = new Error("Channel is archived");
+    error.code = CHANNEL_ARCHIVED_CODE;
+    throw error;
+  }
   const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
@@ -1195,6 +1276,10 @@ function postMessage(state, incoming) {
     ...(incoming.data.kind === "receipt_card" ? {
       kind: "receipt_card",
       claimId: incoming.data.claimId,
+      // Run-receipt link (rc_<claimId>): newer posters carry receiptId on the
+      // event; older cards derive it so every card projects the link the
+      // receipts surface resolves.
+      receiptId: incoming.data.receiptId || `rc_${incoming.data.claimId}`,
       title: incoming.data.title,
       closedBy: incoming.data.closedBy,
       deliveryMode: incoming.data.deliveryMode,
@@ -1325,12 +1410,34 @@ function findEditableMessage(state, incoming, { evidence = "refuse" } = {}) {
   return { message, actor };
 }
 
+// Edit history is bounded. Each edit used to append the previous body with no
+// cap, so enough edits of a long message pushed the room projection into the
+// 4 MiB pilot cap and refused every later write in the room (muse-room 12457
+// item 3, evidence 12458). Keep the most recent EDIT_HISTORY_MAX_ENTRIES prior
+// versions, each body capped at EDIT_HISTORY_MAX_BODY_CHARS, dropping the
+// oldest first; the newest entry is always kept so an edit is still marked.
+const EDIT_HISTORY_MAX_ENTRIES = 25;
+const EDIT_HISTORY_MAX_BODY_CHARS = 20000;
+// One message's history may never hold more than a 128th of the 4 MiB room
+// projection, so even the cap's ceiling cannot crowd out the room's writes.
+const EDIT_HISTORY_MAX_TOTAL_CHARS = 32768;
+
+function appendEditHistory(history, entry) {
+  const size = (e) => (typeof e.body === "string" ? e.body.length : 0) + 64;
+  const trimmed = typeof entry.body === "string" && entry.body.length > EDIT_HISTORY_MAX_BODY_CHARS
+    ? { ...entry, body: entry.body.slice(0, EDIT_HISTORY_MAX_BODY_CHARS) }
+    : entry;
+  let prior = [...(history ?? []), trimmed];
+  while (prior.length > 1 && (prior.length > EDIT_HISTORY_MAX_ENTRIES || prior.reduce((sum, e) => sum + size(e), 0) > EDIT_HISTORY_MAX_TOTAL_CHARS)) prior = prior.slice(1);
+  return prior;
+}
+
 function editMessage(state, incoming) {
   const { message } = findEditableMessage(state, incoming);
   // --- PRIV-1 message redaction ---
   if (!isRedactedBody(incoming.data) && (typeof incoming.data.body !== "string" || !incoming.data.body.trim())) throw new Error("Message body must be text");
   // --- end PRIV-1 message redaction ---
-  message.editHistory = [...(message.editHistory ?? []), { body: message.body, editedAt: incoming.at }];
+  message.editHistory = appendEditHistory(message.editHistory, { body: message.body, editedAt: incoming.at });
   message.body = incoming.data.body;
   message.revision = (message.revision ?? 0) + 1;
   message.editedAt = incoming.at;
@@ -1429,42 +1536,26 @@ function recordEvidenceWithdrawn(state, incoming) {
 }
 // --- end PRIV-1 message redaction ---
 
-function setMessageReaction(state, incoming) {
+// Polls: poll.voted { messageId, option, active } records one member's vote
+// on option index `option`. Votes live on the message as pollVotes, an array
+// of sorted member-id lists aligned with poll.options. Single-choice polls
+// move the vote; allowMultiple polls keep the others.
+function votePoll(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["messageId", "reaction", "active"]);
-  const { messageId, reaction, active } = incoming.data;
+  requireFields(incoming.data, ["messageId", "option", "active"]);
+  const { messageId, option, active } = incoming.data;
   const message = state.messages.find(m => m.id === messageId);
-  if (!message) throw new Error("Reaction must reference a message in this Room");
+  if (!message) throw new Error("Vote must reference a message in this Room");
   if (message.deletedAt) throw new Error("Message was deleted");
-  const key = canonicalReaction(reaction);
-  if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
-  // Replay and checkpoints may still carry like/heart/celebrate/thinking.
-  // Fold those into the Unicode key before applying this choice.
-  message.reactions = foldedReactionMap(message.reactions);
-  const members = new Set(message.reactions[key] || []);
-  if (active) {
-    if (!message.reactions[key] && Object.keys(message.reactions).length >= MAX_REACTIONS_PER_MESSAGE) {
-      throw new Error("Too many reactions on this message");
-    }
-    members.add(actor.id);
-  } else members.delete(actor.id);
-  if (members.size) message.reactions[key] = [...members].sort();
-  else delete message.reactions[key];
-  // Polls: one vote per member on single-choice polls. Setting a vote moves it
-  // off the other options; unvoting and allowMultiple polls leave the rest.
-  if (active && message.kind === "poll" && message.poll?.allowMultiple !== true) {
-    const optionEmojis = pollOptionEmojis(message);
-    if (optionEmojis.includes(key)) {
-      for (const other of optionEmojis) {
-        if (other === key) continue;
-        const voters = message.reactions[other];
-        if (!Array.isArray(voters) || !voters.includes(actor.id)) continue;
-        const rest = voters.filter(id => id !== actor.id);
-        if (rest.length) message.reactions[other] = rest;
-        else delete message.reactions[other];
-      }
-    }
-  }
+  if (message.kind !== "poll" || !Array.isArray(message.poll?.options)) throw new Error("Vote must reference a poll");
+  if (!Number.isInteger(option) || option < 0 || option >= message.poll.options.length || typeof active !== "boolean") throw new Error("Invalid poll vote");
+  const votes = message.poll.options.map((_, i) => Array.isArray(message.pollVotes?.[i]) ? message.pollVotes[i] : []);
+  message.pollVotes = votes.map((voters, i) => {
+    const set = new Set(voters);
+    if (i === option) { if (active) set.add(actor.id); else set.delete(actor.id); }
+    else if (active && message.poll.allowMultiple !== true) set.delete(actor.id);
+    return [...set].sort();
+  });
 }
 
 function proposeWork(state, incoming) {
@@ -1681,6 +1772,14 @@ function recordBond(state, incoming) {
   };
 }
 
+function recordDmConsentChange(state, incoming) {
+  requireMember(state, incoming.actorId);
+  // Receipt only. The dm_consents table is the source of truth (RC-2026-09-19-070);
+  // this sequenced event exists so a live session can refresh its pending-DM view.
+  requireFields(incoming.data, ["requesterId", "targetId", "status"]);
+  if (incoming.data.requesterId === incoming.data.targetId) throw new Error("Cannot consent with yourself");
+}
+
 function recordPeerDm(state, incoming) {
   requireMember(state, incoming.actorId);
   // --- PRIV-1 message redaction ---
@@ -1717,7 +1816,7 @@ function recordLandUpdate(state, incoming) {
 }
 
 export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
-const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
+const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 
 // Thin receipt: validated, never copied into the projection.
 function recordStarterSeeded(state, incoming) {

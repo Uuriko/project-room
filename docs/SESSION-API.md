@@ -4,7 +4,7 @@ HTTP endpoints for the session lifecycle (work sessions), the claims board
 (the authoritative work-claims surface), and the supervision-card APIs.
 This document is HTTP only. For the JS domain interface that server code
 uses (`SessionAdapter`: connect/spawnAgent/readPane/sendText/reportState/…)
-see `docs/SESSION-ADAPTER.md` (pending — lane B12).
+see `archive/docs/plans/SESSION-ADAPTER.md` (pending — lane B12).
 
 ## Status
 
@@ -146,8 +146,7 @@ Owner-only state transitions and notes (403 `work_not_owner` otherwise).
 ### POST /api/rooms/{roomId}/work-claims/{claimId}/review
 
 Record a review attestation (verdict: `approve` | `changes_requested` |
-`comment`) bound to the PR head SHA (lander rule: merges need the
-reviewer's APPROVE on the exact head). **(pending)** herdr changes
+`comment`) bound to the PR head SHA (advisory; merges do not need an APPROVE). **(pending)** herdr changes
 nothing here — verdicts still arrive through this route.
 
 ## Supervision cards (pending — lane B6)
@@ -206,7 +205,8 @@ session's backend is herdr. Flag off = the view does not exist.
 Claim states and review gates, work-session card shape, events/stream/
 presence payloads, webhook delivery object and `signPayload` canonical
 form, MCP tool names/schemas/annotations, signed agent-card fields, the
-full OpenAPI surface (counted in docs/OPENAPI-CONTRACT-REPORT.md — never
-hard-code a number), error code vocabulary (append-only), auth modes.
+full OpenAPI surface (counted by scripts/openapi-method-accuracy.mjs; its
+report is generated output, never committed — never hard-code a number),
+error code vocabulary (append-only), auth modes.
 Every seam call is timeout-bounded with fail-closed fallback to legacy —
 the fork is allowed to disappear at any moment and the room never notices.

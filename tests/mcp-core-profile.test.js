@@ -379,7 +379,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(denied.body.result.isError, true);
   assert.equal(denied.value.code, "agent_readonly");
   // A tool omitted by a focus is still callable under the existing policy.
-  const posted = await call(origin, "room_propose_work", { roomId, workItemId: "off-focus-work", title: "Still available outside review focus", definitionOfDone: "Demonstrate direct invocation", accountableMemberId: owner.identityId, mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false }, owner.secret);
+  const posted = await call(origin, "room_propose_work", { roomId, requestId: "off-focus-propose-1", workItemId: "off-focus-work", title: "Still available outside review focus", definitionOfDone: "Demonstrate direct invocation", accountableMemberId: owner.identityId, mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false }, owner.secret);
   assert.equal(posted.body.result.isError, undefined);
 });
 
@@ -423,7 +423,10 @@ test("hosted claim PR tool preserves API-key scope and current-owner authorizati
   const linked = await call(origin, "room_link_work_claim_pr", args, issue(["rooms:write"]));
   assert.equal(linked.body.result.isError, undefined);
   assert.equal(linked.value.pullRequests[0].url, args.pullRequest);
-  assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)), linked.value);
+  // #3661: reads derive pullRequest.settlement (never stored), so the read
+  // carries exactly one field the mutation response and stored record lack.
+  assert.deepEqual(stripTrust(await client.workClaimGet(claimed.id)),
+    { ...linked.value, pullRequest: { ...linked.value.pullRequest, settlement: "pending" } });
   store.command(owner.secret, roomId, { id: "archive-linked-room", type: "room.archived", data: { reason: "Complete" } });
   const archivedSequence = store.snapshot(owner.secret, roomId).sequence;
   const archived = await call(origin, "room_link_work_claim_pr", { ...args,

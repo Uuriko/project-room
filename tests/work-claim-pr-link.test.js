@@ -71,7 +71,10 @@ test("linking a draft after claiming preserves the lease and reconciles exact du
   }
   assert.equal(linked.history.length, claimed.history.length + 1);
   assert.match(linked.history.at(-1).note, /https:\/\/github\.com\/Uuriko\/project-room\/pull\/7/);
-  assert.deepEqual(stripTrust((await call("read", "later-pr")).value), linked);
+  // #3661: reads derive pullRequest.settlement (never stored), so the read
+  // carries exactly one field the mutation response and stored record lack.
+  assert.deepEqual(stripTrust((await call("read", "later-pr")).value),
+    { ...linked, pullRequest: { ...linked.pullRequest, settlement: "pending" } });
   assert.equal(claimEvents(store).length, beforeEvents + 1);
   assert.equal(claimEvents(store).at(-1).data.action, "state_changed");
   assert.equal(claimEvents(store).at(-1).data.reason, undefined);

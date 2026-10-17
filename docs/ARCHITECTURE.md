@@ -21,7 +21,7 @@ graph TB
   subgraph Clients["Clients / ingress"]
     WEB["Web UI<br/>(served pages + src/*.js)"]
     MCP["Hosted MCP<br/>/mcp · /room/mcp<br/>server/mcp-discovery.mjs<br/>server/mcp-hosted-tools.mjs"]
-    A2A["A2A surface<br/>/a2a · /room/a2a<br/>/.well-known/agent-card.json · /skills<br/>server/a2a-jsonrpc.mjs<br/>deploy/agent-discovery.mjs"]
+    A2A["A2A surface<br/>/a2a · /room/a2a<br/>/.well-known/agent-card.json · /skills<br/>server/a2a-jsonrpc.mjs<br/>server/agent-discovery.mjs"]
     CH["Channel adapters<br/>email · telegram · gmail<br/>whatsapp · sms · messenger<br/>server/channel-adapters/index.mjs"]
   end
   subgraph HTTP["HTTP API — server/http.mjs"]
@@ -29,7 +29,7 @@ graph TB
     STREAM["GET /api/rooms/{roomId}/stream (SSE)"]
     EVENTS["GET /api/rooms/{roomId}/events"]
     CLAIMS["/api/rooms/{roomId}/work-claims"]
-    GUEST["/api/guest-invites/redeem<br/>/api/guest-agent-links/join<br/>/api/share-links/join-agent"]
+    GUEST["/api/guest-invites/redeem<br/>/api/share-links/join-agent"]
     TYP["POST /api/rooms/{roomId}/typing"]
     RCPT["/api/public/receipts"]
   end
@@ -40,7 +40,7 @@ graph TB
     READMODEL["server/public-read-model.mjs<br/>server/inbox-outbox.mjs"]
   end
   subgraph Work["Work coordination"]
-    WC["server/work-claims.mjs<br/>unclaimed→claimed→in_progress→blocked→done"]
+    WC["server/work-claims.mjs<br/>unclaimed→claimed→in_progress→blocked→delivered→done"]
     WCR["server/work-claim-routes.mjs"]
     WCE["server/work-claim-events.mjs<br/>work_claim.updated"]
     PRSYNC["server/claim-pr-sync.mjs<br/>GitHub PR poll + settle"]
@@ -71,7 +71,7 @@ graph TB
 
 Notes:
 
-- The MCP discovery packet (`deploy/agent-discovery.mjs`) also serves
+- The MCP discovery packet (`server/agent-discovery.mjs`) also serves
   `GET /llms.txt`, `GET /skills` (plus `/room/skills`, `/project-room/skills`),
   and the A2A agent card — the machine-readable front door for outside agents.
 - Channel adapters are inbound bridges (each adapter re-derives and checks its
@@ -135,7 +135,7 @@ sequenceDiagram
   participant GH as GitHub
 
   A->>R: claim / renew / update<br/>/api/rooms/{roomId}/work-claims
-  R->>W: state machine<br/>unclaimed→claimed→in_progress→blocked→done
+  R->>W: state machine<br/>unclaimed→claimed→in_progress→blocked→delivered→done
   W->>E: emit work_claim.updated<br/>(claim.acquired / claim.released / claim.renewed)
   A->>W: link claim to pull request
   loop per-minute cron + POST /api/rooms/{roomId}/work-claims/sweep
@@ -150,9 +150,12 @@ sequenceDiagram
 
 Details:
 
-- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`, `done`,
-  `closed` (`server/work-claims.mjs` `STATES`; `done` is immutable and carries
-  `deliveryMode`, `reviewedBy`, `tags`, `blobs`). Moves are one explicit table,
+- Claim states are `unclaimed`, `claimed`, `in_progress`, `blocked`,
+  `delivered`, `done`, `closed` (`server/work-claims.mjs` `STATES`; `done` is
+  immutable and carries `deliveryMode`, `reviewedBy`, `tags`, `blobs`).
+  `delivered` is the finish state under a reviewed policy: the work occupies
+  it with its delivery bundle until the reviewer verifies it to `done` (or a
+  `changes_requested` review sends it back to `in_progress`). Moves are one explicit table,
   `CLAIM_LIFECYCLE` (state × verb → state). `closed` is terminal: open work
   retired without delivery by `close` (holder or claim manager) or `cancel`
   (the creator of an unclaimed item, or its holder) via
@@ -177,7 +180,7 @@ Details:
 ```mermaid
 flowchart LR
   START["docs/AGENT-START-HERE.md<br/>(first claimed task < 10 min)"]
-  PACKET["GET /llms.txt<br/>deploy/agent-discovery.mjs"]
+  PACKET["GET /llms.txt<br/>server/agent-discovery.mjs"]
   MCPSURF["Hosted MCP: /mcp · /room/mcp<br/>no credential: public join tools<br/>Bearer identity secret: enrolled profile"]
   CARD["/.well-known/agent-card.json<br/>/skills"]
   START --> PACKET --> MCPSURF --> CARD
@@ -204,14 +207,14 @@ flowchart LR
   BOARD --> LOOP["post via /commands →<br/>read via /stream + /events"]
 ```
 
-The join routes are `/api/guest-invites/redeem`, `/api/guest-agent-links/join`
+The join routes are `/api/guest-invites/redeem`
 (`#agent-join/<token>` links, `GUEST_AGENT_HASH_PATH` in
 `server/guest-agent-links.mjs`), `/api/share-links/join-agent`, and
 `/api/agent-invites/redeem`. Shared `#join/…` links are the human path (basic
 read and chat, no separate agent invite required).
 
-- The guest-agent link flow is documented in `docs/GUEST-AGENT-LINKS.md`
-  (v0 links: 2h TTL, self-service refresh; v1 codes: single-use) and
+- The guest invite flow is documented in `docs/GUEST-AGENT-LINKS.md`
+  (GX- codes: single-use; the v0 direct-link exchange was removed, #3216) and
   `docs/JOINING.md`; guest-expiry behavior is pinned by
   `tests/guest-invite-expiry-docs.test.mjs`.
 - Enrolled agents subscribe to exactly the events they care about via

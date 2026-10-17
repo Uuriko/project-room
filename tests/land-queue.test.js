@@ -223,7 +223,14 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   assert.equal(wake.pings[0].signal.pr, 969);
   assert.equal(wake.pings[0].signal.head, SHA);
   assert.deepEqual(wake.pings[0].signal.changed, ["green"]);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 0);
+  // #3257: the offline claimant also gets a durable land wake signal —
+  // the doorbell and ping are fire-and-forget, the queue row is not.
+  const landSignals = store.db.prepare("SELECT * FROM agent_wake_signals").all();
+  assert.equal(landSignals.length, 1);
+  assert.equal(landSignals[0].kind, "land");
+  assert.equal(landSignals[0].agent_id, identity.identityId);
+  assert.equal(landSignals[0].room_id, "commons");
+  assert.equal(landSignals[0].message_id, events[1].id);
   const room = store.room("commons");
   const rebuilt = store.rebuildProjection("commons");
   assert.equal(rebuilt.sequence, room.sequence);
@@ -266,7 +273,10 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
     error => error.status === 422 && error.code === "invalid_land_tip"
   );
   assert.equal(wake.warnings.some(line => line.includes(TOKEN)), false);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 0);
+  // #3257: one durable land signal per waking transition — green, behind,
+  // green+merged, and tip. The red transition enqueued none (claimant was
+  // online), and the no-change reportTip enqueued none either.
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE kind='land'").get().n, 4);
 });
 
 test("a missing token is 503 github_unconfigured and is not logged", async t => {
@@ -545,6 +555,36 @@ test("re-adding a pull request keeps one row and can move the claimant", async t
   assert.equal(events[1].data.claimantMemberId, memberId);
 });
 
+test("prototype-named phantom members are not room members (#3023)", async t => {
+  const { store } = fixture(t);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot()).fetchImpl });
+  // These ids pass validId but are not members; a raw members[id] index
+  // resolves them to inherited Object.prototype values (truthy, with
+  // .active undefined), so #member must resolve through ownMember only.
+  for (const phantom of ["toString", "valueOf", "hasOwnProperty"]) {
+    await assert.rejects(
+      () => store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: phantom }),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `add with phantom claimant ${phantom}`
+    );
+    await assert.rejects(
+      () => store.landQueue.add("commons", phantom, { repo: "acme/demo", prNumber: 969 }),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `add by phantom actor ${phantom}`
+    );
+    assert.throws(
+      () => store.landQueue.list("commons", phantom),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `list by phantom actor ${phantom}`
+    );
+  }
+  // No queue row was created for any phantom claimant.
+  assert.equal(store.landQueue.list("commons", "owner").items.length, 0);
+  // Positive control: a real own member still passes the membership check.
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  assert.equal(added.item.claimantMemberId, "owner");
+});
+
 async function listen(t, store) {
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -791,5 +831,61 @@ test("migrateLandQueueClaims skips at-cap claimants without breaking the list re
   // Once the member is under cap, a later pass mirrors the claim.
   store.workClaims.configure("commons", { maxMemberOpenClaims: 2 });
   assert.deepEqual(migrateLandQueueClaims(store), { copied: 1 });
+  assert.equal(store.workClaims.get("commons", itemId).owner, memberId);
+});
+
+test("reassigning the claimant moves the mirrored work claim to the new owner", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const first = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  const itemId = first.item.itemId;
+  assert.equal(store.workClaims.get("commons", itemId).owner, "owner");
+  const second = await store.landQueue.add("commons", "owner", {
+    repo: "acme/demo", prNumber: 969, claimantMemberId: memberId
+  });
+  assert.equal(second.item.claimantMemberId, memberId);
+  const mirrored = store.workClaims.get("commons", itemId);
+  assert.equal(mirrored.owner, memberId, "mirrored claim follows the row's new claimant");
+  assert.equal(mirrored.state, "claimed");
+});
+
+test("a duplicate add naming an at-cap claimant rolls the reassignment back", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const first = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  const itemId = first.item.itemId;
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 1 });
+  // The new claimant already holds their one open claim.
+  const held = claimWork(
+    createWork({ id: "cap-held-reassign", title: "held" }, { now: store.now(), agentId: memberId }),
+    memberId, { leaseHours: null, now: store.now() });
+  store.workClaims.set("commons", held);
+  await assert.rejects(
+    () => store.landQueue.add("commons", "owner", {
+      repo: "acme/demo", prNumber: 969, claimantMemberId: memberId
+    }),
+    error => error.code === "too_many_open_claims" && error.status === 409);
+  // The error must not trail a committed change: the row, the mirrored
+  // claim, and the event log all still name the original claimant.
+  assert.equal(store.landQueue.list("commons", "owner").items[0].claimantMemberId, "owner");
+  assert.equal(store.workClaims.get("commons", itemId).owner, "owner");
+  assert.deepEqual(landEvents(store).map(event => event.data.changed), [["added"]]);
+});
+
+test("a later list pass heals a mirrored claim left with a stale owner", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const first = await store.landQueue.add("commons", "owner", {
+    repo: "acme/demo", prNumber: 969, claimantMemberId: memberId
+  });
+  const itemId = first.item.itemId;
+  // Simulate the pre-fix divergence: the row names memberId while the
+  // mirrored claim still names the previous claimant.
+  const claim = store.workClaims.get("commons", itemId);
+  store.workClaims.set("commons", { ...claim, owner: "owner" });
+  assert.deepEqual(migrateLandQueueClaims(store), { copied: 0 });
   assert.equal(store.workClaims.get("commons", itemId).owner, memberId);
 });

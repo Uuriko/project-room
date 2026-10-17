@@ -2,7 +2,7 @@
 // charge-then-forward trust boundary for priced MCP tools.
 //
 // Contracts owned here (nothing else covers them):
-// - issuance: guests/t1 refused, caps validated, credits-only denomination
+// - issuance: guests/t1 refused, caps validated, cents-only denomination
 //   (grants.test.js owns generic edges, not spend money terms)
 // - expiry/revocation bite on the next authorization
 //   (spend-allowance.test.js owns the room allowance, not per-agent grants)
@@ -47,6 +47,7 @@ import {
   chargeSpendBeforeCall,
   readSpendGrantRoute,
   issueSpendGrantRoute,
+  revokeSpendGrantRoute,
 } from "../server/spend-grants.mjs";
 
 function setup(t) {
@@ -121,7 +122,7 @@ test("issueSpendGrant records caps and the summary reports remaining", async t =
   const summary = issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
     grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
   });
-  assert.equal(summary.denomination, "credits");
+  assert.equal(summary.denomination, "cents");
   assert.equal(summary.capCents, "100");
   assert.equal(summary.perTxCapCents, "10");
   assert.equal(summary.remainingCents, "100");
@@ -131,7 +132,25 @@ test("issueSpendGrant records caps and the summary reports remaining", async t =
   assert.equal(grant.terms.capCents, "100");
 });
 
-test("issuance refusals: guest, t1_readonly, bad caps, non-credits denomination", async t => {
+// #3305: pre-rename grant rows stored the denomination label "credits" for
+// what was always integer cents. ensureSpendGrantsSchema converges the
+// stored label only — caps and prices keep their exact values.
+test("ensureSpendGrantsSchema converges a stored 'credits' label to 'cents'", async t => {
+  const f = roomWithPeer(t);
+  issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
+  });
+  f.store.db.prepare(`UPDATE spend_grant_terms SET denomination = 'credits'
+    WHERE room_id = ? AND agent_id = ?`).run(f.roomId, f.peerMemberId);
+  assert.equal(resolveSpendGrant(f.store.db, f.roomId, f.peerMemberId).terms.denomination, "credits");
+  ensureSpendGrantsSchema(f.store.db);
+  const terms = resolveSpendGrant(f.store.db, f.roomId, f.peerMemberId).terms;
+  assert.equal(terms.denomination, "cents");
+  assert.equal(terms.capCents, "100", "the rename moves no amount");
+  assert.equal(terms.perTxCapCents, "10", "the rename moves no amount");
+});
+
+test("issuance refusals: guest, t1_readonly, bad caps, non-cents denomination", async t => {
   const f = roomWithPeer(t);
   const now = Date.now();
   const base = { grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: now };
@@ -153,10 +172,13 @@ test("issuance refusals: guest, t1_readonly, bad caps, non-credits denomination"
     { ...base, capCents: "1.5" },
     { ...base, capCents: "-5" },
     { ...base, denomination: "usdc" },
+    // #3305: the pre-rename label is refused too — spend is cents, and the
+    // bounty ledger's "credits" are a different unit that never converts.
+    { ...base, denomination: "credits" },
     { ...base, allowlist: ["room_post_message"] },
     { ...base, allowlist: [] },
   ]) {
-    spendError(() => issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, bad), { status: 422, code: bad.denomination === "usdc" ? "spend_grant_denomination_unsupported" : "invalid_spend_grant" });
+    spendError(() => issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, bad), { status: 422, code: bad.denomination ? "spend_grant_denomination_unsupported" : "invalid_spend_grant" });
   }
 });
 
@@ -188,6 +210,32 @@ test("issueSpendGrantRoute: a grants:issue delegate cannot self-issue; the owner
   const own = issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
     { agentId: f.ownerMemberId, capCents: "100", perTxCapCents: "10" });
   assert.equal(own.spend.capCents, "100", "owner self-issue stays allowed");
+});
+
+// #3006: member projections are plain objects, so a raw members[agentId]
+// index resolves inherited Object.prototype names ("toString", ...) as
+// truthy — prototype-named phantom members must fail the member_not_found
+// gate on both issue and revoke, and issue must mint nothing for them.
+test("issue/revokeSpendGrantRoute: prototype names are not room members (#3006)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  for (const phantom of ["toString", "valueOf", "hasOwnProperty", "constructor", "toLocaleString"]) {
+    spendError(
+      () => issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
+        { agentId: phantom, capCents: "100", perTxCapCents: "10" }),
+      { status: 404, code: "member_not_found" });
+    assert.equal(resolveSpendGrant(f.store.db, f.roomId, phantom, { nowMs: now }), null,
+      `no grant row was minted for phantom member ${phantom}`);
+    spendError(
+      () => revokeSpendGrantRoute(f.store, f.owner.secret, f.roomId, phantom),
+      { status: 404, code: "member_not_found" });
+  }
+  // A real member still passes the gate on both routes.
+  const issued = issueSpendGrantRoute(f.store, f.owner.secret, f.roomId,
+    { agentId: f.peerMemberId, capCents: "100", perTxCapCents: "10" });
+  assert.equal(issued.spend.capCents, "100");
+  const revoked = revokeSpendGrantRoute(f.store, f.owner.secret, f.roomId, f.peerMemberId);
+  assert.equal(revoked.agentId, f.peerMemberId);
 });
 
 test("re-issue upserts caps (explicit un-revoke path)", async t => {
@@ -278,6 +326,104 @@ test("void releases the reservation; settle/void are idempotent", async t => {
   assert.equal(handle2.settle(), false, "second settle is a no-op");
   assert.equal(voidSpend(f.store.db, { roomId, agentId, nonce: "v2" }), false, "settled rows cannot be voided");
   assert.equal(settleSpend(f.store.db, { roomId, agentId, nonce: "v1" }), false, "voided rows cannot be settled");
+});
+
+// #2959: settle()/void() (and standalone settleSpend/voidSpend) performed
+// the authorization transition, the room-reservation release, and (for
+// single-use grants) the revocation as separate non-atomic writes. A
+// failure between them left the authorization settled/voided with its
+// spend_room_reservations row still 'active' forever — the reaper only
+// voids rows whose authorization is still 'reserved', so the room
+// allowance leaked permanently. A trigger that aborts every release
+// UPDATE simulates that mid-sequence failure: on the pre-fix code the
+// transition is already committed when the release fails; with the fix
+// all writes share one transaction, so the whole settle/void rolls back
+// and the authorization stays retryable as 'reserved'.
+test("settle/void are atomic: a failed room-reservation release rolls back the transition (#2959)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  const db = f.store.db;
+  issueSpendGrant(db, roomId, agentId, { grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: now });
+  const reserve = nonce => authorizeSpend(db, {
+    roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce, nowMs: now,
+    roomAllowanceCents: 1000, roomCommittedCents: 0,
+  });
+  const statusOf = nonce => db.prepare(`SELECT status FROM spend_authorizations
+    WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, nonce).status;
+  const roomStatusOf = nonce => db.prepare(`SELECT status FROM spend_room_reservations
+    WHERE room_id = ? AND nonce = ?`).get(roomId, nonce).status;
+  const handleSettle = reserve("atomic-handle-settle");
+  const handleVoid = reserve("atomic-handle-void");
+  reserve("atomic-standalone-settle");
+  reserve("atomic-standalone-void");
+  db.exec(`CREATE TRIGGER fail_room_release_2959
+    BEFORE UPDATE ON spend_room_reservations
+    BEGIN SELECT RAISE(ABORT, 'simulated failure between transition and release'); END`);
+  try {
+    assert.throws(() => handleSettle.settle(), /simulated failure/);
+    assert.throws(() => handleVoid.void(), /simulated failure/);
+    assert.throws(() => settleSpend(db, { roomId, agentId, nonce: "atomic-standalone-settle" }), /simulated failure/);
+    assert.throws(() => voidSpend(db, { roomId, agentId, nonce: "atomic-standalone-void" }), /simulated failure/);
+    for (const nonce of ["atomic-handle-settle", "atomic-handle-void", "atomic-standalone-settle", "atomic-standalone-void"]) {
+      assert.equal(statusOf(nonce), "reserved", `${nonce}: a failed settle/void must not commit the transition`);
+      assert.equal(roomStatusOf(nonce), "active", `${nonce}: the room reservation stays with the still-reserved authorization`);
+    }
+  } finally {
+    db.exec("DROP TRIGGER IF EXISTS fail_room_release_2959");
+  }
+  // Once the failure clears, every authorization is still live and its
+  // settle/void completes both writes together.
+  assert.equal(handleSettle.settle(), true);
+  assert.equal(handleVoid.void(), true);
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "atomic-standalone-settle" }), true);
+  assert.equal(voidSpend(db, { roomId, agentId, nonce: "atomic-standalone-void" }), true);
+  assert.equal(statusOf("atomic-handle-settle"), "settled");
+  assert.equal(statusOf("atomic-handle-void"), "voided");
+  assert.equal(statusOf("atomic-standalone-settle"), "settled");
+  assert.equal(statusOf("atomic-standalone-void"), "voided");
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations
+    WHERE room_id = ? AND status = 'active'`).get(roomId).n, 0, "no room reservation leaks after the retried settle/void");
+  assert.equal(spendGrantSummary(db, roomId, agentId, { nowMs: now }).remainingCents, "90",
+    "exactly the two settled 5c charges consume the cap");
+});
+
+// #2959, single-use arm: settle() also revokes the grant as a third
+// separate write. A failure at the revocation left a settled charge
+// whose single-use grant stayed live and could be spent again. The
+// revocation must share the settle transaction.
+test("single-use settle is atomic: a failed revocation rolls back settle and release (#2959)", async t => {
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  const db = f.store.db;
+  issueSpendGrant(db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", singleUse: true, nowMs: now,
+  });
+  const handle = authorizeSpend(db, {
+    roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce: "atomic-single-use", nowMs: now,
+    roomAllowanceCents: 1000, roomCommittedCents: 0,
+  });
+  db.exec(`CREATE TRIGGER fail_grant_revoke_2959
+    BEFORE UPDATE ON agent_capability_grants
+    BEGIN SELECT RAISE(ABORT, 'simulated failure at single-use revocation'); END`);
+  try {
+    assert.throws(() => handle.settle(), /simulated failure/);
+    assert.equal(db.prepare(`SELECT status FROM spend_authorizations
+      WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, "atomic-single-use").status,
+    "reserved", "a failed revocation must not leave the authorization settled");
+    assert.equal(db.prepare(`SELECT status FROM spend_room_reservations
+      WHERE room_id = ? AND nonce = ?`).get(roomId, "atomic-single-use").status,
+    "active", "a failed revocation must not leave the room reservation released");
+    assert.ok(resolveSpendGrant(db, roomId, agentId, { nowMs: now }), "the single-use grant is still live after the rolled-back settle");
+  } finally {
+    db.exec("DROP TRIGGER IF EXISTS fail_grant_revoke_2959");
+  }
+  assert.equal(handle.settle(), true, "the settle retries cleanly once the failure clears");
+  assert.equal(resolveSpendGrant(db, roomId, agentId, { nowMs: now }), null,
+    "the retried settle consumes the single-use grant");
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM spend_room_reservations
+    WHERE room_id = ? AND status = 'active'`).get(roomId).n, 0, "the retried settle releases the room reservation");
 });
 
 // A retry of the expired nonce is refused, but the recovery must stay
@@ -378,6 +524,95 @@ test("reserve lease: crashed reservations are reaped and the cap returns", async
   assert.equal(legacy.status, "voided");
 });
 
+// #3268: the settle paths ignored the reserve lease. They transitioned
+// purely on status='reserved', so a settle landing past expires_at
+// succeeded when no other priced call had run the reaper in between, and
+// failed (row voided) when one had — the money outcome was decided by
+// unrelated room activity. The settle transition itself must enforce the
+// lease (same COALESCE(expires_at, created_at + lease) deadline and the
+// same <= boundary as the reaper), on both the handle and the standalone
+// form, so a post-lease settle deterministically records no charge.
+test("settle enforces the reserve lease itself, with or without an intervening reaper (#3268)", async t => {
+  const { RESERVE_LEASE_MS } = await import("../server/spend-grants.mjs");
+  const f = roomWithPeer(t);
+  const now = Date.now();
+  const roomId = f.roomId, agentId = f.peerMemberId;
+  const db = f.store.db;
+  issueSpendGrant(db, roomId, agentId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: now,
+  });
+  const authz = (nonce, { room = false, at = now } = {}) => authorizeSpend(db, {
+    roomId, agentId, toolName: "room_put_file", priceCents: 5, nonce, nowMs: at,
+    ...(room ? { roomAllowanceCents: 1000, roomCommittedCents: 0 } : {}),
+  });
+  const statusOf = nonce => db.prepare(`SELECT status FROM spend_authorizations
+    WHERE room_id = ? AND agent_id = ? AND nonce = ?`).get(roomId, agentId, nonce).status;
+  const roomStatusOf = nonce => db.prepare(`SELECT status FROM spend_room_reservations
+    WHERE room_id = ? AND nonce = ?`).get(roomId, nonce).status;
+  const pastLease = now + RESERVE_LEASE_MS + 60_000;
+
+  // Within the lease the handle settle still succeeds.
+  assert.equal(authz("lease-live").settle(now + RESERVE_LEASE_MS - 1), true,
+    "a settle inside the lease settles");
+  assert.equal(statusOf("lease-live"), "settled");
+
+  // Exactly at expires_at the reservation is expired (the reaper uses
+  // <=), so a standalone settle at the boundary must not charge either.
+  authz("lease-boundary");
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-boundary", nowMs: now + RESERVE_LEASE_MS }), false,
+    "a settle exactly at lease expiry records no charge");
+  assert.equal(statusOf("lease-boundary"), "reserved", "the refused settle did not settle the row");
+
+  // Case A (issue repro): past the lease, NO intervening authorize — the
+  // handle settle must fail even though the reaper never ran.
+  const expiredHandle = authz("lease-expired-handle", { room: true });
+  assert.equal(expiredHandle.settle(pastLease), false,
+    "a post-lease handle settle succeeds only if the lease is ignored");
+  assert.equal(statusOf("lease-expired-handle"), "reserved",
+    "the post-lease settle left the row unsettled, awaiting the reaper/void");
+  assert.equal(roomStatusOf("lease-expired-handle"), "active",
+    "a failed settle does not release the room reservation out from under a still-reserved row");
+  // Void is cleanup, not a charge: it stays available past the lease.
+  assert.equal(voidSpend(db, { roomId, agentId, nonce: "lease-expired-handle" }), true,
+    "voiding a past-lease reservation still releases it");
+  assert.equal(roomStatusOf("lease-expired-handle"), "released");
+
+  // Case A, standalone form: same reservation shape, settleSpend past the
+  // lease, still no reaper — same deterministic refusal.
+  authz("lease-expired-standalone");
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-expired-standalone", nowMs: pastLease }), false,
+    "a post-lease standalone settle records no charge");
+  assert.equal(statusOf("lease-expired-standalone"), "reserved");
+
+  // Case B (issue repro): an intervening authorize past the lease reaps
+  // the row first; settling afterwards returns the SAME false as Case A —
+  // the outcome no longer depends on unrelated room activity.
+  authz("lease-expired-reaped");
+  // One intervening priced call past the lease: authorizeSpend runs the
+  // reaper inside its own transaction, voiding every past-lease reserve.
+  authz("lease-intervening", { at: pastLease });
+  assert.equal(statusOf("lease-expired-reaped"), "voided", "the reaper voided the past-lease row");
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-expired-reaped", nowMs: pastLease }), false,
+    "settling a reaped reservation fails exactly like the un-reaped Case A");
+
+  // Legacy rows written before #1525 carry expires_at NULL; their deadline
+  // is created_at + lease (the reaper's COALESCE fallback) and settle must
+  // honour that fallback too, not treat NULL as never-expiring.
+  db.prepare(`INSERT INTO spend_authorizations
+      (room_id, agent_id, nonce, tool_name, price_cents, status, created_at, expires_at)
+      VALUES (?, ?, 'lease-legacy', 'room_put_file', '5', 'reserved', ?, NULL)`)
+    .run(roomId, agentId, now - RESERVE_LEASE_MS - 1);
+  assert.equal(settleSpend(db, { roomId, agentId, nonce: "lease-legacy", nowMs: now }), false,
+    "a legacy NULL-expires_at reservation past its created_at deadline cannot settle");
+  assert.equal(statusOf("lease-legacy"), "reserved");
+
+  // Exactly one charge was ever recorded: the in-lease settle.
+  const settled = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(CAST(price_cents AS INTEGER)), 0) AS total
+    FROM spend_authorizations WHERE room_id = ? AND agent_id = ? AND status = 'settled'`).get(roomId, agentId);
+  assert.equal(settled.n, 1, "no post-lease settle recorded a charge");
+  assert.equal(settled.total, 5);
+});
+
 // --- Refusal honesty ---
 
 test("refusal names the tool and price in text and structured detail", async t => {
@@ -386,11 +621,11 @@ test("refusal names the tool and price in text and structured detail", async t =
     () => chargeSpendBeforeCall(f.store, f.peer.secret, "room_put_file", { roomId: f.roomId }),
     { status: 402, code: "payment_required" });
   assert.match(error.message, /room_put_file/);
-  assert.match(error.message, /5 credits/);
+  assert.match(error.message, /5 cents/);
   assert.match(error.message, /nothing was charged/);
   assert.equal(error.detail.tool, "room_put_file");
   assert.equal(error.detail.priceCents, 5);
-  assert.equal(error.detail.denomination, "credits");
+  assert.equal(error.detail.denomination, "cents");
   assert.equal(error.detail.reason, "no_spend_grant");
   // No ledger row was written by the refusal.
   const count = f.store.db.prepare(`SELECT COUNT(*) AS n FROM spend_authorizations`).get().n;
@@ -420,8 +655,10 @@ test("chargeSpendBeforeCall routes the check+reserve through store.transaction (
   assert.ok(error instanceof SpendGrantError, `expected SpendGrantError, got ${error}`);
   assert.equal(error.status, 402);
   assert.equal(error.code, "payment_required");
-  assert.equal(platformTxCalls, 1,
-    "the spend check+reserve must run inside the store platform transaction, never raw SQL");
+  assert.equal(platformTxCalls, 2,
+    "the spend paths must run inside the store platform transaction, never raw SQL: "
+    + "one transaction for the #3377 crash-recovery reap (committed independently, "
+    + "ahead of the charge) and one for the check+reserve itself");
 });
 
 // --- End-to-end through tools/call ---
@@ -438,10 +675,10 @@ test("tools/call: priced tool without a grant is refused and never runs", async 
   assert.equal(value.status, 402);
   assert.equal(value.code, "payment_required");
   assert.equal(value.detail.priceCents, 5);
-  assert.match(value.detail ? JSON.stringify(value) : "", /5 credits/);
+  assert.match(value.detail ? JSON.stringify(value) : "", /5 cents/);
   // The refusal text names the price (x402: both structured and text).
   const text = response.result.content[0].text;
-  assert.match(text, /5 credits/);
+  assert.match(text, /5 cents/);
   assert.match(text, /room_put_file/);
   // The tool never ran: nothing staged.
   const listed = await callTool(f.call, f.peer.secret, "room_list_files", { roomId: f.roomId });
@@ -543,10 +780,10 @@ test("every priced tool advertises its price in its description", async t => {
   for (const [name, cents] of Object.entries(PRICED_MCP_TOOLS)) {
     const def = hostedMcpToolDefs.find(entry => entry.name === name);
     assert.ok(def, `${name} must exist in the hosted tool catalog`);
-    assert.match(def.description, /^\[paid: room-credits\] /,
+    assert.match(def.description, /^\[paid: room-cents\] /,
       `${name}: description must open with the machine-readable paid prefix`);
-    assert.match(def.description, new RegExp(`\\b${cents} credits?\\b`),
-      `${name}: description must name its ${cents}-credit price`);
+    assert.match(def.description, new RegExp(`\\b${cents} cents?\\b`),
+      `${name}: description must name its ${cents}-cent price`);
   }
   assert.equal(priceForTool("room_list_files"), null, "unpriced tools stay free");
   assert.equal(priceForTool("no_such_tool"), null);

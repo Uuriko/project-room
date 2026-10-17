@@ -22,10 +22,6 @@ const WORK_UPDATE_TYPES = new Set([
   T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED, T.WORK_COMPLETED, T.WORK_SUPERSEDED,
   T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HANDOFF_RECORDED, T.WORK_HALT_CLEARED
 ]);
-// Tag acknowledgment (2026-09-23): the one-tap reaction the client offers on
-// pending mention items. "like" is the 👍 reaction key in src/conversation.js
-// (REACTIONS); a bare react on the mentioning message counts as a response.
-export const SUGGESTED_ACK_REACTION = "like";
 // RC-2026-09-19-063: session enforcement events. A round-limit pause or a
 // budget stop is a work control firing — the room owner is told even when
 // they are not the accountable/verifier on the card, because the pause
@@ -129,6 +125,18 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       }
       continue;
     }
+    // RC-2026-09-19-063: the room owner hears about every enforcement pause
+    // or stop — a round-limit pause is specifically waiting on them. Like
+    // the access-request carve-out above, this is NOT gated on work_updates:
+    // it must run before the work_updates="none" gate below, or an owner
+    // who muted ordinary work updates would never see the pause waiting
+    // on their resume (issue #2943).
+    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
+      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
+      && member.id === state.room?.ownerId) {
+      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
+      continue;
+    }
     if (preferences.work_updates === "none") continue;
     // Respect an explicit work-update mute. A friction completion is a
     // direct response to its reporter, so mentions_only may include it;
@@ -145,34 +153,19 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       if (ROLE_FIELDS.some(field => event.data[field] === member.id)) put("assignment", "workItemId", event.data.workItemId, row);
       continue;
     }
-    // RC-2026-09-19-063: the room owner hears about every enforcement pause
-    // or stop — a round-limit pause is specifically waiting on them.
-    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
-      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
-      && member.id === state.room?.ownerId) {
-      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
-      continue;
-    }
     if (preferences.work_updates !== "all") continue; // mentions_only keeps direct assignments only.
     if (WORK_UPDATE_TYPES.has(event.type) && event.data?.workItemId && involvedIn(state.workItems?.[event.data.workItemId], member.id)) {
       put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
     }
   }
   // Tag acknowledgment (2026-09-23): every mention item carries whether the
-  // tagged member has responded, derived at read time — a bare emoji react
-  // counts as a response. `ackState` flips to "acknowledged" when the member
-  // (a) has an active reaction on the mentioning message (their id appears
-  // in any `message.reactions[*]` member list), or (b) authored a message in
-  // the same thread (same thread root) with a later sequence than the
-  // mention. `suggestedAck` names the one-tap reaction the client offers
-  // ("like" = 👍). Existing scoping is untouched: this post-pass only reads
+  // tagged member has responded, derived at read time. `ackState` flips to
+  // "acknowledged" when the member authored a message in the same thread (same thread root) with a later sequence than the
+  // mention. Existing scoping is untouched: this post-pass only reads
   // items the loop above already admitted, so deleted messages, muted
   // threads, muted actors, DM filtering, and self-notify rules all hold.
   for (const item of items.values()) {
     if (item.kind !== "mention") continue;
-    const message = messages.get(item.messageId);
-    const reacted = Object.values(message?.reactions ?? {})
-      .some(ids => (ids ?? []).includes(member.id));
     const mentionRoot = threadRootOf(item.messageId);
     const replied = events.some(row => {
       if (row.sequence <= item.sequence) return false;
@@ -182,8 +175,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       if (messages.get(replyId)?.deletedAt) return false;
       return threadRootOf(replyId) === mentionRoot;
     });
-    item.ackState = (reacted || replied) ? "acknowledged" : "pending";
-    item.suggestedAck = SUGGESTED_ACK_REACTION;
+    item.ackState = replied ? "acknowledged" : "pending";
   }
   return [...items.values()].sort((a, b) => b.sequence - a.sequence);
 }

@@ -121,7 +121,10 @@ export function validateWebhookUrl(url) {
   let parsed;
   try { parsed = new URL(url); } catch { fail("invalid_webhook", "url must be a valid https URL"); }
   check(parsed.protocol === "https:", "url must be a valid https URL");
+  // Host first, so example.com@127.0.0.1 stays an SSRF refusal. A public
+  // host with userinfo is a different miss: node:https sends it as Basic.
   assertPublicHost(parsed.hostname);
+  check(!parsed.username && !parsed.password, "url must be an https URL without credentials");
   // Default https is 443. An explicit port is only 443 or 8443.
   if (parsed.port !== "" && parsed.port !== "443" && parsed.port !== "8443") {
     notPublic("webhook url must use port 443 or 8443");
@@ -291,11 +294,9 @@ export async function assertWebhookHostDnsPublic(url, opts = {}) {
 // payload shape is returned on the agent's next heartbeat and is the shape
 // a future HTTP dispatch would POST to the host's registered wake URL.
 export const WAKE_PING_EVENT = "agent.wake";
-// Tag acknowledgment (2026-09-23): one-tap ack copy carried on every
-// agent.wake payload (and on the journaled pending-wake signal), so a woken
-// agent knows a bare 👍 react on the mentioning message counts as a
-// response. Additive — the signal shape is untouched.
-export const WAKE_ACK_HINT = "react \u{1F44D} to acknowledge";
+// Ack copy carried on every agent.wake payload (and on the journaled
+// pending-wake signal): wakes are acknowledged explicitly by signal id.
+export const WAKE_ACK_HINT = "ack with heartbeat_ack (POST /api/agent-heartbeats/ack { signalIds })";
 export function buildWakePing({ agentId, signal }) {
   check(typeof agentId === "string" && agentId.length > 0, "agentId must be a non-empty string");
   check(signal !== null && typeof signal === "object", "signal must be an object");

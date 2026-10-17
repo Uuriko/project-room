@@ -36,7 +36,7 @@ function twoAgents() {
 test("an overlapping claim succeeds and records who else holds the paths", () => {
   let state = claim(twoAgents(), "w-login", "codex", ["src/app.js", "server/**"]);
   assert.equal(state.workItems["w-login"].claim.overlaps, undefined, "first claim has no overlaps");
-  state = claim(state, "w-start", "claude", ["./src/app.js", "server/store.mjs", "deploy/room-entry.mjs"], "acme/demo");
+  state = claim(state, "w-start", "claude", ["./src/app.js", "server/store.mjs", "server/room-entry.mjs"], "acme/demo");
   assert.equal(state.workItems["w-start"].claim.status, "active", "warn, never block");
   assert.deepEqual(state.workItems["w-start"].claim.overlaps, [{ workItemId: "w-login", holderId: "codex", paths: ["src/app.js", "server/**"] }]);
 });

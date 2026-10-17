@@ -173,7 +173,7 @@ test("inactive or revoked memberships cannot file upgrades", async t => {
   }
 });
 
-test("HTTP upgrades and status require current identity-holder proof; admission stays public", async t => {
+test("HTTP upgrades, status and fresh admission require current identity-holder proof", async t => {
   const f = setup(t);
   const other = f.store.identities.create("Other Requester");
   const server = createRoomServer({ store: f.store });
@@ -204,7 +204,13 @@ test("HTTP upgrades and status require current identity-holder proof; admission 
   const status = await fetch(statusPath, { headers: { Authorization: `Bearer ${current.secret}` } });
   assert.equal(status.status, 200);
   assert.equal((await status.json()).status, "pending");
-  assert.equal((await post({ ...data, identityId: other.identityId, displayName: "Other Requester", requestId: "ar_public_join" })).status, 201);
+  // Issue #2912: fresh admission is not public either — filing under an
+  // identityId requires that identity's secret, and another identity's
+  // secret does not file in its name.
+  const joinData = { ...data, identityId: other.identityId, displayName: "Other Requester", requestId: "ar_public_join" };
+  assert.equal((await post(joinData)).status, 401);
+  assert.equal((await post(joinData, f.identity.secret)).status, 401);
+  assert.equal((await post(joinData, other.secret)).status, 201);
   assert.deepEqual(f.member().permissions, ["steer"]);
 });
 
@@ -248,6 +254,24 @@ test("upgrade pending state obeys cap, cancellation and expiry", t => {
   assert.equal(requests.list(f.ownerToken, "commons").length, 0);
   assert.equal(requests.list(f.ownerToken, "commons", { status: "expired" }).length, 4);
   assert.deepEqual(f.member().permissions, ["steer"]);
+});
+
+// #3745: the cap test above frees slots by polling and listing — the two
+// read paths that materialize expiry. With no reader at all, lapsed
+// upgrade rows used to consume the cap forever; the create path now
+// expires the caller's own lapsed rows before counting.
+test("lapsed upgrade pendings are expired on create and do not consume the cap (#3745)", t => {
+  const f = setup(t);
+  const requests = new AccessRequests(f.store, { rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 }) });
+  const input = { identityId: f.identity.identityId, displayName: "Existing Agent", requestedPermissions: ["accept_work"] };
+  for (let i = 0; i < 5; i++) requests.request("commons", { ...input, requestId: `ar_lapse_${i}` }, f.identity.secret);
+  // Nobody lists, decides, or polls: past the TTL the rows are still
+  // stored 'pending_upgrade'.
+  f.advance(REQUEST_TTL_MS + 1);
+  const sixth = requests.request("commons", { ...input, requestId: "ar_lapse_new" }, f.identity.secret);
+  assert.equal(sixth.status, "pending");
+  assert.equal(requests.list(f.ownerToken, "commons", { status: "expired" }).length, 5);
+  assert.equal(requests.list(f.ownerToken, "commons").length, 1);
 });
 
 test("the pre-upgrade writer rejects pending upgrades even with explicit grants", async t => {

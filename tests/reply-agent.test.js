@@ -372,6 +372,39 @@ test("stale heartbeats show unknown without transferring ownership; status does 
   await assert.rejects(send("delivered"), /recorded answer/);
   await send("needs_attention"); await assert.rejects(send("working"), /silently resume/);
 });
+test("cancelled and declined requests cannot be flipped to result_ready or needs_attention", async t => {
+  const f = await fixture(t);
+  const claim = async label => {
+    const requestMessageId = f.open(label).command.data.messageId;
+    const context = await f.client.replyContext(requestMessageId);
+    const basis = { expectedRequestRevision: context.request.revision, contextEventId: context.request.contextEventId };
+    const attemptId = label + "-host";
+    await f.client.requestRuns({ requestMessageId, attemptId, action: "claim", ...basis });
+    return { requestMessageId, attemptId };
+  };
+  const report = run => action => f.client.requestRuns({ requestMessageId: run.requestMessageId, attemptId: run.attemptId, action });
+  // Cancelled after claim: reports are accepted while the request is open, but
+  // the requester cancelling it must stop a stale host flipping the run state.
+  const cancelled = await claim("run-cancelled");
+  await report(cancelled)("result_ready");
+  assert.equal((await f.client.requestRuns()).runs[cancelled.requestMessageId].state, "result_ready");
+  const beforeCancel = await f.client.replyContext(cancelled.requestMessageId);
+  f.store.command(f.keys.owner, "commons", { id: "cancel-run", type: "reply_request.cancelled",
+    data: { requestMessageId: cancelled.requestMessageId, expectedRequestRevision: beforeCancel.request.revision, reason: "No longer needed" } });
+  assert.equal(f.store.room("commons").state.replyRequests[cancelled.requestMessageId].status, "cancelled");
+  await assert.rejects(report(cancelled)("needs_attention"), { code: "request_run_changed" });
+  await assert.rejects(report(cancelled)("result_ready"), { code: "request_run_changed" });
+  assert.equal((await f.client.requestRuns()).runs[cancelled.requestMessageId].state, "result_ready");
+  // Declined after claim: the recipient declines, so a stale host result must not surface.
+  const declined = await claim("run-declined");
+  const declineContext = await f.client.replyContext(declined.requestMessageId);
+  await f.client.replyAction("room_respond_to_request",
+    f.respond(declineContext, { requestId: "decline-run", responseOutcome: "declined" }));
+  assert.equal(f.store.room("commons").state.replyRequests[declined.requestMessageId].status, "declined");
+  await assert.rejects(report(declined)("result_ready"), { code: "request_run_changed" });
+  await assert.rejects(report(declined)("needs_attention"), { code: "request_run_changed" });
+  assert.equal((await f.client.requestRuns()).runs[declined.requestMessageId].state, "working");
+});
 test("paused agents cannot start and a definite preflight refusal can be retried after resume", async t => {
   const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("paused-host").command.data.messageId;
   f.store.wakeQueue.pause(f.keys.producer, "commons", { requestId: "pause-run", reason: null });
@@ -430,6 +463,48 @@ test("heartbeat detects new clarification and signals the running host to stop",
   assert.equal((await f.client.replyContext(requestMessageId)).request.status, "open");
 });
 
+test("transient heartbeat failures do not abort the running host", { timeout: 10000 }, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("heartbeat-transient").command.data.messageId;
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  // The first three "working" reports fail transiently — a network drop, a
+  // 5xx, then throttling — while every other call (claim, later heartbeats,
+  // delivery) reaches the real service.
+  let workingReports = 0;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/request-runs")
+      && JSON.parse(options.body).action === "working" && ++workingReports <= 3) {
+      if (workingReports === 1) throw new TypeError("network drop");
+      if (workingReports === 2) return new Response(JSON.stringify({ error: { code: "unavailable", message: "Try later" } }), { status: 503 });
+      return new Response(JSON.stringify({ error: { code: "rate_limited", message: "Try later" } }), { status: 429, headers: { "Retry-After": "1" } });
+    }
+    return fetch(url, options);
+  } };
+  let entered, release, hostSignal;
+  const started = new Promise(resolve => { entered = resolve; });
+  const finish = new Promise(resolve => { release = resolve; });
+  let calls = 0;
+  const execute = ({ signal }) => { calls++; hostSignal = signal; entered(); return finish.then(() => ({ body: "Finished despite heartbeat failures" })); };
+  const pending = runRequestOnce({ ...a, connection, requestMessageId, execute });
+  let settled = false; pending.then(() => { settled = true; }, () => { settled = true; });
+  await started;
+  const flush = async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 5)); };
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(workingReports, 1);
+  assert.equal(hostSignal.aborted, false, "a dropped heartbeat report must not abort the host");
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(workingReports, 2);
+  assert.equal(hostSignal.aborted, false, "a 5xx heartbeat report must not abort the host");
+  t.mock.timers.tick(30000); await flush();
+  assert.equal(workingReports, 3);
+  assert.equal(hostSignal.aborted, false, "a throttled heartbeat report must not abort the host");
+  assert.equal(settled, false);
+  release();
+  const result = await pending;
+  assert.equal(result.hostExecuted, true);
+  assert.equal(calls, 1);
+  assert.equal((await f.client.requestRuns()).runs[requestMessageId].state, "delivered");
+  assert.equal((await f.client.replyContext(requestMessageId)).request.status, "answered");
+});
 
 test("rate-limited reservation is a definite refusal, not an uncertain execution", async t => {
   const f = await fixture(t), a = runner(t, f), requestMessageId = f.open("throttled-host").command.data.messageId;
@@ -831,4 +906,15 @@ test("automatic pickup keeps separate failed-request notifications visible", asy
     execute: async () => { throw new Error("Host needs operator attention"); },
     emit: value => { observed.push(value); if (observed.length === 2) controller.abort(); } });
   assert.deepEqual(observed, ids.map(requestMessageId => ({ status: "needs_attention", requestMessageId })));
+});
+
+test("a reply refused because its channel is archived names channel_archived instead of not_confirmed", () => {
+  // #3520: posting into an archived channel is the documented 409 channel_archived.
+  const refused = replyRefusal({ status: 409, code: "channel_archived", message: "Channel is archived" }, { name: "room_reply", args: { requestId: "r1" } });
+  assert.equal(refused.type, "reply_refused");
+  assert.equal(refused.code, "channel_archived");
+  assert.equal(refused.reason, "channel_archived");
+  assert.equal(refused.outcome, "this_attempt_refused");
+  assert.doesNotMatch(refused.hint, /unknown error/i);
+  assert.match(refused.hint, /archived/i);
 });

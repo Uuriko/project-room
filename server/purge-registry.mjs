@@ -157,6 +157,16 @@ const ROWS = [
     }
   },
   {
+    "table": "activity_fanout_failures",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "agent_api_keys",
     "key": "identity_id",
     "action": "delete",
@@ -270,6 +280,16 @@ const ROWS = [
   },
   {
     "table": "agent_identity_verification",
+    "key": "identity_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "identity_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_identity_rotation_receipts",
     "key": "identity_id",
     "action": "delete",
     "match": {
@@ -404,6 +424,31 @@ const ROWS = [
     "match": {
       "room": [
         "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_counters",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_failures",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "subject_id"
       ]
     }
   },
@@ -1346,6 +1391,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_settlements",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_tasks",
     "key": "room_id",
     "action": "delete",
@@ -1733,7 +1788,15 @@ const ROWS = [
         "room_id"
       ]
     }
-  }
+  },
+  // Decision #10: per-room marker for the workItems -> board-claims
+  // backfill (server/work-item-board.mjs). Room-owned migration state:
+  // deleted with the room (a purged room must not leave a marker behind;
+  // the table is lazy-additive, hence optional).
+  { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
+  // monitor state, deleted with the room; lazy-additive, hence optional.
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({

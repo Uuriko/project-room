@@ -162,7 +162,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
           properties: { inviteId: { type: "string", pattern: "^[a-f0-9]{8}$" } },
         } } } },
       } }),
-  route("/api/access-requests", ["POST"], "open", "Request access to a room (owner decides).", "requestAccess",
+  route("/api/access-requests", ["POST"], "identity-secret", "Request access to a room with your identity secret as Bearer (owner decides).", "requestAccess",
     { requestBodies: { POST: ACCESS_REQUEST_BODY } }),
   route("/api/access-requests/{requestId}", ["GET"], "identity-scoped", "Poll your own access request status.", "getAccessRequest"),
   route("/api/share-links/join-agent", ["POST"], "identity-secret", "Guest-link redemption: join with a guest pass.", "joinAgentViaShareLink",
@@ -204,8 +204,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Webhooks family.
   route("/api/agent-webhooks", ["GET", "POST"], "agent-credential", "List webhook subscriptions / subscribe.", "agentWebhooks",
     { operationIds: { GET: "listAgentWebhooks", POST: "subscribeAgentWebhook" } }),
-  route("/api/agent-webhooks/{subscriptionId}", ["GET", "DELETE"], "agent-credential", "Read or delete one webhook subscription.", "agentWebhookById",
-    { operationIds: { GET: "getAgentWebhook", DELETE: "deleteAgentWebhook" } }),
+  route("/api/agent-webhooks/{subscriptionId}", ["DELETE"], "agent-credential", "Delete one webhook subscription.", "agentWebhookById",
+    { operationIds: { DELETE: "deleteAgentWebhook" } }),
   route("/api/agent-webhooks/{subscriptionId}/deliveries", ["GET"], "agent-credential", "Delivery journal for one subscription.", "agentWebhookDeliveries"),
   route("/api/agent-webhooks/deliveries/{deliveryId}/redrive", ["POST"], "agent-credential", "Redrive one dead-letter delivery.", "redriveWebhookDelivery"),
   // Wake control.
@@ -222,6 +222,11 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/oauth/sessions", ["GET"], "account-session", "List the signed-in account's active OAuth sessions (token families): client, issued-at, scopes, issuance IP/User-Agent.", "oauthSessionsList"),
   route("/api/oauth/sessions/revoke-all", ["POST"], "account-session", "Kill every OAuth session for the signed-in account: all refresh families and access tokens die immediately, across all clients.", "oauthSessionsRevokeAll"),
   route("/api/oauth/sessions/{id}", ["DELETE"], "account-session", "Kill one OAuth session (token family) owned by the signed-in account. Unknown ids and other users' families both answer 404.", "oauthSessionRevoke"),
+  // Account-session inventory + targeted revocation (CX4). Native desktop
+  // sessions live here, not in the OAuth family: the desktop exchange
+  // retires its OAuth grant and keeps only the account-session slot.
+  route("/api/account/sessions", ["GET"], "account-session", "List the signed-in account's live account sessions (browser and native/desktop slots): public id, login method, created-at, authenticated-until, expiry, and whether each is the caller's current session.", "accountSessionsList"),
+  route("/api/account/sessions/{id}", ["DELETE"], "account-session", "Revoke one account session (browser or native slot) owned by the signed-in account. Only that session dies; the account's other sessions and every OAuth session are untouched. Unknown ids and other accounts' sessions both answer 404.", "accountSessionRevoke"),
   // Agent claim-block pre-validation (QA2 2026-10-04: served spec omitted it).
   route("/api/claims/validate", ["POST"], "open", "Validate a ```room-claim block before posting it. Unauthenticated by design; a pure function of the request body.", "validateClaimText",
     { requestBodies: { POST: CLAIM_VALIDATE_BODY } }),
@@ -320,8 +325,9 @@ const publicWorkSchemas = {
       schema: { const: "public-work-task/1" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
       namespaceId: { type: "string" }, repositoryUrl: { type: "string", format: "uri" }, repositoryRef: { type: "string" },
       title: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, files: { type: "array", items: { type: "string" } },
+      reward: { type: "object" }, settlement: { type: "object" },
       claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
-        state: { enum: ["unclaimed", "claimed", "submitted"] }, generation: { type: "integer", minimum: 0 },
+        state: { enum: ["unclaimed", "claimed", "submitted", "verified"] }, generation: { type: "integer", minimum: 0 },
         identityId: { type: ["string", "null"] }, leaseExpiresAt: { type: ["string", "null"] }, submittedReceiptId: { type: ["string", "null"] },
       } },
     },
@@ -330,9 +336,9 @@ const publicWorkSchemas = {
     type: "object", required: ["schema", "receiptId", "taskId", "termsVersion", "namespaceId", "generation", "identityId", "state", "artifact", "checksReported", "verification", "createdAt"],
     properties: {
       schema: { const: "public-work-receipt/1" }, receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
-      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" }, state: { const: "submitted" },
+      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" }, state: { enum: ["submitted", "verified"] },
       artifact: { type: "object", required: ["sha256", "bytes"], properties: { sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, bytes: { type: "integer", minimum: 0, maximum: 65536 } } },
-      checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { const: "hash_only" }, createdAt: { type: "string", format: "date-time" },
+      checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { enum: ["hash_only", "system_checked"] }, createdAt: { type: "string", format: "date-time" },
     },
   },
   PublicWorkOutcome: { type: "object", required: ["action", "task"], properties: {

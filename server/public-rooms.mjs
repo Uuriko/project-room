@@ -6,8 +6,8 @@
 // exception: it reads nothing at all — curated static content only.
 import { escapeHtml, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
-import { PUBLIC_PAGE_LASTMOD } from "../deploy/public-search.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
@@ -65,6 +65,30 @@ function head({ title, description, path }) {
 
 const shell = heading => `<body><header><p><a href="/">Project Room</a>${heading ? ` · ${heading}` : ""}</p></header>`;
 
+const ROOM_RECEIPT_PAGE = 5;
+const ROOM_RECEIPT_SCAN = 200;
+
+// The room page shows five receipts. An owner-hidden row does not fill a
+// slot: cutting the query at five and then dropping hidden rows left the
+// page empty while an older public receipt remained.
+function visibleRoomReceipts(store, slug, receiptsEnabled) {
+  const receipts = [];
+  let after = null;
+  let scanned = 0;
+  while (receipts.length < ROOM_RECEIPT_PAGE && scanned < ROOM_RECEIPT_SCAN) {
+    const batch = roomPageReceipts(store, slug, receiptsEnabled, { limit: ROOM_RECEIPT_PAGE, after });
+    if (!batch.length) break;
+    scanned += batch.length;
+    after = { at: batch.at(-1).at, id: batch.at(-1).id };
+    for (const item of excludeHiddenReceipts(store, batch)) {
+      if (receipts.length === ROOM_RECEIPT_PAGE) break;
+      receipts.push({ id: item.id, title: item.title, href: `/receipts/${item.id}` });
+    }
+    if (batch.length < ROOM_RECEIPT_PAGE) break;
+  }
+  return receipts;
+}
+
 function requestHref(slug, ref) {
   return withRef(`/?request=${encodeURIComponent(slug)}`, ref);
 }
@@ -76,11 +100,7 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
   const join = room.joinMode === "link" && room.joinToken
     ? { mode: "link", href: withRef(`/#join/${room.joinToken}`, clean) }
     : { mode: "request", href: requestHref(slug, clean) };
-  const receipts = excludeHiddenReceipts(store, roomPageReceipts(store, slug, room.receiptsEnabled)).map(item => ({
-    id: item.id,
-    title: item.title,
-    href: `/receipts/${item.id}`,
-  }));
+  const receipts = visibleRoomReceipts(store, slug, room.receiptsEnabled);
   const document = {
     schema: "project-room-public-room/1",
     contentTrust: CONTENT_TRUST,
@@ -92,6 +112,7 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
     names: room.names,
     tasks: room.tasks,
     receipts,
+    proofHref: room.receiptsEnabled ? `/r/${slug}/proof` : null,
     join,
   };
   const description = room.purpose || `${room.title} on Project Room.`;
@@ -113,6 +134,7 @@ ${nameLine}
 ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
+${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
 <p><a href="${escapeHtml(join.href)}">Join</a></p>
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
@@ -282,10 +304,9 @@ export function publicSitemapEntries(store) {
     { path: "/agents", lastmod: PUBLIC_PAGE_LASTMOD },
   ];
   for (const room of listPublicRoomSitemap(store)) {
-    entries.push({
-      path: `/r/${room.slug}`,
-      lastmod: typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD,
-    });
+    const lastmod = typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD;
+    entries.push({ path: `/r/${room.slug}`, lastmod });
+    if (room.receiptsEnabled) entries.push({ path: `/r/${room.slug}/proof`, lastmod });
   }
   return entries;
 }

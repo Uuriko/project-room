@@ -1,12 +1,12 @@
 // Public receipts HTML. Script-free. Live records come from receipts-live.mjs.
 // Every interpolated string is escaped: titles and names are room data.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
-export { PUBLIC_SEARCH_CSP as RECEIPTS_PAGE_CSP } from "../deploy/public-search.mjs";
+export { PUBLIC_SEARCH_CSP as RECEIPTS_PAGE_CSP } from "./public-search.mjs";
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/receipts.png`;
 
@@ -27,6 +27,8 @@ a{color:var(--blue)}
 .card,.detail{overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .card{border-top:1px solid var(--line);padding:1rem 0}
 .meta{color:var(--muted);font-size:.9rem}
+.receipt-next{border-top:1px solid var(--line);margin-top:1.5rem;padding-top:1rem}
+.receipt-next p{margin:0}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}`;
@@ -65,7 +67,7 @@ export function renderReceiptsHtml(page) {
   const items = receipts.map(item => `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}</p>
-</article>`).join("") || `<p>No public receipts yet. A room owner can publish merged work from room settings.</p>`;
+</article>`).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
@@ -93,6 +95,37 @@ export function renderReceiptDetailHtml(receipt) {
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
     : "";
+  // Bounty lot receipts carry the escrow movement and the settlement
+  // verdict. Parties are ledger account ids (poster / worker lanes), not
+  // display names, and credits are the room's internal ledger units.
+  const lot = receipt.lot ? (() => {
+    const l = receipt.lot;
+    const s = l.settlement ?? {};
+    const credits = value => typeof value === "number" && Number.isFinite(value) ? `${escapeHtml(value)} credits` : "—";
+    const side = entry => entry ? `${escapeHtml(entry.account)} · ${escapeHtml(entry.lotState)}` : "—";
+    const rows = [
+      `<div><dt>Movement</dt><dd>${escapeHtml(l.kind ?? "")}</dd></div>`,
+      `<div><dt>Amount</dt><dd>${credits(l.amountCredits)} (${escapeHtml(l.amountMillis)} milli-credits)</dd></div>`,
+      `<div><dt>From</dt><dd>${side(l.from)}</dd></div>`,
+      `<div><dt>To</dt><dd>${side(l.to)}</dd></div>`,
+      `<div><dt>Posted by</dt><dd>${escapeHtml(l.poster ?? "—")}</dd></div>`,
+      `<div><dt>Worker</dt><dd>${escapeHtml(l.worker ?? "—")}</dd></div>`,
+      l.verifier ? `<div><dt>Verifier</dt><dd>${escapeHtml(l.verifier)}</dd></div>` : "",
+      `<div><dt>Bounty</dt><dd><code>${escapeHtml(l.bountyId)}</code></dd></div>`,
+      l.bountyState ? `<div><dt>Bounty state</dt><dd>${escapeHtml(l.bountyState)}</dd></div>` : "",
+      `<div><dt>Award</dt><dd>${credits(l.awardCredits)}</dd></div>`,
+      s.kind ? `<div><dt>Settlement</dt><dd>${escapeHtml(s.kind)}</dd></div>` : "",
+      s.reason ? `<div><dt>Settlement reason</dt><dd>${escapeHtml(s.reason)}</dd></div>` : "",
+      s.settledAt ? `<div><dt>Settled</dt><dd><time datetime="${escapeHtml(s.settledAt)}">${escapeHtml(s.settledAt)}</time></dd></div>` : "",
+      s.settledBy?.id ? `<div><dt>Settled by</dt><dd>${escapeHtml(s.settledBy.id)}${s.settledBy.kind ? ` (${escapeHtml(s.settledBy.kind)})` : ""}</dd></div>` : "",
+      l.rubricHash ? `<div><dt>Rubric hash</dt><dd><code>sha256:${escapeHtml(l.rubricHash)}</code>${l.rubricVersion ? ` · version ${escapeHtml(l.rubricVersion)}` : ""}</dd></div>` : "",
+      l.submissionHash ? `<div><dt>Submission hash</dt><dd><code>sha256:${escapeHtml(l.submissionHash)}</code></dd></div>` : "",
+      l.journalHash ? `<div><dt>Ledger entry hash</dt><dd><code>sha256:${escapeHtml(l.journalHash)}</code></dd></div>` : "",
+      l.signedReceiptIds?.length ? `<div><dt>Signed receipt</dt><dd>${l.signedReceiptIds.map(entry => `<code>${escapeHtml(entry)}</code>`).join("<br>")}</dd></div>` : "",
+      l.memo ? `<div><dt>Memo</dt><dd>${escapeHtml(l.memo)}</dd></div>` : "",
+    ];
+    return rows.join("");
+  })() : "";
   // Receipt honesty: say precisely what this record proves, no more. Only a
   // work-claim receipt carries a server-verified merge (the server's own
   // poll wrote pr_merged + syncedAt; a member-supplied outcome "merged"
@@ -101,7 +134,9 @@ export function renderReceiptDetailHtml(receipt) {
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
   // unsigned (docs/RECEIPTS-PAGE.md).
-  const provenNote = receipt.mergedAt && receipt.pullRequest
+  const provenNote = receipt.source === "bounty-lot"
+    ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : receipt.mergedAt && receipt.pullRequest
     ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
@@ -112,10 +147,11 @@ export function renderReceiptDetailHtml(receipt) {
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${hashes}
+${pr}${merged}${hashes}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+<nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
 <footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
@@ -134,6 +170,7 @@ const publicJson = receipt => ({
   mergedAt: receipt.mergedAt,
   hashes: receipt.hashes,
   at: receipt.at,
+  ...(receipt.lot ? { lot: receipt.lot } : {}),
 });
 
 export function receiptsListJson(page) {

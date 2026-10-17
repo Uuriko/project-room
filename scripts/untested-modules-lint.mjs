@@ -11,10 +11,8 @@ const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
   // NEW modules here.
   "agent-key-registry.mjs",
-  "channel-adapters/telegram-rotation.mjs",
   "gmail-content.mjs",
   "inbox-collab-routes.mjs",
-  "inbox-collab-store.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
@@ -25,11 +23,7 @@ const GRANDFATHERED = [
   // the gate and are covered via HTTP-boundary tests; recording them here
   // corrects the baseline so the now-precise check does not flag legacy
   // modules as new gaps. Still never add NEW modules.
-  "opportunities.mjs",
-  "project-offers.mjs",
-  "request-runs.mjs",
-  "return-brief.mjs",
-  "work-help.mjs"
+  "request-runs.mjs"
 ];
 
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
