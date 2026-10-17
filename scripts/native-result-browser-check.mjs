@@ -10,6 +10,26 @@ import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, messageAction } from "./room-chrome.mjs";
 
+// Hosted runners stall hard enough that the page-wide 8s default kills waits
+// whose product leg is ~1s on an unloaded box. Waits on an async round trip
+// poll the actual state with a generous ceiling and, on timeout, fail with a
+// dump of the page state that says why — never a bare locator timeout.
+async function waitForState(page, description, probe, { timeout = 30000, interval = 250 } = {}) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await probe()) return;
+    await page.waitForTimeout(Math.min(interval, deadline - Date.now()));
+  }
+  if (await probe()) return;
+  const state = await page.evaluate(() => ({
+    hash: location.hash,
+    accountStatus: document.querySelector("#account-status")?.textContent ?? null,
+    mainHidden: document.querySelector("#main")?.hidden ?? null,
+    messageInput: document.querySelector("#message-input")?.value ?? null,
+  })).catch(() => null);
+  throw new Error(`Timed out after ${timeout}ms waiting for ${description}. Page state: ${JSON.stringify(state)}`);
+}
+
 async function setup(t, { mobile = false, review = false, viewport = null, body = "  A quiet room\n\nCafé 🪷 — one clear next step.  \n" } = {}) {
   const f = createAcceptanceFixture(), workItemId = "native-human";
   const send = (type, data, actor = "owner") => f.store.command(f.keys[actor], "commons", { id: crypto.randomUUID(), type, data });
@@ -346,7 +366,7 @@ test("native result 320px: a live update keeps the focused View result control o
 
 // A room credential that dies while the account is still signed in used to drop
 // the member to the room list with no explanation.
-test("a room session that ends under a live account says so and points back to the room list", { timeout: 30000 }, async t => {
+test("a room session that ends under a live account says so and points back to the room list", { timeout: 60000 }, async t => {
   const f = createAcceptanceFixture();
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
     data: { memberId: "admin", displayName: "Test admin", kind: "human", permissions: ["manage_members"] } });
@@ -355,7 +375,10 @@ test("a room session that ends under a live account says so and points back to t
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(8000);
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  // Same stall math as the waits below: the shared sign-in helper's waits ride
+  // this page default, and 8s is a stall death sentence for a ~1s leg.
+  page.setDefaultTimeout(30000);
   const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(`${origin}/?account=1`);
   await signInFixture(page, f.store.issueAccountAccessKey("admin-account"), { returnTo: `${origin}/?account=1` });
@@ -372,7 +395,10 @@ test("a room session that ends under a live account says so and points back to t
   dead = true;
   f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MESSAGE_POSTED, data: { body: "Trigger a refresh", replyToId: "test-welcome" } });
   const notice = page.locator("#account-status");
-  await notice.waitFor({ state: "visible" });
+  // The notice lands only after the stream-driven refresh round trip reads
+  // the 401: ~1s unloaded, past the 8s default on a stalled hosted runner
+  // (pure locator timeout, no assertion failure). Poll the state.
+  await waitForState(page, "the ended-session notice to appear", async () => await notice.isVisible().catch(() => false));
   assert.match(await notice.textContent(), /Your session in that room ended\. Open the room again from your room list/);
   assert.equal(await page.locator("#main").isHidden(), true, "the room is closed");
   // E-H2: the credential died, the member did not leave. Reopening from the room list
@@ -381,6 +407,6 @@ test("a room session that ends under a live account says so and points back to t
   await clickChrome(page, "#nav-rooms");
   await page.locator('[data-account-room="commons"]').click();
   await page.locator("#main").waitFor({ state: "visible" });
-  await page.waitForFunction(() => document.querySelector("#message-input").value === "A draft that must survive.");
+  await waitForState(page, "the unsent draft to be restored on reopen", async () => await page.evaluate(() => document.querySelector("#message-input").value === "A draft that must survive.").catch(() => false));
   assert.deepEqual(errors, []);
 });

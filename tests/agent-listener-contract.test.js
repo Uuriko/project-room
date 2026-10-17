@@ -29,6 +29,21 @@ test('heartbeatWithListener without listenerLease reports presence and no listen
   assert.equal(out.listener, null);
 });
 
+test('heartbeatWithListener passes cadenceSeconds through: omit preserves, explicit null clears', t => {
+  // The shared contract is the seam both the HTTP route and hosted MCP
+  // cross; collapsing data.cadenceSeconds with ?? null here would turn
+  // every bare heartbeat back into a cadence reset (rotation review
+  // P5-F2), whatever the store does.
+  const store = fixture(t);
+  const auth = { identityId: 'ai_unit_e' };
+  const declared = heartbeatWithListener(store, auth, { hostId: 'host-e', mode: 'pull-only', cadenceSeconds: 900 });
+  assert.equal(declared.host.cadenceSeconds, 900);
+  const bare = heartbeatWithListener(store, auth, { hostId: 'host-e', mode: 'pull-only' });
+  assert.equal(bare.host.cadenceSeconds, 900, 'a body without cadenceSeconds preserves the declaration');
+  const cleared = heartbeatWithListener(store, auth, { hostId: 'host-e', mode: 'pull-only', cadenceSeconds: null });
+  assert.equal(cleared.host.cadenceSeconds, null, 'an explicit null clears the declaration');
+});
+
 test('identity-level roomless lease: first host acquires, a second host is told who holds it', t => {
   const store = fixture(t);
   const auth = { identityId: 'ai_unit_b' };
