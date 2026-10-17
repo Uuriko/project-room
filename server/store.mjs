@@ -12,6 +12,7 @@ import { BuyerSignoff, buyerSignoffSchema } from "./buyer-signoff.mjs";
 import { TrialTasks, trialTaskSchema } from "./trial-task-store.mjs";
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 // ServiceError lives in server/service-error.mjs (shared, cycle-free); the
 // local import keeps the binding in scope (e.g. for StorageUnavailableError
@@ -1170,8 +1171,8 @@ const LOOKUP_INDEXES = `
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Commit and rollback of a write transaction drop
-// the whole cache, including a parse of uncommitted bytes. Callers receive
+// write drops the entry. Successful commands refill it after outer commit;
+// rollback and unregistered writes discard candidates. Callers receive
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
@@ -1182,6 +1183,26 @@ function deepFreeze(value) {
   if (Array.isArray(value)) { for (const item of value) deepFreeze(item); }
   else { for (const key of Object.keys(value)) deepFreeze(value[key]); }
   return Object.freeze(value);
+}
+
+// Reuse only JSON-stable reducer state. Exotic values (undefined, sparse
+// arrays, -0, accessors, etc.) must still take the canonical cold-read path.
+// Freezing in this same walk prevents later command helpers changing a
+// candidate after its bytes have been persisted.
+function freezeJsonState(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
+  if (typeof value !== "object") return false;
+  const array = Array.isArray(value);
+  if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
+  const keys = Object.keys(value);
+  if (Reflect.ownKeys(value).length !== keys.length + (array ? 1 : 0) || array && keys.length !== value.length) return false;
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
+  }
+  Object.freeze(value);
+  return true;
 }
 
 class ProjectionCache {
@@ -1210,9 +1231,11 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1", workItemBoardBackfill = "auto" } = {}) {
+    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    this.verifyProjectionCache = verifyProjectionCache === true;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
@@ -2758,13 +2781,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
-  _dropProjectionCache() { this._projectionCache?.clear(); }
+  // Invalidate both parsed reads and unpublished command candidates.
+  _dropProjectionCache() {
+    this._projectionCache?.clear();
+    for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
+  }
+  _queueProjectionCache(roomId, sequence, state, projection) {
+    const pending = this._pendingProjectionFrames?.at(-1);
+    if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
+      || !freezeJsonState(state)) return;
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }),
+      weight: Buffer.byteLength(projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) });
+  }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
-    const cache = () => this._projectionCache;
+    const invalidate = () => this._dropProjectionCache();
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
@@ -2772,7 +2804,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const run = stmt.run.bind(stmt);
         stmt.run = (...args) => {
           const result = run(...args);
-          cache()?.clear();
+          invalidate();
           return result;
         };
       }
@@ -2782,7 +2814,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
+        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) invalidate();
         return result;
       };
     }
@@ -2794,13 +2826,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+    // Savepoints collect candidates separately, but never publish before
+    // the outer commit. Every rooms write invalidates all earlier candidates.
+    const boundary = outermost || isolated;
+    const frames = this._pendingProjectionFrames ??= [];
+    if (boundary) frames.push(new Map());
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      this._dropProjectionCache();
+      if (boundary) frames.pop();
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
+    if (boundary) {
+      const pending = frames.pop();
+      this._projectionCache?.clear();
+      if (!outermost) {
+        for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
+      } else {
+        const cache = this._projectionCache ??= new ProjectionCache();
+        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+      }
+    }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -2837,15 +2884,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
     const hit = cache.lookup(roomId, meta.sequence);
-    if (hit) return hit;
+    if (hit) {
+      if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence).value)) {
+        this._dropProjectionCache();
+        throw new Error(`Projection cache differs from storage for room ${roomId}`);
+      }
+      return hit;
+    }
+    const { value, weight } = this._readProjection(roomId, meta.sequence);
+    cache.insert(roomId, meta.sequence, value, weight);
+    return value;
+  }
+  _readProjection(roomId, sequence) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
     const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection));
-    if (missing.length) this._restoreBodiesFromLog(roomId, meta.sequence, parsed, missing);
+    if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
-    const value = Object.freeze({ sequence: meta.sequence, state });
-    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0));
-    return value;
+    return { value: Object.freeze({ sequence, state }),
+      weight: Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh
@@ -5316,6 +5373,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        this._queueProjectionCache(roomId, sequence, state, projection);
         // Board is the claim authority the MCP tools share with /work-claims.
         // Same transaction as the projection event: decision #10's write-path
         // cutover syncs the item's board claim from post-command state via
