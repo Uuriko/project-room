@@ -159,6 +159,24 @@ test("jobHealthView marks stale beyond 3x period and failing on errors", () => {
   assert.equal(jobHealthView(undefined, now).status, "stale", "never-run jobs are stale");
 });
 
+test("applyOutcomes persists a failing tick's summary; a tick with no summary keeps the prior one", () => {
+  const now = Date.parse("2026-10-17T21:00:00Z");
+  let stored = applyOutcomes({}, [{ job: "integrity", ok: true, at: now - 60_000, summary: { checked: 1 } }]);
+  stored = applyOutcomes(stored, [{ job: "integrity", ok: false, at: now, error: "scanError: integrity agent_connections failed (connection_integrity_error)",
+    summary: { checked: 2, blockedRooms: 3 },
+    failure: { code: "connection_integrity_error", subcheck: "agent_connections", errorClass: "integrity_mismatch", recordClass: "journal" } }]);
+  let view = jobHealthView(stored, now).jobs.find(job => job.name === "integrity");
+  assert.deepEqual(view.lastSummary, { checked: 2, blockedRooms: 3 }, "the failing tick's summary replaces the last success summary");
+  assert.equal(view.lastSummaryAt, new Date(now).toISOString());
+  // A thrown tick records no summary (runCronJobs stores null): the prior
+  // summary stands, still labelled by its own lastSummaryAt.
+  stored = applyOutcomes(stored, [{ job: "integrity", ok: false, at: now + 60_000, error: "tick exploded" }]);
+  view = jobHealthView(stored, now + 60_000).jobs.find(job => job.name === "integrity");
+  assert.deepEqual(view.lastSummary, { checked: 2, blockedRooms: 3 });
+  assert.equal(view.lastSummaryAt, new Date(now).toISOString());
+  assert.equal(view.consecutiveFailures, 2);
+});
+
 test("channel drain ticks report the last completed drain, and a wedged drain fails", async () => {
   // Bug sweep F-1: the RPC starts the drain in the background, so its
   // return shape is built from the last completed drain's outcome.

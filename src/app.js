@@ -1978,7 +1978,8 @@ function render() {
   ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
-  selectOptions("#message-to-select", active, "Everyone");
+  // R350-n1: a seat whose identity signed out for good can't read a direct message.
+  selectOptions("#message-to-select", active.filter(m => m.identityRevoked !== true), "Everyone");
   syncWorkForm();
   syncActionForm();
   syncRecipeStrip();
@@ -2000,7 +2001,8 @@ function render() {
   const memberActions = m => {
     if (!ownerView || m.kind !== "agent" || m.active === false) return "";
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
-    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+    // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {

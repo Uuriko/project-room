@@ -461,5 +461,6 @@ export default {
   "human.requiredField": "{fragmentA} is required — complete it before saving.",
   "share.linkReady": "{fragmentA} link ready — the link shown above is the one to share.",
   "share.linkCreated": "{fragmentA} link created — copy this link to share it.",
-  "join.stepTwo": "Account created — you’re signed in. Step 2 of 2: confirm the name people in this room will see, then choose “Join room” to finish."
+  "join.stepTwo": "Account created — you’re signed in. Step 2 of 2: confirm the name people in this room will see, then choose “Join room” to finish.",
+  "people.status.signed_out_for_good": "Signed out for good"
 };
