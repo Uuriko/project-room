@@ -40,8 +40,12 @@ public final class LocalTools {
     }
     public func status() -> [String: Any] {
         lock.lock(); defer { lock.unlock() }
+        let accessibility = AXIsProcessTrusted(), screenCapture = CGPreflightScreenCaptureAccess()
         return ["enabled": enabled, "grantRevision": revision, "runningProcesses": active.count,
-                "accessibility": AXIsProcessTrusted(), "screenCapture": CGPreflightScreenCaptureAccess(),
+                "accessibility": accessibility, "screenCapture": screenCapture,
+                "capabilities": LocalToolReadiness.capabilities(enabled: enabled, accessibility: accessibility, screenCapture: screenCapture),
+                "readinessScope": "local_preflight_only",
+                "readinessLimit": "Each operation still checks its target and current grant. Room access, agent tool configuration and provider execution are separate.",
                 "fullDiskAccess": "not_detected_check_system_settings", "automation": "per_application",
                 "scope": "local_owner_tools", "remoteDeviceConnection": false]
     }

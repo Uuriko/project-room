@@ -53,6 +53,79 @@ final class LocalToolsTests {
     private func refusal(_ code: String, _ action: () throws -> Any) {
         expectError(try action()) { expectEqual(($0 as? LocalToolFailure)?.code,code) }
     }
+    func testCapabilityReadiness() throws {
+        // Independent permission combinations matter: screenshots must not
+        // block file work or input, and AX access must not imply screen access.
+        for enabled in [false, true] {
+            for accessibility in [false, true] {
+                for screen in [false, true] {
+                    let entries = LocalToolReadiness.capabilities(enabled: enabled, accessibility: accessibility, screenCapture: screen)
+                    expectEqual(entries.count, 4)
+                    let byID = Dictionary(uniqueKeysWithValues: entries.map { ($0["id"] as! String, $0) })
+                    let expected = ["files_and_processes": enabled, "app_state": enabled && accessibility,
+                                    "screenshots": enabled && screen, "app_input": enabled && accessibility]
+                    for (id, passed) in expected {
+                        expectEqual(byID[id]!["state"] as? String, passed ? "preflight_passed" : "blocked")
+                        let blockers = byID[id]!["blockers"] as! [String]
+                        expectEqual(blockers.contains("mac_tools_paused"), !enabled)
+                        expectEqual(blockers.isEmpty, passed)
+                        if !enabled { expectEqual(byID[id]!["message"] as? String, "Enable local tools") }
+                    }
+                    expectEqual((byID["screenshots"]!["blockers"] as! [String]).contains("screen_capture_permission_required"), !screen)
+                    expectEqual((byID["app_input"]!["blockers"] as! [String]).contains("accessibility_permission_required"), !accessibility)
+                    expectEqual(LocalToolReadiness.summary(entries).split(separator: "\n").count, 4)
+                }
+            }
+        }
+        let (_, tools) = try fixture()
+        let connection = try LocalToolConnection(service: tools)
+        defer { connection.stop() }
+        for enabled in [false, true, false] {
+            let revision = tools.setEnabled(enabled); try connection.publish()
+            let status = try LocalToolConnection.call(connectionURL: connection.connectionURL, name: "mac_status", arguments: [:])
+            expectEqual(status["readinessScope"] as? String, "local_preflight_only")
+            expectEqual(status["grantRevision"] as? Int, revision)
+            let entries = status["capabilities"] as! [[String: Any]]
+            expectEqual(entries.first!["state"] as? String, enabled ? "preflight_passed" : "blocked")
+            expectEqual((entries.flatMap { $0["tools"] as! [String] }).count, 7)
+            // Polling readiness cannot start a process, observe app contents or capture a window.
+            expectEqual(status["runningProcesses"] as? Int, 0)
+        }
+    }
+    @MainActor func testReadinessWindow() throws {
+        _ = NSApplication.shared
+        let (root, tools) = try fixture()
+        let host = try LocalRoomHost(directory: root.appendingPathComponent("host"))
+        let panel = try LocalToolsWindow(service: tools, host: host)
+        defer { panel.stop(); panel.window.orderOut(nil) }
+        let content = panel.window.contentView!
+        func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
+        let controls = descendants(content).compactMap { $0 as? NSButton }
+        let enable = controls.first { $0.title == "Enable local tools" }!
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            panel.window.appearance = NSAppearance(named: appearance)
+            panel.window.orderFrontRegardless()
+            for enabled in [false, true] {
+                if tools.status()["enabled"] as? Bool != enabled { enable.performClick(nil) }
+                content.layoutSubtreeIfNeeded()
+                panel.window.display()
+                _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+                let labels = descendants(content).compactMap { $0 as? NSTextField }
+                let expected = LocalToolReadiness.summary(tools.status()["capabilities"] as! [[String: Any]])
+                expectEqual(labels.contains { $0.stringValue.hasPrefix(expected) }, true)
+                for view in labels + controls {
+                    let frame = content.convert(view.bounds, from: view)
+                    expectEqual(content.bounds.insetBy(dx: -1, dy: -1).contains(frame), true)
+                }
+                if let destination = ProcessInfo.processInfo.environment["ROOM_READINESS_QA_OUTPUT"] {
+                    let path = URL(fileURLWithPath: destination).appendingPathComponent("readiness-\(appearance.rawValue)-\(enabled).png")
+                    let capture = Process(); capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    capture.arguments = ["-x", "-o", "-l", String(panel.window.windowNumber), path.path]
+                    try capture.run(); capture.waitUntilExit(); expectEqual(capture.terminationStatus, 0)
+                }
+            }
+        }
+    }
     func testComputerObservations() throws {
         let (root, _) = try fixture(); let provider = FixtureObservation()
         let tools = try LocalTools(directory: root.appendingPathComponent("observations"), fixtureRoot: root, observations: provider)
@@ -385,6 +458,8 @@ final class LocalToolsTests {
 let checks = LocalToolsTests()
 defer { for action in checks.teardown { action() } }
 do {
+    try checks.testCapabilityReadiness(); print("PASS capability preflight combinations, native IPC and pause/re-enable projection")
+    try MainActor.assumeIsolated { try checks.testReadinessWindow() }; print("PASS My Mac shared readiness copy, enable/pause and dark/light layout")
     try checks.testActualOwnedWindowInput()
     try checks.testInputRetryAndPause()
     try checks.testActualOwnedWindowObservation()

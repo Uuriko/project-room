@@ -17,11 +17,11 @@ import CoreGraphics
     private var timer: Timer?
     private var hostIssue: String?
     private var setupWindow: LocalRoomHostSetupWindow?
-    public init(service: LocalTools? = nil) throws {
+    public init(service: LocalTools? = nil, host: LocalRoomHost? = nil) throws {
         let owned = try service ?? LocalTools()
-        host = try LocalRoomHost()
+        self.host = try host ?? LocalRoomHost()
         self.service = owned; connection = try LocalToolConnection(service: owned)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520), styleMask: [.titled,.closable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 620), styleMask: [.titled,.closable], backing: .buffered, defer: false)
         super.init()
         window.title = "My Mac · Project Room"; window.isReleasedWhenClosed = false
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
@@ -40,6 +40,9 @@ import CoreGraphics
         let hostNote = NSTextField(wrappingLabelWithString: "Keep Project Room open while your agent works."); hostNote.textColor = .secondaryLabelColor
         let importHost = NSButton(title: "Import existing host configuration…", target: self, action: #selector(connectHost)); importHost.bezelStyle = .rounded
         for view in [hostState, hostControls, hostNote, importHost] { stack.addArrangedSubview(view) }
+        for label in [explanation, state, permissions, scope, hostState, hostNote] {
+            label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24)])
         refresh(); window.center()
@@ -104,7 +107,8 @@ import CoreGraphics
         let snapshot = service.status(), enabled = snapshot["enabled"] as? Bool == true
         state.stringValue = enabled ? "Autonomous local tools enabled · \(snapshot["runningProcesses"]!) running" : "Local tools paused"
         toggle.title = enabled ? "Pause all local tools" : "Enable local tools"
-        permissions.stringValue = "App control: \(snapshot["accessibility"] as? Bool == true ? "Allowed" : "Not allowed") · Screen: \(snapshot["screenCapture"] as? Bool == true ? "Allowed" : "Not allowed")\nFull Disk Access: check macOS settings. Automation requires per-app approval."
+        permissions.stringValue = LocalToolReadiness.summary(snapshot["capabilities"] as? [[String: Any]] ?? [])
+            + "\n\nFiles and apps may require additional access. These local checks do not verify your agent connection or model access."
     }
     @objc private func copyConnection() {
         let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")
