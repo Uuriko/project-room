@@ -1630,6 +1630,24 @@ summary { overflow-wrap: anywhere; }
 .land-checks-pending { background: #d29922; }
 .land-badge { font-size: .68rem; letter-spacing: .02em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 .35rem; }
 
+/* Bounties & credits panel (#3437): in-room human money surface. */
+.bounty-board { display: flex; flex-direction: column; gap: .75rem; }
+.bounty-balance { display: flex; flex-wrap: wrap; gap: .35rem .75rem; font-size: var(--text-sm); }
+.bounty-balance strong { width: 100%; }
+.bounty-form { display: grid; gap: .5rem; }
+.bounty-form h4, .bounty-receipts h4 { margin: 0; font-size: var(--text-sm); }
+.bounty-list { display: flex; flex-direction: column; gap: .5rem; }
+.bounty-row { border: 1px solid var(--line); border-radius: .5rem; padding: .5rem .6rem; }
+.bounty-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; font-size: var(--text-sm); }
+.bounty-amount { margin-left: auto; font-weight: 600; }
+.bounty-review { display: grid; gap: .5rem; margin-top: .5rem; }
+.bounty-delivery { margin: 0; font-size: var(--text-sm); }
+.bounty-rubric { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.bounty-rubric li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; font-size: var(--text-sm); }
+.bounty-actions { display: flex; gap: .5rem; }
+.bounty-receipts ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .25rem; font-size: var(--text-sm); }
+.bounty-receipt-hot { outline: 2px solid var(--blue); border-radius: .35rem; }
+
 /* Email/password entry and focused recovery screens. */
 .app-shell:has(#auth-panel:not([hidden])) .topbar .brand { visibility: hidden; }
 .app-shell:has(#auth-panel:not([hidden])):has(#connection-status[data-state="signed-out"]) > .topbar:has(#session-menu.empty) { display: none; }

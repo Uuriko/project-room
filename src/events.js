@@ -1,5 +1,4 @@
-import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
-import { normalizePoll, pollOptionEmojis } from "./polls.js";
+import { normalizePoll } from "./polls.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -51,7 +50,6 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
-  MESSAGE_REACTION_SET: "message.reaction_set",
   POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
@@ -542,7 +540,38 @@ export function replay(events) {
 // states) while every content branch keeps the full structuredClone.
 // The returned state is value-identical to the structuredClone result;
 // the #3408 replay-equivalence digest chains pin that claim.
-function cloneStateForApply(current) {
+//
+// WRITE-PATH-WINS win 2 (50x audit S1): the messages branch is the dominant
+// content clone (~870-char bodies x five-figure counts), and the message
+// handlers split cleanly by how they touch it:
+//   - message.posted only reads existing messages and pushes new ones
+//     (plus a possible ":channel" copy) — the array needs a fresh slice,
+//     never an element clone;
+//   - message.edited / message.deleted / message.redacted / poll.voted
+//     rewrite elements in place, but only the addressed message and its
+//     ":channel" copy — slice the array and deep-clone just those
+//     elements, so an in-place rewrite can never reach the input state's
+//     objects.
+// Every other branch (members, channels, workItems, replyRequests, ...)
+// keeps the full structuredClone, and every other event type keeps the
+// full messages clone: handlers that range over messages (redact's
+// receipt sweep reads workItems, which stays cloned) stay safe by
+// construction. Sharing unaddressed elements is safe because no handler
+// in the light set mutates them, and any later event that does address
+// one clones it first under the same rule. The projection-write-through
+// equivalence battery pins input-state immutability for the light set.
+const MESSAGE_REWRITE_TYPES = new Set([
+  EVENT_TYPES.MESSAGE_EDITED, EVENT_TYPES.MESSAGE_DELETED,
+  EVENT_TYPES.MESSAGE_REDACTED, EVENT_TYPES.POLL_VOTED
+]);
+function lightMessageCloneIds(incoming) {
+  if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
+  if (!MESSAGE_REWRITE_TYPES.has(incoming?.type)) return null;
+  const messageId = incoming.data?.messageId;
+  if (typeof messageId !== "string" || !messageId) return null;
+  return new Set([messageId, `${messageId}:channel`]);
+}
+function cloneStateForApply(current, incoming) {
   const state = { ...current };
   if (Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
   if (current.seenEvents && typeof current.seenEvents === "object") {
@@ -551,15 +580,22 @@ function cloneStateForApply(current) {
   if (current.seenIdempotencyKeys && typeof current.seenIdempotencyKeys === "object") {
     state.seenIdempotencyKeys = { ...current.seenIdempotencyKeys };
   }
+  const lightMessages = lightMessageCloneIds(incoming);
   for (const key of Object.keys(state)) {
     if (key === "eventLog" || key === "seenEvents" || key === "seenIdempotencyKeys") continue;
+    if (key === "messages" && lightMessages !== null && Array.isArray(current.messages)) {
+      state.messages = lightMessages.size === 0
+        ? current.messages.slice()
+        : current.messages.map(message => (message && lightMessages.has(message.id) ? structuredClone(message) : message));
+      continue;
+    }
     state[key] = structuredClone(current[key]);
   }
   return state;
 }
 
 export function applyEvent(current, incoming) {
-  const state = cloneStateForApply(current);
+  const state = cloneStateForApply(current, incoming);
   validateEnvelope(incoming);
   // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
   // so the stored fingerprint agrees with the logged (post-handler) event.
@@ -615,7 +651,9 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
-    [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    // Reactions were removed (2026-10). Old logs still carry
+    // message.reaction_set; replay skips them.
+    "message.reaction_set": () => {},
     [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
@@ -1535,44 +1573,6 @@ function recordEvidenceWithdrawn(state, incoming) {
   if (!cited) throw new Error("Message not found");
 }
 // --- end PRIV-1 message redaction ---
-
-function setMessageReaction(state, incoming) {
-  const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["messageId", "reaction", "active"]);
-  const { messageId, reaction, active } = incoming.data;
-  const message = state.messages.find(m => m.id === messageId);
-  if (!message) throw new Error("Reaction must reference a message in this Room");
-  if (message.deletedAt) throw new Error("Message was deleted");
-  const key = canonicalReaction(reaction);
-  if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
-  // Replay and checkpoints may still carry like/heart/celebrate/thinking.
-  // Fold those into the Unicode key before applying this choice.
-  message.reactions = foldedReactionMap(message.reactions);
-  const members = new Set(message.reactions[key] || []);
-  if (active) {
-    if (!message.reactions[key] && Object.keys(message.reactions).length >= MAX_REACTIONS_PER_MESSAGE) {
-      throw new Error("Too many reactions on this message");
-    }
-    members.add(actor.id);
-  } else members.delete(actor.id);
-  if (members.size) message.reactions[key] = [...members].sort();
-  else delete message.reactions[key];
-  // Polls: one vote per member on single-choice polls. Setting a vote moves it
-  // off the other options; unvoting and allowMultiple polls leave the rest.
-  if (active && message.kind === "poll" && message.poll?.allowMultiple !== true) {
-    const optionEmojis = pollOptionEmojis(message);
-    if (optionEmojis.includes(key)) {
-      for (const other of optionEmojis) {
-        if (other === key) continue;
-        const voters = message.reactions[other];
-        if (!Array.isArray(voters) || !voters.includes(actor.id)) continue;
-        const rest = voters.filter(id => id !== actor.id);
-        if (rest.length) message.reactions[other] = rest;
-        else delete message.reactions[other];
-      }
-    }
-  }
-}
 
 // Polls: poll.voted { messageId, option, active } records one member's vote
 // on option index `option`. Votes live on the message as pollVotes, an array

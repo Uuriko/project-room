@@ -1,14 +1,6 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { LEGACY_REACTIONS, foldedReactionMap } from "./emoji.js";
+import { uiText } from "./strings.js";
 // Conversation structure is derived from immutable reply links, including older logs.
-// Legacy names remain the input aliases. Pills render the Unicode key.
-export const REACTIONS = LEGACY_REACTIONS;
-
-export function reactionPills(reactions = {}) {
-  return Object.entries(foldedReactionMap(reactions)).map(([key, memberIds]) => (
-    { key, symbol: key, memberIds, count: memberIds.length, used: memberIds.length > 0 }
-  ));
-}
 
 // Composition, key repeat, and touch Return must never accidentally submit.
 export function sendsOnEnter(event, touchKeyboard = false) {
@@ -161,6 +153,8 @@ export function memberOnLine(member, { workItems, now } = {}) {
 
 export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
+  // R350-n1: the seat is still a member, but its identity signed out for good.
+  if (member.identityRevoked === true) return uiText("people.status.signed_out_for_good");
   const line = context ? memberOnLine(member, context) : "";
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }

@@ -750,7 +750,22 @@ const requestOutcomeRecordOf = record => {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
   if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
   if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
-  return Object.freeze({ at: record.at, digest: record.digest });
+  // Reviewer replay authority is never inferred from legacy timestamps or
+  // digest-only records. Malformed provenance loses only this extra authority.
+  let reviewer;
+  const value = record.reviewer;
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && typeof value.actorId === "string" && value.actorId.length > 0 && value.actorId.length <= 128
+    && ["done", "in_progress"].includes(value.state)
+    && Number.isSafeInteger(value.historyLength) && value.historyLength > 0
+    && typeof value.readingAckDigest === "string" && /^[0-9a-f]{64}$/.test(value.readingAckDigest)
+    && value.basis && Object.hasOwn(value.basis, "deliveryDigest") && Object.hasOwn(value.basis, "deliveryGeneration")) {
+    try {
+      reviewer = Object.freeze({ actorId: value.actorId, state: value.state, historyLength: value.historyLength,
+        basis: reviewBasisOf(value.basis), readingAckDigest: value.readingAckDigest });
+    } catch { /* old or malformed provenance cannot authorize reviewer replay */ }
+  }
+  return Object.freeze({ at: record.at, digest: record.digest, ...(reviewer ? { reviewer } : {}) });
 };
 const requestOutcomesOf = value => {
   if (value === undefined || value === null) return null;
@@ -761,7 +776,48 @@ const requestOutcomesOf = value => {
   // String-key insertion order is oldest-first: drop the oldest beyond the cap.
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
-const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({ ...(current ?? {}), [key]: { at, digest } });
+const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({
+  // Reserve the new record's slot before adding it: integer-like ids sort
+  // ahead of string keys and must not be evicted by the normalization cap.
+  ...Object.fromEntries(Object.entries(current ?? {}).filter(([id]) => id !== key).slice(-(MAX_REQUEST_OUTCOMES - 1))),
+  [key]: { at, digest },
+});
+// The route seals a successful reviewer exit after all same-request writes
+// (including readingAck). This metadata is server-created, never request input.
+// Lifetime history length makes the binding exact even if a release/reclaim
+// uses the same timestamp and identical delivery bytes. Later edits fail closed.
+const readingAckDigest = value => createHash("sha256").update(canonicalPayload(value), "utf8").digest("hex");
+export function bindReviewerRequestOutcome(before, work, actorId, requestId, readingAck) {
+  const item = workOf(work), prior = workOf(before), actor = agentOf(actorId), key = requestIdOf(requestId);
+  const record = item.requestOutcomes?.[key];
+  check(prior.state === "delivered" && prior.owner !== actor
+    && !Object.hasOwn(prior.requestOutcomes ?? {}, key)
+    && prior.id === item.id && sameBasis(reviewBasisFor(prior), reviewBasisFor(item))
+    && record && typeof record === "object" && item.owner !== actor
+    && item.verification?.by === actor && item.verification.at === record.at
+    && ((item.state === "done" && item.verification.state === "verified")
+      || (item.state === "in_progress" && item.verification.state === "changes_requested")),
+  "reviewer request outcome must describe a successful reviewer exit");
+  const reviewer = Object.freeze({ actorId: actor, state: item.state, historyLength: claimHistoryLength(item),
+    basis: reviewBasisFor(item), readingAckDigest: readingAckDigest(readingAck) });
+  return Object.freeze({ ...work, requestOutcomes: requestOutcomesOf({ ...item.requestOutcomes, [key]: { ...record, reviewer } }) });
+}
+// Provenance is necessary, never sufficient: the route must also recheck live
+// membership and the current review policy before returning a stored outcome.
+export function reviewerRequestOutcome(work, requestId, actorId) {
+  const record = work.requestOutcomes && Object.hasOwn(work.requestOutcomes, requestId)
+    ? requestOutcomeRecordOf(work.requestOutcomes[requestId]) : undefined;
+  const bound = record?.reviewer, verification = work.verification;
+  return bound && bound.actorId === actorId && bound.state === work.state
+    && bound.historyLength === claimHistoryLength(work)
+    && sameBasis(bound.basis, reviewBasisFor(work))
+    && verification?.by === actorId && verification.at === record.at
+    && sameBasis(verification.basis, bound.basis)
+    && verification.state === (bound.state === "done" ? "verified" : "changes_requested")
+    ? bound : null;
+}
+export const reviewerReadingAckMatches = (outcome, readingAck) => outcome.readingAckDigest === readingAckDigest(readingAck);
+
 // Exported so writer paths that build claim rows outside the state machine
 // (the work-item-board backfill, #3465) validate a row BEFORE storing it:
 // the durable registry's codec decodes without validation, so a row stored
@@ -1011,8 +1067,12 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     branch: branch === undefined ? item.branch : branchOf(branch),
     // #3685: a fresh claim opens a fresh delivery round — no CI
     // settlement from a previous round may be cited for this one, and
-    // the delivery generation restarts with the round (#3684)
-    ci: null, deliveryGeneration: 0,
+    // the delivery generation restarts with the round (#3684).
+    // The round's delivery and verification fact restart too: every
+    // release path clears them when a round ends, and the claim refuses
+    // to inherit any residue that reached the pool anyway (bug sweep
+    // 2026-10-16 F1 — the lease sweep once leaked exactly this).
+    ci: null, deliveryGeneration: 0, delivery: null, verification: null,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
@@ -1231,6 +1291,17 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   // fact instead (visible, never hidden, but the owner's call stands).
   let verification = item.verification;
   if (state === "done") {
+    // Defense in depth (bug sweep 2026-10-16 F2): under a reviewed
+    // policy the executed checks run over the delivered bundle — a
+    // claim carrying no delivery has nothing to verify, and an empty
+    // executed-checks list must never be stamped "verified". Finish
+    // requires the bundle under exactly these policies; verify now
+    // refuses its absence outright instead of trusting that every road
+    // into `delivered` supplied one.
+    if (effectivePolicy !== "self_attested" && !deliveredItem.delivery) {
+      fail("delivery_incomplete",
+        `verifying "${item.id}" under review policy "${effectivePolicy}" requires a recorded delivery bundle — the claim carries none`);
+    }
     const executedChecks = executeDeliveryChecks(deliveredItem);
     const failed = executedChecks.find(entry => entry.result === "fail");
     if (failed && effectivePolicy !== "self_attested") {
@@ -1277,7 +1348,10 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // #3685: the CI settlement belongs to the delivery round too — a
     // release or a replacement delivery clears it (see replacesDelivery)
     ci: released || replacesDelivery ? null : item.ci,
-    deliveryGeneration: deliveredItem.deliveryGeneration ?? item.deliveryGeneration ?? 0,
+    // A release ends the round, so its delivery generation ends with
+    // it — the same reset releaseExpired and reassignWork apply, so no
+    // round-ending path leaves a different residue than another.
+    deliveryGeneration: released ? 0 : deliveredItem.deliveryGeneration ?? item.deliveryGeneration ?? 0,
     verification,
     ...withProvenance };
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
@@ -1466,8 +1540,22 @@ export function notePullMerged(work, mergedSha, now) {
   });
   return { ...item, revision, pullRequest };
 }
-// Reassign: the owner hands work to another agent (stays in the same state).
-// Attestations are cleared — reviews belong to the previous owner's round.
+// Reassign: the owner hands work to another agent. Attestations and
+// reviews are cleared — they belong to the previous owner's round of
+// review. The round's DELIVERY state (delivery, verification, ci,
+// deliveryGeneration) belongs to the round, not the owner, and follows
+// the round semantics below (bug sweep 2026-10-16 F2):
+//  - a fresh assignment from unclaimed opens a new round: cleared.
+//  - a live round (claimed / in_progress / blocked) changes hands
+//    intact — a delivery retained by a send-back is the record of what
+//    was handed over and survives the handover.
+//  - a delivered claim never changes hands in `delivered`: nulling its
+//    bundle while keeping the state stranded it where verify could
+//    stamp it "verified" with zero executed checks. The handover
+//    instead reopens the round to in_progress — the state a reviewer's
+//    send-back produces — with the delivery retained as the round's
+//    record and no verdict standing (verification clears with the
+//    reviews). The new owner re-finishes and a reviewer verifies.
 export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
@@ -1492,8 +1580,18 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]),
-    delivery: null, verification: null, ci: null, deliveryGeneration: 0 }, atMs, agent, `reassigned:${target}`, note);
+  // A fresh assignment opens a fresh round (delivery state cleared,
+  // exactly like a claim). A live round keeps its delivery state. A
+  // delivered claim reopens to in_progress with its delivery retained
+  // and its verification fact cleared — no verdict recorded against the
+  // previous owner stands over the new owner's round.
+  const round = fresh
+    ? { delivery: null, verification: null, ci: null, deliveryGeneration: 0 }
+    : item.state === "delivered"
+      ? { state: "in_progress", verification: null }
+      : {};
+  return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
+    atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -1516,7 +1614,16 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
+    // The round's delivery state goes with it (bug sweep 2026-10-16 F1):
+    // a claim sent back to in_progress keeps its delivery as the record
+    // of what was handed over, so a lease lapse after a send-back used
+    // to leave the frozen bundle, its verification fact, and its
+    // generation on the unclaimed item — and the next claimant's
+    // bundle-less finish then froze that bundle as THEIR delivery.
+    // Every round-ending path now clears the same set: delivery,
+    // verification, ci, and the delivery generation.
     const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
+      delivery: null, verification: null, deliveryGeneration: 0,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
