@@ -253,10 +253,28 @@ function cborRead(input, offset) {
   offset += 1;
   const readLength = () => {
     if (info < 24) return [info, offset];
-    if (info === 24) return [input[offset], offset + 1];
-    if (info === 25) return [input.readUInt16BE(offset), offset + 2];
-    if (info === 26) return [input.readUInt32BE(offset), offset + 4];
-    if (info === 27) return [Number(input.readBigUInt64BE(offset)), offset + 8];
+    // Every multi-byte length prefix must be bounds-checked before reading:
+    // a truncated prefix used to decode to `undefined` (info 24) or throw a
+    // RangeError from the Buffer read (info 25/26/27) instead of the
+    // documented TypeError, silently producing garbage values (notably an
+    // empty buffer for a truncated byte string) inside attestationObject and
+    // COSE key parsing.
+    if (info === 24) {
+      if (offset >= input.length) throw new TypeError("truncated CBOR");
+      return [input[offset], offset + 1];
+    }
+    if (info === 25) {
+      if (offset + 2 > input.length) throw new TypeError("truncated CBOR");
+      return [input.readUInt16BE(offset), offset + 2];
+    }
+    if (info === 26) {
+      if (offset + 4 > input.length) throw new TypeError("truncated CBOR");
+      return [input.readUInt32BE(offset), offset + 4];
+    }
+    if (info === 27) {
+      if (offset + 8 > input.length) throw new TypeError("truncated CBOR");
+      return [Number(input.readBigUInt64BE(offset)), offset + 8];
+    }
     throw new TypeError("indefinite-length CBOR is not supported");
   };
   if (major === 0) {
