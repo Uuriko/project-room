@@ -219,8 +219,11 @@ export function createRecoveryFixture(filename) {
       verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation.",
         citations: [{ criterionId: "c1", verdict: "pass" }] } });
     escrow.watchBounty("commons", first.bountyId, { watcher });
+    // #3727: a dispute opens only into a seatable decider, so the disputed
+    // bounty names its third-lane verifier (codex — neither poster, claimant,
+    // nor challenger) at posting; the dispute below then seats codex.
     const second = escrow.postBounty("commons", { poster, title: "Recovery: disputed bounty",
-      criteria: "Fixture row for the dispute path.", amount: 8, deadline }).bounty;
+      criteria: "Fixture row for the dispute path.", amount: 8, deadline, verifierId: "codex" }).bounty;
     escrow.fundBounty("commons", second.bountyId, { funder: poster });
     escrow.claimBounty("commons", second.bountyId, { claimant });
     escrow.submitWork("commons", second.bountyId, { claimant,

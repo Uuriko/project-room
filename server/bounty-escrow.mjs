@@ -2315,7 +2315,8 @@ export class BountyEscrow {
 
   // Arbitrator cards are drawn from CURRENT room membership — never a
   // hardcoded lane list. A lane that leaves (or never joined) cannot be
-  // seated; the dispute path then reports honestly-unavailable.
+  // seated; a dispute that would need that seat is refused as honestly
+  // unavailable (#3727).
   _laneCards(roomId) {
     const members = this._members(roomId);
     if (members === null) {
@@ -2364,6 +2365,41 @@ export class BountyEscrow {
       const required = Math.ceil(bounty.amountMillis * DISPUTE_BOND_RATIO);
       check(bondMillis === required, "invalid_bond",
         `dispute bond must be exactly 25% of the bounty (${toCredits(required)} credits)`);
+      // Seat-or-refuse (#3727): a dispute must never open into an empty
+      // decider seat. The designated tier-1 decider is the only
+      // authorized decider in slice 1 — panel-majority voting arrives
+      // in a later slice — so when no decider can be seated (no decider
+      // designated at posting, or the designee cannot sit: no longer an
+      // enrolled lane or active member, or not independent of the
+      // claimant or the challenger) the dispute is honestly unavailable
+      // and is refused HERE, before the challenger's bond locks. Opening
+      // anyway froze the bounty and the bond for 14 days in a record
+      // nobody could ever rule on; the timeout default is the backstop
+      // for disputes that stall, not for disputes undecidable from the
+      // start. The designation is the bounty's named dispute decider
+      // when one was set at posting, else its designated verifier.
+      const designatedDecider = bounty.disputeDecider ?? bounty.verifier;
+      let seating = null;
+      if (designatedDecider) {
+        const lanes = this._laneCards(roomId);
+        // Lane cards enumerate agent members; a designated HUMAN decider
+        // (a human-mode room's named reviewer) is seated from their live
+        // membership instead. Independence from the claimant — and from
+        // the challenger, an independence input since #3866: a designee
+        // who raised this dispute is ineligible for its seat
+        // (party-as-judge) — remains resolveTier1's check, keyed off the
+        // same `unavailable` signal the decide-time guard uses.
+        if (!lanes.some(card => card.lane === designatedDecider)) {
+          const member = this._memberOf(roomId, designatedDecider);
+          if (member && member.active !== false)
+            lanes.push({ lane: designatedDecider, trust_level: "standard" });
+        }
+        seating = this._arbiters.resolveTier1({ verifierId: designatedDecider,
+          executor: { lane: bounty.claimant }, challenger: { lane }, lanes });
+      }
+      check(seating !== null && !seating.unavailable, "dispute_unavailable",
+        `dispute is unavailable for this bounty: ${seating?.reason
+          ?? "no designated decider — a dispute needs a dispute decider (or verifier) named at posting to seat its decider"}`);
       this._requirePayable(roomId, lane, bondMillis, "dispute bond");
       const at = isoNow(this.nowMs());
       const disputeId = newId("dsp_");
@@ -2383,38 +2419,9 @@ export class BountyEscrow {
         this._persistDispute(roomId, dispute);
         dispute = machine.submitEvidence(disputeId, { by: lane, summary: grounds });
         this._persistDispute(roomId, dispute);
-        // Seat the decider: the designated tier-1 arbiter is the only
-        // authorized decider in slice 1 — the bounty's designated dispute
-        // decider when one was named at post time, else its designated
-        // verifier. Panel-majority voting arrives in a later slice, so
-        // without a designation there is no authorized decider: the
-        // dispute is marked honestly unavailable and the 14-day timeout
-        // default (RELEASE) is the backstop.
-        const designatedDecider = bounty.disputeDecider ?? bounty.verifier;
-        let seating = null;
-        if (designatedDecider) {
-          const lanes = this._laneCards(roomId);
-          // Lane cards enumerate agent members; a designated HUMAN decider
-          // (a human-mode room's named reviewer) is seated from their live
-          // membership instead. Independence from the claimant remains
-          // resolveTier1's check, and the challenger is now an independence
-          // input beside it: a designee who raised this dispute is
-          // ineligible for its seat (party-as-judge) and seating falls
-          // through to the honest-unavailable path below.
-          if (!lanes.some(card => card.lane === designatedDecider)) {
-            const member = this._memberOf(roomId, designatedDecider);
-            if (member && member.active !== false)
-              lanes.push({ lane: designatedDecider, trust_level: "standard" });
-          }
-          seating = this._arbiters.resolveTier1({ verifierId: designatedDecider,
-            executor: { lane: bounty.claimant }, challenger: { lane }, lanes });
-        }
-        if (!seating || seating.unavailable) {
-          dispute = machine.markUnavailable(disputeId,
-            seating?.reason ?? "no-designated-verifier: panel-majority voting is not in slice 1");
-        } else {
-          dispute = machine.seatDecider(disputeId, { decider: seating.decider.lane });
-        }
+        // Seat the decider resolved (and required) above: the dispute
+        // reaches the machine only once a tier-1 decider exists (#3727).
+        dispute = machine.seatDecider(disputeId, { decider: seating.decider.lane });
         this._persistDispute(roomId, dispute);
       } catch (error) {
         // #3275: the machine Map is not transactional — a rollback here
@@ -2547,7 +2554,7 @@ export class BountyEscrow {
       forfeitedBond: packet.forfeitedBond, actor }) ?? [];
   }
 
-  _settleDispute(bounty, { outcome, terminal, reasonCodes = [], bondSnapshot, forfeitedBond, actor }) {
+  _settleDispute(bounty, { outcome, terminal, reasonCodes = [], bondSnapshot, forfeitedBond, actor, bondToChallenger = false }) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     const at = isoNow(this.nowMs());
     const amount = bounty.amountMillis;
@@ -2642,7 +2649,15 @@ export class BountyEscrow {
         this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
           amountMillis: amount, kind: "approve", bountyId, lotId, memo: `dispute ${outcome}: award vests`, actor });
         if (typeof bondSnapshot === "number") {
-          if (forfeited || terminal === "timeout")
+          if (bondToChallenger)
+            // #3727 legacy guard: the record carries no seated decider
+            // (opened before disputeBounty learned to refuse an empty
+            // seat), so no ruling was ever possible and the challenger
+            // was never heard. Their bond comes home — it never
+            // compensates the worker for a hearing that could not happen.
+            this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
+              amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "undecidable dispute: bond returned to challenger", actor });
+          else if (forfeited || terminal === "timeout")
             this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: POOL_ACCOUNT, state: "payable" },
               amountMillis: bondSnapshot, kind: "bond-forfeit", bountyId, lotId: newId("lot_"), memo: `dispute ${outcome}: bond forfeited to pool`, actor });
           else
@@ -2867,8 +2882,12 @@ export class BountyEscrow {
       }
       if (bounty.disputeOpenedMs !== null && now - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS) {
         // Unresolved > 14d: permissionless finalize defaults to RELEASE.
+        // A record with no seated decider is a pre-#3727 legacy row —
+        // undecidable from the start — so its bond returns to the
+        // challenger instead of compensating the worker.
         const signed = this._settleDispute(bounty, { outcome: "timeout-default", terminal: "timeout",
-          bondSnapshot: dispute.bondSnapshot, forfeitedBond: 0, actor });
+          bondSnapshot: dispute.bondSnapshot, forfeitedBond: 0, actor,
+          bondToChallenger: !dispute.decider });
         return { action: "released", signed };
       }
     }

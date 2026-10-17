@@ -7878,9 +7878,13 @@ paths:
       summary: Dispute an accepted bounty
       description: |
         Challenger stakes a bond of exactly 25% of the bounty (the minimum
-        and the cap). The designated third-lane verifier, if one was named
-        at posting, seats as the decider; otherwise the dispute is honestly
-        unavailable and the 14-day timeout default (RELEASE) is the backstop.
+        and the cap). The designated decider — the dispute decider named
+        at posting, else the designated verifier — seats as the decider;
+        if no decider can be seated the
+        dispute is honestly unavailable and the request is refused
+        (`dispute_unavailable`) before any bond locks — a dispute never
+        opens into an empty decider seat. The 14-day timeout default
+        (RELEASE) remains the backstop for disputes that stall undecided.
         Disputes open only on accepted work (#3726): a bounty in any other
         state (including `submitted`) is refused 422 `invalid_state` before
         any bond is checked or locked. Emits `bounty.disputed`. API keys
@@ -7915,7 +7919,7 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '409': { description: dispute_exists }
-        '422': { description: invalid_bounty_input }
+        '422': { description: invalid_bounty_input, dispute_unavailable }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide:
     post:
       summary: Rule on a dispute (seated decider only)
