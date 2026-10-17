@@ -8,21 +8,25 @@
 // escrow freezes finality while a dispute runs and records the verdict
 // before any finality move.
 //
-// Escalation ladder:
+// Ladder:
 //   opened -> challenged -> evidence -> adjudicating -> decided -> resolved
-//                                      decided -> appealed -> adjudicating (tier+1)
-//   opened/challenged/evidence/adjudicating/appealed -> withdrawn
 //
 // - opened: dispute raised with standing; bond snapshot taken (economic) or
 //   bond: "none" (coordination).
 // - challenged: the target receipt/accept is frozen while the dispute runs.
 // - evidence: parties post EVIDENCE: entries.
 // - adjudicating: a decider is seated (mechanical ADJUDICATE:), time-boxed.
-// - decided: ruling issued with reason codes. Terminal unless appealed.
-// - appealed: escalation to the next tier with a doubled bond (loser-pays).
-// - resolved: final. withdrawn: disputant withdrew, bond forfeit.
+// - decided: ruling issued with reason codes.
+// - resolved: final (an unappealed decision finalizes).
 // - unavailable(<reason>): honest-unavailable overlay, not a state — the
 //   dispute is recorded but cannot proceed until an arbitrator exists.
+//
+// R-1 (#3726 rider): the appeal/withdraw rungs (appeal, escalate, withdraw,
+// requiredAppealBond) were removed — no production consumer ever called them
+// (the escrow drives open/challenge/evidence/seat/decide/finalize only), and
+// unreachable money-adjacent surface is a liability, not an option. The
+// `tier`/`escalations` record fields remain for persisted-row shape
+// compatibility and are always 0/[] in practice.
 //
 // All state is caller-owned (a Map); the module is pure and dependency-free.
 // Frozen outputs; malformed inputs and illegal transitions throw
@@ -31,7 +35,7 @@
 const MAX_DISPUTE_COST_RATIO = 0.25;
 const STATES = Object.freeze([
   "opened", "challenged", "evidence", "adjudicating",
-  "decided", "appealed", "resolved", "withdrawn",
+  "decided", "resolved",
 ]);
 // Fixed reason-code vocabulary (docs/ROOM-PROTOCOL.md § dispute grammar).
 const REASON_CODES = Object.freeze([
@@ -40,7 +44,7 @@ const REASON_CODES = Object.freeze([
   "verifier-conflict", "no-arbitrator",
 ]);
 const OUTCOMES = Object.freeze(["upheld", "rejected", "split", "frivolous"]);
-const TERMINAL = new Set(["resolved", "withdrawn"]);
+const TERMINAL = new Set(["resolved"]);
 const MIN_BOND_RATIO = 0.05; // open bond = max($1, 5% of bounty)
 
 class DisputeError extends Error {
@@ -168,8 +172,8 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
     return updated;
   };
 
-  // Issue a ruling: adjudicating -> decided. A frivolous ruling forfeits the
-  // bond and carries no appeal as of right.
+  // Issue a ruling: adjudicating -> decided. A frivolous ruling forfeits
+  // the bond to the pool (applied by the escrow settlement).
   const decide = (disputeId, { outcome, reasonCodes, decider }) => {
     const current = get(disputeId);
     requireState(current, "adjudicating");
@@ -183,60 +187,14 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
     const resolution = Object.freeze({ outcome,
       reasonCodes: Object.freeze([...reasonCodes]),
       decider: decider ?? current.decider });
-    // Annotate the latest escalation with the decision (loser-pays is
-    // computed in the economic wiring slice).
-    const escalations = current.escalations.map((e, i) =>
-      i === current.escalations.length - 1 && e.decision === undefined
-        ? Object.freeze({ ...e, decision: outcome }) : e);
     const updated = Object.freeze({ ...current, state: "decided", resolution,
-      forfeitedBond, escalations: Object.freeze(escalations) });
+      forfeitedBond });
     set(updated);
     return updated;
   };
 
-  // Bond required to appeal into the next tier: 2x the current tier's bond.
-  const requiredAppealBond = dispute =>
-    dispute.kind === "coordination" ? "none" : dispute.bondSnapshot * 2 ** (dispute.tier + 1);
-
-  // Appeal a decision: decided -> appealed. A frivolous ruling has no appeal
-  // as of right.
-  const appeal = (disputeId, { by, bond }) => {
-    const current = get(disputeId);
-    requireState(current, "decided");
-    nonEmptyString(by, "by");
-    if (current.resolution.outcome === "frivolous")
-      fail("frivolous", `dispute "${disputeId}" was ruled frivolous: no appeal as of right`);
-    const required = requiredAppealBond(current);
-    if (required === "none") {
-      check(bond === undefined || bond === "none", 'coordination appeal carries bond: "none"');
-    } else {
-      if (!Number.isFinite(bond))
-        fail("bond-missing", `appeal requires a bond of at least ${required} (2x tier-${current.tier} bond)`);
-      check(bond >= required, `appeal bond ${bond} is below the required ${required} (2x tier-${current.tier} bond)`);
-    }
-    const escalations = Object.freeze([...current.escalations,
-      Object.freeze({ tier: current.tier + 1, appellant: by,
-        bond: required === "none" ? "none" : bond })]);
-    const updated = Object.freeze({ ...current, state: "appealed", escalations,
-      decider: null });
-    set(updated);
-    return updated;
-  };
-
-  // Move an appealed dispute into the next adjudication tier:
-  // appealed -> adjudicating (tier+1).
-  const escalate = (disputeId, { decider }) => {
-    const current = get(disputeId);
-    requireState(current, "appealed");
-    nonEmptyString(decider, "decider");
-    const updated = Object.freeze({ ...current, state: "adjudicating",
-      tier: current.tier + 1, decider, resolution: null });
-    set(updated);
-    return updated;
-  };
-
-  // Optimistic finality: an unappealed decision finalizes to resolved.
-  // Fires the single onDisputeFinalized callback for the adjudicated path.
+  // Finality: a decision finalizes to resolved. Fires the single
+  // onDisputeFinalized callback for the adjudicated path.
   const finalize = disputeId => {
     const current = get(disputeId);
     requireState(current, "decided");
@@ -245,22 +203,8 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
     return notifyFinalized(updated, "resolved");
   };
 
-  // Disputant withdraws: bond forfeit (UMA _computeBurnedBond shape).
-  // The escrow is notified too — the bond forfeiture settles on this packet.
-  const withdraw = (disputeId, { by } = {}) => {
-    const current = get(disputeId);
-    requireState(current, "opened", "challenged", "evidence", "adjudicating", "appealed");
-    if (by !== undefined) nonEmptyString(by, "by");
-    const forfeitedBond = typeof current.bondSnapshot === "number"
-      ? current.forfeitedBond + current.bondSnapshot : current.forfeitedBond;
-    const updated = Object.freeze({ ...current, state: "withdrawn", forfeitedBond,
-      withdrawnBy: by ?? null });
-    set(updated);
-    return notifyFinalized(updated, "withdrawn");
-  };
-
-  // Record a dispute cost. Refuses when it would exceed the 25% cap — the cap
-  // spans the whole escalation because every tier shares one dispute record.
+  // Record a dispute cost. Refuses when it would exceed the 25% cap of the
+  // bounty (the cap spans the whole dispute record).
   const recordCost = (disputeId, amount) => {
     const current = get(disputeId);
     if (TERMINAL.has(current.state) || current.state === "decided")
@@ -292,8 +236,8 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
   };
 
   return Object.freeze({ open, challenge, submitEvidence, seatDecider, decide,
-    appeal, escalate, finalize, withdraw, recordCost, markUnavailable,
-    clearUnavailable, get, requiredAppealBond,
+    finalize, recordCost, markUnavailable,
+    clearUnavailable, get,
     size: () => disputes.size, MAX_DISPUTE_COST_RATIO, STATES, REASON_CODES, OUTCOMES });
 }
 export { DisputeError, REASON_CODES, OUTCOMES };

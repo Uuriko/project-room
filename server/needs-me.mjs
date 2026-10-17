@@ -4,7 +4,17 @@ import { sessionWatermark } from "./read-cursor.mjs";
 // One read replaces listing rooms and then opening each inbox. Items are
 // mentions, direct reply asks, open handoffs, unread DMs, bond requests,
 // and land-queue rows this member owns that have changed. Each item carries
-// roomId, a seq cursor, and a suggested next tool call.
+// roomId, a seq cursor, and a suggested next tool call. Standing sections
+// ride beside items and never move the cursor: openWork (ready Board work),
+// reviewAsks (deliveries naming me as reviewer), myWork (my claims whose
+// lease is expiring or that sit idle), myClaims (every open claim I own,
+// with its state and next lifecycle step), and actionsNeeded (my claims
+// whose recorded CI failed or whose current delivery drew a
+// changes-requested review). myClaims/actionsNeeded (agent-inbox v1) close
+// the last gap where a polling agent had to re-read a whole room or board
+// to answer "what is mine and what is broken": the CI rollup and reviews
+// already live on the claim record (recordCi / recordReview), so these
+// sections compose that state instead of recomputing it.
 //
 // since is a sequence number (applied per room) or the previous cursor
 // { rooms: { roomId: seq }, land: { roomId: updatedAt } }. Land-queue
@@ -19,7 +29,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
-import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 
 const MAX_ROOMS = 40;
@@ -429,6 +439,116 @@ export function myWorkOf(store, roomId, memberId, claims = null, nowMs = Date.no
   return { roomId, count: rows.length, top: rows.slice(0, MY_WORK_SHOWN) };
 }
 
+const MY_CLAIMS_SHOWN = 10;
+const ACTIONS_NEEDED_SHOWN = 8;
+const MY_CLAIM_STATES = new Set([...ACTIVE_CLAIM_STATES, "delivered"]);
+
+// The owner's next lifecycle step, read off the one lifecycle table
+// (work-claims CLAIM_LIFECYCLE) so this surface cannot drift from the
+// verbs the update route actually accepts. A delivered claim has no
+// owner-forward verb: the step belongs to its reviewers.
+function ownerNextAction(item) {
+  const row = CLAIM_LIFECYCLE[item.state] ?? {};
+  if (Object.hasOwn(row, "start")) return "start";
+  if (Object.hasOwn(row, "finish")) return "finish";
+  if (item.state === "delivered") return "await_review";
+  return null;
+}
+
+// A changes-requested verdict that still asks the CURRENT owner for work:
+// recorded against this ownership round (same owner + claimedAt as the live
+// claim) and, when both carry it, the live delivery generation. A verdict
+// from a released/re-claimed round or an earlier delivery is history.
+function changesRequestedOf(item) {
+  let latest = null;
+  for (const review of item.reviews ?? []) {
+    if (review?.verdict !== "changes_requested") continue;
+    const basis = review.basis;
+    if (!basis || basis.owner !== item.owner || basis.claimedAt !== item.claimedAt) continue;
+    if (Number.isSafeInteger(basis.deliveryGeneration) && Number.isSafeInteger(item.deliveryGeneration)
+      && basis.deliveryGeneration !== item.deliveryGeneration) continue;
+    if (!latest || String(review.at ?? "") > String(latest.at ?? "")) latest = review;
+  }
+  return latest;
+}
+
+// Every open claim this member owns, with state and next step (agent-inbox
+// v1). myWork above flags only the two urgent cases (lease expiring, idle);
+// an agent planning its turn needs the full list without re-reading the
+// board. Standing state like openWork: never moves the cursor. The filter
+// is ownership within rooms the identity already belongs to, so it exposes
+// nothing the member could not already see on that room's Board.
+export function myClaimsOf(store, roomId, memberId, claims = null) {
+  const list = claims ?? claimBoardOf(store, roomId);
+  if (!list) return null;
+  const mine = list.filter(item => item && item.owner === memberId && MY_CLAIM_STATES.has(item.state) && !item.supersededBy);
+  if (!mine.length) return null;
+  const rank = { blocked: 0, in_progress: 1, claimed: 2, delivered: 3 };
+  mine.sort((a, b) => rank[a.state] - rank[b.state]
+    || String(claimUpdatedAt(b) ?? "").localeCompare(String(claimUpdatedAt(a) ?? ""))
+    || String(a.id).localeCompare(String(b.id)));
+  const byState = {};
+  for (const item of mine) byState[item.state] = (byState[item.state] ?? 0) + 1;
+  return {
+    roomId,
+    count: mine.length,
+    byState,
+    top: mine.slice(0, MY_CLAIMS_SHOWN).map(item => ({
+      id: item.id,
+      title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      state: item.state,
+      next: ownerNextAction(item),
+      ...(item.leaseExpiresAt ? { leaseExpiresAt: item.leaseExpiresAt } : {}),
+      ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
+      ...(item.ci?.state ? { ci: item.ci.state } : {}),
+      ...(changesRequestedOf(item) ? { changesRequested: true } : {})
+    })),
+    next: `GET /api/rooms/${encodeURIComponent(roomId)}/work-claims`
+  };
+}
+
+// Needed actions on work this member owns (agent-inbox v1): the claim's
+// recorded CI rollup failed, or a reviewer asked for changes on the current
+// delivery. Both already wake the owner once (work-claim-events); this is
+// the standing state a polling agent can re-read after a missed wake,
+// instead of re-reading the board to find what is broken. PR checks for
+// work NOT linked to a room claim have no in-room record and are out of
+// scope here — the land-queue items above carry their own checks_state.
+export function actionsNeededOf(store, roomId, memberId, claims = null) {
+  const list = claims ?? claimBoardOf(store, roomId);
+  if (!list) return null;
+  const rows = [];
+  for (const item of list) {
+    if (!item || item.owner !== memberId || item.supersededBy || !MY_CLAIM_STATES.has(item.state)) continue;
+    const title = String(item.title ?? "").slice(0, OPEN_WORK_TITLE);
+    const at = claimUpdatedAt(item) ?? "";
+    if (item.ci?.state === "failure") {
+      rows.push({
+        id: item.id, title, why: "ci_failed", at,
+        ...(item.ci.url ? { ciUrl: item.ci.url } : {}),
+        ...(item.ci.headSha ? { headSha: item.ci.headSha } : {}),
+        ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {})
+      });
+    }
+    const changes = changesRequestedOf(item);
+    if (changes) {
+      rows.push({
+        id: item.id, title, why: "changes_requested", at,
+        by: changes.memberId,
+        summary: clip(changes.summary)
+      });
+    }
+  }
+  if (!rows.length) return null;
+  rows.sort((a, b) => String(b.at).localeCompare(String(a.at)) || String(a.id).localeCompare(String(b.id)));
+  return {
+    roomId,
+    count: rows.length,
+    top: rows.slice(0, ACTIONS_NEEDED_SHOWN).map(({ at, ...row }) => row),
+    next: `GET /api/rooms/${encodeURIComponent(roomId)}/work-claims`
+  };
+}
+
 export function collectNeedsMe(store, secret, { since } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -459,6 +579,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const openWork = [];
   const reviewAsks = [];
   const myWork = [];
+  const myClaims = [];
+  const actionsNeeded = [];
   let roomAfter = parsed.roomAfter ?? "";
   let hasMore = links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
@@ -478,6 +600,10 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (asks) reviewAsks.push(asks);
     const mine = myWorkOf(store, link.roomId, link.memberId, claims);
     if (mine) myWork.push(mine);
+    const owned = myClaimsOf(store, link.roomId, link.memberId, claims);
+    if (owned) myClaims.push(owned);
+    const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
+    if (needed) actionsNeeded.push(needed);
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
@@ -532,5 +658,13 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // delivered state exact and nothing replays.
   const cursor = { rooms, land, landIds, ...(parsed.number !== null && hasMore ? { floor: parsed.number } : {}), ...(hasMore ? { roomAfter } : {}) };
   items.sort((a, b) => a.roomId.localeCompare(b.roomId) || b.seq - a.seq);
-  return { identityId: identity.identityId, items, ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), cursor, hasMore, untrusted: true };
+  // R327-1 (r6): tell a paused agent it is paused. Items stay readable (this
+  // is a read surface) but carry paused:true; `paused` names each paused room
+  // and who holds the pause.
+  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p => !allowedRooms || allowedRooms.includes(p.roomId)) ?? [];
+  if (pausedRooms.length) {
+    const held = new Set(pausedRooms.map(p => p.roomId));
+    for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
+  }
+  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
 }

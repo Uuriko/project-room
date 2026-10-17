@@ -7,7 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../server/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, DISCOVERY_PATHS, JOIN_TIERS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
@@ -142,6 +142,24 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(packetSkill.description, /After paste/);
   assert.match(packetSkill.description, /shared invitation/);
   assert.doesNotMatch(agentCardJson(), FORBIDDEN);
+});
+
+test("both packets disclose the trial-seat mint requirement where they teach guest-agent-link (#3432)", () => {
+  // The guest door was taught as plain "owner-issued" while the mint gate
+  // requires the owner's signed-in account session — agent owners followed
+  // the packet into a 403 whose advice looped back at them. The disclosure
+  // rides the same sentence that presents the door, in both packets, and
+  // in the JOIN_TIERS summary agents read first.
+  for (const packet of [llmsTxt(), llmsFullTxt()]) {
+    const line = packet.split("\n").find(l => l.startsWith("- guest-agent-link"));
+    assert.ok(line, "guest-agent-link join line present");
+    assert.match(line, /signed-in account session/);
+    assert.match(line, /agent identity cannot mint/);
+    assert.match(line, /Add agent/);
+  }
+  const tier = JOIN_TIERS.find(row => row.id === "guest-agent-link");
+  assert.match(tier.summary, /signed-in account session/);
+  assert.match(tier.summary, /agent identity cannot mint/);
 });
 
 test("join prompt is one paste, secret-free, and served at /join.txt", () => {

@@ -3,13 +3,15 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
-import { syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { staleSweepDueAt, syncClaimPullRequests } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -18,6 +20,10 @@ import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/
 import { growthCollector } from "../src/growth-emit.js";
 import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
 
+// One cooperative budget for every job on both runtimes: each job gets
+// this long per tick, measured from the job's own start and enforced at
+// the jobs' step checkpoints — not a hard per-step bound. The Worker
+// derives its CRON_JOB_BUDGET_MS from this constant (#3767).
 export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
 export const HOUR_MS = 60 * MINUTE_MS;
@@ -273,10 +279,10 @@ export const JOBS = Object.freeze([
     enabled(_env, store) {
       if (!store) return true;
       const now = Date.now();
-      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null;
+      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null || staleSweepDueAt(store, now) != null;
     },
-    disabledReason: () => "No open pull request is waiting",
-    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now),
+    disabledReason: () => "No open pull request or stale board sweep is waiting",
+    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? staleSweepDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
@@ -317,6 +323,33 @@ export const JOBS = Object.freeze([
         const integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
+        // Isolated failures: the store contained one record's blast radius
+        // and returned the outstanding failures instead of throwing. The
+        // tick still fails — the verdict is unchanged — with the same
+        // sanitized detail shape as the throw path (stable codes and
+        // classes only; record ids stay in the operator log line).
+        const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
+        if (failures.length) {
+          const first = failures[0];
+          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+          // The operator line carries the allowlisted fields only —
+          // sub-check, record id, stable code, class, count. The stored
+          // failure message is a diagnostic for the record's owner, not
+          // log text: re-emitting it here every tick would republish
+          // whatever a record's error once contained.
+          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
+          const summary = {};
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept"]) {
+            if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
+          }
+          return {
+            ...summary,
+            errors: failures.length,
+            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+            failureDetail: failure
+          };
+        }
         return logIntegrity(integrity);
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
@@ -344,6 +377,41 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "public-work-reseed",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #3530: the keeper is due only when the public board's claimable
+    // supply is exactly zero and at least one anchored starter seed has
+    // a fully submitted latest round to advance.
+    enabled(_env, store) {
+      if (!store?.publicWorkClaims) return false;
+      const status = store.publicWorkClaims.starterPoolStatus();
+      return status.available && status.anchored > 0 && status.claimable === 0 && status.due.length > 0;
+    },
+    disabledReason: () => "Public-work starter pool has claimable tasks or no seed round is due",
+    async run(store, ctx) {
+      if (ctx.room?.reseedPublicWorkStarters) return ctx.room.reseedPublicWorkStarters();
+      return store.publicWorkClaims.reseedStarterPool();
+    }
+  }),
+  defineJob({
+    name: "escrow-epochs",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #3693/#3844: payout epochs progress on their own. The keeper is due
+    // whenever any bounty is waiting on time — an accepted bounty past its
+    // challenge window, an approved one awaiting its sweep, a dispute past
+    // its timeout, a deadline refund. One closeEpoch per room per tick:
+    // the two-step close (approve, then sweep) is never collapsed.
+    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
+    disabledReason: () => "No bounty is waiting on an epoch close",
+    nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
+    async run(store, ctx) {
+      if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
+      return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });
+    }
+  }),
+  defineJob({
     name: "room-backup",
     cadenceMs: DAY_MS,
     slow: true,
@@ -358,6 +426,25 @@ export const JOBS = Object.freeze([
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
         return { errors: 1 };
       }
+    }
+  }),
+  defineJob({
+    name: "patrol",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // ClueBot phase 1: enabled only while some room has events the patrol
+    // has not tailed, so an idle room never wakes for it (the registry's
+    // standing rule). Read-only: the patrol files findings, it never acts.
+    enabled: (_env, store) => (store ? patrolPending(store) : true),
+    disabledReason: () => "No unpatrolled events are waiting",
+    // Due at the caller's `now`, never a live Date.now(): a fresh clock
+    // read lands a hair past the arming computation, slips past the
+    // registry's push-out-by-one-cadence rule, and arms the alarm
+    // immediately — an idle room would wake at once (jobs-alarm proof).
+    nextDueAt: (store, now) => (patrolPending(store) ? now : null),
+    async run(store, ctx) {
+      if (ctx.room?.patrolTick) return ctx.room.patrolTick();
+      return runPatrolTick(store, { deadline: ctx.deadline });
     }
   }),
   defineJob({
@@ -450,6 +537,27 @@ function finiteInterval(value, fallback) {
   return number;
 }
 
+// #3767 (with #3698): budgetExceeded is cooperative progress when the
+// tick moved the job's own counters — the next tick continues the
+// remainder. It is not progress when the tick did nothing at all: the
+// job was starved before it started (its deadline had already passed)
+// and the stall would otherwise be recorded as a plain success on every
+// tick. Progress is a positive value in any of the summary's own work
+// counters; the fields below never count — the exhaustion signal
+// itself, the failure channel (already graded as a failure), a
+// remaining-work gauge, a timestamp, and a configured batch limit.
+const NON_PROGRESS_FIELDS = new Set(["budgetExceeded", "errors", "pending", "at", "batchLimit"]);
+export const BUDGET_EXHAUSTED_NO_PROGRESS = "budget_exceeded_no_progress";
+export function budgetExhaustedWithoutProgress(result) {
+  if (!result || typeof result !== "object") return false;
+  if (!(result.budgetExceeded === true || Number(result.budgetExceeded) > 0)) return false;
+  for (const [key, value] of Object.entries(result)) {
+    if (NON_PROGRESS_FIELDS.has(key)) continue;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return false;
+  }
+  return true;
+}
+
 // Node has no Durable Object alarm. One unref'd timer asks each node job
 // whether it is due. The immediate webhook kick still flushes a delivery
 // that was just committed; this timer is the retry backstop.
@@ -518,11 +626,18 @@ export function startNodeScheduler({
     }
     return Object.keys(out).length ? out : null;
   };
-  const record = (name, at, ok, { error = null, failure = null, durationMs = null } = {}) => {
+  const record = (name, at, ok, { error = null, failure = null, grade = null, durationMs = null } = {}) => {
     const prior = records.get(name) ?? { consecutiveFailures: 0 };
+    // #3767: the grade names a success that did no work (budget exhausted
+    // with zero progress). Consecutive such ticks are the degraded
+    // signal; any other outcome — progress, an idle tick, or a failure —
+    // breaks the streak and clears the grade.
+    const exhausted = grade === BUDGET_EXHAUSTED_NO_PROGRESS;
     records.set(name, ok
-      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null }
-      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure });
+      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null,
+        lastGrade: grade, consecutiveNoProgressExhaustions: exhausted ? (prior.consecutiveNoProgressExhaustions ?? 0) + 1 : 0 }
+      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure,
+        lastGrade: null, consecutiveNoProgressExhaustions: 0 });
   };
   // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
   // store progress on it across ticks (runNodeRetention advances
@@ -544,8 +659,12 @@ export function startNodeScheduler({
         if (!jobEnabled(job, env, store)) continue;
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
         if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
-        const deadline = at + (job.budgetMs ?? JOB_BUDGET_MS);
+        // #3767: the budget window opens at this job's own start, not at
+        // the pass start — the Worker builds each runner's deadline when
+        // the job runs. A pass-relative deadline let early jobs burn the
+        // later jobs' windows down to nothing.
         const startedAt = now();
+        const deadline = startedAt + (job.budgetMs ?? JOB_BUDGET_MS);
         try {
           // Jobs run sequentially under the `running` guard, so sharing
           // ctxBase is safe; only the per-job deadline changes between runs.
@@ -553,12 +672,19 @@ export function startNodeScheduler({
           const result = await job.run(store, ctxBase);
           lastRan.set(job.name, at);
           const failed = summaryFailed(result);
+          // #3767/#3698: a tick that exhausted its budget having done
+          // zero work is not an unqualified success — name the
+          // exhaustion in the outcome and the run record. It is still
+          // not a failure: budgetExceeded with progress made is
+          // cooperative, and the next tick continues the remainder.
+          const grade = !failed && budgetExhaustedWithoutProgress(result) ? BUDGET_EXHAUSTED_NO_PROGRESS : null;
           record(job.name, at, !failed, {
             error: failed ? (result.scanError ? `scanError: ${oneLine(result.scanError)}` : `${Number(result.errors) || 0} error(s) in tick`) : null,
             failure: failed ? failureDetailOf(result) : null,
+            grade,
             durationMs: now() - startedAt
           });
-          outcomes.push({ job: job.name, ok: true, result });
+          outcomes.push(grade ? { job: job.name, ok: true, grade, result } : { job: job.name, ok: true, result });
         } catch (error) {
           lastRan.set(job.name, at);
           record(job.name, at, false, { error: oneLine(error?.message ?? error), failure: failureDetailOf(error), durationMs: now() - startedAt });
@@ -602,6 +728,8 @@ export function startNodeScheduler({
           lastErrorRecordClass: rec.lastFailure?.recordClass ?? null,
           lastDurationMs: rec.lastDurationMs ?? null,
           lastSummaryAt: iso(rec.lastSummaryAt),
+          lastGrade: rec.lastGrade ?? null,
+          consecutiveNoProgressExhaustions: rec.consecutiveNoProgressExhaustions ?? 0,
           consecutiveFailures: rec.consecutiveFailures ?? 0
         };
       });

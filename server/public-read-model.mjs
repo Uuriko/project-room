@@ -8,15 +8,25 @@ import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "..
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
+const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
+// The member receipt's public twin (#3636): the same deterministic id the
+// projection writes, and the absolute URL a holder can share.
+export const publicWorkClaimReceiptId = (roomId, claimId) => hashId("wcr", roomId, claimId);
+export const publicReceiptUrl = id => `${PUBLIC_ORIGIN}/receipts/${id}`;
 const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const OPEN = new Set(["proposed", "accepted", "working", "blocked"]);
-export const PUBLIC_RECEIPT_ID = /^(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32})$/;
+export const PUBLIC_RECEIPT_ID = /^(?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16})$/;
+export const LOT_RECEIPT_ID = /^lot_[a-f0-9]{16}$/;
 export const DIRECTORY_PAGE_SIZE = 50;
 export const PUBLIC_BACKFILL_BATCH = 20;
 
 export const PUBLIC_READ_MODEL_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS public_receipts (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -28,6 +38,7 @@ export const PUBLIC_READ_MODEL_SCHEMA = `
     humans_json TEXT NOT NULL,
     pull_request TEXT,
     merged_at TEXT,
+    verification_state TEXT,
     hashes_json TEXT NOT NULL,
     at TEXT NOT NULL,
     start_href TEXT NOT NULL
@@ -73,6 +84,15 @@ export const PUBLIC_READ_MODEL_SCHEMA = `
 
 const hashId = (prefix, roomId, localId) =>
   `${prefix}_${createHash("sha256").update(`${roomId}\0${localId}`).digest("hex").slice(0, 32)}`;
+
+// Tables created before result-mode receipts projected (#3636) carry no
+// verification_state column; the CREATE above only shapes fresh tables.
+export function ensurePublicReceiptVerificationColumn(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(public_receipts)").all().map(column => column.name));
+  if (columns.size > 0 && !columns.has("verification_state")) {
+    db.exec("ALTER TABLE public_receipts ADD COLUMN verification_state TEXT");
+  }
+}
 
 const httpsUrl = value => {
   if (typeof value !== "string" || value.length > 2048) return null;
@@ -128,6 +148,39 @@ function serverVerifiedMerge(item) {
   return history.some(step => step?.action === "pr_merged");
 }
 
+// The verification fact a done claim carries, named at its true tier
+// (#3636). Two shapes record it. The #3627 verification object is read
+// first when present — its delivered→verify flow stamps the outcome on
+// the claim itself. On main the recorded fact is reviewedBy: the done
+// transition stores the attesting member there, and the route enforced
+// who that may be (canCloseWork) — the owner alone under self_attested,
+// an attested distinct member under the reviewed policies. A reviewer
+// distinct from the worker is a verified completion; anything else is
+// the worker's own attestation, disclosed as such, never upgraded.
+export function workClaimVerificationTier(item) {
+  const recorded = item?.verification;
+  if (recorded && typeof recorded === "object"
+    && (recorded.state === "verified" || recorded.state === "self_attested")) return recorded.state;
+  if (typeof item?.reviewedBy === "string" && item.reviewedBy && item.reviewedBy !== item.owner) return "verified";
+  return "self_attested";
+}
+
+// A done claim with no pull request on it finished by result, not by
+// merge, so it projects at its recorded verification tier. A claim that
+// carries a PR link publishes only through serverVerifiedMerge above:
+// the merge gate owns its public story until the server settles it.
+function resultVerificationTier(item) {
+  if (!item || item.state !== "done") return null;
+  if (pullRequestUrl(item.pullRequest?.url)) return null;
+  return workClaimVerificationTier(item);
+}
+
+function doneAtOf(item) {
+  const history = Array.isArray(item?.history) ? item.history : [];
+  const stamp = [...history].reverse().find(step => step?.action === "state:done");
+  return iso(stamp?.at);
+}
+
 function creditsFrom(people) {
   const agents = [], humans = [];
   for (const person of people) {
@@ -162,23 +215,26 @@ function rowToPublic(row) {
     humans: parseJson(row.humans_json, []),
     pullRequest: row.pull_request,
     mergedAt: row.merged_at,
+    ...(row.verification_state ? { verification: { state: row.verification_state } } : {}),
     hashes: parseJson(row.hashes_json, []),
     at: row.at,
     startHref: row.start_href,
   };
 }
 
-const RECEIPT_COLUMNS = `id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href`;
+const RECEIPT_COLUMNS = `id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, verification_state, hashes_json, at, start_href`;
 
 function insertReceipt(store, row) {
-  store.db.prepare(`INSERT INTO public_receipts (${RECEIPT_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+  store.db.prepare(`INSERT INTO public_receipts (${RECEIPT_COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET
       title=excluded.title, source=excluded.source, origin_room_id=excluded.origin_room_id,
       room_id=excluded.room_id, room_title=excluded.room_title, agents_json=excluded.agents_json,
       humans_json=excluded.humans_json, pull_request=excluded.pull_request, merged_at=excluded.merged_at,
+      verification_state=excluded.verification_state,
       hashes_json=excluded.hashes_json, at=excluded.at, start_href=excluded.start_href`
   ).run(row.id, row.title, row.source, row.originRoomId, row.roomId, row.roomTitle, JSON.stringify(row.agents),
-    JSON.stringify(row.humans), row.pullRequest, row.mergedAt, JSON.stringify(row.hashes), row.at, row.startHref);
+    JSON.stringify(row.humans), row.pullRequest, row.mergedAt, row.verificationState ?? null,
+    JSON.stringify(row.hashes), row.at, row.startHref);
 }
 
 function listedRoomFields(state, listed) {
@@ -196,11 +252,48 @@ function optedInRows(store, state) {
   const rows = [];
   let claims = [];
   try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
-  for (const item of claims) {
-    if (!serverVerifiedMerge(item)) continue;
+  const claimCredits = item => {
     const people = [credit(state, item.owner)];
     for (const step of Array.isArray(item.history) ? item.history : []) people.push(credit(state, step?.agentId));
-    const { agents, humans } = creditsFrom(people);
+    return creditsFrom(people);
+  };
+  for (const item of claims) {
+    if (serverVerifiedMerge(item)) {
+      const { agents, humans } = claimCredits(item);
+      rows.push({
+        id: hashId("wcr", roomId, item.id),
+        title: cleanName(item.title) ?? "Receipt",
+        source: "work-claim",
+        originRoomId: roomId,
+        roomId: room.roomId,
+        roomTitle: room.roomTitle,
+        agents, humans,
+        pullRequest: pullRequestUrl(item.pullRequest?.url),
+        mergedAt: iso(item.pullRequest?.syncedAt),
+        verificationState: null,
+        hashes: hashList(Array.isArray(item.blobs) ? item.blobs : []),
+        at: iso(item.pullRequest?.syncedAt) ?? iso(item.updatedAt) ?? new Date(0).toISOString(),
+        startHref: href,
+      });
+      continue;
+    }
+    // Result-mode finish (#3636): the same wcr_ id, the same public
+    // fields a merge-verified receipt of this class carries, no merge
+    // fields at all, and the recorded verification tier stored on the
+    // row so every surface names it. Re-projection after the server
+    // settles a merge rewrites this same row through the branch above.
+    const tier = resultVerificationTier(item);
+    if (!tier) continue;
+    // A completed board work item projects its own wir_ receipt in the
+    // loop below; the claim the board sync mirrors it into (same id)
+    // must not project the same completion a second time as a wcr_ row.
+    // One completion carries one public receipt, at the work-item
+    // source — this branch's subject is claims with no board item, or
+    // no projected item receipt, behind them.
+    const workItemTwin = state.workItems && typeof state.workItems === "object" ? state.workItems[item.id] : null;
+    if (workItemTwin && workItemTwin.state === "completed"
+      && workItemTwin.receipt && typeof workItemTwin.receipt === "object") continue;
+    const { agents, humans } = claimCredits(item);
     rows.push({
       id: hashId("wcr", roomId, item.id),
       title: cleanName(item.title) ?? "Receipt",
@@ -209,10 +302,11 @@ function optedInRows(store, state) {
       roomId: room.roomId,
       roomTitle: room.roomTitle,
       agents, humans,
-      pullRequest: pullRequestUrl(item.pullRequest?.url),
-      mergedAt: iso(item.pullRequest?.syncedAt),
+      pullRequest: null,
+      mergedAt: null,
+      verificationState: tier,
       hashes: hashList(Array.isArray(item.blobs) ? item.blobs : []),
-      at: iso(item.pullRequest?.syncedAt) ?? iso(item.updatedAt) ?? new Date(0).toISOString(),
+      at: doneAtOf(item) ?? iso(item.updatedAt) ?? new Date(0).toISOString(),
       startHref: href,
     });
   }
@@ -233,6 +327,7 @@ function optedInRows(store, state) {
       agents, humans,
       pullRequest: pullRequestUrl(item.receipt.evidenceUrl),
       mergedAt: null,
+      verificationState: null,
       hashes: hashList(version ? [version] : []),
       at: iso(item.updatedAt) ?? new Date(0).toISOString(),
       startHref: href,
@@ -353,8 +448,30 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const pageWas = publicPage(previous).enabled === true;
   const receiptsOn = publicReceipts(state).enabled === true;
   const receiptsWere = publicReceipts(previous).enabled === true;
-  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere) return;
+  // Lot receipts have no public_receipts row for an opt-out to delete, so
+  // the RECORDED receipts setting is mirrored into
+  // room_public_receipts_setting for the lot read: only a recorded off
+  // hides a lot, and "never recorded" must stay distinguishable from
+  // "recorded false". The setter bumps the recorded revision on every
+  // record, so an unchanged revision needs no write; a null previous
+  // (bootstrap, import, backfill) is an authoritative state and always
+  // re-mirrors.
+  const recorded = state.room.publicReceipts;
+  const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
+  const recordedWas = previous?.room?.publicReceipts ?? null;
+  const mirrorSetting = previous === null
+    || (hasRecorded && (!recordedWas || typeof recordedWas.enabled !== "boolean"
+      || recordedWas.revision !== recorded.revision));
+  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting) return;
   const write = () => {
+    if (mirrorSetting) {
+      if (hasRecorded) {
+        store.db.prepare(`INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?,?)
+          ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, recorded.enabled ? 1 : 0);
+      } else {
+        store.db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
+      }
+    }
     if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
     if (pageOn || pageWas || receiptsOn || receiptsWere) touchPublicWorkListing(store, state);
     if (pageOn) upsertPublicRoom(store, state, auth);
@@ -430,6 +547,7 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
     humans: [],
     pullRequest: null,
     mergedAt: null,
+    verificationState: null,
     hashes,
     at: iso(body.createdAt) ?? new Date(0).toISOString(),
     startHref: startHref(ownerName),
@@ -580,6 +698,34 @@ const HIDDEN_RECEIPT = `NOT EXISTS (
      OR (u.kind='room' AND u.target=public_receipts.room_id)
      OR (u.kind='room' AND u.target=public_receipts.origin_room_id))`;
 
+// The owner half of hidden (#3595): a receipt also stays out when any room
+// it belongs to turned public receipts off (room_directory_settings
+// .public_receipts = 0, default 1). Resolved the way receipts-live resolves
+// the toggle — the origin room, plus the owning room of a public-work
+// receipt through its task record, since a pwr_ row's origin is a namespace
+// rather than a room id. Same predicate the directory receipt count uses.
+const OWNER_HIDDEN_RECEIPT = `NOT EXISTS (
+  SELECT 1 FROM room_directory_settings s
+  WHERE s.public_receipts = 0
+    AND (s.room_id = public_receipts.origin_room_id
+         OR s.room_id IN (
+           SELECT pwt.room_id FROM public_work_receipts pwr
+           JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+           WHERE pwr.receipt_id = public_receipts.id)))`;
+
+// A legacy store whose settings table predates the toggle column has no
+// private rooms by definition (the column's default is public), so the
+// owner-toggle clause applies only where the column can be read.
+function ownerToggleReadable(store) {
+  try {
+    store.db.prepare("SELECT public_receipts FROM room_directory_settings LIMIT 0").all();
+    return true;
+  } catch (error) {
+    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
+    return false;
+  }
+}
+
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
@@ -600,19 +746,30 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
   const filter = receiptFilter(room, needle);
+  // The rows this list could serve: filter matches, minus both kinds of
+  // hidden (operator-unpublished, owner-toggled-off). The page query and
+  // the cursor lookup apply the same set, so a served nextCursor always
+  // names a receipt a follow-up request may anchor on.
+  const visibility = ownerToggleReadable(store) ? [HIDDEN_RECEIPT, OWNER_HIDDEN_RECEIPT] : [HIDDEN_RECEIPT];
   let after = "";
   const afterParams = [];
   if (cursor != null) {
     if (typeof cursor !== "string" || !cursor) {
       return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     }
-    const where = filter.clauses.length ? `WHERE ${filter.clauses.join(" AND ")} AND id=?` : "WHERE id=?";
+    // The cursor must name a receipt this list could serve: a hidden row
+    // is not a valid pagination position — accepting it would confirm the
+    // hidden receipt exists and where it sits in the order (#3595). Both
+    // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
+    // owner public-receipts toggle (OWNER_HIDDEN_RECEIPT). Same 422 as a
+    // never-existent id.
+    const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
     if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
-  const clauses = [...filter.clauses, HIDDEN_RECEIPT];
+  const clauses = [...filter.clauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
@@ -624,8 +781,137 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
 
 export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
+  if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
   return row ? rowToPublic(row) : null;
+}
+
+const cleanText = (value, max) => {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return text ? text.slice(0, max) : null;
+};
+
+const finiteNumber = value => typeof value === "number" && Number.isFinite(value) ? value : null;
+
+// Bounty lot receipts are composed at read time from the escrow ledger —
+// the same derivation the member-gated credits history uses (one lot is
+// one zero-sum journal movement; server/bounty-escrow.mjs history()). No
+// lot rows are stored in public_receipts: the journal is the record, and
+// a stored copy could drift from it. A lot becomes a public receipt only
+// once its bounty carries a recorded settlement verdict (paid out,
+// failed, unverified, or split — every terminal path stamps one via
+// _recordSettlement). Before settlement, and for journal lots that are
+// not bounty movements (transfers carry no bounty_id), the id is a 404.
+// The owner's consent gates it like every other shape, through the
+// switches that can apply to a row-less record: operator unpublish,
+// the directory receipts toggle (receipts-live), and the room's own
+// recorded public-receipts setting — a RECORDED off hides the lot,
+// while a room that never recorded the setting is served by default.
+// Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
+export function publicLotReceiptById(store, id) {
+  if (typeof id !== "string" || !LOT_RECEIPT_ID.test(id)) return null;
+  let entries;
+  try {
+    entries = store.db.prepare(`SELECT entry_id, room_id, account_id, at, kind, bounty_id,
+      amount, lot_state, hash, prev_hash, memo, actor_kind, actor_id, receipt_id
+      FROM bounty_journal WHERE lot_id=? ORDER BY seq LIMIT 100`).all(id);
+  } catch { return null; } // a store with no escrow ledger has no lot receipts
+  if (!entries.length) return null;
+  const first = entries[0];
+  const roomId = first.room_id;
+  const bountyId = first.bounty_id;
+  if (typeof roomId !== "string" || typeof bountyId !== "string" || !bountyId) return null;
+  let bounty;
+  try {
+    bounty = store.db.prepare(`SELECT room_id, title, amount_millis, poster, verifier, claimant,
+      state, rubric_hash, rubric_version, submission_hash, resolution_json, created_at
+      FROM bounty_records WHERE bounty_id=?`).get(bountyId);
+  } catch { return null; }
+  if (!bounty || bounty.room_id !== roomId) return null;
+  let resolution = null;
+  try { resolution = bounty.resolution_json ? JSON.parse(bounty.resolution_json) : null; } catch { resolution = null; }
+  const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
+  if (!settlement || typeof settlement !== "object") return null;
+  if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) return null;
+  // No public_receipts row exists for an opt-out to delete, so the
+  // recorded setting is read from its write-time mirror
+  // (syncRoomPublication). No row means the owner never recorded the
+  // setting, which is not an opt-out.
+  let settingRow = null;
+  try {
+    settingRow = store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
+  } catch { settingRow = null; } // a store without the read-model schema recorded no setting
+  if (settingRow && settingRow.enabled === 0) return null;
+  let roomTitle = null;
+  try {
+    if (isListed(store, roomId)) {
+      roomTitle = cleanName(store.db.prepare("SELECT title FROM public_rooms WHERE slug=?").get(roomId)?.title ?? null);
+    }
+  } catch { roomTitle = null; }
+  const debit = entries.find(entry => entry.amount < 0) ?? null;
+  const credit = entries.find(entry => entry.amount > 0) ?? null;
+  const principal = credit ?? first;
+  const amountMillis = Math.abs(principal.amount);
+  const settledBy = settlement.settledBy && typeof settlement.settledBy === "object"
+    ? { kind: cleanText(settlement.settledBy.kind, 32), id: cleanText(settlement.settledBy.id, 256) }
+    : null;
+  return {
+    schema: "project-room-public-receipt/1",
+    id,
+    title: cleanName(bounty.title) ?? "Bounty",
+    source: "bounty-lot",
+    room: { id: roomId, title: roomTitle },
+    agents: [],
+    humans: [],
+    pullRequest: null,
+    mergedAt: null,
+    hashes: hashList(entries.map(entry => HEX64.test(entry.hash ?? "") ? `sha256:${entry.hash}` : null).filter(Boolean)),
+    at: iso(first.at) ?? new Date(0).toISOString(),
+    startHref: startHref(null),
+    lot: {
+      bountyId,
+      kind: first.kind,
+      kinds: [...new Set(entries.map(entry => entry.kind))],
+      amountMillis,
+      amountCredits: amountMillis / 1000,
+      from: debit ? { account: debit.account_id, lotState: debit.lot_state } : null,
+      to: { account: principal.account_id, lotState: principal.lot_state },
+      memo: cleanText(first.memo, 500),
+      actor: first.actor_kind ? { kind: first.actor_kind, id: first.actor_id } : null,
+      poster: cleanText(bounty.poster, 256),
+      worker: cleanText(bounty.claimant, 256),
+      verifier: cleanText(bounty.verifier, 256),
+      bountyState: cleanText(bounty.state, 32),
+      awardMillis: bounty.amount_millis,
+      awardCredits: finiteNumber(bounty.amount_millis) === null ? null : bounty.amount_millis / 1000,
+      rubricHash: HEX64.test(bounty.rubric_hash ?? "") ? bounty.rubric_hash : null,
+      rubricVersion: Number.isInteger(bounty.rubric_version) ? bounty.rubric_version : null,
+      submissionHash: HEX64.test(bounty.submission_hash ?? "") ? bounty.submission_hash : null,
+      settlement: {
+        kind: cleanText(settlement.kind, 32),
+        workerMillis: Number.isSafeInteger(settlement.workerMillis) ? settlement.workerMillis : null,
+        workerCredits: finiteNumber(settlement.workerCredits),
+        refundMillis: Number.isSafeInteger(settlement.refundMillis) ? settlement.refundMillis : null,
+        refundCredits: finiteNumber(settlement.refundCredits),
+        reason: cleanText(settlement.reason, 500),
+        settledAt: iso(settlement.settledAt),
+        settledBy: settledBy && settledBy.id ? settledBy : null,
+      },
+      movements: entries.map(entry => ({
+        entryId: entry.entry_id,
+        kind: entry.kind,
+        account: entry.account_id,
+        lotState: entry.lot_state,
+        amountMillis: entry.amount,
+      })),
+      entries: entries.map(entry => entry.entry_id),
+      signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
+      journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
+      prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,
+      bountyCreatedAt: iso(bounty.created_at),
+    },
+  };
 }
 
 export function collectPublicReceipts(store) {
@@ -660,12 +946,45 @@ export function loadPublicRoom(store, slug) {
 }
 
 export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at FROM public_rooms ORDER BY slug ASC").all()
+  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all()
     .filter(row => !isUnpublished(store.db, "room", row.slug))
     .map(row => ({
       slug: row.slug,
       setAt: row.set_at,
+      receiptsEnabled: row.receipts_enabled === 1,
     }));
+}
+
+// What one public receipt actually proves, named by its source. Only a
+// work-claim receipt with a merge on it is server-verified: optedInRows
+// projects a claim after serverVerifiedMerge passed (the server's own
+// poll wrote pr_merged + syncedAt). A result-mode work-claim receipt
+// (#3636) carries the verification fact recorded on the claim instead:
+// member-verified when a distinct member reviewed the delivery,
+// self-attested when the worker's own finish is the only record. A
+// work-item receipt is the room's own record of a completion. A
+// public-work receipt records an artifact hash; its checks are
+// worker-reported (verification: "hash_only").
+export function proofLevelOf(receipt) {
+  if (receipt?.source === "work-claim" && receipt.mergedAt && receipt.pullRequest) return "server-verified-merge";
+  if (receipt?.source === "work-claim" && receipt.verification?.state === "verified") return "member-verified-completion";
+  if (receipt?.source === "work-claim" && receipt.verification?.state === "self_attested") return "self-attested-completion";
+  if (receipt?.source === "work-item") return "room-recorded-completion";
+  if (receipt?.source === "public-work") return "artifact-hash-recorded";
+  return "room-recorded";
+}
+
+// Every public receipt that belongs to one room, newest first — the proof
+// page's row set. Same room attribution as roomPageReceipts: rows naming
+// the room directly, plus the room's own work-claim / work-item receipts
+// (origin_room_id) which carry room_id only when the room is listed.
+// Operator unpublish applies here (HIDDEN_RECEIPT); the owner public-
+// receipts toggle is the receipts-live wrapper's job, like every other
+// public receipt read.
+export function roomProofRows(store, slug) {
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
+    WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
+    ORDER BY at DESC, id ASC`).all(slug, slug).map(rowToPublic);
 }
 
 // Newest-first page of receipts that name this room. `after` is the last row

@@ -51,7 +51,7 @@ the credential is issued only at redemption.
 
 | | |
 | --- | --- |
-| Status | `live` — mint is owner-only (`owner_only`) |
+| Status | `live` — mint is owner-only (`owner_only`), from the room owner's signed-in account session or an owner delegate granted by that account (`mintRequires: owner_account_session_or_delegate`); an agent identity bearer cannot mint, even as the room's owner — agent owners admit agents durably with Add agent instead |
 | Invite code | `GX-` + 32 base64url chars. Single-use, stored as a hash, grants nothing by itself |
 | Redemption | guest presents its `ai_…` identity secret (Authorization header) + an Ed25519-signed agent card; the display name comes from the signed card |
 | Credential | issued only at redemption (never posted publicly) |

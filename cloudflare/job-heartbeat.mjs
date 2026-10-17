@@ -1,4 +1,4 @@
-import { JOBS as REGISTRY, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
+import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
@@ -11,7 +11,10 @@ export const HEARTBEAT_STORAGE_KEY = 'cron:job-heartbeats:v1';
 export const STALE_PERIODS = 3;
 // A cron RPC shares the request Durable Object. Each job gets this long,
 // then it stops at the next item so a slow tick cannot pin the input gate.
-export const CRON_JOB_BUDGET_MS = 5000;
+// One budget for both runtimes (#3767): the value lives in the registry
+// module and this name — kept for the cron call sites — derives from it,
+// so the two can never drift apart.
+export const CRON_JOB_BUDGET_MS = JOB_BUDGET_MS;
 
 // Worker jobs, in registry order. The safety-net cron is every 30 minutes;
 // due work runs from the Durable Object alarm instead.

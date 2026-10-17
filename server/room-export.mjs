@@ -123,12 +123,19 @@ export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
   yield JSON.stringify({ kind: "watermark", version: 1, backedUpAt: Date.now(), rooms, events }) + "\n";
+  // #3325: pin every loadable table's content in the trailer, accumulated
+  // over the sanitized rows exactly as they are yielded below.
+  const digests = createTableDigests();
   for (const table of exportTableOrder(db)) {
     const columns = tableColumns(db, table);
     if (!columns.length) continue;
-    for (const row of exportTableRows(db, table, columns, pageRows)) yield JSON.stringify({ table, row: sanitizeRow(row) }) + "\n";
+    for (const row of exportTableRows(db, table, columns, pageRows)) {
+      const sanitized = sanitizeRow(row);
+      digests.add(table, sanitized);
+      yield JSON.stringify({ table, row: sanitized }) + "\n";
+    }
   }
-  yield JSON.stringify(exportTrailer(db)) + "\n";
+  yield JSON.stringify(exportTrailer(db, digests.finish())) + "\n";
 }
 
 // End-of-stream integrity trailer. The watermark is taken before the first
@@ -144,7 +151,7 @@ export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
 // mid-stream fails the events foreign key, and any other room tear moves the
 // event count.
 const TRAILER_PAGE_ROWS = 2000;
-export function exportTrailer(db) {
+export function exportTrailer(db, tables = null) {
   // Keyset pages, not one .all(): a room with many events would otherwise hold
   // every row in memory at the end of each export. Pages use .all() because the
   // Durable Object database adapter has no iterate().
@@ -162,7 +169,15 @@ export function exportTrailer(db) {
     if (rows.length < TRAILER_PAGE_ROWS) break;
     ({ room_id: roomId, sequence } = rows.at(-1));
   }
-  return { kind: "trailer", version: 1, events: count, eventsHash: hash.digest("hex") };
+  const trailer = { kind: "trailer", version: 1, events: count, eventsHash: hash.digest("hex") };
+  // Trailer version 2 carries the per-table content digests (#3325). A
+  // caller that cannot supply them (a bare event-log read) still gets a
+  // version 1 trailer, which restores report at the weaker level.
+  if (tables && Object.keys(tables).length) {
+    trailer.version = 2;
+    trailer.tables = tables;
+  }
+  return trailer;
 }
 
 // Refuses a torn export: the parsed event rows must be exactly the event log
@@ -179,6 +194,85 @@ export function verifyTrailer(trailer, byTable) {
   if (hash.digest("hex") !== trailer.eventsHash)
     throw new Error("Backup is torn: the event log changed during the export (same count, different rows). Re-take the backup.");
   return true;
+}
+
+// #3325: the trailer above pins only the event log, so a tampered or
+// corrupted non-event row — a credential's expiry, a revoked flag, an
+// account's active bit — restored as verified. Trailer version 2 also pins
+// every table a restore can load: a sha256 over the sanitized rows exactly
+// as yielded (the same treatment the event hash gives event cells), plus
+// the row count. Tables no restore path ever loads are excluded on both
+// sides: the DO runtime markers and retired tables in REPLAY_SKIPPED_TABLES,
+// the claim writer permit (the target's own authority, never the export's),
+// and Cloudflare-internal _cf_ tables. (The set itself is defined with
+// REPLAY_SKIPPED_TABLES below.)
+function contentDigestSkipped(table) {
+  return table.startsWith("_cf_") || CONTENT_DIGEST_SKIPPED_TABLES.includes(table);
+}
+
+export function createTableDigests() {
+  const tables = new Map();
+  return {
+    add(table, row) {
+      if (contentDigestSkipped(table)) return;
+      let entry = tables.get(table);
+      if (!entry) {
+        entry = { hash: createHash("sha256"), rows: 0 };
+        tables.set(table, entry);
+      }
+      entry.hash.update(`${JSON.stringify(row)}\n`);
+      entry.rows += 1;
+    },
+    finish() {
+      const out = {};
+      for (const [table, entry] of tables) out[table] = { rows: entry.rows, sha256: entry.hash.digest("hex") };
+      return out;
+    }
+  };
+}
+
+export function tableDigestsOf(byTable) {
+  const digests = createTableDigests();
+  for (const [table, rows] of byTable) for (const row of rows) digests.add(table, row);
+  return digests.finish();
+}
+
+// The restore's content-verification level for a parsed export, named so a
+// weaker legacy export never reports the same bare "verified" as a fully
+// pinned one: "full" (trailer v2 table digests verified), "events-only"
+// (trailer v1: only the event log is pinned), "watermark-only" (no
+// trailer at all). Throws when a pinned digest disagrees with the rows the
+// export actually holds — the tamper/corruption case.
+export function contentVerificationLevel(trailer, computed) {
+  if (!trailer) return "watermark-only";
+  if (!trailer.tables) return "events-only";
+  for (const [table, expected] of Object.entries(trailer.tables)) {
+    const actual = computed[table];
+    if (!actual)
+      throw new Error(`Export trailer pins table ${table} but the export holds no rows for it`);
+    if (actual.rows !== expected.rows || actual.sha256 !== expected.sha256)
+      throw new Error(`Export table digest does not match for ${table}: the backup's ${table} rows differ from the rows the exporter pinned (tampered or corrupted backup). Re-take the backup.`);
+  }
+  for (const table of Object.keys(computed))
+    if (!Object.hasOwn(trailer.tables, table))
+      throw new Error(`Export holds rows for table ${table} that its trailer does not pin`);
+  return "full";
+}
+
+// Shape gate shared by both NDJSON parsers (here and restore-ndjson.mjs).
+export function assertTrailerShape(record) {
+  const malformed = () => new Error("Export trailer is malformed");
+  if (record.version !== 1 && record.version !== 2) throw malformed();
+  if (!Number.isSafeInteger(record.events) || typeof record.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(record.eventsHash)) throw malformed();
+  if (record.version === 2 && record.tables === undefined) throw malformed();
+  if (record.tables !== undefined) {
+    if (!record.tables || typeof record.tables !== "object" || Array.isArray(record.tables)) throw malformed();
+    for (const [table, entry] of Object.entries(record.tables)) {
+      if (!IDENT.test(table) || !entry || typeof entry !== "object" || Array.isArray(entry)
+        || !Number.isSafeInteger(entry.rows) || entry.rows < 0
+        || typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.sha256)) throw malformed();
+    }
+  }
 }
 
 export function exportNdjsonText(db) {
@@ -266,8 +360,7 @@ function parseExport(ndjson) {
     }
     if (record?.kind === "trailer") {
       if (trailer) throw new Error("Export has more than one trailer");
-      if (record.version !== 1 || !Number.isSafeInteger(record.events) || typeof record.eventsHash !== "string" || !/^[0-9a-f]{64}$/.test(record.eventsHash))
-        throw new Error("Export trailer is malformed");
+      assertTrailerShape(record);
       trailer = record;
       continue;
     }
@@ -292,16 +385,25 @@ function insertOrder(names) {
 // The retired Emissary tables stay in upgraded databases (no DROP was ever
 // issued) but no module reads them. abuse_rate_buckets is rate-limit state
 // the Durable Object creates on first use (server/abuse-rate-buckets.mjs); a
-// restored store starts with fresh budgets. Replay skips these and reports the
-// row counts; the export itself still holds the rows.
+// restored store starts with fresh budgets. The wake-accounting tables
+// (server/wake-metrics.mjs, #3345) are the same shape: lazily created
+// telemetry — outcome counters plus a bounded loss journal — and a restored
+// store restarts its accounting window; the reliability STOCK (pending /
+// acked / stranded) is derived from the wake tables themselves, which do
+// replay. Replay skips these and reports the row counts; the export itself
+// still holds the rows.
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
+
+// #3325: tables excluded from the trailer's content digests (see
+// createTableDigests above): exactly the tables no restore path loads.
+export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TABLES, CLAIM_PERMIT_TABLE]);
 
 // Replay into a new sqlite file, then run the same checks as backupRoom.
 // audit "strict" (default) refuses a store the recovery audit rejects.
@@ -316,8 +418,12 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
   if (!filename) throw new Error("Missing replay paths");
   const { watermark, byTable, trailer } = parseExport(ndjson);
   // Fail fast on a torn export, before any store is created: a mid-stream
-  // write the watermark could not see must never verify.
+  // write the watermark could not see must never verify. #3325: the
+  // trailer's per-table content digests are computed over the complete
+  // parsed stream (before any table is skipped below) and verified with
+  // the other post-load checks.
   const trailerState = trailer ? (verifyTrailer(trailer, byTable), "verified") : "absent";
+  const computedDigests = tableDigestsOf(byTable);
   const directory = dirname(filename);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
@@ -366,6 +472,13 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
     if (store.db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw new Error("Restored store failed quick_check");
     const events = store.db.prepare("SELECT count(*) AS n FROM events").get().n;
     if (events !== watermark.events) throw new Error("Export watermark does not match the restored event log");
+    // #3325: the digest pin is verified after the load, not before it —
+    // the load's own per-cell refusals (a non-BLOB object cell, a BLOB
+    // whose bytes fail their stored sha256) are the more specific errors
+    // and must fire first. A tampered row whose cells are all well-formed
+    // (the #3325 probe) loads cleanly and is refused here, before the
+    // audits and before verified is ever returned.
+    const contentVerification = contentVerificationLevel(trailer, computedDigests);
     let recovery = null, invitations = {}, auditResult = { ok: true };
     try {
       recovery = auditRecovery(store);
@@ -375,6 +488,6 @@ export function replayNdjson(ndjson, filename, { audit = "strict" } = {}) {
       auditResult = { ok: false, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) };
     }
     chmodSync(filename, 0o600);
-    return { verified: true, events, trailer: trailerState, ...invitations, recovery, audit: auditResult, skippedTables: skipped };
+    return { verified: true, events, trailer: trailerState, contentVerification, ...invitations, recovery, audit: auditResult, skippedTables: skipped };
   } finally { store.close(); }
 }

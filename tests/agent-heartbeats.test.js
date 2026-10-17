@@ -490,6 +490,12 @@ test("opted-in work wakes survive retries and obey current pause, preferences, r
   at += 3 * 60000;
   assert.equal((await heartbeat()).pendingWakes.length, 1);
   const other = f.store.identities.create("other-work-wake");
+  // #3266: ack enforces poll's registration gate — an identity that has
+  // never heartbeated gets 404 agent_not_registered, not a drained queue.
+  const unregisteredAck = await post(origin, "/api/agent-heartbeats/ack", { signalIds: [wake.signalId] }, other.secret);
+  assert.equal(unregisteredAck.status, 404);
+  assert.equal((await unregisteredAck.json()).error?.code, "agent_not_registered");
+  await post(origin, "/api/agent-heartbeats", { hostId: "other-host", mode: "pull-only" }, other.secret);
   assert.deepEqual((await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [wake.signalId] }, other.secret)).json()).acknowledged, []);
   send(identity.secret, "work.accepted", { workItemId: "wake-work", expectedRevision: 0 });
   assert.deepEqual((await heartbeat()).pendingWakes, [], "old assignment must not survive a newer work revision");
