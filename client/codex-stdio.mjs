@@ -7,7 +7,7 @@ const METHODS = new Set(["initialize", "account/read", "thread/start", "thread/r
 const inside = (root, path) => path === root || (!relative(root, path).startsWith(`..${sep}`) && relative(root, path) !== ".." && !isAbsolute(relative(root, path)));
 
 export function validateCodexRuntimeConfig(config) {
-  if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model"].includes(key)))
+  if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model", "macTools"].includes(key)))
     throw new Error("Unknown runtime config field");
   for (const key of ["command", "cwd", "codexHome"]) if (!isAbsolute(config[key] ?? "")) throw new Error(`Runtime ${key} must be absolute`);
   if (!statSync(config.command).isFile() || !statSync(config.cwd).isDirectory()) throw new Error("Runtime executable/workspace unavailable");
@@ -31,6 +31,16 @@ export function validateCodexRuntimeConfig(config) {
     if (!Number.isInteger(value) || value < 100 || value > maximum) throw new Error(`Invalid ${key}`);
   }
   if (config.model !== undefined && (typeof config.model !== "string" || !config.model.trim() || config.model.length > 128)) throw new Error("Invalid model");
+  if (config.macTools !== undefined) {
+    const local = config.macTools;
+    if (process.platform !== "darwin" || !local || Object.keys(local).some(key => !["command", "connection", "inputApproval"].includes(key))
+      || local.inputApproval !== undefined && !["prompt", "approve"].includes(local.inputApproval)
+      || !isAbsolute(local.command ?? "") || !isAbsolute(local.connection ?? "")
+      || !statSync(local.command).isFile()) throw new Error("macTools requires the native MCP executable and explicit private connection path");
+    const connection = lstatSync(local.connection);
+    if (!connection.isFile() || connection.isSymbolicLink() || connection.uid !== process.getuid() || (connection.mode & 0o077))
+      throw new Error("macTools connection must be a private owner file");
+  }
   return { ...structuredClone(config), command, cwd, requestTimeoutMs: config.requestTimeoutMs ?? 30000, turnTimeoutMs: config.turnTimeoutMs ?? 300000 };
 }
 
@@ -48,7 +58,14 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   const args = ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"',
     "-c", 'shell_environment_policy.inherit="none"', "-c", `approval_policy=${JSON.stringify(settings.policy.approvalPolicy)}`,
     "-c", `sandbox_mode=${JSON.stringify(settings.policy.sandbox)}`,
-    ...(settings.model ? ["-c", `model=${JSON.stringify(settings.model)}`] : [])];
+    ...(settings.model ? ["-c", `model=${JSON.stringify(settings.model)}`] : []),
+    ...(settings.macTools ? [
+      "-c", `mcp_servers.project_room_mac.command=${JSON.stringify(settings.macTools.command)}`,
+      "-c", `mcp_servers.project_room_mac.args=${JSON.stringify(["--connection", settings.macTools.connection])}`,
+      "-c", 'mcp_servers.project_room_mac.enabled_tools=["mac_status","mac_app_state","mac_screenshot","mac_input"]',
+      "-c", "mcp_servers.project_room_mac.required=true",
+      "-c", `mcp_servers.project_room_mac.tools.mac_input.approval_mode=${JSON.stringify(settings.macTools.inputApproval ?? "prompt")}`
+    ] : [])];
   const child = spawn(settings.command, args, { cwd: settings.cwd, detached: true, shell: false,
     env: { HOME: privateHome, CODEX_HOME: settings.codexHome, PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin", LANG: "en_US.UTF-8" },
     stdio: ["pipe", "pipe", "pipe"] });

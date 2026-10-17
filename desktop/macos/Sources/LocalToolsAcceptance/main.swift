@@ -19,6 +19,25 @@ final class FixtureObservation: LocalComputerObserving {
         return LocalScreenshot(png: png, width: 1, height: 1, windowID: windowID)
     }
 }
+
+final class InputButtonFixture: NSButton {
+    var rightClicks = 0
+    override func rightMouseDown(with event: NSEvent) { rightClicks += 1 }
+}
+
+final class InputClickFixture: NSObject { var count = 0; @objc func click() { count += 1 } }
+
+final class InputFixtureWindow: NSWindow { override var canBecomeKey: Bool { true }; override var canBecomeMain: Bool { true } }
+
+final class FixtureInput: LocalComputerActing {
+    var writes = 0
+    var beforeDispatch: (() -> Void)?
+    func perform(_ arguments: [String: Any], authorize: () throws -> Void) throws -> [String: Any] {
+        beforeDispatch?(); try authorize(); writes += 1
+        return ["state": "input_dispatched"]
+    }
+}
+
 final class LocalToolsTests {
     var teardown: [() -> Void] = []
     func addTeardownBlock(_ action: @escaping () -> Void) { teardown.append(action) }
@@ -53,15 +72,16 @@ final class LocalToolsTests {
         let path = shot["path"] as! String
         expectEqual(try Data(contentsOf: URL(fileURLWithPath: path)).count, shot["bytes"] as! Int)
         expectEqual((try FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
-        let unrelated = tools.directory.appendingPathComponent("capture-personal.png")
+        let captureDirectory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let unrelated = captureDirectory.appendingPathComponent("capture-personal.png")
         try Data("preserve unrelated file".utf8).write(to: unrelated)
         for _ in 0..<10 { _ = try tools.call("mac_screenshot", arguments: ["windowId": 42], grantRevision: revision) }
         expectEqual(try String(contentsOf: unrelated, encoding: .utf8), "preserve unrelated file")
-        expectEqual(try FileManager.default.contentsOfDirectory(atPath: tools.directory.path).filter { $0.hasPrefix("capture-") }.count, 9)
-        let count = try FileManager.default.contentsOfDirectory(atPath: tools.directory.path).filter { $0.hasPrefix("capture-") }.count
+        expectEqual(try FileManager.default.contentsOfDirectory(atPath: captureDirectory.path).filter { $0.hasPrefix("capture-") }.count, 9)
+        let count = try FileManager.default.contentsOfDirectory(atPath: captureDirectory.path).filter { $0.hasPrefix("capture-") }.count
         provider.beforeReturn = { tools.setEnabled(false) }
         refusal("mac_tools_paused") { try tools.call("mac_screenshot", arguments: ["windowId": 42], grantRevision: revision) }
-        expectEqual(try FileManager.default.contentsOfDirectory(atPath: tools.directory.path).filter { $0.hasPrefix("capture-") }.count, count)
+        expectEqual(try FileManager.default.contentsOfDirectory(atPath: captureDirectory.path).filter { $0.hasPrefix("capture-") }.count, count)
         // Actual native permission gate, with no prompts or operator-window capture.
         if !AXIsProcessTrusted() { refusal("accessibility_permission_required") { try LocalComputerObservation().appState(processID: getpid()) } }
         else { print("SKIP actual AX read: already trusted; synthetic secure fixture covers projection") }
@@ -111,6 +131,117 @@ final class LocalToolsTests {
         expectEqual(bitmap.pixelsHigh, shot?["height"] as? Int ?? 0)
         expectEqual(bitmap.pixelsWide > 0 && bitmap.pixelsWide <= 2048, true)
         print("PASS actual owned-window AX and ScreenCaptureKit through authenticated native IPC")
+    }
+
+
+    func testActualOwnedWindowInput() throws {
+        guard AXIsProcessTrusted() else { print("SKIP real input: native Accessibility permission absent"); return }
+        let (root, _) = try fixture()
+        let previous = NSWorkspace.shared.frontmostApplication
+        let app = NSApplication.shared; app.setActivationPolicy(.regular); app.finishLaunching()
+        func pump() {
+            if let event = app.nextEvent(matching: .any, until: Date().addingTimeInterval(0.02), inMode: .default, dequeue: true) { app.sendEvent(event) }
+            app.updateWindows()
+        }
+        let window = InputFixtureWindow(contentRect: NSRect(x: 300, y: 300, width: 320, height: 160), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Project Room input acceptance fixture"
+        let field = NSTextField(frame: NSRect(x: 20, y: 60, width: 280, height: 30))
+        window.contentView!.addSubview(field)
+        let clicks = InputClickFixture()
+        let button = InputButtonFixture(frame: NSRect(x: 100, y: 15, width: 120, height: 35))
+        button.title = "Fixture click"; button.target = clicks; button.action = #selector(InputClickFixture.click)
+        window.contentView!.addSubview(button)
+        let scroll = NSScrollView(frame: NSRect(x:20, y:100, width:280, height:50))
+        scroll.hasVerticalScroller = true
+        let document = NSTextView(frame:NSRect(x:0, y:0, width:260, height:1500))
+        document.string = String(repeating: "Scroll fixture row\n", count:100)
+        scroll.documentView = document
+        window.contentView!.addSubview(scroll)
+        window.makeKeyAndOrderFront(nil); app.activate(ignoringOtherApps: true); window.makeFirstResponder(field)
+        defer { window.orderOut(nil); _ = previous?.activate(options: []) }
+        let tools = try LocalTools(directory: root.appendingPathComponent("real-input"))
+        let revision = tools.setEnabled(true)
+        let connection = try LocalToolConnection(service: tools)
+        defer { connection.stop() }
+        func call(_ args: [String: Any]) throws -> [String: Any] {
+            let mutex = NSLock(); var done = false, result: [String: Any]?, failure: Error?
+            DispatchQueue.global().async {
+                do { let value = try LocalToolConnection.call(connectionURL: connection.connectionURL, name: "mac_input", arguments: args); mutex.lock(); result = value; mutex.unlock() }
+                catch { mutex.lock(); failure = error; mutex.unlock() }
+                mutex.lock(); done = true; mutex.unlock()
+            }
+            let end = Date().addingTimeInterval(5)
+            while Date() < end {
+                pump()
+                mutex.lock(); let complete = done; mutex.unlock(); if complete { break }
+            }
+            mutex.lock(); defer { mutex.unlock() }
+            guard done else { throw NSError(domain:"fixture_input_timeout", code:1) }
+            if let failure { throw failure }; return result!
+        }
+        let end = Date().addingTimeInterval(2)
+        while !NSRunningApplication.current.isActive && Date() < end { pump() }
+        window.display()
+        let shown = Date().addingTimeInterval(0.5)
+        while Date() < shown { pump() }
+        window.makeKeyAndOrderFront(nil); window.makeFirstResponder(field)
+        window.makeKey(); pump()
+        let base: [String: Any] = ["processId": getpid(), "windowId": window.windowNumber]
+        expectEqual(try call(base.merging(["requestId":"actual-activate", "action":"activate"]) { _,new in new })["state"] as? String, "activation_requested")
+        let args = base.merging(["requestId":"actual-type", "action":"type", "text":"Room input works"]) { _,new in new }
+        expectEqual(try call(args)["state"] as? String, "input_dispatched")
+        let delivered = Date().addingTimeInterval(2)
+        while field.stringValue != "Room input works" && Date() < delivered { pump() }
+        expectEqual(field.stringValue, "Room input works")
+        expectEqual(try call(args)["duplicate"] as? Bool, true)
+        _ = try call(base.merging(["requestId":"actual-backspace", "action":"key", "key":"backspace"]) { _,new in new })
+        let deleted = Date().addingTimeInterval(2)
+        while field.stringValue != "Room input work" && Date() < deleted { pump() }
+        expectEqual(field.stringValue, "Room input work")
+        refusal("computer_target_changed") { try tools.call("mac_input", arguments:base.merging(["requestId":"wrong-target", "action":"type", "text":"never", "windowId":UInt32.max]) { _,new in new }, grantRevision:revision) }
+        _ = try call(base.merging(["requestId":"actual-click", "action":"click", "x":0.5, "y":0.82]) { _,new in new })
+        let clicked = Date().addingTimeInterval(2)
+        while clicks.count == 0 && Date() < clicked { pump() }
+        expectEqual(clicks.count, 1)
+        expectEqual(try call(base.merging(["requestId":"actual-click", "action":"click", "x":0.5, "y":0.82]) { _,new in new })["duplicate"] as? Bool, true)
+        pump(); expectEqual(clicks.count, 1)
+        _ = try call(base.merging(["requestId":"actual-right-click", "action":"click", "x":0.5, "y":0.82, "button":"right"]) { _,new in new })
+        let rightClicked = Date().addingTimeInterval(2)
+        while button.rightClicks == 0 && Date() < rightClicked { pump() }
+        expectEqual(button.rightClicks, 1)
+        let cover = NSPanel(contentRect:window.frame, styleMask:[.borderless,.nonactivatingPanel], backing:.buffered, defer:false)
+        cover.level = .floating; cover.backgroundColor = .white; cover.orderFrontRegardless()
+        let covered = Date().addingTimeInterval(0.2)
+        while Date() < covered { pump() }
+        do {
+            _ = try call(base.merging(["requestId":"occluded-click", "action":"click", "x":0.5, "y":0.82]) { _,new in new })
+            failCheck("Expected occluded target refusal")
+        } catch { expectEqual((error as? LocalToolFailure)?.code, "computer_target_occluded") }
+        cover.orderOut(nil)
+        let uncovered = Date().addingTimeInterval(0.2)
+        while Date() < uncovered { pump() }
+        let beforeScroll = scroll.contentView.bounds.origin.y
+        _ = try call(base.merging(["requestId":"actual-scroll", "action":"scroll", "x":0.5, "y":0.35, "deltaX":0, "deltaY":-80]) { _,new in new })
+        let scrolled = Date().addingTimeInterval(2)
+        while scroll.contentView.bounds.origin.y == beforeScroll && Date() < scrolled { pump() }
+        expectFalse(scroll.contentView.bounds.origin.y == beforeScroll)
+        print("PASS actual owned-window activation, typing, key/click/scroll effects, exact retry and wrong target refusal through native IPC")
+    }
+    func testInputRetryAndPause() throws {
+        let (root, _) = try fixture(), input = FixtureInput()
+        let tools = try LocalTools(directory: root.appendingPathComponent("input"), fixtureRoot: root, input: input)
+        let args: [String: Any] = ["requestId":"type-once", "processId":1, "windowId":1, "action":"type", "text":"synthetic"]
+        refusal("mac_tools_paused") { try tools.call("mac_input", arguments: args, grantRevision: 0) }
+        let revision = tools.setEnabled(true)
+        expectEqual(try tools.call("mac_input", arguments: args, grantRevision: revision)["state"] as? String, "input_dispatched")
+        expectEqual(try tools.call("mac_input", arguments: args, grantRevision: revision)["duplicate"] as? Bool, true)
+        let restart = try LocalTools(directory: tools.directory, fixtureRoot: root, input: input)
+        expectEqual(try restart.call("mac_input", arguments: args, grantRevision: restart.setEnabled(true))["duplicate"] as? Bool, true)
+        expectEqual(input.writes, 1)
+        input.beforeDispatch = { tools.setEnabled(false) }
+        refusal("mac_tools_paused") { try tools.call("mac_input", arguments: args.merging(["requestId":"pause-before-input"]) { _,new in new }, grantRevision: revision) }
+        expectEqual(input.writes, 1)
+        print("PASS input exact retry/restart and revocation before dispatch")
     }
     func testNativeGrantAndExactFileRetries() throws {
         let (root,tools) = try fixture(); let file = root.appendingPathComponent("result.txt")
@@ -215,13 +346,17 @@ final class LocalToolsTests {
         let replies = try data.split(separator:10).map { try JSONSerialization.jsonObject(with:Data($0)) as! [String:Any] }
         expectEqual(replies.count,6)
         let listed = replies.first { $0["id"] as? Int == 2 }!["result"] as! [String:Any]
-        expectEqual((listed["tools"] as! [[String:Any]]).count,7)
+        expectEqual((listed["tools"] as! [[String:Any]]).count,8)
         let executed = replies.first { $0["id"] as? Int == 4 }!["result"] as! [String:Any]
         expectEqual(executed["isError"] as? Bool,false)
         expectEqual((executed["structuredContent"] as! [String:Any])["output"] as? String,"literal $(anything)")
         for id in [5, 6] { expectEqual((replies.first { $0["id"] as? Int == id }!["result"] as! [String:Any])["isError"] as? Bool, false) }
         let capture = (replies.first { $0["id"] as? Int == 6 }!["result"] as! [String:Any])["structuredContent"] as! [String:Any]
         expectEqual(capture["uploaded"] as? Bool, false); expectEqual(capture["windowId"] as? Int, 42)
+        let screenshotReply = replies.first { $0["id"] as? Int == 6 }!["result"] as! [String: Any]
+        let image = (screenshotReply["content"] as! [[String: Any]]).first { $0["type"] as? String == "image" }
+        expectEqual(image?["mimeType"] as? String, "image/jpeg")
+        expectEqual(Data(base64Encoded: image?["data"] as? String ?? "")!.count <= 600000, true)
     }
     func testPrivateNativeConnectionAndRevocation() throws {
         let (root,tools) = try fixture(); let connection = try LocalToolConnection(service:tools)
@@ -250,6 +385,8 @@ final class LocalToolsTests {
 let checks = LocalToolsTests()
 defer { for action in checks.teardown { action() } }
 do {
+    try checks.testActualOwnedWindowInput()
+    try checks.testInputRetryAndPause()
     try checks.testActualOwnedWindowObservation()
     try checks.testComputerObservations(); print("PASS computer observations, secure redaction, private artifact, grant revocation and explicit permission-gate skips")
     try checks.testNativeGrantAndExactFileRetries(); print("PASS native grant, file versions, exact retries and restart")

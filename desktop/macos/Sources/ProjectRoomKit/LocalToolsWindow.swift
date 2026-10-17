@@ -24,7 +24,7 @@ import CoreGraphics
         window.title = "My Mac · Project Room"; window.isReleasedWhenClosed = false
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "Let agents work on this Mac"); title.font = .systemFont(ofSize: 21, weight: .semibold)
-        let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files and run programs as you. Enable them for this app session, then connect your agent. Pause stops new operations and running process groups.")
+        let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files, run programs, and control apps as you. Enable them for this app session, then connect your agent. Pause stops new operations and running process groups.")
         let scope = NSTextField(wrappingLabelWithString: "This connects local agents. Web and shared-room device access are still being built."); scope.textColor = .secondaryLabelColor
         toggle.target = self; toggle.action = #selector(changeEnabled); toggle.bezelStyle = .rounded
         let setup = NSButton(title: "macOS permissions…", target:self, action:#selector(openPermissions)); setup.bezelStyle = .rounded
@@ -39,7 +39,7 @@ import CoreGraphics
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24)])
         refresh(); window.center()
-        timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in self?.refresh() } }
+        timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in if self?.window.isVisible == true { self?.refresh() } } }
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
     public func stop() { timer?.invalidate(); host.stopAndWait(); connection.stop() }

@@ -412,3 +412,18 @@ test("observed failed turn remains failed if the transport disconnects immediate
   assert.equal((await f.run()).result.status, "failed");
   assert.equal(f.calls.filter(x => x.method === "turn/start").length, 1);
 });
+
+
+test("completed response with a tool approval refusal asks for attention without publishing success", async t => {
+  const f = await setup(t, ({ event, finish }) => {
+    event("item/completed", { threadId: "shared-thread", turnId: "shared-turn-1",
+      item: { id: "blocked", type: "mcpToolCall", status: "failed",
+        error: { message: "MCP tool call requires approval, but approval policy is never" } } });
+    finish("completed");
+  });
+  assert.equal((await f.run()).result.status, "needs_input");
+  const run = (await f.api("owner")).runs[0];
+  assert.equal(run.resultMessageId ?? null, null);
+  assert.ok(run.inputs.every(input => input.status === "pending"));
+  assert.equal(f.calls.filter(x => x.method === "turn/start").length, 1);
+});

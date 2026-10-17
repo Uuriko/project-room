@@ -9,11 +9,11 @@ const recoverable = new Set(["working", "unknown", "resume_requested", "pause_re
 const PERMANENT_CODES = new Set(["unauthenticated", "invalid_token", "token_revoked", "origin_denied", "host_denied", "forbidden", "not_a_member", "member_removed"]);
 export const isPermanentRoomError = error => error?.status === 401 || error?.status === 403 || PERMANENT_CODES.has(error?.code);
 // A lost claim race: another host owns the attempt. Nothing is wrong locally.
-const isClaimRace = error => ["assistant_revision_conflict", "assistant_attempt_changed"].includes(error?.code)
+const isClaimRace = error => ["assistant_revision_conflict", "assistant_attempt_changed", "assistant_run_owned"].includes(error?.code)
   || /already owned|Another host owns/.test(String(error?.message));
 // Honour the server's Retry-After when it asks for longer than our own backoff.
 export const retryDelay = (error, backoffMs, maxMs = 300000) =>
-  Math.min(maxMs, Math.max(backoffMs, Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0 ? error.retryAfterMs : 0));
+  Math.max(Math.min(maxMs, backoffMs), Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0 ? error.retryAfterMs : 0);
 export class ReconnectAgentError extends Error {
   constructor(cause) { super("Room refused this agent's connection; reconnect this agent"); this.code = "reconnect_agent"; this.cause = cause; }
 }
@@ -43,7 +43,15 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
     const event = { type: "host_status", status, ...extra }, key = JSON.stringify(event);
     if (key !== lastStatus) { lastStatus = key; emit(event); }
   };
-  const pause = ms => delay(ms, undefined, { signal: controller.signal }).catch(error => { if (!controller.signal.aborted) throw error; });
+  const pause = async ms => {
+    // Node timers overflow above ~24 days. Preserve long Retry-After values
+    // without an immediate retry; shutdown still interrupts each wait.
+    const until = Date.now() + ms;
+    while (!controller.signal.aborted && Date.now() < until) {
+      await delay(Math.min(until - Date.now(), 2147483647), undefined, { signal: controller.signal })
+        .catch(error => { if (!controller.signal.aborted) throw error; });
+    }
+  };
   try {
     const client = new RoomAgentClient(connection);
     db.exec("CREATE TABLE IF NOT EXISTS codex_supervisor_retry (scope TEXT NOT NULL, run_id TEXT NOT NULL, failures INTEGER NOT NULL, retry_at INTEGER NOT NULL, PRIMARY KEY(scope,run_id))");

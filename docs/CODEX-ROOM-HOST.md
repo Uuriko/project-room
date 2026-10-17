@@ -80,20 +80,6 @@ ROOM_AGENT_CONFIG=/absolute/room-connection \
   /absolute/private-room-journal.sqlite /absolute/runtime.json
 ```
 
-For normal shared conversation use, keep the host listening instead of copying
-each run ID:
-
-```sh
-ROOM_AGENT_CONFIG=/absolute/room-connection \
-  node scripts/run-codex-room.mjs --watch \
-  /absolute/private-room-journal.sqlite /absolute/runtime.json
-```
-
-The foreground host picks up queued requests and resumes one at a time in this
-workspace. Leave it running while the team works; Ctrl-C stops it. A failed or
-uncertain attempt is reported once for attention. Use its run ID and the same
-journal to reconcile it before restarting the watcher.
-
 The CLI checks the protocol **before claiming the run**. It streams answer deltas
 as JSON to stdout and prints the final Room status/result ID. It passes neither
 connection credentials nor private runtime reasoning into the room. The journal
@@ -217,3 +203,56 @@ For a compact read-only queue view, use
 This shows this agent's current shared requests, pending input IDs, and Stop/Resume
 state without acknowledging, claiming, or executing work. An unchanged room
 context version never suppresses current shared requests.
+
+## Native computer use with the shared host
+
+Enable local tools in the Mac app and grant Accessibility and Screen Recording
+through its My Mac controls as needed. In the dedicated runtime JSON, add:
+
+```json
+"macTools": {
+  "command": "/absolute/Project Room.app/Contents/MacOS/ProjectRoomTools",
+  "connection": "/absolute/Library/Application Support/Project Room/Local Tools/connection.json"
+}
+```
+
+Input defaults to `"inputApproval": "prompt"`. This unattended host cannot obtain
+interactive approval, so input remains blocked and the shared run reports Needs
+input. After explicitly deciding to authorize computer control for this host,
+the Mac owner may add `"inputApproval": "approve"` inside `macTools`. This is a
+per-tool policy for `mac_input`, not global approval or a shell sandbox change.
+Native enablement and OS permissions are still required. A room message cannot
+change this private host configuration. A completed model response is not proof
+that the requested action happened; structured approval refusals survive restart
+and prevent automatic publication as a successful shared result.
+
+This explicitly delegates the configured native tools to the agent selected by
+this host's private Room connection. Use it only for a room whose authorized
+shared asks may control this Mac. Do not configure it just to enable ordinary
+chat. It does not enroll a device for arbitrary rooms or give every room member
+personal computer authority. The Mac app and host must remain running; web
+participants interact through the existing shared ask, not a browser-to-OS port.
+
+The host exposes only status, app observation, screenshot and input from this
+MCP server. It does not add the broker's unsandboxed process/file tools to the
+runtime. Native MCP tools have their own owner grant and OS permissions; Codex's
+shell sandbox does not constrain those native capabilities. The connection path
+is explicit because the runtime uses an isolated HOME. The nonce is not passed
+in command arguments or posted to the room. Pause in My Mac revokes local tools.
+
+Use `mac_app_state` first; target its process and window IDs. `mac_input` offers
+activate, click, type, key and scroll. Click and scroll require explicit coordinates, normalized 0..1
+within the window, top-left origin, independent of screenshot scaling. Activate
+is a request, so reobserve before input. Input requires the target app/window to
+remain focused. Keyboard input is sent to the target process; clicks use the
+session event stream after checking the target at the pointer. A dispatched event does not prove
+an app saved or submitted anything: observe the result. Preserve operation IDs
+on retry; prepared outcomes after a crash require reconciliation.
+
+Screenshots retain at most eight private PNGs in a dedicated captures directory.
+Retention scans those captures rather than the growing operation journal. MCP
+returns a separate JPEG image block (up to 1024px and 600KB), so the model can see
+it without reading outside its workspace. Image bytes are not repeated in the
+text metadata or room history. The model receives the image; `uploaded:false`
+means no Room attachment upload, not that the provider never sees it. There is
+no continuous screen recording, and only one capture runs at a time.

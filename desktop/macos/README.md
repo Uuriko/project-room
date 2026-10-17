@@ -37,8 +37,8 @@ the app and broker running; Quit stops them. Relaunch requires fresh enablement.
 The app must stay running. Discovery works without computer permission; execution needs
 native enablement and whichever access macOS permits. The adapter does not start models.
 
-Tools: `mac_status`, `mac_files_read`, `mac_files_write`, `mac_process_run`, and
-`mac_process_cancel`. File reads/writes support up to 64KiB of UTF-8. Writes require a
+Tools: `mac_status`, `mac_app_state`, `mac_screenshot`, `mac_input`,
+`mac_files_read`, `mac_files_write`, `mac_process_run`, and `mac_process_cancel`. File reads/writes support up to 64KiB of UTF-8. Writes require a
 previous SHA256 or `expectedAbsent: true`; the check serializes this broker's writers but
 is not a filesystem transaction against unrelated programs. Process calls take an
 absolute executable, literal argument array, working directory and 100–300,000ms timeout.
@@ -56,8 +56,7 @@ The local Unix socket has an owner-only directory and socket, peer-UID validatio
 random nonce in a mode-0600 connection file. No TCP port or JavaScript/native execution
 bridge is installed. Any trusted local agent with this connection receives the enabled
 owner authority. Local private results are not automatically posted to a room.
-Web/shared-room device enrollment, account-specific delegation, durable grants, live
-model integration, native app/screen action tools and cloud-account connectors remain
+Web/shared-room device enrollment, account-specific delegation, durable grants, cloud-account connectors remain
 separate delivery work. The pane reports actual Accessibility/Screen permission checks;
 Full Disk Access is manual and Automation requires approval per target app.
 
@@ -125,3 +124,17 @@ Run native host acceptance without accounts or model calls:
 `swift run --package-path desktop/macos LocalRoomHostAcceptance`.
 It exercises real fixture processes, stale/wrong-owner status, duplicate hosts,
 private saved setup, graceful stop, and a termination-resistant descendant.
+
+### Computer use
+
+App observation and explicit-window screenshots use Accessibility and
+ScreenCaptureKit. Input supports activation, click, Unicode text, keys and
+scrolling. An operation specifies an observed process/window; focus changes
+are refused. Input is serialized and exact retries return the journaled result
+without typing or clicking again. Always reobserve to confirm the effect.
+Screenshots are captured on demand, stored privately with an eight-file limit,
+and returned to MCP clients as bounded image blocks plus metadata. No room
+attachment is created automatically. The native owner can pause tools at any time.
+
+See [the shared host setup](../../docs/CODEX-ROOM-HOST.md#native-computer-use-with-the-shared-host)
+for explicit computer-tool delegation to a dedicated Room runtime.

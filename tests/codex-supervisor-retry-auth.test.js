@@ -9,7 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { createRoomClient } from "../client/room-assistant-client.mjs";
 import { openRequestJournal } from "../client/request-runner.mjs";
 import { openCodexStdio, checkCodexProtocol } from "../client/codex-stdio.mjs";
-import { superviseCodexRoom, ReconnectAgentError } from "../client/codex-supervisor.mjs";
+import { superviseCodexRoom, ReconnectAgentError, retryDelay } from "../client/codex-supervisor.mjs";
 import http from "node:http";
 
 async function fixture(t, mode = "complete") {
@@ -70,12 +70,15 @@ const refuse = (res, status, code, headers = {}) => { res.writeHead(status, { "c
 
 test("a room 429 waits at least the server's Retry-After before polling again", async t => {
   const x = await fixture(t); await x.invoke("rl");
-  let refusals = 0;
-  const conn = await proxy(t, x, (req, res) => refusals < 2 && req.method === "GET" && req.url.includes("assistant") ? (refusals++, refuse(res, 429, "rate_limited", { "retry-after": "1" })) : false);
+  let refusals = 0; const polledAt = [];
+  const conn = await proxy(t, x, (req, res) => refusals < 2 && req.method === "GET" && req.url.includes("assistant") ? (polledAt.push(Date.now()), refusals++, refuse(res, 429, "rate_limited", { "retry-after": "1" })) : false);
   const c = new AbortController(), events = [];
   await sup(x, conn, "h", { signal: c.signal, emit: e => { events.push(e); if (e.status === "settled") c.abort(); } });
   const waits = events.filter(e => e.status === "retrying_room").map(e => e.retryMs);
-  assert.equal(waits.length, 2);
+  assert.equal(refusals, 2);
+  assert.ok(polledAt[1] - polledAt[0] >= 990, "second poll ignored Retry-After");
+  assert.ok(waits.length >= 1); // Identical status events are intentionally coalesced.
+  assert.equal(retryDelay({ retryAfterMs: 600000 }, 1000), 600000);
   assert.ok(waits.every(ms => ms >= 1000), `retry waits ignored Retry-After: ${waits}`);
   assert.equal(x.runtime().starts, 1);
 });
@@ -118,6 +121,6 @@ test("two hosts on one member: each ask runs once and the losing host keeps its 
   clearTimeout(timer);
   assert.equal(x.runtime().starts, 3);
   assert.ok((await x.owner.assistant()).runs.every(r => r.status === "done"));
-  assert.equal(events.filter(e => e.status === "recovery_pending").length, 0, "a lost claim race is not a failure");
+  assert.equal(events.filter(e => e.status === "recovery_pending").length, 0, `a lost claim race is not a failure: ${JSON.stringify(events.filter(e => e.status === "recovery_pending"))}`);
   assert.ok(connects.A <= 1 && connects.B <= 1, `runtime respawned: ${JSON.stringify(connects)}`);
 });
