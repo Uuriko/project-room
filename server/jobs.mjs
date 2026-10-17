@@ -122,7 +122,7 @@ function backupConfigured(env) {
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
@@ -176,6 +176,15 @@ export function classifyIntegrityError(error) {
   else if (/sqlite|database|storage|disk/i.test(message)) errorClass = "storage";
   else if (subcheck !== "unknown") errorClass = "integrity_mismatch";
   return { code, subcheck, errorClass, recordClass: INTEGRITY_RECORD_CLASS[subcheck] ?? "unknown" };
+}
+
+function integrityFailure(error) {
+  const failure = classifyIntegrityError(error);
+  return {
+    errors: 1,
+    scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+    failureDetail: failure
+  };
 }
 
 async function runNodeRetention(store, ctx) {
@@ -313,23 +322,43 @@ export const JOBS = Object.freeze([
     enabled: () => true,
     disabledReason: () => null,
     async run(store, ctx) {
+      let integrity;
       try {
-        const integrity = ctx.room?.verifyRoomIntegrity
+        integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
-        return logIntegrity(integrity);
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
         // #3334: the failure detail survives reporting — the heartbeat turns
         // scanError into lastError and persists failureDetail, so the health
         // surface names the failing sub-check instead of "1 error(s) in tick".
-        const failure = classifyIntegrityError(error);
-        return {
-          errors: 1,
-          scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-          failureDetail: failure
-        };
+        integrity = integrityFailure(error);
       }
+      // A parked backfill does not throw again, and most rotation ticks do
+      // not visit it. Observe the durable set AFTER doing the normal work,
+      // even on a budget exit, so healthy rooms keep progressing while both
+      // runtimes retain an active, safe failure until every block clears.
+      try {
+        const blockedRooms = store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get()?.n;
+        if (!Number.isSafeInteger(blockedRooms) || blockedRooms < 0) {
+          throw new Error("Invalid database messages backfill block count");
+        }
+        integrity = { ...integrity, blockedRooms };
+        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({ integritySubcheck: "messages_backfill" }) };
+        }
+      } catch (error) {
+        // The general read() helper swallows SQL errors; using it here would
+        // turn an unreadable block table into a false recovery. Preserve an
+        // earlier failure, otherwise report this read failure without raw
+        // record identifiers or exception text on the public health surface.
+        if (!summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({
+            integritySubcheck: "messages_backfill", message: error?.message ?? error
+          }) };
+        }
+      }
+      return logIntegrity(integrity);
     }
   }),
   defineJob({
