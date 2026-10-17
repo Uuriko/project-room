@@ -672,7 +672,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       // #3796: arriving here via account creation used to re-render the
       // dialog into this name form with no word about what happened or
       // what remained. Name the step and its completion action.
-      if (afterSignIn && account.authenticated && !returning) {
+      if (afterSignIn && account.authenticated && !returning
+        && !$("#join-link-status")?.textContent?.trim()) {
+        // Only when nothing else is already announced (applyAccountDefaults
+        // may have posted the verification-code message, which owns it).
         joinStatus(uiText("join.stepTwo"));
       }
       // Signed out: sign-in comes first, with "Continue as guest" below it.

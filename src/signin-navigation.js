@@ -6,9 +6,6 @@ export function createSigninNavigation({ getUI, active }) {
   // 503, so the anchors stay hidden in every view — fail-open: a provider is
   // only ever added here on a positive "configured: false" answer.
   const unavailableProviders = new Set();
-  // Providers the feed positively reported configured; anchors start
-  // hidden in the static HTML and are revealed only from this set (B-7).
-  const availableProviders = new Set();
   function sync(view) {
     const previous = current;
     current = view;
@@ -29,8 +26,8 @@ export function createSigninNavigation({ getUI, active }) {
     $("#email-auth-step").hidden = !auxiliary;
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
-    $("#google-signin").hidden = view === "welcome" || !availableProviders.has("google");
-    $("#github-signin").hidden = view === "welcome" || !availableProviders.has("github");
+    $("#google-signin").hidden = view === "welcome";
+    $("#github-signin").hidden = view === "welcome";
     if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
     if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
     $("#terms-notice").hidden = view === "welcome";
@@ -51,16 +48,9 @@ export function createSigninNavigation({ getUI, active }) {
     sync, withReplay,
     setProviderUnavailable(name) {
       unavailableProviders.add(name);
-      availableProviders.delete(name);
       if (!active()) return;
       const anchor = $(`#${name}-signin`);
       if (anchor) anchor.hidden = true;
-    },
-    setProviderAvailable(name) {
-      availableProviders.add(name);
-      unavailableProviders.delete(name);
-      if (!active()) return;
-      if (current !== "welcome") { const anchor = $(`#${name}-signin`); if (anchor) anchor.hidden = false; }
     },
     back() {
       if (active() && history.state?.roomSigninView) { history.back(); return false; }

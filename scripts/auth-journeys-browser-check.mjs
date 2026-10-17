@@ -270,12 +270,7 @@ test("an incoming room link owns navigation while its workspace module downloads
   const route = await held;
   assert.equal(await page.locator("#auth-panel").evaluate(node => node.inert), true);
   assert.equal(await page.locator("#session-menu-button").isDisabled(), true, "account controls wait for their handlers");
-  // Front-door batch B-7: an unconfigured OAuth door is not rendered at
-  // all on this server, so the inert probe clicks the password submit —
-  // the assertion is unchanged: no sign-in control may act while the
-  // incoming room link owns navigation.
-  assert.equal(await page.locator("#google-signin").isHidden(), true, "unconfigured Google door is not rendered");
-  const button = await page.locator('#auth-signin-ui button[type="submit"]').boundingBox();
+  const button = await page.locator("#google-signin").boundingBox();
   await page.mouse.click(button.x + button.width / 2, button.y + button.height / 2);
   assert.equal(requests.includes("/api/auth/google/start"), false, "old sign-in cannot replace pending entry");
   await route.continue();

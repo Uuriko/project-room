@@ -203,8 +203,6 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (node) {
       node.setAttribute("aria-busy", String(busy));
       for (const control of node.querySelectorAll("input, button")) control.disabled = busy;
-      const passwordInput = node.querySelector('[name="password"]');
-      if (passwordInput && preservedPassword) passwordInput.value = preservedPassword;
     }
     setStatus(statusText, statusError);
     onViewChange?.(currentView());
@@ -319,6 +317,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       emailMethod = "password";
       if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
       pendingLink = null; magicPhase = "request"; setStatus(""); render();
+      // B-1: restore the password captured at this switch — and only here.
+      // A submit repaint (e.g. after a rejected password) must never
+      // repaint it; preservation is a mode-switch behavior, not a render
+      // behavior.
+      const switchedPassword = surface()?.querySelector('[name="password"]');
+      if (switchedPassword && preservedPassword) switchedPassword.value = preservedPassword;
       surface()?.querySelector('[name="email"]')?.focus(); return;
     }
     if (event.target?.closest?.("[data-magic-switch]")) {
@@ -505,9 +509,6 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       else if (field?.name === "email") setStatus(uiText("signin.copy.036"), true);
       else if (field?.name) setStatus(uiText("signin.copy.037"), true);
     }, true);
-    node.addEventListener("input", event => {
-      if (event.target?.name === "password") preservedPassword = event.target.value;
-    });
   }
   return {
     canLeave() { return !busy && !pendingTerms; },

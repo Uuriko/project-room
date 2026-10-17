@@ -806,17 +806,11 @@ const signinUI = createAuthSigninUI({
   ensureAccountSession,
   loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
   onProviderCapabilities: providers => {
-    // The OAuth anchors start hidden in the static HTML (front-door batch
-    // B-7, #3743): a door is revealed only on the feed's positive
-    // "configured: true" answer, so an unconfigured provider never
-    // renders-then-vanishes and never leads to its 503 start route.
-    if (providers?.github?.configured === true) signinNavigation.setProviderAvailable("github");
+    // The OAuth anchors are static HTML whose start routes 503 when the
+    // provider is not configured on this deployment; hide an anchor only
+    // on the feed's positive "configured: false" answer.
     if (providers?.github?.configured === false) signinNavigation.setProviderUnavailable("github");
-    if (providers?.google?.configured === true) signinNavigation.setProviderAvailable("google");
     if (providers?.google?.configured === false) signinNavigation.setProviderUnavailable("google");
-    const joinGoogle = $("#join-account-google");
-    if (joinGoogle && providers?.google?.configured === false) joinGoogle.hidden = true;
-    if (joinGoogle && providers?.google?.configured === true) joinGoogle.hidden = false;
   },
   onViewChange: syncSigninView,
   onBack: handleSigninBack,

@@ -87,16 +87,16 @@ test("B-1: invalid submits name their field; the password survives a mode switch
   assert.match(catalog["human.requiredField"], /is required — complete it before saving\./);
   const auth = read("src/auth-signin-ui.js");
   assert.match(auth, /preservedPassword/);
-  assert.match(auth, /passwordInput\.value = preservedPassword/);
+  assert.match(auth, /switchedPassword\.value = preservedPassword/);
 });
 
-test("B-7: OAuth doors start hidden and are revealed only on a positive configured answer", () => {
-  const index = read("index.html");
-  assert.match(index, /id="google-signin"[^>]* hidden>/);
-  assert.match(index, /id="github-signin"[^>]* hidden>/);
+test("B-7: GitHub's button renders with Google's icon/label treatment; unconfigured doors hide on the feed's answer", () => {
+  const css = read("src/login-polish.css");
+  assert.match(css, /#google-signin, #auth-panel #github-signin \{ display: flex; align-items: center; gap: var\(--space-3\)/);
   const nav = read("src/signin-navigation.js");
-  assert.match(nav, /setProviderAvailable\(name\)/);
-  assert.match(nav, /!availableProviders\.has\("google"\)/);
+  assert.match(nav, /setProviderUnavailable\(name\)/);
+  const app = read("src/app.js");
+  assert.match(app, /providers\?\.github\?\.configured === false/);
 });
 
 test("B-10: mailer-less signup copy states the signed-in truth", async () => {
