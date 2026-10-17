@@ -86,7 +86,10 @@ test("track vocabulary: journal kinds and state transitions classify by track", 
   assert.equal(trackOfJournalKind("nope"), null);
   assert.equal(trackOfStateTransition("submitted", "accepted"), TRACK_ACCEPTANCE);
   assert.equal(trackOfStateTransition("claimed", "submitted"), TRACK_ACCEPTANCE);
-  assert.equal(trackOfStateTransition("submitted", "disputed"), TRACK_ACCEPTANCE);
+  // #3726 (Option A): no submitted -> disputed edge — disputes open only on
+  // accepted work, so the transition has no track and is illegal.
+  assert.equal(trackOfStateTransition("submitted", "disputed"), null);
+  assert.equal(trackOfStateTransition("accepted", "disputed"), TRACK_ACCEPTANCE);
   assert.equal(trackOfStateTransition("disputed", "refunded"), TRACK_ACCEPTANCE);
   assert.equal(trackOfStateTransition("accepted", "approved"), TRACK_FINALITY);
   assert.equal(trackOfStateTransition("approved", "paid"), TRACK_FINALITY);
@@ -97,6 +100,8 @@ test("track vocabulary: journal kinds and state transitions classify by track", 
   assert.equal(stateTransitionLegal("funded", "accepted"), false);
   assert.equal(stateTransitionLegal("disputed", "claimed"), false);
   assert.equal(acceptanceTransitionLegal("submitted", "accepted"), true);
+  assert.equal(acceptanceTransitionLegal("submitted", "disputed"), false); // #3726
+  assert.equal(stateTransitionLegal("submitted", "disputed"), false); // #3726
   assert.equal(acceptanceTransitionLegal("disputed", "approved"), true);
   assert.equal(acceptanceTransitionLegal("funded", "accepted"), false);
   assert.equal(acceptanceTransitionLegal("accepted", "paid"), false);
