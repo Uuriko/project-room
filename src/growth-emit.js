@@ -27,7 +27,7 @@ export const ROOM_TO_GROWTH = Object.freeze({
   [EVENT_TYPES.MEMBER_ADDED]: "member.joined",
   [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: "member.joined",
   [EVENT_TYPES.MESSAGE_POSTED]: "message.sent",
-  [EVENT_TYPES.MESSAGE_REACTION_SET]: "reaction.added",
+  "message.reaction_set": "reaction.added", // historical events only; reactions were removed
   [EVENT_TYPES.MESSAGE_PINNED]: "message.pinned",
   [EVENT_TYPES.WORK_PROPOSED]: "work.proposed",
   [EVENT_TYPES.WORK_COMPLETED]: "work.completed",
