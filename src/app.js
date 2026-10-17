@@ -3587,7 +3587,7 @@ function workCard(i, now, drafts, messages = []) {
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
-`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
+`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...(draft.body ?? "")].slice(0, 100).join(""))}${[...(draft.body ?? "")].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const staleBasis = latestDraft?.proposal && latestDraft.proposal.basisRevision < i.revision ? latestDraft.proposal.basisRevision : null;
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
@@ -3622,6 +3622,10 @@ function timelineWorkEntries() {
   for (let index = state.messages.length - 1; index >= 0; index--) {
     const message = state.messages[index];
     if (!message.workItemId || !message.proposal) continue;
+    // A deleted or redacted draft keeps its proposal context but its body is
+    // tombstoned to null: it is not a draft anymore, so it must neither count
+    // toward "Drafts (n)" nor be rendered (mirrors pinnedMessages' filter).
+    if (message.deletedAt || message.body == null) continue;
     if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
     draftsByWork.get(message.workItemId).push(message);
   }
