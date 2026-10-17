@@ -15,6 +15,8 @@ if CommandLine.arguments.count > 3, CommandLine.arguments[2].hasPrefix("--") {
     if args[2] == "--stop-watch" { fm.createFile(atPath: journal + ".stop", contents: Data()); exit(0) }
     let mode = String(data: try Data(contentsOf: URL(fileURLWithPath: args[4])), encoding: .utf8)!
     let directory = journal + ".watch"
+    let pinned = ProcessInfo.processInfo.environment["ROOM_HOST_SCOPE"] ?? "missing"
+    try pinned.write(toFile: journal + ".scope", atomically: true, encoding: .utf8)
     try fm.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     let started = stamp(), session = UUID().uuidString.lowercased()
     func status(_ phase: String) throws {
@@ -95,17 +97,28 @@ do { try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable),
 catch { print("PASS: nonprivate native connection refused") }
 let retainedManifest = try RoomHostManifest.read(setupSaved)
 check(retainedManifest.runtimeConfig == approvedManifest.runtimeConfig, "failed setup preserves working configuration")
+let (changedHost, changedDir) = try fixture("changed")
+let changedConnection = changedDir.appendingPathComponent("connection/connection.json")
+try write(["origin":"https://fixture.invalid", "roomId":"another-room", "memberId":"agent", "token":"fixture-only"], changedConnection.path)
+var refusedChangedRoom = false
+do { try changedHost.start() } catch { refusedChangedRoom = (error as? LocalToolFailure)?.code == "room_connection_changed" }
+_ = changedHost.stopAndWait()
+check(refusedChangedRoom, "changed room connection refused before starting host")
 let (host,dir) = try fixture("normal")
 let saved = dir.appendingPathComponent("managed/selected-host.json")
 let savedAttributes = try fm.attributesOfItem(atPath:saved.path)
 check((savedAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "saved manifest private")
 let restored = try LocalRoomHost(directory:dir.appendingPathComponent("managed"))
 check(restored.snapshot()["configured"] as? Bool == true && restored.snapshot()["running"] as? Bool == false, "restores setup without automatic execution")
+try write(["origin":"https://fixture.invalid", "roomId":"fixture", "memberId":"agent", "token":"rotated-fixture-token"], dir.appendingPathComponent("connection/connection.json").path)
 try host.start()
+check(host.snapshot()["running"] as? Bool == true, "same-identity token rotation remains startable")
 do { try host.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true); check(false, "active configuration refused") }
 catch { print("PASS: active host configuration cannot change") }
 check(until { (host.snapshot()["message"] as? String)?.hasPrefix("Listening") == true }, "owned fresh status reaches listening without claiming model ready")
 do { try restored.start(); check(false,"duplicate refused") } catch { print("PASS: duplicate desktop host refused") }
+let pinnedScope = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: host.journalURL!.path + ".scope"))) as! [String: String]
+check(pinnedScope == ["origin":"https://fixture.invalid", "roomId":"fixture", "memberId":"agent"], "child receives exact selected room identity without a token")
 check(host.stopAndWait(), "graceful stop waits for child")
 check(host.snapshot()["message"] as? String == "Agent stopped", "terminal status and exit both confirm stop")
 for mode in ["wrongpid","stale","unverified","exit"] {

@@ -47,22 +47,26 @@ public final class LocalRoomHost {
         let saved = self.directory.appendingPathComponent("selected-host.json")
         if FileManager.default.fileExists(atPath: saved.path) { try? configure(saved) }
     }
-    public func configure(_ url: URL) throws {
-        let selected = try RoomHostManifest.read(url)
+    private static func connectionIdentity(_ selected: RoomHostManifest) throws -> [String: String] {
         let connectionURL = URL(fileURLWithPath: selected.roomConnection).appendingPathComponent("connection.json")
         let data = try Data(contentsOf: connectionURL)
         guard data.count <= 4096, let identity = try JSONSerialization.jsonObject(with: data) as? [String: Any],
             let origin = identity["origin"] as? String, let roomId = identity["roomId"] as? String, let memberId = identity["memberId"] as? String,
             !origin.isEmpty, !roomId.isEmpty, !memberId.isEmpty else { throw LocalToolFailure("invalid_room_connection") }
+        return ["origin": origin, "roomId": roomId, "memberId": memberId]
+    }
+    public func configure(_ url: URL) throws {
+        let selected = try RoomHostManifest.read(url)
+        let identity = try Self.connectionIdentity(selected)
         let key = SHA256.hash(data: Data(URL(fileURLWithPath: selected.roomConnection).resolvingSymlinksInPath().path.utf8)).map { String(format: "%02x", $0) }.joined()
         lock.lock(); defer { lock.unlock() }
         guard pid == 0 else { throw LocalToolFailure("host_already_running") }
         let saved = directory.appendingPathComponent("selected-host.json")
         try JSONEncoder().encode(selected).write(to: saved, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: saved.path)
-        manifest = selected; scope = ["origin": origin, "roomId": roomId, "memberId": memberId]
+        manifest = selected; scope = identity
         journalURL = directory.appendingPathComponent("room-\(key).sqlite")
-        lastMessage = "Ready to start · \(roomId)"
+        lastMessage = "Ready to start · \(identity["roomId"]!)"
     }
     // Save a private managed copy: selecting Mac tools must never rewrite an
     // imported runtime shared with a terminal host or another application.
@@ -100,13 +104,17 @@ public final class LocalRoomHost {
             try? FileManager.default.removeItem(at: source)
         }
     }
-    private func spawn(_ manifest: RoomHostManifest, arguments: [String]) throws -> pid_t {
+    private func spawn(_ manifest: RoomHostManifest, arguments: [String], selectedScope: [String: String]? = nil) throws -> pid_t {
         var actions: posix_spawn_file_actions_t?, attributes: posix_spawnattr_t?
         posix_spawn_file_actions_init(&actions); posix_spawnattr_init(&attributes)
         defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
         for fd in [STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO] { posix_spawn_file_actions_addopen(&actions, fd, "/dev/null", fd == STDIN_FILENO ? O_RDONLY : O_WRONLY, 0) }
         posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP)); posix_spawnattr_setpgroup(&attributes, 0)
-        let environment = ["PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME=\(NSHomeDirectory())", "LANG=en_US.UTF-8", "TMPDIR=\(NSTemporaryDirectory())", "ROOM_AGENT_CONFIG=\(manifest.roomConnection)"]
+        var environment = ["PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME=\(NSHomeDirectory())", "LANG=en_US.UTF-8", "TMPDIR=\(NSTemporaryDirectory())", "ROOM_AGENT_CONFIG=\(manifest.roomConnection)"]
+        if let selectedScope {
+            let encoded = try JSONSerialization.data(withJSONObject: selectedScope, options: [.sortedKeys])
+            environment.append("ROOM_HOST_SCOPE=\(String(decoding: encoded, as: UTF8.self))")
+        }
         let argv = ([manifest.node, manifest.script] + arguments).map { strdup($0) } + [nil]
         let env = environment.map { strdup($0) } + [nil]
         defer { for pointer in argv + env { if let pointer { free(pointer) } } }
@@ -121,10 +129,11 @@ public final class LocalRoomHost {
         lock.lock(); defer { lock.unlock() }
         guard pid == 0, !stopping else { throw LocalToolFailure("host_already_running") }
         guard let manifest, let journalURL else { throw LocalToolFailure("host_not_configured") }
+        guard (try? Self.connectionIdentity(manifest)) == scope else { throw LocalToolFailure("room_connection_changed") }
         let fd = Darwin.open(directory.appendingPathComponent("desktop-owner.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw LocalToolFailure("host_lock_unavailable") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw LocalToolFailure("another_desktop_host_running") }
-        do { pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig]) }
+        do { pid = try spawn(manifest, arguments: ["--watch", journalURL.path, manifest.runtimeConfig], selectedScope: scope) }
         catch { close(fd); throw error }
         ownerFD = fd; stopping = false; session = nil; launchTime = Date(); lastMessage = "Starting agent…"
         let child = pid; finished.enter()

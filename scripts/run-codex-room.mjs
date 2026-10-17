@@ -45,6 +45,17 @@ Normal invocation executes one already-created public Room assistant run assigne
     throw new Error("Invalid arguments; use --help");
   const settings = validateCodexRuntimeConfig(JSON.parse(readFileSync(configPath, "utf8")));
   const connection = check ? null : agentConnectionFromEnvironment();
+  // Native setup pins the visible room identity. Validate the connection that
+  // this child actually loaded, closing the file-replacement race at launch.
+  if (connection && process.env.ROOM_HOST_SCOPE !== undefined) {
+    let expected;
+    try { expected = JSON.parse(process.env.ROOM_HOST_SCOPE); } catch { /* refuse below */ }
+    const fields = ["origin", "roomId", "memberId"];
+    if (!expected || typeof expected !== "object" || Array.isArray(expected)
+      || Object.keys(expected).length !== fields.length
+      || fields.some(field => typeof expected[field] !== "string" || !expected[field] || expected[field] !== connection[field]))
+      throw new Error("Room connection changed; reconnect the agent in My Mac");
+  }
   const db = check ? null : openRequestJournal(journal);
   const threads = db ? scopedCodexThreads(db, connection) : [];
   let rpc, statusWriter;

@@ -80,7 +80,9 @@ import CoreGraphics
     @objc private func toggleHost() {
         hostIssue = nil
         if host.snapshot()["running"] as? Bool == true { host.requestStop() }
-        else { do { try host.start() } catch { hostIssue = "Could not start. Check setup or another running host." } }
+        else { do { try host.start() } catch { hostIssue = (error as? LocalToolFailure)?.code == "room_connection_changed"
+            ? "The room connection changed. Choose Connect agent to review its setup before starting."
+            : "Could not start. Check setup or another running host." } }
         refresh()
     }
     private func refresh() {

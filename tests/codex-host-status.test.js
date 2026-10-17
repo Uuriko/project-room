@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, chmodSync, symlinkSync, statSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, chmodSync, symlinkSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
@@ -83,7 +83,7 @@ test("desktop CLI starts idle, publishes a fresh bounded heartbeat, and stops wi
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); room.store.close(); });
   const connectionDir = join(f.root, "room"), origin = `http://127.0.0.1:${server.address().port}`;
   saveAgentConnection(connectionDir, { version: 1, origin, roomId: "commons", memberId: "producer", token: room.keys.producer });
-  const child = spawn(process.execPath, [cli, "--watch", f.journal, f.config], { env: { ROOM_AGENT_CONFIG: connectionDir, PATH: "/unavailable" }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [cli, "--watch", f.journal, f.config], { env: { ROOM_AGENT_CONFIG: connectionDir, PATH: "/unavailable", ROOM_HOST_SCOPE: JSON.stringify({ origin, roomId: "commons", memberId: "producer" }) }, stdio: ["ignore", "pipe", "pipe"] });
   let out = "", err = ""; child.stdout.on("data", d => { out += d; }); child.stderr.on("data", d => { err += d; });
   const finished = new Promise(resolve => child.on("exit", (code, signal) => resolve({ code, signal })));
   t.after(async () => { child.kill("SIGTERM"); await finished; });
@@ -98,3 +98,24 @@ test("desktop CLI starts idle, publishes a fresh bounded heartbeat, and stops wi
   assert.equal(readCodexHostStatus(f.journal).phase, "stopped");
   assert.doesNotMatch(out + err, /PRIVATE-ACCOUNT-DETAIL|planType/);
 });
+
+
+for (const mismatch of ["origin", "roomId", "memberId", "malformed", "incomplete"]) {
+  test(`desktop scope refuses ${mismatch} before opening a journal or provider`, t => {
+    const f = setup(t), connectionDir = join(f.root, "room");
+    const connection = { version: 1, origin: "https://fixture.invalid", roomId: "selected", memberId: "agent", token: "t".repeat(43) };
+    saveAgentConnection(connectionDir, connection);
+    const pinned = { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId };
+    if (mismatch === "incomplete") delete pinned.memberId;
+    else if (mismatch !== "malformed") pinned[mismatch] += "-changed";
+    const result = spawnSync(process.execPath, [cli, "--watch", f.journal, f.config], {
+      encoding: "utf8", timeout: 2500,
+      env: { PATH: "/unavailable", ROOM_AGENT_CONFIG: connectionDir,
+        ROOM_HOST_SCOPE: mismatch === "malformed" ? "{" : JSON.stringify(pinned) }
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Room connection changed; reconnect the agent in My Mac/);
+    assert.equal(existsSync(f.journal), false, "refusal precedes journal and provider startup");
+    assert.equal((result.stdout + result.stderr).includes(connection.token), false);
+  });
+}
