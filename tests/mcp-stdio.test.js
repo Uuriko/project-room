@@ -153,9 +153,17 @@ test("draft refusals are distinct from unknown saves and private diagnostics are
 
 test("oversized input and ambiguous in-flight IDs close the bounded transport", async t => {
   const h = harness(t); h.input.write("x".repeat(65537)); await h.server.done;
+  // Assertions (T-4, find:mcp-stdio-001): awaiting `done` alone only proves
+  // the transport closed, not that it closed WITHOUT answering. The
+  // oversized line was never a valid request, so no reply may exist.
+  assert.equal(h.replies.length, 0, "oversized input produces no reply before the transport closes");
   const duplicate = harness(t, { checkConnection: () => new Promise(() => {}) }); await duplicate.ready();
   const message = { id: "same", method: "tools/call", params: { name: "room_check_access" } };
   duplicate.send(message); duplicate.send(message); await duplicate.server.done;
+  // The duplicate ID is ambiguous, so NEITHER request may be answered:
+  // a reply for "same" would mean one of them was silently served.
+  assert.equal(duplicate.replies.filter(reply => reply.id === "same").length, 0,
+    "ambiguous in-flight IDs are never answered");
 });
 
 test("discussion refusals explain safe next steps without echoing service diagnostics", async t => {
