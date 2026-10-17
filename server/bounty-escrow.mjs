@@ -2397,14 +2397,17 @@ export class BountyEscrow {
           // Lane cards enumerate agent members; a designated HUMAN decider
           // (a human-mode room's named reviewer) is seated from their live
           // membership instead. Independence from the claimant remains
-          // resolveTier1's check, unchanged.
+          // resolveTier1's check, and the challenger is now an independence
+          // input beside it: a designee who raised this dispute is
+          // ineligible for its seat (party-as-judge) and seating falls
+          // through to the honest-unavailable path below.
           if (!lanes.some(card => card.lane === designatedDecider)) {
             const member = this._memberOf(roomId, designatedDecider);
             if (member && member.active !== false)
               lanes.push({ lane: designatedDecider, trust_level: "standard" });
           }
           seating = this._arbiters.resolveTier1({ verifierId: designatedDecider,
-            executor: { lane: bounty.claimant }, lanes });
+            executor: { lane: bounty.claimant }, challenger: { lane }, lanes });
         }
         if (!seating || seating.unavailable) {
           dispute = machine.markUnavailable(disputeId,
@@ -2451,6 +2454,11 @@ export class BountyEscrow {
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
       check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      // Defense in depth: seating now refuses a challenger-designee, but a
+      // dispute seated before that exclusion existed (or recorded by any
+      // other path) still cannot be ruled on by the party who raised it.
+      check(dispute.raisedBy !== lane, "not_authorized",
+        "the seated decider cannot rule on a dispute they raised");
       // Slice 6: the arbiter may re-check the work against the pinned
       // rubric version. When supplied, the citations are validated against
       // the pin before the ruling lands, and recorded on the resolution.

@@ -121,6 +121,33 @@ test('dispute on accepted work is decidable: the seated decider rules and the pu
   assert.equal(issued(store), issuedBefore); conserved(store);
 });
 
+test('the designated decider cannot dispute into their own seat (party-as-judge)', t => {
+  const f = fixture(t), { store } = f;
+  const issuedBefore = issued(store);
+  f.enable();
+  const receipt = f.claimAndFinish();
+  // Option A (#3726): disputes open only on accepted work, so the
+  // scenario sits behind an acceptance; the seating refusal below is
+  // the pin (#3866) and is unchanged.
+  store.publicWorkReviews.decide('commons', 'reviewer2', receipt.receiptId,
+    f.decideInput('rota-accept', 'accepted')(receipt));
+  // The rail designated 'reviewer' (a human member) as the dispute decider
+  // at fund time. The reviewer raises a dispute against the very bounty
+  // they would judge: no seat may be granted, and they cannot rule on
+  // their own challenge.
+  const { dispute } = store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
+    { challenger: 'reviewer', bond: 1, grounds: 'judging my own challenge' });
+  assert.equal(dispute.decider, null);
+  assert.match(dispute.unavailable, /challenger/);
+  assert.equal(dispute.raisedBy, 'reviewer');
+  // The bond still locks (the dispute exists; it simply has no decider).
+  assert.deepEqual(millis(store, 'reviewer'), [99_000, 1_000, 0, 0]);
+  assert.throws(() => store.bountyEscrow.decideDispute('commons', bountyOf(store).bountyId,
+    { decider: 'reviewer', outcome: 'upheld', reasonCodes: ['criterion-unmet'] }), code('not_authorized'));
+  assert.equal(bountyOf(store).state, 'disputed');
+  assert.equal(issued(store), issuedBefore); conserved(store);
+});
+
 test('undecided dispute timeout on accepted work: award vests, but the challenger bond goes to the pool, never the claimant', t => {
   const f = fixture(t), { store } = f;
   const issuedBefore = issued(store);

@@ -432,6 +432,76 @@ test("no designated verifier means no authorized decider: dispute is honestly un
   expectConserved(escrow);
 });
 
+// Post -> fund -> claim -> submit -> accept with arbitrary post overrides.
+function runToAcceptedDesignated(escrow, overrides = {}) {
+  const bounty = post(escrow, { amount: 10, ...overrides });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  return escrow.getBounty(ROOM, bounty.bountyId);
+}
+
+test("the designated verifier cannot dispute into their own decider seat", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "judging my own case" });
+  const d = escrow.getDispute(ROOM, dispute.disputeId);
+  assert.equal(d.decider, null); // the designee IS the challenger: no seat
+  assert.match(d.unavailable, /challenger/);
+  assert.equal(d.raisedBy, INSTINCT);
+  // Nobody may rule on it — least of all the challenger.
+  expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+  expectConserved(escrow);
+});
+
+test("the designated dispute decider cannot dispute into their own seat either", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAcceptedDesignated(escrow, { disputeDeciderId: CODEX });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "my own case" });
+  const d = escrow.getDispute(ROOM, dispute.disputeId);
+  assert.equal(d.decider, null);
+  assert.match(d.unavailable, /challenger/);
+  expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: CODEX, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+  expectConserved(escrow);
+});
+
+test("a verifier's dispute still seats a distinct designated decider (precedence unchanged)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAcceptedDesignated(escrow, { verifierId: INSTINCT, disputeDeciderId: CODEX });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "not my seat" });
+  assert.equal(dispute.decider, CODEX); // disputeDecider ?? verifier, as before
+  assert.equal(dispute.unavailable, null);
+  expectConserved(escrow);
+});
+
+test("decide-time guard: a pre-seated self-dispute cannot be ruled on by its raiser", () => {
+  const db = new DatabaseSync(":memory:");
+  const { escrow } = makeEscrow(db);
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "neutral challenge" });
+  assert.equal(dispute.decider, INSTINCT);
+  // Simulate a dispute record seated before the challenger exclusion
+  // existed: the seated decider is also the dispute's raiser, persisted
+  // exactly as such a legacy row would sit in bounty_disputes.
+  const legacy = Object.freeze({ ...escrow.getDispute(ROOM, dispute.disputeId), raisedBy: INSTINCT });
+  escrow._disputeRecords.set(dispute.disputeId, legacy);
+  escrow._persistDispute(ROOM, legacy);
+  // A fresh escrow over the same store rehydrates the legacy row.
+  const { escrow: rehydrated } = makeEscrow(db);
+  const row = rehydrated.getDispute(ROOM, dispute.disputeId);
+  assert.equal(row.raisedBy, INSTINCT);
+  assert.equal(row.decider, INSTINCT);
+  expectCode(() => rehydrated.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+  // The refusal is a refusal, not a settlement: the bounty stays disputed.
+  assert.equal(rehydrated.getBounty(ROOM, bounty.bountyId).state, "disputed");
+  expectConserved(rehydrated);
+});
+
 test("getDispute is room-scoped: another room's dispute reads as absent (L-P2-10)", () => {
   const { escrow } = makeEscrow();
   const OTHER = "room-other";
