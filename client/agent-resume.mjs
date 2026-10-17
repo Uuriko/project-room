@@ -42,7 +42,7 @@ async function beforeAbort(promise, signal) {
 
 export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion, attentionCursor, focus, maxPages = 2,
   timeoutMs = 10000, signal, maxResponseBytes = 262144 } = {}) {
-  if (focus !== undefined && focus !== 'replies' || !connection?.memberId || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 5
+  if (focus !== undefined && !['replies', 'assistant'].includes(focus) || !connection?.memberId || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 5
     || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 15000
     || !Number.isInteger(maxResponseBytes) || maxResponseBytes < 1024 || maxResponseBytes > 1048576
     || sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)
@@ -74,6 +74,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     observedThroughBySource: {}, attention: [], ownClaims: [], obligations: [], pendingReconciliations: { status: 'not_read' },
     incompleteSources: [], nextReads: [], metrics };
   if (focus === 'replies') Object.assign(out, { focus, openRequests: [], optionalConversations: [] });
+  if (focus === 'assistant') Object.assign(out, { focus, sharedAssistant: null, assignedRuns: [] });
   const safe = () => { if (JSON.stringify(out).includes(connection.token)) throw invalid(); return out; };
   const incomplete = (source, error) => out.incompleteSources.push({ source, ...connectionDiagnostic(error), httpStatus: error instanceof RoomClientError ? error.status : 0 });
   const contextRead = async version => {
@@ -97,14 +98,14 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
     out.observedThroughBySource.context = { evaluatedThrough: value.evaluatedThrough, cursors: value.cursors, notModified: value.not_modified === true };
     if (value.not_modified) return;
     out.authoritySummary = pick(value.roster.find(member => member.id === connection.memberId), ['id', 'kind', 'active', 'permissions']);
-    out.obligations = focus === 'replies' ? [] : value.focusWork.map(item => pick(item, ['id', 'title', 'state', 'revision', 'nextAction', 'nextMemberId', 'needsAttention']));
-    out.ownClaims = focus === 'replies' ? [] : value.locks.filter(lock => lock.holderId === connection.memberId)
+    out.obligations = focus ? [] : value.focusWork.map(item => pick(item, ['id', 'title', 'state', 'revision', 'nextAction', 'nextMemberId', 'needsAttention']));
+    out.ownClaims = focus ? [] : value.locks.filter(lock => lock.holderId === connection.memberId)
       .map(lock => pick(lock, ['workItemId', 'repository', 'ref', 'paths', 'expiresAt', 'status']));
     out.nextReads = out.nextReads.filter(read => read.source !== 'work');
     for (const item of out.obligations) out.nextReads.push({ source: 'work', tool: 'room_read_work', arguments: { roomId: connection.roomId, workItemId: item.id } });
   };
   project(initial);
-  try {
+  if (focus !== 'assistant') try {
     const items = []; let cursor = attentionCursor, more = false;
     for (let page = 0; page < maxPages; page++) {
       const query = new URLSearchParams();
@@ -157,6 +158,34 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
       for (const request of out.openRequests) out.nextReads.push({ source: 'openRequests', ...request.nextRead });
     } catch (error) { incomplete('openRequests', error); }
   }
+  if (focus === 'assistant') {
+    try {
+      const listing = await client.assistant(undefined, { signal: stop });
+      const assistant = listing.assistant;
+      if (!isObject(assistant) || !['not_connected', 'awaiting_host', 'connected'].includes(assistant.availability)
+        || assistant.coordinatorMemberId !== null && !validId(assistant.coordinatorMemberId)
+        || !count(assistant.revision) || !Array.isArray(listing.runs) || listing.runs.length > 100) throw invalid();
+      const states = new Set(['queued', 'working', 'unknown', 'resume_requested', 'pause_requested', 'cancel_requested', 'paused', 'needs_input', 'done', 'failed', 'cancelled']);
+      const runs = [];
+      for (const run of listing.runs) {
+        if (!isObject(run) || !validId(run.id) || !states.has(run.status)) throw invalid();
+        if (run.coordinatorMemberId !== connection.memberId || ['done', 'failed', 'cancelled'].includes(run.status)) continue;
+        if (!count(run.revision) || !validId(run.sourceMessageId) || run.attemptId !== null && !validId(run.attemptId)
+          || !Array.isArray(run.inputs) || run.inputs.length > 100
+          || run.inputs.some(input => !isObject(input) || !validId(input.sourceMessageId) || !['pending', 'applied'].includes(input.status))) throw invalid();
+        runs.push({ ...pick(run, ['id', 'status', 'revision', 'attemptId', 'sourceMessageId']), sourceDeleted: run.sourceDeleted === true,
+          inputCount: run.inputs.length, pendingInputMessageIds: run.inputs.filter(input => input.status === 'pending').map(input => input.sourceMessageId) });
+      }
+      out.sharedAssistant = { ...pick(assistant, ['coordinatorMemberId', 'availability', 'revision']),
+        selectedForThisAgent: assistant.coordinatorMemberId === connection.memberId, execution: 'not_observed' };
+      out.assignedRuns = runs;
+      // Assistant rows do not share the room-event context version. Always read
+      // them even when the caller can reuse its unchanged room context.
+      out.observedThroughBySource.assistant = { readAt: new Date().toISOString(), currentRead: true };
+      out.nextReads.push({ source: 'assistant', tool: 'room_assistant_context', arguments: { roomId: connection.roomId } });
+      if (listing.runs.length === 100) out.incompleteSources.push({ source: 'assistant', code: 'run_window_limit' });
+    } catch (error) { incomplete('assistant', error); }
+  }
   // Fresh compact read, not a cached grant. Changed context replaces the earlier projection.
   try {
     const fresh = await contextRead(initial.context_version);
@@ -170,6 +199,7 @@ export async function resumeAgent({ connection, fetchImpl = fetch, sinceVersion,
   } catch (error) {
     out.contextVersion = null; out.authoritySummary = null; out.observedThroughBySource = {};
     if (focus === 'replies') { out.openRequests = []; out.optionalConversations = []; }
+    if (focus === 'assistant') { out.sharedAssistant = null; out.assignedRuns = []; }
     out.attention = []; out.obligations = []; out.ownClaims = []; out.nextReads = [];
     incomplete('connection', error);
   }
