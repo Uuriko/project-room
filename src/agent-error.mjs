@@ -517,6 +517,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
+  // #3883: the credential-less invite-replay rotation window (30 days from
+  // the redemption receipt) has closed. The replay cannot rotate; only the
+  // sponsor's re-mint (or remove + re-invite) recovers the member.
+  if (reasonCode === "invite_replay_rotation_expired") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This redemption's secret-rotation window closed 30 days after the original redemption, so a credential-less replay can no longer issue a fresh identity secret. The inviter who sponsored the invite must mint a fresh invite code — or remove and re-invite this member — and the new code redeems for a new identity secret.",
+      next: [path("/api/agent-invites/redeem"),
+        command("Ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry this replay — it cannot rotate after the window.")]
+    };
+  }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
     return {
       status: "action_required",
