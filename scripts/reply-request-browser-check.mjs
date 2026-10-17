@@ -43,7 +43,7 @@ async function mode(page, id, kind) {
   assert.equal(await page.locator("#composer-status").textContent(), "");
 }
 
-for (const width of [1280, 390]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
+for (const width of [1280, 390, 320]) test(`request journey at ${width}px: request, clarify and answer stay in chat without closing work`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 }), owner = await f.login("owner"), guest = await f.login("guest");
   const before = structuredClone(f.state().workItems);
   await input(owner).fill("Keep my ordinary draft");
@@ -66,6 +66,19 @@ for (const width of [1280, 390]) test(`request journey at ${width}px: request, c
   await record(guest, id).getByRole("button", { name: "Answer request", exact: true }).click();
   await guest.getByRole("button", { name: "Send answer", exact: true }).waitFor();
   await idle(guest);
+  assert.equal(await guest.locator("#request-refresh").isVisible(), false, "unchanged context needs no refresh control");
+  if (width <= 390) {
+    const geometry = await guest.evaluate(() => {
+      const bar = document.querySelector('#request-mode-bar').getBoundingClientRect();
+      const exit = document.querySelector('#request-exit').getBoundingClientRect();
+      const assistant = document.querySelector('#room-assistant').getBoundingClientRect();
+      return { barHeight: bar.height, exitHeight: exit.height, assistantHeight: assistant.height, overflow: document.documentElement.scrollWidth > innerWidth + 1 };
+    });
+    assert.ok(geometry.barHeight < 100, JSON.stringify(geometry));
+    assert.ok(geometry.exitHeight >= 44, "request exit keeps a touch-sized target");
+    assert.ok(geometry.assistantHeight <= 48, JSON.stringify(geometry));
+    assert.equal(geometry.overflow, false);
+  }
   await input(guest).fill("Use the short agenda, including the review.");
   await guest.screenshot({ path: `test-results/request-answer-${width}.png`, fullPage: true });
   await input(guest).press("Shift+Enter");

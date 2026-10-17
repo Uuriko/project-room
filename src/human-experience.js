@@ -106,6 +106,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     const runs = Object.values(projection.runs ?? {});
+    section.classList.toggle('assistant-idle', !runs.length && !error && !operation && !rejectedOperation);
     $('#assistant-activity').hidden = !runs.length;
     const openRuns = new Set([...document.querySelectorAll('#assistant-runs details.assistant-run[open]')].map(d => d.dataset.assistantRun));
     const runsHtml = runs.map(run => {
