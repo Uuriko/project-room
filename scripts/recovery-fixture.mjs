@@ -225,6 +225,10 @@ export function createRecoveryFixture(filename) {
     escrow.claimBounty("commons", second.bountyId, { claimant });
     escrow.submitWork("commons", second.bountyId, { claimant,
       evidence: { evidenceUrl: "https://example.com/pr/2", summary: "Fixture submission under dispute." } });
+    // #3726: disputes open only on accepted work — accept before disputing.
+    escrow.acceptWork("commons", second.bountyId, { acceptor: poster,
+      verifierAttestation: { at: new Date(Date.now()).toISOString(), note: "Recovery fixture attestation.",
+        citations: [{ criterionId: "c1", verdict: "pass" }] } });
     escrow.disputeBounty("commons", second.bountyId, { challenger: watcher, bond: 2, grounds: "Recovery fixture dispute." });
     // Slice 8: a claimed bounty that times out without a submission records a flake.
     // Short deadline so the keeper can time it out without expiring the fixture's invitation.
