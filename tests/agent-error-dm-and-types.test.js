@@ -21,12 +21,12 @@ test("dm_consent_required points at DM consent, not at access or the owner", () 
 
 test("an unknown command type names the closest real type and its family", () => {
   const refused = type => { try { validateCommand({ id: "11111111-1111-4111-8111-111111111111", type, data: {} }); } catch (error) { return error; } };
-  for (const [type, expected] of [["message.post", "message.posted"], ["message.reacted", "message.reaction_set"], ["work.accept", "work.accepted"]]) {
+  for (const [type, expected] of [["message.post", "message.posted"], ["message.edit", "message.edited"], ["work.accept", "work.accepted"]]) {
     const error = refused(type);
     assert.equal(error.status, 422); assert.equal(error.code, "invalid_command");
     assert.match(error.message, new RegExp(`Did you mean "${expected.replace(".", "\\.")}"`));
   }
-  assert.match(refused("message.post").message, /message types: message\.posted, .*message\.reaction_set/);
+  assert.match(refused("message.post").message, /message types: message\.posted, .*message\.pinned/);
   assert.doesNotMatch(refused("bogus").message, /Did you mean/);
   assert.match(refused("bogus").message, /Types include message\.posted/);
   // A bad id keeps its old message; the type check only runs on a valid id.

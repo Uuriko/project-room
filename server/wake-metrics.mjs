@@ -28,7 +28,7 @@
 //                           (journaled) — the attempt was owed and lost
 // Delivery is a signal's inclusion in a page/batch served on a door
 // (heartbeat, poll, mcp, listener); ack is delivered_at set through an
-// ack door (rest, mcp, reaction). Push is a doorbell, not delivery: its
+// ack door (rest, mcp). Push is a doorbell, not delivery: its
 // outcomes are counted separately (doorbell_delivered / doorbell_failed,
 // failures journaled) and never enter the delivery rate.
 //

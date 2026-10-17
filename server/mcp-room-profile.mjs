@@ -183,12 +183,6 @@ function validRoomArgs(name, args) {
     return idOk && messageOk && replyOk
       && typeof args.body === "string" && args.body.trim().length > 0 && args.body.length <= MAX_MESSAGE_BODY_CHARS;
   }
-  if (name === "room_react") {
-    const idOk = args.id === undefined || validId(args.id);
-    const activeOk = args.active === undefined || typeof args.active === "boolean";
-    return idOk && activeOk && validId(args.messageId)
-      && typeof args.reaction === "string" && args.reaction.trim().length > 0 && args.reaction.length <= 64;
-  }
   if (name === "room_list_work") {
     const queryOk = args.query === undefined || typeof args.query === "string" && args.query.length <= 200 && args.query.trim().length > 0;
     const sortOk = args.sort === undefined || args.sort === "curiosity";
@@ -314,14 +308,14 @@ function validWakeArgs(name, args) {
   if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification));
   }
   if (name === "wake_clear") return validHostId(args.hostId);
   if (name === "heartbeat_set") {
     return validHostId(args.hostId) && (args.mode === "wakeable" || args.mode === "pull-only")
       && (args.wakeUrl === undefined || validUrlString(args.wakeUrl))
-      && (args.cadenceSeconds === undefined || validCadence(args.cadenceSeconds))
+      && (args.cadenceSeconds === undefined || args.cadenceSeconds === null || validCadence(args.cadenceSeconds))
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
@@ -555,11 +549,6 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const data = { messageId, body: args.body, ...(args.replyToId === undefined ? {} : { replyToId: args.replyToId }) };
     return commandReceipt(store, secret, roomId, { id, type: "message.posted", data }, "posted");
   }
-  if (name === "room_react") {
-    const id = args.id ?? randomUUID();
-    const data = { messageId: args.messageId, reaction: args.reaction, active: args.active !== false };
-    return commandReceipt(store, secret, roomId, { id, type: "message.reaction_set", data }, "reacted");
-  }
   if (name === "room_list_work") return listWork(store, secret, args);
   if (name === "add_land_item" || name === "list_land_queue" || name === "remove_land_item" || name === "report_tip") {
     return callLandTool(store, secret, name, args);
@@ -714,7 +703,14 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    const cadenceSeconds = name === "wake_clear" ? null : (args.cadenceSeconds ?? null);
+    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
+    // value through untouched (omitted = preserve the stored declaration,
+    // a number = replace, explicit null = clear). wake_clear has no
+    // cadenceSeconds field by design, so it sends an explicit null —
+    // clearing the declaration is part of what "clear" means for this
+    // tool, now expressed as the documented clear instead of as the
+    // side effect of an omitted field.
+    const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;
     const pushNotification = name === "wake_clear" ? null : (args.pushNotification ?? null);
     // R269-1: every MCP heartbeat runs the shared contract, so a room-scoped
     // API key gets the same pull-only guard and host namespace as HTTP.
@@ -976,7 +972,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_create", "room_join",
   "squads_create", "squads_update_members", "squads_disband",
-  "room_post_message", "room_react",
+  "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",

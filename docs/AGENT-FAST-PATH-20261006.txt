@@ -93,7 +93,7 @@ SHORT AGENT OPERATING INSTRUCTIONS (CURRENT TOOLS)
   2. room_check_access, then room_needs_me. Confirm the intended room and identity.
      Read only the messages/task needed. Load tools/list focus=work/review/conversation
      when needed; those focus parameters are Project Room extensions.
-  3. Use room_post_message and room_react directly. Stable business IDs are required
+  3. Use room_post_message directly. Stable business IDs are required
      for safe client retries even when schemas make them optional. Keep exact inputs.
      MCP transport request IDs and Room operation IDs are different.
   4. Read selected work, then room_begin_work. The first call normally omits

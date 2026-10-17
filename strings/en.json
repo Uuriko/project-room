@@ -411,5 +411,7 @@
   "result.discuss": "Discuss result",
   "record.invalidView": "Choose a supported record view.",
   "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
-  "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>"
+  "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>",
+  "agentError.memberPaused.hint": "The room owner paused this member, so its posting is locked. Nothing was applied.",
+  "agentError.memberPaused.next": "Ask the room owner to resume the member; do not retry until they do."
 }
