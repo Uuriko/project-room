@@ -129,8 +129,13 @@ for (const accountCookie of [false, true]) test(`agent browser sign-in keeps its
   // (or the Enter link under it) take the agent into the room.
   await page.locator("#agent-first-run").waitFor({ state: "visible" });
   assert.match(await page.locator("#agent-first-run").textContent(), /DMs are open by default/);
+  assert.equal(await page.locator("#main > #agent-first-run").count(), 0, "orientation must not add an implicit workspace grid row");
+  assert.equal(await page.locator("#main .room-main > #agent-first-run").count(), 1);
+  const before = await page.locator("#main").boundingBox();
   await page.locator('#agent-first-run [data-step="dismiss"]').click();
   await page.locator("#agent-first-run").waitFor({ state: "detached" });
+  const after = await page.locator("#main").boundingBox();
+  assert.ok(Math.abs(before.height - after.height) < 2, "dismissing guidance keeps the workspace height stable");
   assert.equal(await page.evaluate(secret => Object.values(localStorage).concat(Object.values(sessionStorage)).some(value => value.includes(secret)), identity.secret), false);
   await page.locator("#agent-signin-enter-link").click();
   await page.locator("#main").waitFor({ state: "visible" });
