@@ -3,7 +3,7 @@ import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
 import { installRoomLayout, syncSidebarSections } from "./room-layout.js";
-import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID } from "./events.js";
+import { EVENT_TYPES as T, MAX_MESSAGE_BODY_CHARS, WORK_STATES as S, roomPolicy, roomTrust, distinctMemberOwnerIds, roomKind, isRoomArchived, spendAllowance, pinnedMessages, isPinned, PIN_LIMIT, isMutedBy, channelList, messageChannelId, DEFAULT_CHANNEL_ID, ownMember } from "./events.js";
 import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
@@ -1156,7 +1156,7 @@ async function openAccountRoom(roomId) {
 // Issue #6 A2: room lifecycle — create (account home), archive (owner), leave (member).
 const roomKindLabel = kind => (kind === "organization" ? "Organization" : "Personal");
 function syncRoomLifecycle() {
-  const room = state?.room ?? null, viewer = state && session ? state.members[session.member.id] : null;
+  const room = state?.room ?? null, viewer = state && session ? ownMember(state.members, session.member.id) : null;
   const archived = Boolean(state) && isRoomArchived(state);
   const badge = $("#room-kind-badge");
   badge.textContent = room ? roomKindLabel(roomKind(room)) : ""; badge.hidden = !room;
@@ -1189,7 +1189,7 @@ $("#room-archive-button").addEventListener("click", async () => {
 });
 $("#room-leave-button").addEventListener("click", async () => {
   if (!state || !session || busy) return;
-  const member = state.members[session.member.id];
+  const member = ownMember(state.members, session.member.id);
   if (!member || member.active === false) return;
   if (!window.confirm("Leave this room? You lose access to it and need a new invitation to return. Your messages stay in the room.")) return;
   const generation = client.generation, roomId = session.roomId, button = $("#room-leave-button");
@@ -1268,13 +1268,13 @@ function renderDirectoryCard(card) {
     + `<p class="form-hint">${esc(reachLine)}</p>`;
 }
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
-const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? ["", state.members[id].displayName, " (", id, ")"].join('') : `Unknown member (${id})`;
+const memberLabel = id => id == null ? "Unassigned" : ownMember(state.members, id) ? ["", ownMember(state.members, id).displayName, " (", id, ")"].join('') : `Unknown member (${id})`;
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
 let displayNames = createMemberDisplayNames({});
 const displayName = id => humanExperience?.assistantName(id) || displayNames(id);
 const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
-const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
+const can = capability => ownMember(state?.members, session?.member.id)?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
   && session?.roomId === roomId && session?.member.id === memberId;
 // First letter or digit of each word, so "Maya (tester)" is "MT", not "M(".
@@ -2028,7 +2028,7 @@ function render() {
   // below. Propose and accept send no scopes; the server defaults all v1.
   const friendBondHtml = m => {
     if (!session || session.member.kind !== "agent" || m.kind !== "agent" || m.active === false || m.id === session.member.id) return "";
-    const self = state.members[session.member.id] ?? session.member;
+    const self = ownMember(state.members, session.member.id) ?? session.member;
     const selfId = identityIdOf(self, presenceStates.get(session.member.id));
     const peerId = identityIdOf(m, presenceStates.get(m.id));
     const bond = bondWithPeer(mergeFriendBonds(friendBonds, state.bonds), selfId, peerId);
@@ -2071,7 +2071,7 @@ function render() {
     const requests = incomingDmRequests(dmConsents, state.members, session.member.id);
     if (!requests.length) return "";
     const rows = requests.map(r => {
-      const member = state.members[r.requesterId];
+      const member = ownMember(state.members, r.requesterId);
       return `<li class="dm-request"><div><strong>${esc(member ? member.displayName : r.requester)}</strong>${r.reason ? `<p class="dm-request-reason">&ldquo;${esc(r.reason)}&rdquo;</p>` : ""}</div><div class="dm-consent-actions"><button type="button" class="text-button" data-dm-consent-action="approve" data-dm-consent-peer="${esc(r.requesterId)}">Approve</button><button type="button" class="text-button" data-dm-consent-action="reject" data-dm-consent-peer="${esc(r.requesterId)}">Reject</button><button type="button" class="text-button" data-dm-consent-action="block" data-dm-consent-peer="${esc(r.requesterId)}">Block</button></div></li>`;
     }).join("");
     return `<div class="dm-requests"><p class="presence-heading">Direct message requests (${requests.length})</p><ul>${rows}</ul></div>`;
@@ -2454,7 +2454,7 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
-  const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
+  const showInvite = Boolean(session?.member?.id && ownMember(state?.members, session.member.id)?.active !== false);
   if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
@@ -2517,7 +2517,7 @@ return `<p class="form-hint"><a class="source-link draft-state" href="${esc(work
 // data-message-action wiring, so the work loop is untouched.
 function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
-  const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete")
+  const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], ownMember(state.members, session.member.id)).some(([action]) => action === "complete")
     ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
   const request = state.replyRequests?.[m.id];
   const clarify = request?.status === "open" && request.recipientId === session.member.id;
@@ -2530,7 +2530,7 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const threadHtml = !currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : "";
   const workHtml = !m.deletedAt && can("steer") && !(m.proposal && m.workItemId)
     ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
-  const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"
+  const decideHtml = !m.deletedAt && can("decide") && ownMember(state.members, session.member.id)?.kind === "human"
     ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
   // Own messages only: the author can edit or delete (the server also lets the owner delete; that stays out of this menu).
   const own = !m.deletedAt && m.authorId === session.member.id && !m.proposal;
@@ -2673,7 +2673,7 @@ async function commitComposerFiles(messageId) {
   await refreshRoomFiles();
 }
 function messageContent(m, cluster = {}, unreadStart = false, members = Object.values(state.members)) {
-  const author = state.members[m.authorId];
+  const author = ownMember(state.members, m.authorId);
   const authorLabel = displayName(m.authorId);
   // E4 moderation: a muted author's message collapses for the muter alone; Report goes to the owner only.
   const muted = isMutedBy(state, session.member.id, m.authorId), other = m.authorId !== session.member.id;
@@ -2779,7 +2779,7 @@ function requestControls(message) {
       ? `<button type="button" class="message-to-work" data-message-id="${esc(previous.id)}" data-message-action="request-follow-up">Follow up</button>` : "";
   }
   const own = session.member.id, open = request.status === "open";
-  const status = open ? state.members[request.recipientId]?.active === false ? "Recipient unavailable" : "Reply requested"
+  const status = open ? ownMember(state.members, request.recipientId)?.active === false ? "Recipient unavailable" : "Reply requested"
     : ({ answered: "Answered", declined: "Declined", cancelled: "Cancelled" })[request.status];
   const actions = [];
   if (replyFollowUp(state, request.id, own)) actions.push(["follow-up", "Follow up"]);
@@ -2793,7 +2793,7 @@ function syncRequestComposer() {
   $("#request-mode-bar").hidden = !active;
   const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
   const members = state?.members;
-  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
+  const recipient = members && Object.hasOwn(members, recipientId) ? ownMember(members, recipientId) : null;
   const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
   const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
   if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
@@ -3020,7 +3020,7 @@ function revealWork(id) {
 }
 function workNavigationContext() {
   const member = session?.member?.id;
-  return state && member && state.members?.[member]?.id === member && state.members[member].active !== false && !$("#main").hidden
+  return state && member && ownMember(state.members, member)?.id === member && ownMember(state.members, member).active !== false && !$("#main").hidden
     ? `${client.generation}|${session.roomId}|${member}` : null;
 }
 function workHistoryState() {
@@ -3224,7 +3224,7 @@ function revealDrafts(id) {
   summary.scrollIntoView({ block: 'start', behavior: 'instant' });
 }
 function revealMember(id) {
-  if (!state?.members[id] || busy) return;
+  if (!ownMember(state?.members, id) || busy) return;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   $("#people-panel").open = true;
@@ -3316,7 +3316,7 @@ function revealLocationHash() {
     if (id !== null && prefix === "#event-" && snapshotAuditView === "activity") { revealEvent(id, true); return; }
     const exists = prefix === "#message-" ? conversation.byId.has(id)
       : prefix === "#work-" ? Boolean(state.workItems[id])
-      : prefix === "#member-" ? Boolean(state.members[id])
+      : prefix === "#member-" ? Boolean(ownMember(state.members, id))
       : state.eventLog.some(event => event.id === id);
     if (id !== null && exists) { reveal(id); return; }
     break;
@@ -3324,8 +3324,8 @@ function revealLocationHash() {
 }
 function hasIndependentProducer(i) { return hasReportedProducer(i) && i.receipt.producerId !== i.verifierMemberId; }
 function actions(i, scopeOnly = false, now = Date.now()) {
-  if (!scopeOnly) return renderWorkActions(i, state.members[session.member.id], { now, busy, esc, workId: i.id });
-  return workActions(i, state.members[session.member.id], now).filter(([action]) => ["release", "renew"].includes(action)).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
+  if (!scopeOnly) return renderWorkActions(i, ownMember(state.members, session.member.id), { now, busy, esc, workId: i.id });
+  return workActions(i, ownMember(state.members, session.member.id), now).filter(([action]) => ["release", "renew"].includes(action)).map(([action, label]) => `<button type="button" class="button secondary" data-action="${action}" data-work-id="${esc(i.id)}" data-focus-key="work-action:${esc(i.id)}:${action}"${busy ? " disabled" : ""}>${label}</button>`).join("");
 }
 function helpView(item, now = Date.now()) {
   try { return workHelpContext(state, item.id, session.member.id, new Date(now).toISOString()); }
@@ -3348,8 +3348,8 @@ function pinOffer(entry, item, offerId = entry.offerId) {
   entry.helpRevision = item.helpWanted?.revision ?? 0;
   entry.helpEventId = item.helpWanted?.eventId ?? null;
   entry.offerRevision = state.helpOffers?.[entry.offerId]?.revision ?? null;
-  entry.viewerRevision = state.members[session.member.id]?.revision;
-  entry.offererRevision = state.members[state.helpOffers?.[entry.offerId]?.offererId]?.revision ?? null;
+  entry.viewerRevision = ownMember(state.members, session.member.id)?.revision;
+  entry.offererRevision = ownMember(state.members, state.helpOffers?.[entry.offerId]?.offererId)?.revision ?? null;
 }
 const currentHelp = () => $("#action-fields").querySelector("#help-current");
 const offerField = name => $("#action-fields").querySelector('[id="offer-' + name + '"]');
@@ -3969,7 +3969,7 @@ $("#refresh-button").disabled = false;
 // message. Returns null when the error is not a DM denial.
 function mapDmConsentRefusal(command, error) {
   if (command?.data?.toMemberId && DM_CONSENT_REFUSAL_CODES.includes(error.code)) {
-    const peer = state?.members?.[command.data.toMemberId];
+    const peer = ownMember(state?.members, command.data.toMemberId);
     return Object.assign(new Error(dmConsentFailureMessage(error, peer?.displayName)), { code: error.code, status: error.status });
   }
   return null;
@@ -4198,7 +4198,7 @@ $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
   if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
   const chip = e.target.closest("[data-mention-id]");
-  if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
+  if (chip && state) { applyMentionMember(ownMember(state.members, chip.dataset.mentionId)); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
   const id = button.dataset.messageId;
   // An action picked from the "⋯" overflow menu closes the menu behind it.
@@ -4208,7 +4208,7 @@ $("#message-list").addEventListener("click", e => {
   else if (button.dataset.messageAction === "decide") openDecision(id);
   else if (button.dataset.messageAction === "result") {
     const message = conversation.byId.get(id), item = state.workItems[message?.workItemId];
-    if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
+    if (item && workActions(item, ownMember(state.members, session.member.id)).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
   }
   else if (button.dataset.messageAction === "pin") setPinned(id);
   else if (button.dataset.messageAction === "mark-unread") void markMessageUnread(id);
@@ -4221,7 +4221,7 @@ $("#message-list").addEventListener("click", e => {
     switchThread(conversation.rootById.get(id), button.dataset.messageAction === "reply");
     if (button.dataset.messageAction === "reply") {
       replyToId = id;
-      const author = replyAuthorToAddress(session.member.id, state.members[conversation.byId.get(id)?.authorId]);
+      const author = replyAuthorToAddress(session.member.id, ownMember(state.members, conversation.byId.get(id)?.authorId));
       // Replying stays public: the thread is room-visible and the @mention is
       // text only. Never touch the DM recipient select here — a reply is not
       // a DM and must never silently become one.
@@ -4233,7 +4233,7 @@ $("#message-list").addEventListener("click", e => {
 function updateReply() {
   const target = conversation?.byId.get(replyToId);
   $("#reply-bar").hidden = Boolean(requestMode) || !target || replyToId === currentThreadId;
-  const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
+  const author = target ? replyAuthorToAddress(session?.member?.id, ownMember(state.members, target.authorId)) : null;
   const addressing = Boolean(author && messageMentionsMember($("#message-input").value, author));
   // Runs on every keystroke: write text only when it changes. Replacing an
   // unchanged text node still forces a layout of the whole timeline.
@@ -4251,7 +4251,7 @@ function cancelReply() { if (assistantDraft) switchThread(currentThreadId); else
 $("#cancel-reply").addEventListener("click", () => { cancelReply(); $("#message-input").focus({ preventScroll: true }); });
 $("#reply-mention").addEventListener("click", () => {
   const target = conversation?.byId.get(replyToId);
-  const author = target ? replyAuthorToAddress(session?.member?.id, state.members[target.authorId]) : null;
+  const author = target ? replyAuthorToAddress(session?.member?.id, ownMember(state.members, target.authorId)) : null;
   if (!author) return;
   const input = $("#message-input");
   if (messageMentionsMember(input.value, author)) {
@@ -4414,7 +4414,7 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   const option = e.target.closest("[data-mention-id]");
   if (!option) return;
   e.preventDefault();
-  chooseMention(state.members[option.dataset.mentionId]);
+  chooseMention(ownMember(state.members, option.dataset.mentionId));
 });
 // C6: the owner's pause roster is one read when People opens and after each
 // action; the row buttons never appear for non-owners or inactive agents.
@@ -4453,7 +4453,7 @@ $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-work]");
   if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
   e.preventDefault();
-  const member = state.members[button.dataset.memberWork];
+  const member = ownMember(state.members, button.dataset.memberWork);
   if (!member || member.kind !== "agent" || member.active === false) return;
   const permissions = [...new Set([...member.permissions, ...WORK_PERMISSIONS])], generation = client.generation;
   memberActionBusy = true; button.disabled = true;
@@ -4479,7 +4479,7 @@ $("#presence-list").addEventListener("click", async e => {
   const button = e.target.closest("[data-member-admin]");
   if (!button || !ownsRoomActions(null) || memberActionBusy || state.room.ownerId !== session.member.id) return;
   e.preventDefault();
-  const member = state.members[button.dataset.memberAdmin];
+  const member = ownMember(state.members, button.dataset.memberAdmin);
   if (!member || member.active === false || member.id === state.room.ownerId) return;
   const wasAdmin = member.permissions.includes("manage_members"), generation = client.generation;
   const permissions = wasAdmin ? member.permissions.filter(p => p !== "manage_members") : [...member.permissions, "manage_members"];
@@ -4506,7 +4506,7 @@ $("#presence-list").addEventListener("click", async e => {
   const memberId = pauseButton?.dataset.memberPause ?? removeButton?.dataset.memberRemove ?? keepButton.dataset.memberRemoveCancel;
   const focusAction = selector => $(`#presence-list [${selector}="${CSS.escape(memberId)}"]`)?.focus();
   if (keepButton) { armedRemoval = null; render(); focusAction("data-member-remove"); return; }
-  const member = state.members[memberId];
+  const member = ownMember(state.members, memberId);
   if (!member || member.kind !== "agent" || member.active === false || state.room.ownerId !== session.member.id || !can("manage_members")) return;
   if (removeButton && armedRemoval !== memberId) { armedRemoval = memberId; render(); focusAction("data-member-remove"); return; }
   memberActionBusy = true;
@@ -4535,7 +4535,7 @@ $("#presence-list").addEventListener("click", async e => {
 $("#presence-list").addEventListener("click", e => {
   if (!shouldAddressPresenceClick(e.target)) return;
   const row = e.target.closest(".presence-member");
-  const member = state?.members[row?.dataset.memberRecordId];
+  const member = ownMember(state?.members, row?.dataset.memberRecordId);
   if (!member || member.active === false) return;
   $("#main").classList.remove("sidebar-open");
   $("#sidebar-toggle").setAttribute("aria-expanded", "false");
@@ -5038,7 +5038,7 @@ function stickPinnedTimeline(list) {
 // a source-backed decision; the room reads the register from the event feed.
 let decisionSourceId = null;
 function openDecision(messageId) {
-  if (!can("decide") || busy || state.members[session.member.id]?.kind !== "human") return;
+  if (!can("decide") || busy || ownMember(state.members, session.member.id)?.kind !== "human") return;
   const message = conversation.byId.get(messageId);
   if (!message) return;
   decisionSourceId = messageId;
@@ -5078,7 +5078,7 @@ function renderSpendAllowance() {
   if (!panel || !state?.room) return;
   const allowance = spendAllowance(state);
   const ledger = spendLedger(state, { nowMs: Date.now(), periodDays: allowance?.periodDays ?? 30 });
-  const owner = session?.member?.id === state.room.ownerId && state.members[session.member.id]?.kind === "human";
+  const owner = session?.member?.id === state.room.ownerId && ownMember(state.members, session.member.id)?.kind === "human";
   const committed = ledger.committedCents;
   panel.dataset.spendAllowance = !allowance ? "none" : committed > allowance.allowanceCents ? "over" : committed >= allowance.allowanceCents ? "full" : "set";
   setText("#spend-summary", allowance ? `${usd(committed)} of ${usd(allowance.allowanceCents)}` : "No allowance");
@@ -5226,7 +5226,7 @@ $("#report-form").addEventListener("submit", e => {
   }, { failureHint: "Report not sent. Retry the same reason, or close and start again." });
 });
 async function setMute(memberId, muted) {
-  const target = state?.members[memberId];
+  const target = ownMember(state?.members, memberId);
   if (!target || busy || memberId === session.member.id) return;
   const entry = draftCommand(null, T.MEMBER_MUTE_SET, { memberId, muted });
   const generation = client.generation;
@@ -5270,7 +5270,7 @@ $("#presence-list").addEventListener("click", async e => {
   await runFriendAction(button.dataset.friendAction, button.dataset.friendPeer, button.dataset.friendBond || "", button);
 });
 function syncReports() {
-  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
+  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && ownMember(state.members, session.member.id)?.kind === "human");
   $("#reports-section").hidden = !owner;
   if (!owner) { reportsSequence = -1; return; }
   if ($("#reports-section").open && (reportsSequence !== client.sequence || reportsGeneration !== client.generation)) loadReports();
@@ -5278,7 +5278,7 @@ function syncReports() {
 // UI calming #9: Usage + Spend sit under one collapsed, owner-only "Room
 // health" group. About stays open; the spend allowance form keeps its behavior.
 function syncRoomHealth() {
-  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && state.members[session.member.id]?.kind === "human");
+  const owner = Boolean(state && session && state.room?.ownerId === session.member.id && ownMember(state.members, session.member.id)?.kind === "human");
   const panel = $("#room-health");
   if (!panel) return;
   panel.hidden = !owner;
@@ -5432,7 +5432,7 @@ function syncAcquisitionControls() {
     joinControl.hidden = !isOwner;
     if (isOwner) { joinBox.checked = state.room.joinLink?.enabled === true; joinBox.disabled = acquisitionBusy; }
   }
-  const member = state && viewerId ? state.members[viewerId] : null;
+  const member = state && viewerId ? ownMember(state.members, viewerId) : null;
   if (nameControl && nameBox) {
     nameControl.hidden = !member;
     if (member) { nameBox.checked = member.publicName?.enabled === true; nameBox.disabled = acquisitionBusy; }
@@ -6090,7 +6090,7 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
   pendingAction = { type, action, workId: item.id, revision: item.revision, draftMessageId, publishRationale, receipt: item.receipt ? { completionEventId: item.receipt.eventId, evidenceVersion: item.receipt.evidenceVersion } : null, retry: null, uncertain: false, error: "" };
   if (isHelpAction(action)) {
     pendingAction.helpRevision = item.helpWanted?.revision ?? 0;
-    pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
+    pendingAction.accountableRevision = ownMember(state.members, item.accountableMemberId)?.revision;
   }
   if (isOfferAction(action)) pinOffer(pendingAction, item, offerId);
   $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
@@ -6205,18 +6205,18 @@ function actionAvailable(entry) {
     const help = helpView(item);
     return entry.action === "help" ? help?.canPublish === true : help?.canWithdraw === true;
   }
-  return Boolean(item && workActions(item, state.members[session.member.id]).some(([action]) => action === entry.action));
+  return Boolean(item && workActions(item, ownMember(state.members, session.member.id)).some(([action]) => action === entry.action));
 }
 function actionChanged(entry) {
   const item = state?.workItems[entry.workId];
   if (isOfferAction(entry.action)) return item?.revision !== entry.revision
     || (item?.helpWanted?.revision ?? 0) !== entry.helpRevision || (item?.helpWanted?.eventId ?? null) !== entry.helpEventId
     || (state?.helpOffers?.[entry.offerId]?.revision ?? null) !== entry.offerRevision
-    || state?.members[session.member.id]?.revision !== entry.viewerRevision
-    || (state?.members[state?.helpOffers?.[entry.offerId]?.offererId]?.revision ?? null) !== entry.offererRevision;
+    || ownMember(state?.members, session.member.id)?.revision !== entry.viewerRevision
+    || (ownMember(state?.members, state?.helpOffers?.[entry.offerId]?.offererId)?.revision ?? null) !== entry.offererRevision;
   return item?.revision !== entry.revision || isHelpAction(entry.action) && (
     (item?.helpWanted?.revision ?? 0) !== entry.helpRevision
-    || state?.members[item?.accountableMemberId]?.revision !== entry.accountableRevision);
+    || ownMember(state?.members, item?.accountableMemberId)?.revision !== entry.accountableRevision);
 }
 function syncActionForm() {
   $("#resume-action").hidden = !pendingAction?.uncertain;
@@ -6278,7 +6278,7 @@ $("#refresh-action").addEventListener("click", () => {
     }
     if (isHelpAction(entry.action)) {
       entry.helpRevision = item.helpWanted?.revision ?? 0;
-      entry.accountableRevision = state.members[item.accountableMemberId]?.revision;
+      entry.accountableRevision = ownMember(state.members, item.accountableMemberId)?.revision;
       if (changedHelp && entry.action === "help") {
         entry.error = "Request changed. Your draft is kept; compare it with the latest request.";
         currentHelp().hidden = false;
@@ -6918,7 +6918,7 @@ function syncNotifications() {
   // Inputs that change the feed directly refetch at once: your cursor, your membership
   // revision and your preferences. New room events only coalesce a refetch, and a hidden
   // tab waits until it is visible again.
-  const me = state.members[session.member.id];
+  const me = ownMember(state.members, session.member.id);
   const inputs = `${roomCursor}:${me?.revision ?? ""}:${JSON.stringify(me?.notificationPreferences ?? null)}`;
   if (notificationOwner.inputs !== inputs) { notificationOwner.inputs = inputs; notificationOwner.sequence = client.sequence; scheduleNotifications(0); }
   else if (notificationOwner.sequence !== client.sequence) {
@@ -7021,7 +7021,7 @@ async function refreshDmConsents() {
 }
 async function runDmConsentAction(action, peerId, button) {
   if (!state || !session || dmConsentBusy) return;
-  const peer = state.members[peerId];
+  const peer = ownMember(state.members, peerId);
   if (!peer || peer.active === false) return;
   const seq = ++dmConsentSeq, generation = client.generation, room = state;
   dmConsentBusy = true;
@@ -7092,7 +7092,7 @@ function focusFriendGroup(peerMemberId) {
 }
 async function runFriendAction(action, peerMemberId, bondId, button) {
   if (!state || !session || friendBusy) return;
-  const peer = state.members[peerMemberId];
+  const peer = ownMember(state.members, peerMemberId);
   if (!peer || peer.active === false || peer.kind !== "agent" || peer.id === session.member.id) return;
   if (action === "dm") { openFriendThread(peerMemberId); return; }
   const generation = client.generation;
@@ -7122,13 +7122,13 @@ async function runFriendAction(action, peerMemberId, bondId, button) {
   }
 }
 function friendThreadHtml(messages, peerMemberId) {
-  const selfId = identityIdOf(state.members[session.member.id] ?? session.member, presenceStates.get(session.member.id));
+  const selfId = identityIdOf(ownMember(state.members, session.member.id) ?? session.member, presenceStates.get(session.member.id));
   return friendMessageHtml(messages, { selfId, peerName: displayName(peerMemberId), esc, time });
 }
 async function loadFriendThread(peerMemberId) {
   if (!state || !session || friendDmPeerId !== peerMemberId) return;
   const generation = client.generation;
-  const peer = state.members[peerMemberId];
+  const peer = ownMember(state.members, peerMemberId);
   const peerIdentity = peer ? identityIdOf(peer, presenceStates.get(peer.id)) : null;
   try {
     const listed = await client.request(client.path("/peer-dms"));
@@ -7152,7 +7152,7 @@ function scrollFriendDmToLatest() {
 }
 function openFriendThread(peerMemberId) {
   if (!state || !session) return;
-  const peer = state.members[peerMemberId];
+  const peer = ownMember(state.members, peerMemberId);
   if (!peer) return;
   friendDmPeerId = peerMemberId;
   $("#friend-dm-title").textContent = `Friends with ${peer.displayName}`;
@@ -7169,7 +7169,7 @@ $("#friend-dm-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (!state || !session || !friendDmPeerId || friendBusy) return;
   const peerMemberId = friendDmPeerId;
-  const peer = state.members[peerMemberId];
+  const peer = ownMember(state.members, peerMemberId);
   const body = $("#friend-dm-input").value.trim();
   if (!peer || !body) return;
   const generation = client.generation;

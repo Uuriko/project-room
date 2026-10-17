@@ -3,6 +3,8 @@
 // the broader rollup remains owner-only. Requester controls share this module
 // so every runtime serves the same already-packaged permission UI.
 
+import { ownMember } from "./events.js";
+
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const KIND_LABEL = {
@@ -31,7 +33,7 @@ export function createNeedsAttentionCard(options) {
   let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null;
   function viewer() {
     const state = typeof getState === "function" ? getState() : null, session = client.session;
-    const member = hasRoomState ? (state?.room?.id === session?.roomId ? state?.members?.[session?.member?.id] : null) : session?.member;
+    const member = hasRoomState ? (state?.room?.id === session?.roomId ? ownMember(state?.members, session?.member?.id) ?? null : null) : session?.member;
     return { member, owner: Boolean(member && state?.room?.ownerId === member.id) };
   }
   function canReview() {
@@ -301,7 +303,7 @@ export function installMemberPermissions({ client, getState, getSession }) {
   let scope = null, operation = null, busy = false, message = "", retry = false;
   const current = () => {
     const session = getSession(), state = getState();
-    const member = session && state?.members?.[session.member.id];
+    const member = session && ownMember(state?.members, session.member.id);
     return session && state?.room?.id === session.roomId && member?.active !== false && member ? { session, state, member, generation: client.generation } : null;
   };
   const owns = value => {

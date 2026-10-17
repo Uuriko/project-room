@@ -6,7 +6,7 @@
 // Guide is not an identity: this module stores no secret, mints no key, and
 // links no identity. Board writes need the contribute pair (accept_work and
 // complete_work). There is no separate post or claim_work permission.
-import { EVENT_TYPES } from "../src/events.js";
+import { EVENT_TYPES, ownMember } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { getRoomTemplate } from "./templates.mjs";
 import { createWork } from "./work-claims.mjs";
@@ -70,7 +70,7 @@ export function seedStarter(store, roomId, { templateSlug = null, intent = null,
     if (state.room.ownerId !== ownerMemberId) throw new ServiceError(403, "owner_required", "Only the room owner can seed a starter");
     const template = templateFor({ templateSlug, intent });
     if (!state.room.starterSeeded) {
-      if (!state.members?.[ROOM_GUIDE_ID]) {
+      if (!ownMember(state.members, ROOM_GUIDE_ID)) {
         const activeNames = Object.values(state.members).filter(member => member.active !== false)
           .map(member => ({ memberId: member.id, displayName: member.displayName }));
         const checked = checkAgentDisplayName("Room Guide", { activeNames });

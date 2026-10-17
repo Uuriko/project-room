@@ -2,7 +2,7 @@
 // Separate additive tables leave the existing mention/DM journal readable by old hosts.
 import { randomUUID } from "node:crypto";
 import { nextWorkStep } from "../src/workflow.js";
-import { firstBlockedWakeTarget } from "../src/events.js";
+import { firstBlockedWakeTarget, ownMember } from "../src/events.js";
 import { sessionRecord } from "../src/work-item-session.js";
 import { heldUntil } from "./attention.mjs";
 import { mutedEvent } from "./moderation.mjs";
@@ -52,7 +52,7 @@ export class WorkWakes {
       AND (room_id IS NULL OR room_id=?) AND (? IS NULL OR host_id=?) LIMIT 1`).get(agentId, roomId, hostId, hostId));
   }
   permitted(state, item, memberId, actorId) {
-    const member = state.members[memberId];
+    const member = ownMember(state.members, memberId);
     const session = sessionRecord(item);
     return member?.active !== false && member?.kind === "agent" && !isGuestAgentMemberId(memberId)
       && !state.room.archivedAt && member.notificationPreferences?.work_updates !== "none"
