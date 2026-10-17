@@ -108,7 +108,9 @@ export function threadRootId(messages, message) {
   return current?.id && current.id !== message.id ? current.id : null;
 }
 
-function affectedMessageIds(event) {
+// Exported for the resident patrol (server/patrol.mjs), which folds the
+// same affected-id set per message event into its shadow records.
+export function affectedMessageIds(event) {
   const data = event?.data ?? {};
   if (event?.type === "message.redacted" && typeof data.messageId === "string") {
     return data.messageId.endsWith(":channel") ? [data.messageId] : [data.messageId, `${data.messageId}:channel`];

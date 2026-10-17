@@ -1,0 +1,294 @@
+// ClueBot phase 1: the resident per-event invariant patrol.
+//
+// The patrol is read-only (it writes only patrol_* tables) and files
+// findings with the room, the event sequence and the hashes — the evidence
+// the batch integrity suite could not produce. The bar is symmetric: a
+// clean room log produces zero findings (the false-positive rate is the
+// product's credibility), and each injected fault is caught at the event
+// that introduces it. The three controls mirror the read-only patrol test
+// (idea-forge/cluebot-readonly-report.md): log truncation of the production
+// shape, an altered message body, a forged second claim.
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { test } from "node:test";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { patrolPending, patrolStatus } from "../server/patrol.mjs";
+import { jobByName } from "../server/jobs.mjs";
+import { applyOutcomes, jobHealthView, runCronJobs } from "../cloudflare/job-heartbeat.mjs";
+import { claimWork, createWork, updateWork } from "../server/work-claims.mjs";
+import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
+import { event as makeEvent, EVENT_TYPES } from "../src/events.js";
+
+function openStore(roomId = "alpha") {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-patrol-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  store.initialize(initialRoom(roomId));
+  return store;
+}
+const headOf = (store, roomId = "alpha") =>
+  store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+function post(store, id, body, roomId = "alpha") {
+  const key = store.issueAccessKey(roomId, "owner");
+  store.command(key, roomId, { id: `cmd-${id}`, type: "message.posted", data: { body, messageId: id } });
+}
+// Drive a claim through the kernel exactly as the routes do: mutate the
+// registry row, then receipt the change with its event.
+function driveClaim(store, item, action, atMs, roomId = "alpha") {
+  store.workClaims.set(roomId, item);
+  emitWorkClaimEvent(store, roomId, { actorId: item.owner ?? "owner", item, action, atMs });
+  return item;
+}
+function honestClaim(store, id, roomId = "alpha") {
+  const now = Date.now();
+  let item = createWork({ id, title: `Task ${id}` }, { now, agentId: "owner" });
+  driveClaim(store, item, "created", now, roomId);
+  item = claimWork(item, "owner", { now: now + 1 });
+  driveClaim(store, item, "claimed", now + 1, roomId);
+  item = updateWork(item, "owner", { state: "in_progress", now: now + 2 });
+  driveClaim(store, item, "state_changed", now + 2, roomId);
+  return { item, now };
+}
+function finishClaim(store, item, now, roomId = "alpha") {
+  item = updateWork(item, "owner", { state: "delivered", now: now + 3 });
+  driveClaim(store, item, "state_changed", now + 3, roomId);
+  item = updateWork(item, "owner", { state: "done", now: now + 4 });
+  driveClaim(store, item, "state_changed", now + 4, roomId);
+  return item;
+}
+
+test("clean room: messages and a full claim lifecycle file zero findings", () => {
+  const store = openStore();
+  try {
+    post(store, "m1", "hello world");
+    post(store, "m2", "second message");
+    const { item, now } = honestClaim(store, "task-1");
+    finishClaim(store, item, now);
+    const head = headOf(store);
+    assert.equal(patrolPending(store), true, "untailed events arm the patrol job");
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.equal(result.errors, undefined);
+    assert.equal(result.checked, head, "the whole log was tailed");
+    assert.deepEqual(store.patrolFindings(), []);
+    assert.equal(patrolStatus(store).rooms[0].sequence, head, "cursor sits at the head");
+    assert.equal(patrolPending(store), false, "a caught-up room does not re-arm the job");
+    const again = store.patrolTick();
+    assert.equal(again.checked, 0, "a steady-state tick is a no-op");
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("control A: a truncated log files head_gap at the first missing sequence", () => {
+  const store = openStore();
+  try {
+    for (let i = 1; i <= 6; i++) post(store, `m${i}`, `message ${i}`);
+    const head = headOf(store);
+    // The production shape: the room head still counts events the log no
+    // longer holds (the commands referencing them are gone with the tail).
+    store.db.prepare("DELETE FROM commands WHERE room_id='alpha' AND sequence>?").run(head - 2);
+    store.db.prepare("DELETE FROM events WHERE room_id='alpha' AND sequence>?").run(head - 2);
+    const result = store.patrolTick();
+    const findings = store.patrolFindings();
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].invariant, "sequence");
+    assert.equal(findings[0].kind, "head_gap");
+    assert.equal(findings[0].sequence, head - 1, "named at the first missing sequence");
+    assert.equal(findings[0].room_id, "alpha");
+    assert.match(result.scanError, /sequence invariant failed at sequence/);
+    assert.ok(!result.scanError.includes("alpha"), "record ids stay off the public health surface (#3334)");
+    assert.equal(result.failureDetail.subcheck, "sequence");
+    assert.equal(result.failureDetail.errorClass, "integrity_mismatch");
+    // Parked: the same head does not re-file or re-wake the patrol.
+    assert.equal(patrolPending(store), false);
+    const again = store.patrolTick();
+    assert.equal(again.fresh, 0);
+    assert.equal(store.patrolFindings().length, 1);
+  } finally { store.close(); }
+});
+
+test("control B: an altered projection body is named at its posting event, with hashes", () => {
+  const store = openStore();
+  try {
+    post(store, "m1", "hello world");
+    post(store, "m2", "untouched");
+    store.patrolTick();
+    const row = store.db.prepare("SELECT projection FROM rooms WHERE id='alpha'").get();
+    const projection = JSON.parse(row.projection);
+    const target = projection.messages.find(message => message.id === "m1");
+    const postingSequence = store.db.prepare(
+      "SELECT sequence FROM events WHERE room_id='alpha' AND json_extract(body, '$.data.messageId')='m1'").get().sequence;
+    target.body = "tampered body";
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(projection));
+    post(store, "m3", "fresh activity brings the tail to the head");
+    const result = store.patrolTick();
+    const findings = store.patrolFindings();
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].invariant, "messages_parity");
+    assert.equal(findings[0].kind, "record_differs");
+    assert.equal(findings[0].subject_id, "m1");
+    assert.equal(findings[0].sequence, postingSequence, "attributed to the event that posted the message");
+    assert.ok(findings[0].detail.expectedBodySha256, "the log's hash is named");
+    assert.ok(findings[0].detail.actualBodySha256, "the served hash is named");
+    assert.notEqual(findings[0].detail.expectedBodySha256, findings[0].detail.actualBodySha256);
+    assert.equal(result.failureDetail.subcheck, "messages_parity");
+    assert.equal(result.failureDetail.recordClass, "message");
+  } finally { store.close(); }
+});
+
+test("control C: a forged second claim is caught at the forged event", () => {
+  const store = openStore();
+  try {
+    const { item } = honestClaim(store, "task-1");
+    assert.equal(item.state, "in_progress");
+    const base = store.patrolTick();
+    assert.equal(base.fresh, 0, "the honest claim history is clean");
+    // Forge: a second member takes the held claim — in the log only. The
+    // registry still shows the first owner, exactly the report's control.
+    const sequence = headOf(store) + 1;
+    const forged = makeEvent({
+      id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.WORK_CLAIM_UPDATED,
+      actorId: "bob", roomId: "alpha", at: new Date().toISOString(),
+      data: { workClaim: "task-1", action: "claimed", claimState: "claimed", ownerId: "bob", leaseExpiresAt: null, title: "Task task-1", paths: [] }
+    });
+    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("alpha", sequence, forged.id, JSON.stringify(forged));
+    store.db.prepare("UPDATE rooms SET sequence=? WHERE id='alpha'").run(sequence);
+    const result = store.patrolTick();
+    const findings = store.patrolFindings();
+    const kinds = findings.map(finding => finding.kind).sort();
+    assert.deepEqual(kinds, ["double_claim", "surface_differs"]);
+    for (const finding of findings) {
+      assert.equal(finding.invariant, "claim_legality");
+      assert.equal(finding.sequence, sequence, "caught at the introducing event");
+      assert.equal(finding.subject_id, "task-1");
+    }
+    assert.equal(result.failureDetail.subcheck, "claim_legality");
+  } finally { store.close(); }
+});
+
+test("receipt leg: a done claim must keep its owner and exactly one done stamp", () => {
+  const store = openStore();
+  try {
+    const first = honestClaim(store, "task-ownerless");
+    const doneFirst = finishClaim(store, first.item, first.now);
+    const second = honestClaim(store, "task-twostamps");
+    const doneSecond = finishClaim(store, second.item, second.now);
+    assert.equal(store.patrolTick().fresh, 0, "honest completions are clean");
+    // Corrupt the registry underneath the log: one done claim loses its
+    // owner (its receipt would have no creator), the other gains a second
+    // state:done stamp. A ci_changed receipt re-runs the agreement legs.
+    store.workClaims.set("alpha", { ...doneFirst, owner: null });
+    emitWorkClaimEvent(store, "alpha", { actorId: "owner", item: { ...doneFirst, owner: null }, action: "ci_changed", atMs: Date.now(), reason: "ci_changed", ciState: "success" });
+    const stamps = doneSecond.history.filter(entry => entry.action === "state:done");
+    store.workClaims.set("alpha", { ...doneSecond, history: [...doneSecond.history, stamps[0]] });
+    emitWorkClaimEvent(store, "alpha", { actorId: "owner", item: doneSecond, action: "ci_changed", atMs: Date.now(), reason: "ci_changed", ciState: "success" });
+    const result = store.patrolTick();
+    assert.ok(result.fresh >= 2);
+    const bySubject = new Map(store.patrolFindings().map(finding => [`${finding.subject_id}:${finding.kind}`, finding]));
+    const ownerless = bySubject.get("task-ownerless:done_without_owner");
+    assert.ok(ownerless, "the ownerless done claim is named");
+    assert.equal(ownerless.invariant, "receipt_linkage");
+    const stamped = bySubject.get("task-twostamps:done_stamp_count");
+    assert.ok(stamped, "the double-stamped done claim is named");
+    assert.equal(stamped.detail.stamps, 2);
+  } finally { store.close(); }
+});
+
+test("job wiring: fresh findings surface in job health as a named patrol failure", async () => {
+  const store = openStore();
+  try {
+    for (let i = 1; i <= 4; i++) post(store, `m${i}`, `message ${i}`);
+    const head = headOf(store);
+    store.db.prepare("DELETE FROM commands WHERE room_id='alpha' AND sequence>?").run(head - 1);
+    store.db.prepare("DELETE FROM events WHERE room_id='alpha' AND sequence>?").run(head - 1);
+    const job = jobByName("patrol");
+    assert.ok(job, "the patrol is a registered job");
+    assert.deepEqual([...job.runtimes].sort(), ["node", "worker"], "it runs in the DO and on Node");
+    const tick = async at => {
+      const outcomes = await runCronJobs(
+        { patrol: () => job.run(store, { deadline: Date.now() + 5000 }) },
+        { now: () => at, log: () => {} }
+      );
+      return applyOutcomes({}, outcomes);
+    };
+    const records = await tick(1_000);
+    const entry = jobHealthView(records, 1_000).jobs.find(candidate => candidate.name === "patrol");
+    assert.equal(entry.consecutiveFailures, 1);
+    assert.match(entry.lastError, /sequence invariant failed/);
+    assert.ok(!entry.lastError.includes("alpha"), "the room id never reaches the public error");
+    assert.equal(entry.lastErrorSubcheck, "sequence");
+    assert.equal(entry.lastErrorCode, "patrol_finding");
+    assert.equal(entry.lastErrorClass, "integrity_mismatch");
+    // The journal names what the public surface cannot: room, event, kind.
+    const journal = store.patrolFindings();
+    assert.equal(journal.length, 1);
+    assert.equal(journal[0].room_id, "alpha");
+    assert.equal(journal[0].kind, "head_gap");
+  } finally { store.close(); }
+});
+
+test("read-only store: the patrol files nothing and never throws", () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-patrol-ro-"));
+  const filename = join(directory, "room.sqlite");
+  const store = new RoomStore(filename);
+  store.initialize(initialRoom("alpha"));
+  post(store, "m1", "hello");
+  store.close();
+  const readOnly = new RoomStore(filename, { readOnly: true });
+  try {
+    const result = readOnly.patrolTick();
+    assert.equal(result.skipped, 1);
+    assert.deepEqual(readOnly.patrolFindings(), []);
+  } finally { readOnly.close(); }
+});
+
+test("log replacement resets the room instead of filing false findings", () => {
+  const store = openStore();
+  try {
+    post(store, "m1", "hello world");
+    post(store, "m2", "second");
+    store.patrolTick();
+    const head = headOf(store);
+    // An import rewrites event ids under the same sequences: the cursor's
+    // recorded id no longer matches, so the patrol replays from zero
+    // rather than trusting shadows folded from a different log.
+    const atCursor = store.db.prepare("SELECT id FROM events WHERE room_id='alpha' AND sequence=?").get(head);
+    store.db.prepare("UPDATE events SET id=? WHERE room_id='alpha' AND sequence=?").run(randomUUID(), head);
+    assert.notEqual(store.db.prepare("SELECT id FROM events WHERE room_id='alpha' AND sequence=?").get(head).id, atCursor.id);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+    assert.equal(patrolStatus(store).rooms[0].sequence, head, "the replay reached the head again");
+  } finally { store.close(); }
+});
+
+test("a long log is tailed in bounded batches, never rescanned whole", () => {
+  const store = openStore();
+  try {
+    const base = headOf(store);
+    // 450 events the patrol does not interpret (an unknown-to-it room
+    // event type): the tail mechanics, not the reducer, are under test.
+    const insert = store.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+    for (let i = 1; i <= 450; i++) {
+      const sequence = base + i;
+      insert.run("alpha", sequence, randomUUID(), JSON.stringify({
+        id: randomUUID(), idempotencyKey: randomUUID(), roomId: "alpha",
+        type: "room.renamed", actorId: "owner", at: new Date().toISOString(), data: { name: `room ${i}` }
+      }));
+    }
+    store.db.prepare("UPDATE rooms SET sequence=? WHERE id='alpha'").run(base + 450);
+    const first = store.patrolTick();
+    assert.equal(first.checked, 200, "one tick tails one bounded batch");
+    assert.equal(patrolStatus(store).rooms[0].sequence, 200);
+    const second = store.patrolTick();
+    assert.equal(second.checked, 200);
+    const third = store.patrolTick();
+    assert.equal(third.checked, 52, "the final batch drains the remainder (450 inserted + 2 bootstrap events)");
+    assert.equal(patrolStatus(store).rooms[0].sequence, base + 450);
+    assert.equal(third.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});

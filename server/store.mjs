@@ -48,6 +48,7 @@ import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native 
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
+import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
@@ -2029,6 +2030,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   checkMessagesParity() {
     return verifyMessagesParity(this);
+  }
+  // ClueBot phase 1: the resident per-event invariant patrol. Read-only —
+  // it writes only patrol_* tables and files findings; see server/patrol.mjs.
+  patrolTick(options = {}) {
+    return runPatrolTick(this, options);
+  }
+  patrolFindings(options = {}) {
+    return listPatrolFindings(this, options);
   }
   // At most `limit` chain members whose cap was never copied off the invite.
   // The mint path refuses a NULL cap, so a tick that stops early fails closed.

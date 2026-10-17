@@ -33,6 +33,7 @@ import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
+import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
@@ -294,6 +295,13 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
+  }
+  // ClueBot phase 1: tail new events and file invariant findings. The
+  // patrol is read-only (patrol_* tables only); a paused room skips.
+  async patrolTick() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runPatrolTick(this.store, { deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
