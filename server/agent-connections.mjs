@@ -288,8 +288,49 @@ export class AgentConnections {
     try { this.verifyHistory(); }
     catch { fail(503, "connection_integrity_error", "Agent connection history requires reconciliation"); }
   }
+  // Who owned a room when a connection operation landed. Sponsorship is
+  // an at-the-time authority fact — apply() required the sponsor to be
+  // the owner when they acted — not a claim that they still own the room
+  // today: ownership transfer is a supported, reversible operation, and
+  // demanding the sponsor still be the current owner makes every
+  // transferred room's connection journal fail integrity forever. The
+  // timeline comes from the room's own event log: the owner before the
+  // first ownership.transferred event is that event's actor (the reducer
+  // requires the actor to be the owner), and each transfer hands
+  // ownership to data.toMemberId. Operations whose receipt carries the
+  // membership event's sequence resolve exactly by sequence; the rest
+  // resolve by time, where a transfer landing in the same millisecond
+  // leaves both neighbouring owners plausible and either may match.
+  ownerIdsAt(roomId, currentOwnerId, { sequence = null, at = null } = {}, cache = null) {
+    let transfers = cache?.get(roomId);
+    if (!transfers) {
+      transfers = this.db.prepare(`SELECT sequence, body FROM events WHERE room_id=?
+        AND json_extract(body,'$.type')=? ORDER BY sequence`).all(roomId, T.OWNERSHIP_TRANSFERRED)
+        .map(({ sequence: seq, body }) => { const event = JSON.parse(body);
+          return { sequence: seq, at: Date.parse(event.at), from: event.actorId, to: event.data?.toMemberId }; })
+        .filter(transfer => typeof transfer.to === "string");
+      cache?.set(roomId, transfers);
+    }
+    const initial = transfers.length ? transfers[0].from : currentOwnerId;
+    if (Number.isSafeInteger(sequence)) {
+      let owner = initial;
+      for (const transfer of transfers) {
+        if (transfer.sequence >= sequence) break;
+        owner = transfer.to;
+      }
+      return [owner];
+    }
+    let before = initial, after = initial;
+    for (const transfer of transfers) {
+      if (transfer.at < at) { before = transfer.to; after = transfer.to; }
+      else if (transfer.at === at) after = transfer.to;
+      else break;
+    }
+    return before === after ? [before] : [before, after];
+  }
   verifyHistory() {
     const invalid = () => fail(503, "connection_integrity_error", "Agent connection history requires reconciliation");
+    const ownershipCache = new Map();
     for (const sql of tables.split(";").map(sql => sql.trim()).filter(Boolean)) {
       const name = /^CREATE TABLE (\w+)/.exec(sql)[1];
       if (this.db.prepare("SELECT sql FROM sqlite_master WHERE name=? AND type='table'").get(name)?.sql !== sql) invalid();
@@ -326,7 +367,8 @@ export class AgentConnections {
           || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : [])].sort().join()
           || ![state.created_at, state.updated_at, state.expires_at, state.sponsor_auth_epoch, state.sponsor_member_revision, state.member_revision].every(integer)
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
-          || state.sponsor_member_id !== room.room.ownerId || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
+          || !this.ownerIdsAt(row.room_id, room.room.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id)
+          || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
           || !account || account.auth_epoch < state.sponsor_auth_epoch || binding?.account_id !== state.sponsor_account_id) invalid();
         const credential = this.db.prepare("SELECT * FROM credentials WHERE hash=?").get(state.credential_hash);
         if (!credential || credential.room_id !== row.room_id || credential.member_id !== row.member_id || credential.kind !== "access"
