@@ -473,3 +473,45 @@ for (const stage of ["rollup", "queue"]) {
     assert.equal(timers.size, 0);
   });
 }
+
+for (const first of ["rollup", "queue"]) {
+  test(`attention starts independent reads together and waits for both (${first} first)`, async t => {
+    const { section } = attentionEnvironment(t);
+    const rollup = deferredAttentionRead(), queue = deferredAttentionRead();
+    const { client, calls } = attentionClient({ read: () => rollup.promise, queue: () => queue.promise });
+    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+    const refresh = card.refresh();
+    // Settle both even if the concurrency assertion fails on the old code.
+    t.after(async () => { rollup.resolve(null); queue.resolve(accessQueue()); await refresh; });
+    assert.equal(calls.rollup.length, 1);
+    assert.equal(calls.queue.length, 1, "queue must start without waiting for the rollup");
+    if (first === "rollup") rollup.resolve(null);
+    else queue.resolve(accessQueue());
+    await Promise.resolve();
+    assert.equal(section._elements["#attention-list"].innerHTML, "", "no partial decision view");
+    assert.equal(section._elements["#attention-refresh"].disabled, true);
+    rollup.resolve(null); queue.resolve(accessQueue());
+    await refresh;
+    assert.match(section._elements["#attention-list"].innerHTML, /Pending member/);
+    assert.equal(section._elements["#attention-refresh"].disabled, false);
+  });
+}
+
+for (const first of ["rollup", "queue"]) {
+  test(`concurrent attention handles both rejected reads (${first} fails first)`, async t => {
+    const { section, timers } = attentionEnvironment(t);
+    const rollup = deferredAttentionRead(), queue = deferredAttentionRead();
+    const { client } = attentionClient({ read: () => rollup.promise, queue: () => queue.promise });
+    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+    const refresh = card.refresh();
+    (first === "rollup" ? rollup : queue).reject(new Error("First read unavailable"));
+    await refresh;
+    assert.match(section._elements["#attention-status"].textContent, /First read unavailable/);
+    assert.equal(timers.size, 1, "one retry for the combined operation");
+    (first === "rollup" ? queue : rollup).reject(new Error("Second read unavailable"));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.match(section._elements["#attention-status"].textContent, /First read unavailable/);
+    assert.equal(timers.size, 1, "late failure does not duplicate retry or replace the status");
+    assert.equal(section._elements["#attention-list"].innerHTML, "");
+  });
+}

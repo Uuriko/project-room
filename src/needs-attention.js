@@ -222,11 +222,14 @@ export function createNeedsAttentionCard(options) {
     setBusy(true);
     setStatus("Checking…");
     try {
-      let report = await client.needsAttention(cursor, { includeShadow: includeShadow() });
+      // Independent authorized reads overlap instead of waiting in sequence.
+      // Promise.all also observes both failures if either read rejects first.
+      let [report, queue] = await Promise.all([
+        client.needsAttention(cursor, { includeShadow: includeShadow() }),
+        hasRoomState ? client.request(client.path("/access-requests?status=pending")) : null,
+      ]);
       if (!owns(ticket, session, generation)) return;
       if (hasRoomState) {
-        const queue = await client.request(client.path("/access-requests?status=pending"));
-        if (!owns(ticket, session, generation)) return;
         if (queue?.roomId !== session.roomId || !Array.isArray(queue.requests)) throw new Error("The request queue could not be confirmed");
         const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
         // Owners retain their paged rollup; admins receive only the request queue
