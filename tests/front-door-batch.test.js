@@ -38,8 +38,11 @@ test("B-4: receipt page states a named verification tier, not the self-disclaime
   const memberVerified = renderReceiptDetailHtml({ ...base, verification: { state: "verified" } });
   assert.match(memberVerified, /Verification tier: human verdict \(member-verified\)/);
   for (const html of [merged, selfAttested, memberVerified]) {
-    assert.doesNotMatch(html, /This record is unsigned/);
-    assert.doesNotMatch(html, /Hashes are stored values, not re-verified/);
+    // The tier leads; the factual caveats (stored hashes, unsigned
+    // envelope) follow it instead of standing as the whole statement.
+    const noteAt = html.indexOf("Verification tier:");
+    assert.ok(noteAt > -1 && noteAt < html.indexOf("Hashes are stored values"), "tier is stated before the caveats");
+    assert.doesNotMatch(html, /What this record proves:/);
   }
 });
 
