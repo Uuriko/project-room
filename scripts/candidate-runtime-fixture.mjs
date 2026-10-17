@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimePackage } from './runtime-package.mjs';
+import { createRuntimePackage, allowed } from './runtime-package.mjs';
 import { publicAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
 
 export function candidateRuntimeFixture(repository, directory) {
@@ -10,190 +10,11 @@ export function candidateRuntimeFixture(repository, directory) {
   const baseline = join(directory, 'head-runtime');
   createRuntimePackage({ repository, commit: head, destination: baseline });
   const paths = new Set(JSON.parse(readFileSync(join(baseline, 'runtime-manifest.json'))).files.map(entry => entry.path));
-  paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
-  paths.add('client/work-preparation.mjs'); // Restored from #908 revert: MCP work-preparation helper (imported by client/mcp-stdio.mjs)
-  paths.add('client/host-result.mjs'); paths.add('client/host-subprocess.mjs'); paths.add('client/host-verification.mjs');
-  paths.add('src/agent-error.mjs');
-  paths.add('client/request-notices.mjs');
-  paths.add('src/work-help.js'); paths.add('server/work-help.mjs');
-  paths.add('client/help-actions.mjs');
-  paths.add('server/action-classes.mjs');
-  paths.add('server/inbox.mjs');
-  paths.add('server/inbox-stitch.mjs'); paths.add('server/inbox-stitch-store.mjs'); // Task #19 (imported by server/inbox.mjs)
-  paths.add('server/boot-config.mjs'); // RC-2026-09-27-2732 (imported by server.mjs)
-  paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');
-  paths.add('scripts/stamp-version.mjs');
-  paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');
-  paths.add('server/graph-fixture-sync.mjs');
-  paths.add('server/graph-reply-draft.mjs');
-  paths.add('server/graph-reply-journal.mjs');
-  paths.add('server/graph-reply-update-review.mjs');
-  paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs'); paths.add('src/gmail-ui.js'); paths.add('src/account-setup-ui.js');
-  paths.add('src/inbox-client.js'); paths.add('src/inbox-ui.js');
-  paths.add('src/inbox-send-ui.js');
-  paths.add('src/room-roster.js');
-  paths.add('src/account-settings-ui.js');
-  paths.add('src/auth-signin-ui.js'); // Multi-method sign-in / create-account UI (imported by src/app.js, slice 7)
-  paths.add('src/agent-signin-ui.js'); // Agent browser sign-in choice UI (imported by src/app.js, RC-2026-09-23)
-  paths.add('src/agent-first-run.js'); // Agent first-run orientation card (imported by src/agent-signin-ui.js, RC-2026-09-24-213)
-  paths.add('src/room-deep-link.js');
-  paths.add('src/browser-session.js');
-  paths.add('src/composer-files.js'); // Composer file chips (imported by src/app.js)
-  paths.add('src/session-expiry.js'); // Session-expiry locale rendering (imported by src/app.js + src/join.js)
-  paths.add('src/agent-invite-ui.js');
-  paths.add('src/share-invite-code.js');
-  paths.add('src/room-mcp-join.js');
-  paths.add('server/mcp-http.mjs');
-  paths.add('src/mcp-server-card.mjs');
-  paths.add('server/mcp-hosted-tools.mjs');
-  paths.add('server/mcp-discovery.mjs');
-  paths.add('server/mcp-arg-errors.mjs'); // structured MCP tools/call errors (imported by server/mcp-http.mjs)
-  paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
-  paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
-  paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
-  paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
-  paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
-  paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
-  paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
-  paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
-  paths.add('server/spend-pricing.mjs'); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/spend-grants.mjs)
-  paths.add('server/routes/spend-pricing.mjs'); // spend-pricing kill switch RT routes (imported by server/routes/table.mjs)
-  paths.add('server/read-cursor.mjs'); // safe scalar foundation
-  paths.add('server/needs-me.mjs'); // cross-room room_needs_me (imported by server/mcp-room-profile.mjs and server/http.mjs)
-  paths.add('server/land-queue.mjs'); // per-room pull-request land queue (imported by server/store.mjs)
-  paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
-  paths.add('server/wake-identity-resolution.mjs'); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs)
-  paths.add('src/land-queue-board.js'); // Land-queue board card (imported by src/app.js)
-  paths.add('src/board-ui.js'); paths.add('src/board-keyboard.mjs'); paths.add('src/board-mine.js'); paths.add('src/first-room-copy.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)
-  paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
-  paths.add('server/agent-discovery.mjs');
-  paths.add('server/capabilities.mjs'); // #601: build-time route-family inventory (imported by server/agent-discovery.mjs)
-  paths.add('server/agent-card-key.mjs'); // RC-2026-09-23-105: room card signing key, public half (imported by server/agent-discovery.mjs)
-  paths.add('server/agent-card-signed.mjs'); // RC-2026-09-23-105: build-time card signature (imported by server/agent-discovery.mjs)
-  paths.add('server/procedures-index.mjs'); // W008: baked shared-procedure index (imported by server/agent-discovery.mjs)
-  paths.add('server/room-entry.mjs');
-  paths.add('server/guest-agent-links.mjs');
-  paths.add('server/agent-invites.mjs');
-  paths.add('server/referrals.mjs'); // Referral attribution (imported by server/store.mjs)
-  paths.add('server/growth-loop.mjs'); // Referral growth: activation and room credits (imported by server/http.mjs and server/referrals.mjs)
-  paths.add('server/referral-invites.mjs'); // Signed agent-carried referral invites (imported by server/store.mjs)
-  paths.add('server/thread-mutes.mjs'); // Per-thread mutes (imported by server/store.mjs)
-  paths.add('server/human-push.mjs'); // Human browser push (imported by server/store.mjs)
-  paths.add('server/push-subscriptions.mjs'); paths.add('server/web-push.mjs'); // Browser push delivery (imported by server/human-push.mjs)
-  paths.add('src/human-push.js'); paths.add('src/human-push-display.js'); paths.add('push-sw.js'); // Human push button, lock-screen text, service worker
-  paths.add('join.html'); // Self-serve join page
-  paths.add('src/join.js'); // Join page logic
-  paths.add('favicon.svg'); paths.add('icon.svg'); paths.add('manifest.webmanifest');
-  paths.add('offline.html'); paths.add('icons/icon-192.png'); paths.add('icons/icon-512.png'); paths.add('icons/maskable-512.png'); paths.add('icons/apple-touch-icon-180.png');
-  paths.add('src/pwa-install.js'); paths.add('src/push-ask.js');
-  paths.add('src/public-a11y.css');
-  paths.add('src/referral-board.js'); // Referral board (imported by src/app.js)
-  paths.add('src/work-item-session.js');
-  paths.add('src/work-recipes.js');
-  paths.add('src/board.js');
-  paths.add('src/work-templates.js');
-  paths.add('src/room-templates.js');
-  paths.add('server/diagnostics.mjs');
-  paths.add('server/access-review.mjs');
-  paths.add('server/owner-delegates.mjs'); // Owner-delegate authority (imported by server/store.mjs; delegate flag consumed by server/access-review.mjs, server/guest-invites.mjs, server/guest-agent-links.mjs, server/agent-invites.mjs, server/agent-connections.mjs, server/http.mjs)
-  paths.add('server/membership-delegation.mjs'); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
-  paths.add('server/wake-queue.mjs'); paths.add('server/request-runs.mjs');
-  paths.add('server/wake-queue-limits.mjs'); // Burs-IA A2: wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf)
-  paths.add('server/governance.mjs'); // Burs-IA A2: /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
-  paths.add('server/discoverability.mjs'); // Burs-IA A1: Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
-  paths.add('server/attention.mjs');
-  paths.add('server/room-lifecycle.mjs');
-  paths.add('server/attachment-schema.mjs');
-  paths.add('server/room-attachment-bytes.mjs'); // room_attachments byte store (imported by server/store.mjs and server/http.mjs)
-  paths.add('server/inbox-attachment-bytes.mjs'); // identity inbox attachment bytes (imported by server/store.mjs)
-  paths.add('server/attachments.mjs'); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
-  paths.add('server/moderation.mjs');
-  paths.add('scripts/release-evidence.mjs');
-  paths.add('server/usage-summary.mjs');
-  paths.add('server/notifications.mjs');
-  for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/telegram-rotation.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/channel-journal.mjs', 'server/room-export-html.mjs']) paths.add(path);
-  paths.add('server/room-export.mjs'); paths.add('cloudflare/room-backup.mjs');
-  for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
-  paths.add('server/spend-allowance.mjs');
-  paths.add('server/autonomy-tiers.mjs'); // Graduated autonomy tiers (imported by server/store.mjs and server/http.mjs)
-  paths.add('server/grants.mjs'); // UFO-steal slice 1 (imported by server/store.mjs and server/http.mjs)
-  paths.add('server/messages-store.mjs'); // MSG-1: messages table written with each message event (imported by server/store.mjs)
-  paths.add('server/abuse-rate-buckets.mjs'); // Durable abuse rate buckets (imported by server/http.mjs, server/writer-fence.mjs, and cloudflare/room.mjs)
-  paths.add('server/receipt-cards.mjs'); // ACT-1a: in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
-  paths.add('server/room-guide.mjs'); // ACT-1a: Room Guide (imported by cloudflare/room.mjs and server/starter-room.mjs)
-  paths.add('server/starter-room.mjs'); // ACT-1a: starter seed (imported by server/room-lifecycle.mjs)
-  paths.add('server/pins.mjs');
-  paths.add('server/squads.mjs'); // plan-squads: squad roster + thread channel (imported by server/http.mjs, server/store.mjs, server/mcp-room-profile.mjs, server/work-claim-routes.mjs)
-  paths.add('src/squads-ui.js'); // plan-squads: read-only squad roster panel (lazy-loaded by src/app.js)
-  paths.add('server/typing.mjs'); // ephemeral typing heartbeats (imported by server/http.mjs)
-  paths.add('server/required-reading.mjs'); // W012: per-lane required reading (imported by server/work-claim-routes.mjs)
-  paths.add('server/account-login-methods.mjs'); // Multi-method login model (imported by server/store.mjs)
-  paths.add('server/account-deletion.mjs'); // RC-2026-09-19-078: deletion executor (imported by server/http.mjs)
-  paths.add('src/account-deletion.mjs'); // RC-2026-09-19-078: pure purge planner (imported by server/account-deletion.mjs)
-  // CP-ADMIN-0: operator auth, purge, and status (imported by server/http.mjs and server/store.mjs)
-  for (const path of ['server/operator-auth.mjs', 'server/operator-actions.mjs', 'server/purge-registry.mjs', 'server/operator-purge.mjs', 'server/operator-status.mjs', 'server/operator-routes.mjs']) paths.add(path);
-  paths.add('server/account-passkeys.mjs'); // Passkey auth wiring (slice 5; imported by server/http.mjs)
-  paths.add('src/passkey-login.mjs'); // WebAuthn logic (imported by server/account-passkeys.mjs)
-  paths.add('src/password-auth.mjs'); // Email+password crypto (imported by server/http.mjs, slice 2)
-  paths.add('server/magic-links.mjs'); // Magic-link mail sender seam (imported by server/http.mjs)
-  paths.add('server/resend-mailer.mjs'); // Resend-backed magic-link sender (imported by server/boot-options.mjs)
-  paths.add('server/webhook-dispatch.mjs'); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs)
-  paths.add('server/ip-blocklist.mjs'); // RC-2026-09-25: shared SSRF IP blocklist (imported by server/web-fetch.mjs, server/outbound-webhooks.mjs, server/webhook-dispatch.mjs)
-  paths.add('server/agent-key-registry.mjs'); // Integration map slice 9 (imported by server/store.mjs and server/agent-identities.mjs)
-  paths.add('server/signed-evidence.mjs'); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs)
-  paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
-  paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
-  paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
-  paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
-  for (const path of ['server/sla-clocks.mjs', 'server/sla-breach-journal.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
-  paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
-  for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
-  paths.add('server/content-trust.mjs'); // structured untrusted markers (imported by server/http.mjs surfaces and MCP)
-  paths.add('server/room-activation-pack.mjs'); // Room activation pack (quill lane, RC-2026-09-18-040; imported by server/http.mjs)
-  paths.add('server/room-context.mjs'); // Compact agent room context (imported by server/store.mjs)
-  for (const path of ['server/work-claims.mjs', 'server/work-claim-routes.mjs', 'server/work-duplicates.mjs', 'server/claim-coordination.mjs', 'server/claim-pr-sync.mjs', 'server/mention-receipts.mjs']) paths.add(path); // RC-2026-09-18-041: work-claim state machine + HTTP routes (imported by server/http.mjs); work-duplicates: pure duplicate detection (imported by server/work-claim-routes.mjs)
-  paths.add('server/retention-response.mjs'); // room-retention: first-contribution SLA bot + zero-reply watchdog (pure, imported by server/work-claim-routes.mjs)
-  paths.add('server/claim-validate.mjs'); // RC-2026-09-24-204: synchronous pre-post claim-block validation (imported by server/http.mjs; pure, no imports of its own)
-  for (const path of ['server/bounty-escrow.mjs', 'server/bounty-escrow-routes.mjs', 'server/bounty-disputes.mjs', 'server/dispute-arbiters.mjs', 'server/bounty-reputation.mjs', 'server/reputation.mjs', 'server/bounty-receipts.mjs']) paths.add(path); // agent work exchange slice 1: escrowed bounties (imported by server/http.mjs) + slice #4 bounty -> reputation + receipts slice #1: Ed25519-signed movement receipts (imported by server/bounty-escrow.mjs)
-  paths.add('server/persisted-row.mjs'); // RC-2026-09-27-2730: replay-safe persisted-row envelope (imported by server/bounty-escrow.mjs, server/work-claim-sqlite.mjs, server/dispatch-journal.mjs; pure, no imports)
-  paths.add('server/spam-shadow.mjs'); // Shadow-mode auto-quarantine instrumentation (imported by server/inbox.mjs)
-  paths.add('server/dm-consents.mjs'); // Directional DM-consent journal (imported by server/store.mjs)
-  paths.add('src/dm-consents.js'); // DM consent browser view-model + API helpers (imported by src/app.js)
-  paths.add('src/friend-bond.js'); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
-  paths.add('server/web-fetch.mjs'); // RC-2026-09-23-102: room-side web fetch (imported by server/http.mjs + server/store.mjs)
-  paths.add('server/web-research.mjs'); // RC-2026-09-24-310: knowledge router (imported by server/store.mjs)
-  paths.add('server/owner-attention.mjs'); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
-  paths.add('server/owner-overview.mjs'); // #3342: cross-room owner overview read model (imported by server/http.mjs)
-  paths.add('server/open-questions.mjs'); // F1: open-questions radar read (imported by server/http.mjs)
-  paths.add('src/room-layout.js');
-  paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
-  paths.add('src/owner-cockpit.js'); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
-  paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)
-  paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
-  paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
-  paths.add('server/members-directory.mjs'); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
-  paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
-  paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
-  paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
-  paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
-  paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
-  paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)
-  paths.add('server/capability-visibility.mjs'); // RC-2026-09-27-2731: withhold-never-refused catalog predicate (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
-  paths.add('server/conversation-sync.mjs'); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
-  paths.add('server/routes/dispatch.mjs'); paths.add('server/routes/table.mjs'); paths.add('server/routes/inbox.mjs'); paths.add('server/routes/auth.mjs'); paths.add('server/routes/work-claims.mjs'); // batch RT: route table (imported by server/http.mjs)
-  paths.add('server/oauth-provider-store.mjs'); // durable OAuth grants (imported by cloudflare/room.mjs and server/writer-fence.mjs)
-  paths.add('server/redact-read.mjs'); // read-time message tombstone (imported by server/http.mjs)
-  paths.add('server/message-redaction.mjs'); // PRIV-1: rewrite deleted message text (imported by server/store.mjs and server/account-deletion.mjs)
-  paths.add('server/history-visibility.mjs'); // PRIV-2: history visibility floor and export authority (imported by server/store.mjs and server/http.mjs)
-  paths.add('server/abuse-rate-buckets.mjs'); // durable abuse rate buckets (imported by cloudflare/room.mjs, server/http.mjs, and server/writer-fence.mjs)
-  paths.add('server/receipt-cards.mjs'); // in-room receipt cards (imported by server/work-claim-events.mjs and server/room-guide.mjs)
-  paths.add('server/room-guide.mjs'); // Room Guide demo agent (imported by cloudflare/room.mjs)
-  paths.add('server/starter-room.mjs'); // starter seed (imported by server/room-lifecycle.mjs)
-  paths.add('server/public-search.mjs'); // public search assets (imported by server/http.mjs)
-  paths.add('cloudflare/job-heartbeat.mjs'); // per-job cron heartbeat (imported by cloudflare/room.mjs)
-  paths.add('cloudflare/channel-drain-tick.mjs'); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
-  paths.add('server/routes/agent-connect.mjs'); // GET /a/<code> (imported by server/http.mjs)
-  paths.add('server/connect-snippets.mjs'); // DX-1a connect table (imported by server/public-search.mjs)
+  // The existing runtime allowlist owns candidate membership too. Include new
+  // working files without maintaining a second handwritten deployment list.
+  // Baseline paths remain mandatory below; historical optional paths may be
+  // absent in the current checkout. Only explicitly allowlisted files enter.
+  for (const path of allowed) if (existsSync(join(repository, path))) paths.add(path);
   // Decision #36 (#3254, Option A): the generated agent pages are build
   // output and are never committed, so a pristine checkout legitimately
   // lacks them. Take only the pages the source tree actually has: the
@@ -207,7 +28,7 @@ export function candidateRuntimeFixture(repository, directory) {
     paths.add(path);
   }
   const candidate = join(directory, 'synthetic-source'); mkdirSync(candidate);
-  // No private state, credentials, docs or real checkout Git metadata.
+  // Only allowlisted runtime/public assets; never arbitrary working files or Git metadata.
   for (const path of paths) {
     mkdirSync(join(candidate, path, '..'), { recursive: true });
     cpSync(join(repository, path), join(candidate, path));

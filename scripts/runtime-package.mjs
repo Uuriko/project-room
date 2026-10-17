@@ -180,6 +180,7 @@ optional.push("server/inbox-attachment-bytes.mjs"); // identity inbox attachment
 optional.push("server/attachments.mjs"); // filename and extension checks (imported by server/room-attachment-bytes.mjs)
 optional.push("server/wake-queue.mjs", "server/request-runs.mjs");
 optional.push("server/wake-queue-limits.mjs"); // wake-queue capacity constants (imported by server/wake-queue.mjs and server/governance.mjs; leaf, no store import)
+optional.push("src/service-origin.js"); // shared client/server URL routing without discovery dependencies
 optional.push("server/governance.mjs"); // /.well-known/governance.json builder (imported by server/agent-discovery.mjs)
 optional.push("server/discoverability.mjs"); // Appendix A route table + generated /openapi.json (imported by server/http.mjs, server/mcp-http.mjs, server/mcp-room-profile.mjs)
 optional.push("server/matchmaking-routes.mjs", "server/work-matchmaking.mjs", "server/work-declarations.mjs", "server/agent-lanes.mjs"); // work matchmaking routes (imported by server/http.mjs)

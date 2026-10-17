@@ -15,6 +15,7 @@ test("Mac runtime runs outside checkout with verified closure and no installed p
   assert.ok(result.files > 1);
   const manifest = JSON.parse(readFileSync(join(output, "runtime-manifest.json")));
   for (const file of manifest.files) assert.equal(createHash("sha256").update(readFileSync(join(output, file.path))).digest("hex"), file.sha256);
+  assert.equal(existsSync(join(output, "server/agent-discovery.mjs")), false, "agent runtime must not package server discovery to route client URLs");
   assert.equal(existsSync(join(output, "node_modules")), false);
   assert.equal(existsSync(join(output, ".git")), false);
   const host = spawnSync(process.execPath, [join(output, "scripts/run-codex-room.mjs"), "--help"], { cwd: root, encoding: "utf8" });
