@@ -42,6 +42,11 @@ export function classifyAuthLink(params) {
 export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions, onProviderCapabilities }) {
   let container = null, welcome = false, mountedBefore = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
+  // Front-door batch B-1 (#3771): the typed password survives a
+  // Log-in <-> Create-account mode switch. render() rebuilds the form, so
+  // the value is kept here and restored into the fresh input — the switch
+  // used to clear it silently (17 chars -> 0) while keeping the email.
+  let preservedPassword = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
@@ -198,6 +203,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (node) {
       node.setAttribute("aria-busy", String(busy));
       for (const control of node.querySelectorAll("input, button")) control.disabled = busy;
+      const passwordInput = node.querySelector('[name="password"]');
+      if (passwordInput && preservedPassword) passwordInput.value = preservedPassword;
     }
     setStatus(statusText, statusError);
     onViewChange?.(currentView());
@@ -305,6 +312,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       welcome = false;
       const currentEmail = surface()?.querySelector('[name="email"]')?.value;
       if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
+      const currentPassword = surface()?.querySelector('[name="password"]')?.value;
+      if (typeof currentPassword === "string") preservedPassword = currentPassword;
       // One merged email form (#3341): every method/mode switch lands
       // on it; the mode switch still chooses login vs signup.
       emailMethod = "password";
@@ -489,6 +498,16 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function bind(node) {
     node.addEventListener("click", onClick);
     node.addEventListener("submit", onSubmit);
+    // B-1 (#3771): a refused submit names its field instead of silence.
+    node.addEventListener("invalid", event => {
+      const field = event.target;
+      if (field?.name === "password" && passwordMode === "signup") setStatus(uiText("signin.copy.024"), true);
+      else if (field?.name === "email") setStatus(uiText("signin.copy.036"), true);
+      else if (field?.name) setStatus(uiText("signin.copy.037"), true);
+    }, true);
+    node.addEventListener("input", event => {
+      if (event.target?.name === "password") preservedPassword = event.target.value;
+    });
   }
   return {
     canLeave() { return !busy && !pendingTerms; },

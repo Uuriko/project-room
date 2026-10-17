@@ -547,6 +547,14 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full working permissions (not membership administration). Share it only with people and agents you trust."; }
       else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
       $("#share-link-url").dataset.linkId = result.link.id;
+      // #3794: the growth-kit field at the top of this dialog still showed
+      // a pre-existing (guest) link after a create — the only URL many
+      // inviters ever copied. The created link is the link the current
+      // settings describe, so it is the URL every field here shows.
+      const growthUrl = $("#growth-invite-url");
+      if (growthUrl) growthUrl.value = inviteUrl;
+      const growthStatus = $("#growth-kit-status");
+      if (growthStatus) growthStatus.textContent = `${result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest"} link created — copy this link to share it.`;
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
@@ -554,7 +562,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       updateCopyControls();
       // Unlock the dialog before clipboard. A hanging writeText (or a test
       // stub that waits for finish) must not keep Create disabled.
-      status("Link ready.");
+      status(`${result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest"} link ready — the link shown above is the one to share.`);
       $("#share-link-copy").focus();
       creationBusy(false);
       list(version, generation).catch(() => {});
@@ -661,6 +669,12 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#join-link-form").hidden = false; $("#join-link-name").focus();
       if (account.authenticated && !resume && !fragment.reviewSession) await applyAccountDefaults(version);
       if (version !== joinVersion) return;
+      // #3796: arriving here via account creation used to re-render the
+      // dialog into this name form with no word about what happened or
+      // what remained. Name the step and its completion action.
+      if (afterSignIn && account.authenticated && !returning) {
+        joinStatus("Account created — you're signed in. Step 2 of 2: confirm the name people in this room will see, then choose \u201cJoin room\u201d to finish.");
+      }
       // Signed out: sign-in comes first, with "Continue as guest" below it.
       // Member and co-admin links need an account, so they offer no guest path.
       const elevated = preview.link.access && preview.link.access !== "guest";

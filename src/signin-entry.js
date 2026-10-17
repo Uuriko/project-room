@@ -37,6 +37,14 @@ export function mountSigninEntry({ openWorkspace }) {
     // and offers an email sign-in link it cannot serve (Codex review of
     // the #3068 integration, 2026-10-14).
     loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
+    onProviderCapabilities: providers => {
+      // Same B-7 rule as the workspace wall (app.js): a door is revealed
+      // only on a positive configured answer; the anchors start hidden.
+      if (providers?.github?.configured === true) navigation.setProviderAvailable("github");
+      if (providers?.github?.configured === false) navigation.setProviderUnavailable("github");
+      if (providers?.google?.configured === true) navigation.setProviderAvailable("google");
+      if (providers?.google?.configured === false) navigation.setProviderUnavailable("google");
+    },
     onViewChange: navigation.sync,
     onBack: navigation.back,
     onSignedIn: enterAccount,
