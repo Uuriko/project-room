@@ -2,7 +2,7 @@
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
@@ -1978,6 +1978,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const gr2Alias = gr2PublicPath(url.pathname);
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
+      // GET /api/public/front-door (EXP-7 Variant B live facts) is a
+      // route-table row: server/routes/front-door.mjs, dispatched above.
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
@@ -2161,7 +2163,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_SEARCH_CSP));
+        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end
         if (canonical && !url.search) {
           if (canonical !== url.pathname) {
