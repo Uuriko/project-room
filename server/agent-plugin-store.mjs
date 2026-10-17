@@ -31,6 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -1227,19 +1228,21 @@ export class AgentPluginStore {
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
   // subscription whose event filter matches. RC-2026-09-24 fanout scope:
   // delivery is scoped to room membership — only subscriptions whose
-  // agent_id is linked to the event's room (identity_links) are
-  // considered. A subscription that never joined the room hears nothing
-  // from it, the same way the /events and /stream read paths behave.
+  // agent_id is seated in the event's room are considered. A subscription
+  // that never joined the room hears nothing from it, the same way the
+  // /events and /stream read paths behave. #3777: seating resolves
+  // through the shared guest-aware resolver (identity_links first,
+  // guest_members fallback) — trial seats hold subscriptions too, and an
+  // identity_links-only join silently starved them of every delivery.
   // Called from the room store's command() inside the same transaction as
   // the event insert, so a delivery is never journaled without its
   // triggering event.
   fanoutRoomEvent({ roomId, event }) {
     const rows = this.db.prepare(
       `SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,
-              s.events_json AS eventsJson, l.member_id AS memberId
+              s.events_json AS eventsJson
        FROM agent_webhook_subs s
-       JOIN identity_links l ON l.identity_id = s.agent_id AND l.room_id = ?
-       WHERE s.enabled = 1`).all(roomId);
+       WHERE s.enabled = 1`).all();
     let created = 0;
     // Q3-D: the actor's kind and name come from the room roster, read once.
     let members;
@@ -1254,6 +1257,12 @@ export class AgentPluginStore {
       // room's message bodies to the URL it chose, even if the row stayed
       // enabled from an older build.
       if (this.identityRevoked(row.agentId)) continue;
+      // Room-membership scope: resolve the subscription's agent_id to its
+      // member id in this room through the shared guest-aware resolver.
+      // An identity seated in neither identity_links nor guest_members
+      // for this room is not a member and hears nothing.
+      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId);
+      if (!memberId) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;
@@ -1261,17 +1270,19 @@ export class AgentPluginStore {
       // (RC-2026-09-18-012, server/store.mjs). A message.posted event
       // carrying data.toMemberId is a direct message, visible only to its
       // sender and its addressed member — never to third-party push
-      // subscribers. The JOIN above already resolved the subscription's
-      // agent_id to this room's member id; apply the same rule the
-      // /events and /stream read paths use. (Every candidate row has a
-      // link by construction, so an unlinkable subscriber can never
-      // reach this branch as sender or addressee.)
+      // subscribers. The resolver above already resolved the
+      // subscription's agent_id to this room's member id (the guest
+      // seat's member id for trial seats, so the fence binds guests
+      // too); apply the same rule the /events and /stream read paths
+      // use. (Every candidate row is a seated member by construction, so
+      // an unseated subscriber can never reach this branch as sender or
+      // addressee.)
       if (event?.type === "message.posted" && event?.data?.toMemberId) {
-        if (event.actorId !== row.memberId && event.data.toMemberId !== row.memberId) continue;
+        if (event.actorId !== memberId && event.data.toMemberId !== memberId) continue;
       }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,
-          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: row.memberId }) });
+          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: memberId }) });
       if (!delivery.duplicate) created++;
     }
     // Prompt dispatch: the drain kicks fire-and-forget after the request

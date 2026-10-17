@@ -385,13 +385,18 @@ function insertOrder(names) {
 // The retired Emissary tables stay in upgraded databases (no DROP was ever
 // issued) but no module reads them. abuse_rate_buckets is rate-limit state
 // the Durable Object creates on first use (server/abuse-rate-buckets.mjs); a
-// restored store starts with fresh budgets. Replay skips these and reports the
-// row counts; the export itself still holds the rows.
+// restored store starts with fresh budgets. The wake-accounting tables
+// (server/wake-metrics.mjs, #3345) are the same shape: lazily created
+// telemetry — outcome counters plus a bounded loss journal — and a restored
+// store restarts its accounting window; the reliability STOCK (pending /
+// acked / stranded) is derived from the wake tables themselves, which do
+// replay. Replay skips these and reports the row counts; the export itself
+// still holds the rows.
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";

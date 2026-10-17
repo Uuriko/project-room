@@ -428,6 +428,31 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_wake_counters",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_failures",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "subject_id"
+      ]
+    }
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",
@@ -715,6 +740,16 @@ const ROWS = [
   },
   {
     "table": "guest_members",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "guest_invite_authority",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1027,6 +1062,16 @@ const ROWS = [
   },
   {
     "table": "messages_backfill_cursor",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "messages_backfill_blocks",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1366,6 +1411,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_settlements",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_tasks",
     "key": "room_id",
     "action": "delete",
@@ -1477,6 +1532,16 @@ const ROWS = [
   },
   {
     "table": "room_mention_settings",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_public_receipts_setting",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1705,6 +1770,16 @@ const ROWS = [
     }
   },
   {
+    "table": "wake_queue_pause_by",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "web_fetch_cache_rooms",
     "key": "room_id",
     "action": "delete",
@@ -1758,7 +1833,10 @@ const ROWS = [
   // backfill (server/work-item-board.mjs). Room-owned migration state:
   // deleted with the room (a purged room must not leave a marker behind;
   // the table is lazy-additive, hence optional).
-  { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
+  // monitor state, deleted with the room; lazy-additive, hence optional.
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
