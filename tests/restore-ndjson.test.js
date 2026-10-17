@@ -328,3 +328,102 @@ test("legacy exports restore at an explicitly weaker verification level (#3325)"
   assert.equal(result2.verified, true);
   assert.equal(result2.contentVerification, "watermark-only");
 });
+
+// Bug sweep 2026-10-16 F1: a byte-valid backup whose stored projections
+// were written by older code can differ from current-reducer replay. The
+// file replay has an audit "report" mode for exactly this case; the
+// DO-native paths refused outright, with a generic 500. Strict stays the
+// default, but the refusal now names the drift (room + fields), and the
+// operator opt-in (audit: "report", ?audit=report) lands the data with
+// the drift as a named qualification on the result.
+function driftProjection(store, roomId) {
+  const row = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+  const state = JSON.parse(row.projection);
+  state.members.agent.displayName = "Drifted Name";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), roomId);
+}
+
+function seedDrifted(t, roomIds = ["commons"]) {
+  const store = openStore(t, "restore-ndjson-drift-seed-");
+  for (const roomId of roomIds) {
+    store.initialize(initialRoom(roomId));
+    const key = store.issueAccessKey(roomId, "owner");
+    store.command(key, roomId, { id: randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId: "agent", displayName: "Restore agent", kind: "agent", permissions: ["accept_work"] } });
+    store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED,
+      data: { messageId: randomUUID(), body: "history that must survive the restore" } });
+    // Drift lives only in the stored projection; the export below is
+    // computed over the drifted tables, so counts, digests and trailer
+    // are all self-consistent — the "backup written by older code" case.
+    driftProjection(store, roomId);
+  }
+  return { store, ndjson: exportNdjsonText(store.db) };
+}
+
+test("strict replay of a drifted backup refuses and names the drifted room and field", t => {
+  const { ndjson } = seedDrifted(t);
+  const target = openStore(t, "restore-ndjson-drift-strict-");
+  assert.throws(() => replayNdjsonInto(ndjson, target), error => {
+    assert.match(error.message, /requires operator reconciliation/);
+    assert.match(error.message, /commons/);
+    assert.match(error.message, /displayName/);
+    assert.deepEqual(error.drift, [{ room: "commons", fields: ["state.members.agent.displayName"] }]);
+    return true;
+  });
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "refused replay leaves the store empty");
+});
+
+test("report-mode replay lands a drifted backup with the drift as a named audit qualification", t => {
+  const { ndjson } = seedDrifted(t, ["commons", "annex"]);
+  const target = openStore(t, "restore-ndjson-drift-report-");
+  const result = replayNdjsonInto(ndjson, target, { audit: "report" });
+  assert.equal(result.verified, true);
+  assert.equal(result.contentVerification, "full");
+  assert.equal(result.recovery, null, "a failed audit has no recovery report to stand behind verified");
+  assert.equal(result.audit.ok, false);
+  assert.match(result.audit.error, /requires operator reconciliation/);
+  assert.deepEqual(result.audit.drift.map(entry => entry.room), ["annex", "commons"],
+    "every drifted room is enumerated, not just the first");
+  for (const entry of result.audit.drift) assert.ok(entry.fields.some(field => field.endsWith("displayName")));
+  assert.equal(target.room("commons").state.members.agent.displayName, "Drifted Name", "the drifted data landed as stored");
+  assert.equal(target.room("annex").state.members.agent.displayName, "Drifted Name");
+});
+
+test("a clean replay reports an unqualified audit result", t => {
+  const { ndjson } = seed(t);
+  const target = openStore(t, "restore-ndjson-drift-clean-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.deepEqual(result.audit, { ok: true });
+  assert.ok(result.recovery, "a passing audit returns its recovery report");
+});
+
+test("operator restore endpoint: strict drift refusal is a legible 422, report opt-in lands it", async t => {
+  const { ndjson } = seedDrifted(t);
+  const strictTarget = openStore(t, "restore-ndjson-drift-endpoint-strict-");
+  const refused = await operatorRestoreResponse(fakeRequest({ body: ndjson }), OPERATOR_TOKEN, strictTarget);
+  assert.equal(refused.status, 422, "the reconciliation refusal is operator-legible, not a generic 500");
+  const refusedPayload = await refused.json();
+  assert.equal(refusedPayload.error.code, "restore_verification_failed");
+  assert.match(refusedPayload.error.message, /commons/);
+  assert.match(refusedPayload.error.message, /displayName/);
+  assert.ok(!strictTarget.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "refused restore leaves the store empty");
+
+  const reportTarget = openStore(t, "restore-ndjson-drift-endpoint-report-");
+  const headers = new Headers({ "content-type": "application/x-ndjson", authorization: `Bearer ${OPERATOR_TOKEN}` });
+  const landed = await operatorRestoreResponse(
+    { method: "POST", url: "https://room.example/api/operator/restore?audit=report", headers, text: async () => ndjson },
+    OPERATOR_TOKEN, reportTarget);
+  assert.equal(landed.status, 200);
+  const landedPayload = await landed.json();
+  assert.equal(landedPayload.verified, true);
+  assert.equal(landedPayload.audit.ok, false);
+  assert.deepEqual(landedPayload.audit.drift, [{ room: "commons", fields: ["state.members.agent.displayName"] }]);
+  assert.equal(reportTarget.room("commons").state.members.agent.displayName, "Drifted Name");
+
+  const badTarget = openStore(t, "restore-ndjson-drift-endpoint-bad-");
+  const bad = await operatorRestoreResponse(
+    { method: "POST", url: "https://room.example/api/operator/restore?audit=bogus", headers, text: async () => ndjson },
+    OPERATOR_TOKEN, badTarget);
+  assert.equal(bad.status, 422);
+  assert.equal((await bad.json()).error.code, "invalid_restore");
+});

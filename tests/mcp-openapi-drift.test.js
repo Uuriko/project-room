@@ -188,9 +188,9 @@ const ALLOW = {
     // "Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }."
     fixed: { mode: "pull-only" },
     narrowed: {
-      // "Cadence is cleared because this body omits cadenceSeconds, matching that route."
+      // "Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear"
       wakeUrl: "Clearing the wake URL is the point of the tool; the fixed mode pull-only forbids it route-side.",
-      cadenceSeconds: "'Cadence is cleared because this body omits cadenceSeconds, matching that route.'",
+      cadenceSeconds: "'Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — the tool exposes no cadenceSeconds field; it hardcodes the clear.'",
       pushNotification: "'An existing push subscription row is left in place' — the tool never sends one.",
       workWakes: "The pointer-only work-signal preference is owned by heartbeat_set; this fixed pull-only body omits it, and the route retains the current setting when it is omitted.",
     },

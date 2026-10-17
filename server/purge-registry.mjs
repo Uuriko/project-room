@@ -749,6 +749,16 @@ const ROWS = [
     }
   },
   {
+    "table": "guest_invite_authority",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "guest_selfserve",
     "key": "room_id",
     "action": "delete",
@@ -1052,6 +1062,16 @@ const ROWS = [
   },
   {
     "table": "messages_backfill_cursor",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "messages_backfill_blocks",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1391,6 +1411,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_settlements",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_tasks",
     "key": "room_id",
     "action": "delete",
@@ -1502,6 +1532,16 @@ const ROWS = [
   },
   {
     "table": "room_mention_settings",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_public_receipts_setting",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1721,6 +1761,16 @@ const ROWS = [
   },
   {
     "table": "wake_queue_pause",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "wake_queue_pause_by",
     "key": "room_id",
     "action": "delete",
     "match": {
