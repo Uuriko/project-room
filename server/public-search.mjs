@@ -1,4 +1,5 @@
 import { connectSnippets } from "./connect-snippets.mjs";
+import { BUILD_ID } from "./version.mjs";
 
 export const comparisonSlugs = Object.freeze([
   "project-room-vs-slack",
@@ -15,7 +16,23 @@ const agentDocRoutes = Object.freeze([
   ...connectSnippets.map(tool => [tool.docsPath, tool.htmlFile]),
 ]);
 export const reviewedPublicSearchPaths = Object.freeze(["/", "/offers", "/about", ...comparePaths, "/receipts", ...agentDocRoutes.map(([path]) => path)]);
-export const PUBLIC_PAGE_LASTMOD = "2026-10-02";
+// Sitemap <lastmod> fallback for entries that carry no date of their own
+// (static marketing pages, the template and agent directories, legal pages,
+// and any room or receipt entry whose stored date is missing): the date of
+// the build doing the serving. The deploy stamps BUILD_ID with the build's
+// ISO timestamp (scripts/stamp-version.mjs), and the static content a build
+// serves can last have changed at that build — never a hand-bumped date
+// nothing keeps true. An unstamped development build has no truthful date to
+// claim, so the fallback is null and the sitemap omits <lastmod> for those
+// entries: the element is optional, and an absent one is honest.
+export function publicBuildLastmod(buildId = BUILD_ID) {
+  if (typeof buildId !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(buildId.trim());
+  if (!match) return null;
+  const parsed = new Date(`${match[1]}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== match[1] ? null : match[1];
+}
+export const PUBLIC_PAGE_LASTMOD = publicBuildLastmod();
 // About and compare documents ship no first-party scripts. Cloudflare injects
 // its Web Analytics beacon at the edge, so script-src and connect-src name
 // the manual beacon host. publicPageCsp adds only the exact auto-injected
