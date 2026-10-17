@@ -31,6 +31,7 @@ import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -580,12 +581,21 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
-  const links = store.db.prepare(
-    `SELECT l.room_id AS roomId, l.member_id AS memberId, r.archived_at AS archivedAt
-     FROM identity_links l JOIN rooms r ON r.id=l.room_id
-     WHERE l.identity_id=? AND l.room_id>?
-     ORDER BY l.room_id LIMIT ?`
-  ).all(identity.identityId, parsed.roomAfter ?? "", MAX_ROOMS + 1);
+  // Seats come from the shared resolver (#3882): identity_links plus
+  // guest_members trial seats — a guest seat's room belongs in the inbox
+  // with the same membership truth as everywhere else. archivedAt rides
+  // from the rooms row; a seat whose room row is gone reads as archived
+  // (the old INNER JOIN dropped it the same way).
+  const seats = identityRoomSeats(store.db, identity.identityId,
+    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1 });
+  const roomRows = seats.length ? store.db.prepare(
+    `SELECT id, archived_at AS archivedAt FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
+  ).all(...seats.map(seat => seat.roomId)) : [];
+  const archivedByRoom = new Map(roomRows.map(row => [row.id, row.archivedAt]));
+  const links = seats.map(seat => ({
+    ...seat,
+    archivedAt: archivedByRoom.has(seat.roomId) ? archivedByRoom.get(seat.roomId) : 1
+  }));
   const items = [];
   const rooms = { ...parsed.rooms };
   const land = { ...parsed.land };
