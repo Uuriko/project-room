@@ -247,6 +247,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // guest_invite_authority (F-5): per-invite issuing-authority provenance
+  // for the GX flow. Purely additive and intentionally NOT fenced, same
+  // reasoning as the invite tables it annotates.
+  "guest_invite_authority",
   // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
   // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
   // request-ID idempotency records. Purely additive and intentionally NOT

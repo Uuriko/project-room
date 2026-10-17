@@ -96,7 +96,7 @@ import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
+import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
@@ -1096,7 +1096,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
+    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1382,6 +1382,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
+        this.guestInvites.verifyAuthoritySchema({ allowAbsent: true }); // F-5: guest-invite authority provenance, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
@@ -1679,6 +1680,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
       this.db.exec(guestSelfServeSchema);
+      // F-5: guest-invite issuing-authority provenance — purely additive
+      // side table (no events, no projection impact), same pattern.
+      this.db.exec(guestInviteAuthoritySchema);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -5557,6 +5561,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
+      // Delegation lifecycle (F-1): an ownership transfer lapses every
+      // delegation grant the outgoing owner issued in this room — the
+      // grants are their personal issuance, and the incoming owner must
+      // not silently inherit them. Runs inside the transfer's own
+      // transaction, after the event persists, so a failed transfer
+      // revokes nothing. Account deletion revokes the same way through
+      // its own executor; it appends its transfer event directly and
+      // never reaches this hook.
+      if (command.type === T.OWNERSHIP_TRANSFERRED) {
+        state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
+      }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
@@ -5570,6 +5585,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       throw error;
     }
+  }
+
+  // F-1: lapse the outgoing owner's delegation grants on an ownership
+  // transfer. Grant rows are revoked and journaled under the
+  // "ownership_transferred" lifecycle actor by the two delegation modules;
+  // a grant-conferred invite_member bit is stripped here through the event
+  // path, with the incoming owner as actor (their authority replaces the
+  // lapsed grant), following the in-command event-append pattern of
+  // resumeRoundLimitPauses. Runs inside the transfer command's transaction:
+  // if a strip cannot apply, the whole transfer fails rather than leaving
+  // the bit behind. Returns the post-strip room state.
+  lapseDelegationOnTransfer(roomId, state, outgoingOwnerId, sequence, transferEvent) {
+    const actorId = "ownership_transferred";
+    this.ownerDelegates.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    const { stripTargets } = this.delegation.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    let next = state;
+    let seq = sequence;
+    for (const target of stripTargets) {
+      if (seq >= PILOT_LIMITS.eventsPerRoom) break;
+      const member = next.members?.[target.memberId];
+      if (!member || member.active === false || !member.permissions.includes("invite_member")) continue;
+      const stripEvent = event({
+        type: T.MEMBER_ACCESS_CHANGED, roomId, actorId: next.room.ownerId, at: transferEvent.at,
+        id: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        idempotencyKey: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        causationId: transferEvent.id,
+        data: { memberId: member.id, expectedMemberRevision: member.revision,
+          permissions: member.permissions.filter(permission => permission !== "invite_member"),
+          active: member.active, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+      });
+      const applied = compact(applyEventWithGrowth(next, stripEvent, growthCollector).state);
+      const projection = this.storedProjection(roomId, applied);
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
+      seq += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
+        .run(seq, projection, archivedAtOf(applied), roomId);
+      // Parity with a command-issued member.access_changed (see command()).
+      this.agentConnections.revokeMember(roomId, member.id);
+      next = applied;
+    }
+    return next;
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
