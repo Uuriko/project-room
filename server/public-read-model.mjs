@@ -23,6 +23,10 @@ export const DIRECTORY_PAGE_SIZE = 50;
 export const PUBLIC_BACKFILL_BATCH = 20;
 
 export const PUBLIC_READ_MODEL_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS room_public_receipts_setting (
+    room_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS public_receipts (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -444,8 +448,30 @@ export function syncRoomPublication(store, { roomId, state, previous = null, aut
   const pageWas = publicPage(previous).enabled === true;
   const receiptsOn = publicReceipts(state).enabled === true;
   const receiptsWere = publicReceipts(previous).enabled === true;
-  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere) return;
+  // Lot receipts have no public_receipts row for an opt-out to delete, so
+  // the RECORDED receipts setting is mirrored into
+  // room_public_receipts_setting for the lot read: only a recorded off
+  // hides a lot, and "never recorded" must stay distinguishable from
+  // "recorded false". The setter bumps the recorded revision on every
+  // record, so an unchanged revision needs no write; a null previous
+  // (bootstrap, import, backfill) is an authoritative state and always
+  // re-mirrors.
+  const recorded = state.room.publicReceipts;
+  const hasRecorded = !!recorded && typeof recorded.enabled === "boolean";
+  const recordedWas = previous?.room?.publicReceipts ?? null;
+  const mirrorSetting = previous === null
+    || (hasRecorded && (!recordedWas || typeof recordedWas.enabled !== "boolean"
+      || recordedWas.revision !== recorded.revision));
+  if (!pageOn && !pageWas && !receiptsOn && !receiptsWere && !mirrorSetting) return;
   const write = () => {
+    if (mirrorSetting) {
+      if (hasRecorded) {
+        store.db.prepare(`INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?,?)
+          ON CONFLICT(room_id) DO UPDATE SET enabled=excluded.enabled`).run(roomId, recorded.enabled ? 1 : 0);
+      } else {
+        store.db.prepare("DELETE FROM room_public_receipts_setting WHERE room_id=?").run(roomId);
+      }
+    }
     if (receiptsOn || receiptsWere) replaceOptedInReceipts(store, state);
     if (pageOn || pageWas || receiptsOn || receiptsWere) touchPublicWorkListing(store, state);
     if (pageOn) upsertPublicRoom(store, state, auth);
@@ -672,6 +698,34 @@ const HIDDEN_RECEIPT = `NOT EXISTS (
      OR (u.kind='room' AND u.target=public_receipts.room_id)
      OR (u.kind='room' AND u.target=public_receipts.origin_room_id))`;
 
+// The owner half of hidden (#3595): a receipt also stays out when any room
+// it belongs to turned public receipts off (room_directory_settings
+// .public_receipts = 0, default 1). Resolved the way receipts-live resolves
+// the toggle — the origin room, plus the owning room of a public-work
+// receipt through its task record, since a pwr_ row's origin is a namespace
+// rather than a room id. Same predicate the directory receipt count uses.
+const OWNER_HIDDEN_RECEIPT = `NOT EXISTS (
+  SELECT 1 FROM room_directory_settings s
+  WHERE s.public_receipts = 0
+    AND (s.room_id = public_receipts.origin_room_id
+         OR s.room_id IN (
+           SELECT pwt.room_id FROM public_work_receipts pwr
+           JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+           WHERE pwr.receipt_id = public_receipts.id)))`;
+
+// A legacy store whose settings table predates the toggle column has no
+// private rooms by definition (the column's default is public), so the
+// owner-toggle clause applies only where the column can be read.
+function ownerToggleReadable(store) {
+  try {
+    store.db.prepare("SELECT public_receipts FROM room_directory_settings LIMIT 0").all();
+    return true;
+  } catch (error) {
+    if (!/no such (column|table)/i.test(error?.message ?? "")) throw error;
+    return false;
+  }
+}
+
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
@@ -692,23 +746,30 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   }
   const needle = agent ? agent.trim().toLowerCase() : null;
   const filter = receiptFilter(room, needle);
+  // The rows this list could serve: filter matches, minus both kinds of
+  // hidden (operator-unpublished, owner-toggled-off). The page query and
+  // the cursor lookup apply the same set, so a served nextCursor always
+  // names a receipt a follow-up request may anchor on.
+  const visibility = ownerToggleReadable(store) ? [HIDDEN_RECEIPT, OWNER_HIDDEN_RECEIPT] : [HIDDEN_RECEIPT];
   let after = "";
   const afterParams = [];
   if (cursor != null) {
     if (typeof cursor !== "string" || !cursor) {
       return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     }
-    // The cursor must name a receipt this list could serve: a hidden
-    // (operator-unpublished) row is not a valid pagination position —
-    // accepting it would confirm the hidden receipt exists and where it
-    // sits in the order (#3595). Same 422 as a never-existent id.
-    const where = filter.clauses.length ? `WHERE ${filter.clauses.join(" AND ")} AND id=? AND ${HIDDEN_RECEIPT}` : `WHERE id=? AND ${HIDDEN_RECEIPT}`;
+    // The cursor must name a receipt this list could serve: a hidden row
+    // is not a valid pagination position — accepting it would confirm the
+    // hidden receipt exists and where it sits in the order (#3595). Both
+    // hiding mechanisms count: operator unpublish (HIDDEN_RECEIPT) and the
+    // owner public-receipts toggle (OWNER_HIDDEN_RECEIPT). Same 422 as a
+    // never-existent id.
+    const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
     if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
-  const clauses = [...filter.clauses, HIDDEN_RECEIPT];
+  const clauses = [...filter.clauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
@@ -742,6 +803,11 @@ const finiteNumber = value => typeof value === "number" && Number.isFinite(value
 // failed, unverified, or split — every terminal path stamps one via
 // _recordSettlement). Before settlement, and for journal lots that are
 // not bounty movements (transfers carry no bounty_id), the id is a 404.
+// The owner's consent gates it like every other shape, through the
+// switches that can apply to a row-less record: operator unpublish,
+// the directory receipts toggle (receipts-live), and the room's own
+// recorded public-receipts setting — a RECORDED off hides the lot,
+// while a room that never recorded the setting is served by default.
 // Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
 export function publicLotReceiptById(store, id) {
   if (typeof id !== "string" || !LOT_RECEIPT_ID.test(id)) return null;
@@ -768,6 +834,15 @@ export function publicLotReceiptById(store, id) {
   const settlement = resolution && typeof resolution === "object" ? resolution.settlement : null;
   if (!settlement || typeof settlement !== "object") return null;
   if (isUnpublished(store.db, "receipt", id) || isUnpublished(store.db, "room", roomId)) return null;
+  // No public_receipts row exists for an opt-out to delete, so the
+  // recorded setting is read from its write-time mirror
+  // (syncRoomPublication). No row means the owner never recorded the
+  // setting, which is not an opt-out.
+  let settingRow = null;
+  try {
+    settingRow = store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
+  } catch { settingRow = null; } // a store without the read-model schema recorded no setting
+  if (settingRow && settingRow.enabled === 0) return null;
   let roomTitle = null;
   try {
     if (isListed(store, roomId)) {
