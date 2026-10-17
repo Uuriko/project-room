@@ -107,7 +107,7 @@ export const receiptCanonical = receipt => `${ROOM_ORIGIN}/receipts/${receipt.id
 // receipt is a record, not a review. Names are omitted on purpose: the
 // page qualifies them as room-recorded, not identity-verified, and this
 // vocabulary has no honest way to carry that qualifier.
-export function receiptJsonLd(receipt) {
+export function receiptJsonLd(receipt, { description } = {}) {
   const property = (name, value) => ({ "@type": "PropertyValue", name, value });
   const additionalProperty = [property("Proof level", proofLabelOf(receipt))];
   if (receipt.pullRequest) additionalProperty.push(property("Pull request", receipt.pullRequest));
@@ -127,7 +127,7 @@ export function receiptJsonLd(receipt) {
     url: receiptCanonical(receipt),
     identifier: receipt.id,
     ...(receipt.at ? { dateCreated: receipt.at } : {}),
-    description: receiptProvenNote(receipt).replace(/^What this record proves: /, ""),
+    description: description ?? receiptProvenNote(receipt).replace(/^What this record proves: /, ""),
     ...(receipt.room?.title
       ? { isPartOf: { "@type": "Organization", name: receipt.room.title, url: `${ROOM_ORIGIN}/r/${receipt.room.id}` } }
       : {}),
