@@ -175,7 +175,7 @@ test("guest-visible subset matches the #1166 guest semantics", () => {
         `guest catalog lists write tool ${tool.name}: call time would 403 guest_scope_denied`);
     }
   }
-  // The exact #1166 subset: chat posts + reactions stay, everything
+  // The exact #1166 subset: chat posts stay, everything
   // else (drafts, work, wake, files, admin) is withheld.
   for (const keep of GUEST_WRITABLE_TOOLS) assert.ok(names.has(keep), `guest catalog must keep ${keep}`);
   assert.ok(!names.has("room_post_draft"), "guest catalog must withhold drafts (contributor-tier gated at call time)");
@@ -201,7 +201,6 @@ test("capabilityVisibleTo: mixed standing unions the call-time carve-outs", () =
     { active: true, isGuest: false, isOwner: false, autonomyTier: "t1_readonly" },
   ]);
   assert.equal(capabilityVisibleTo(mixed, write("room_post_message")), true, "guest class keeps chat");
-  assert.equal(capabilityVisibleTo(mixed, write("room_react")), true, "guest class keeps reactions");
   assert.equal(capabilityVisibleTo(mixed, write("heartbeat_set")), true, "t1 class keeps heartbeats");
   assert.equal(capabilityVisibleTo(mixed, write("room_create")), false, "no class admits room_create: withheld");
   assert.equal(capabilityVisibleTo(mixed, read("wake_list")), true, "reads are never withheld");
