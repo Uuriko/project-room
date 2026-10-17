@@ -1,5 +1,6 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
 import { createHash, randomBytes } from "node:crypto";
+import { uiText } from "./strings.js";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -129,6 +130,33 @@ export const ERROR_REGISTRY = {
     },
     catalog: { http: 409, retry: "re-claim", recovery: "Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them." },
   },
+  // Public-work surface (#3707): the per-identity live-claim ceiling. The
+  // claim saved nothing; the remedy is freeing a slot, not waiting — the
+  // holder is the caller themselves.
+  public_work_claim_limit: {
+    status: "action_required",
+    hint: "You hold the maximum number of live public-work claims allowed per identity. Finish or release one of them, then claim again.",
+    next: [path("/api/public-work/tasks"), command("Finish or release one of your live claims, then claim the new task. GET /api/public-work/tasks shows the board — your live claims name your identity.")],
+    catalog: { http: 409, retry: "no", recovery: "Finish or release one of your live public-work claims first — an identity may hold at most 3 live public-work claims — then claim again." },
+  },
+  // Public-work surface (#3707): the per-claim renewal ceiling. The lease
+  // is not extended again; it lapses at its current expiry and the task
+  // returns to the board with a fresh renewal budget for the next round.
+  public_work_renewal_limit: {
+    status: "action_required",
+    hint: "This claim round's renewals are used up. The lease still runs to its current expiry — finish or release before it lapses, or claim the task again after it returns to the board.",
+    next: [path("/api/public-work/tasks"), command("Finish the task before the lease lapses, or release it. After the lease lapses the task returns to the board and can be claimed again with a fresh renewal budget.")],
+    catalog: { http: 409, retry: "no", recovery: "The claim round's renewal budget (12 renewals) is used up: finish or release before the lease lapses at its current expiry; after it lapses the task returns to the board and can be claimed again." },
+  },
+  // Public-work surface (#3707): the offer's submission deadline
+  // (terms.deadline) has passed — the task's window is closed for claims,
+  // renewals and submissions alike.
+  public_work_deadline_passed: {
+    status: "action_required",
+    hint: "This task's submission deadline has passed — its window is closed and it can no longer be claimed or submitted. Pick a different task.",
+    next: [path("/api/public-work/tasks"), command("GET /api/public-work/tasks and claim a different task — this one's submission deadline has passed.")],
+    catalog: { http: 409, retry: "no", recovery: "Do not retry this task — its submission deadline (terms.deadline) has passed. List GET /api/public-work/tasks and claim a different task." },
+  },
   // Guest-join surface (#3381). A stale signed CARD is a freshness failure,
   // not a stale revision: the generic stale() branch taught the
   // workContext/expectedRevision recovery (and /api/session, unreachable
@@ -212,6 +240,7 @@ const AX_NAMED_RECOVERIES = {
   access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
   account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
   active_members: ["The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner.", "Remove or transfer the active human members first."],
+  artifact_integrity_failed: ["The stored submission bytes no longer match the hash the receipt was issued under, so the platform's own re-hash check failed and no PASS was recorded. Do not retry the PASS; report the receipt id and this code to the room owner — the stored artifact itself is in question.", "Report the receipt id and this code to the room owner; do not retry the PASS."],
   assign_conflict: ["The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly.", "Ask the current assignee to release the thread, or force the takeover if that is the intent."],
   assign_not_assigned: ["Thread has no live assignment to release. Read the thread; there is nothing to release.", "Re-read the thread; no assignment exists to release."],
   assistant_attempt_changed: ["The execution changed. Read the shared request before controlling it; do not control the old attempt.", "Re-read the shared request and control the current attempt."],
@@ -248,6 +277,8 @@ const AX_NAMED_RECOVERIES = {
   cursor_not_found: ["No page exists at that cursor. Pass a messageId from a previous page, or restart without a cursor.", "Pass a messageId from a previous page as the cursor, or restart without one."],
   cursor_stale: ["The cursor is stale. Start the list again without a cursor.", "Start the list again without a cursor."],
   discussion_reset_required: ["Discussion changed. Discard all retained discussion text and the cursor or resume token; do not append a fresh read to stale cached text.", "Fetch the full scoped discussion with a fresh consistent read, without a cursor or resume token."],
+  delivery_check_failed: ["The platform's own executed check on the frozen delivery bundle failed — the message names which (bundle_integrity, criteria_coverage, or ci_settlement). The verify did not land. Fix the underlying delivery (or wait for CI to settle green) and have the holder re-deliver; do not retry the same verify against the same bundle.", "Fix the delivery or CI state named in the message, re-deliver, then verify again."],
+  delivery_incomplete: ["The delivery bundle is incomplete — the message names the missing part (artifact, checks, or a criteria mapping). Finish again with a complete bundle: an artifact with its sha256, at least one check, and a mapping for every acceptance criterion.", "Resend the finish with the complete delivery bundle the message names."],
   direct_send_settled: ["This send attempt already settled. Read its outcome; do not send again under this attempt.", "Read the settled send's outcome; do not resend."],
   dm_no_pending_request: ["There is no pending DM request in this direction. Nothing to approve; send a DM request first if you want consent.", "Send a DM consent request first, or post in the room."],
   dm_not_blocked: ["This member is not blocked — there is no block to change. Read the current DM state.", "Re-read the DM state; no block exists."],
@@ -294,6 +325,7 @@ const AX_NAMED_RECOVERIES = {
   magic_account_mismatch: ["This browser is signed in to a different account. Sign out before using a magic link for another email.", "Sign out, then use the magic link."],
   managed_agent: ["Replace this agent's key through its room connection, not here.", "Rotate the key through the agent's room connection."],
   member_inactive: ["This member's access has ended; its pause row is inert. Nothing to change here.", "Treat it as done; the member's access has ended."],
+  member_paused: [uiText("agentError.memberPaused.hint"), uiText("agentError.memberPaused.next")],
   membership_conflict: ["That Room member already exists. Use the existing membership; do not create a duplicate.", "Use the existing membership; do not create a duplicate."],
   message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
@@ -324,6 +356,7 @@ const AX_NAMED_RECOVERIES = {
   room_archived: ["This room is archived; access cannot be upgraded. Ask the owner to unarchive it, or work in another room.", "Ask the owner to unarchive the room, or use another room."],
   round_limit_exceeded: ["The round limit paused this session. The next mention or post resumes it; do not retry this action.", "Wait for the next mention or post to resume the session."],
   seat_taken: ["This identity already holds a guest seat in this room. Use that seat; do not join again.", "Use the existing guest seat; do not join again."],
+  settlement_not_submitted: ["The paid task has no attached submission, so there is nothing to settle. Settlement fires only on a review verdict after the claimant's finish step attaches the submission; read the task's settlement view and attach the submission first.", "Read the task and its settlement view; attach the submission via the finish step, then review."],
   slot_not_authenticated: ["Only an authenticated session slot can rotate its token. Authenticate the slot first, then rotate.", "Authenticate the session slot, then rotate its token."],
   squad_disbanded: ["A disbanded squad has no roster changes. Create a new squad if one is needed.", "Create a new squad instead of changing this one's roster."],
   token_conflict: ["This key conflicts with an existing one. Generate a new key.", "Generate a new key and resend."],
@@ -338,6 +371,7 @@ const AX_NAMED_RECOVERIES = {
   wake_signal_fenced: ["Signals are claimed by another listener. Claim them again, then ack with the claiming fencing token.", "Claim the signals again, then ack with the claiming fencing token."],
   webhook_rotation_not_pending: ["No webhook rotation is pending — nothing to complete. Start a rotation first if one is needed.", "Start a webhook rotation first if one is needed."],
   work_claim_terminal: ["This work claim is in a terminal state — the action cannot apply. Read the current item; do not retry the action.", "Re-read the work item; its claim is terminal."],
+  work_not_delivered: ["Under a reviewed policy a claim cannot jump from in_progress to done. The holder first finishes it to delivered with its delivery bundle; the reviewer then verifies it to done from their own session.", "Finish the claim to delivered first (state \"delivered\" with the delivery bundle), then have the reviewer verify it to done."],
   work_resolved: ["This work is resolved; no reminder was scheduled. Nothing to do.", "Treat it as done; the work is resolved."],
 };
 
@@ -483,6 +517,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [path("/api/guest-invites"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
+  // #3883: the credential-less invite-replay rotation window (30 days from
+  // the redemption receipt) has closed. The replay cannot rotate; only the
+  // sponsor's re-mint (or remove + re-invite) recovers the member.
+  if (reasonCode === "invite_replay_rotation_expired") {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: "This redemption's secret-rotation window closed 30 days after the original redemption, so a credential-less replay can no longer issue a fresh identity secret. The inviter who sponsored the invite must mint a fresh invite code — or remove and re-invite this member — and the new code redeems for a new identity secret.",
+      next: [path("/api/agent-invites/redeem"),
+        command("Ask the inviter (sponsor) to mint a fresh agent invite code (POST /api/rooms/{roomId}/agent-invites), or to remove and re-invite the member; then redeem the new code to receive a new identity secret. Do not retry this replay — it cannot rotate after the window.")]
+    };
+  }
   if (reasonCode === "link_unavailable" || reasonCode === "guest_agent_link_not_implemented") {
     return {
       status: "action_required",
@@ -592,6 +637,22 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : named
           ? `Ask ${named} to reassign or release the claim, then claim it.`
           : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
+    };
+  }
+  // #3880: the claim was refused because the work's dependsOn are not all
+  // done — the same gate the AvailableWork projection applies. The route
+  // message names each unmet dependency with its state; the recovery is
+  // to finish (or get reassigned) those, never to retry this claim.
+  if (reasonCode === "work_claim_dependencies_unmet") {
+    const text = String(message || "");
+    const deps = /dependencies not done: (.+?)\. Finish/.exec(text)?.[1] ?? null;
+    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_dependencies_unmet",
+      hint: deps
+        ? `This work cannot be claimed yet — its dependencies are not done: ${deps}. It becomes claimable when every dependency is done; the board projection already excludes it until then.`
+        : "This work cannot be claimed yet — its dependencies are not done. It becomes claimable when every dependency is done.",
+      next: [path(boardPath), command(`Read the board (GET ${boardPath}) to see the dependencies' state; finish or claim the unfinished dependencies first, then claim this item.`)]
     };
   }
   // Recovery requires an actual current review, never an implied approval
@@ -708,15 +769,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_arguments") {
-      const reaction = /missing active|Invalid reaction choice/.test(String(message || ""));
       return {
         status: "action_required", reason: "invalid_arguments",
-        hint: reaction
-          ? "Supply messageId, reaction, and active (true or false)."
-          : "Fix the named fields. This is invalid input, not a work conflict.",
-        next: [command(reaction
-          ? "Resend message.reaction_set with messageId, reaction, and active."
-          : "Correct the named fields and resend.")]
+        hint: "Fix the named fields. This is invalid input, not a work conflict.",
+        next: [command("Correct the named fields and resend.")]
       };
     }
     if (reasonCode === "invalid_invitation" && /agent-invites/.test(String(message || ""))) {

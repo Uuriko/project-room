@@ -17,8 +17,11 @@
 //   board claim  — not invalidated (no premiseFlag, not supersededBy),
 //                  state "unclaimed", kind "work", every dependsOn done,
 //                  and (when a viewer is named) the viewer may write claims.
-//   public task  — the facade packet's claim.state is "unclaimed" (no
-//                  submitted receipt, no live owner after lease release).
+//   public task  — the facade packet's own claimable verdict (#3707):
+//                  claim.state "unclaimed" AND the submission deadline
+//                  has not passed. claim.state alone is the weaker rule
+//                  the facade moved past — it offers tasks the claim
+//                  operation refuses with 409 (#3879).
 // Work items are not a separate source: decision #10 migrated them onto
 // the board (server/work-item-board.mjs), so an accepted work item IS a
 // board claim here — one definition, no dual-source divergence.
@@ -150,23 +153,27 @@ export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 
   return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
 }
 
-// Cross-room public pool: published public-work tasks whose packet claim
-// state is "unclaimed". Scans the facade's own paginated list so the
-// availability classification stays the facade's (packet()).
+// Cross-room public pool: published public-work tasks the facade itself
+// calls claimable. Scans the facade's own paginated list so the
+// availability classification stays the facade's (packet()). The scan
+// always walks the whole pool: total is the pool-wide claimable count
+// (the availableWorkInRoom contract), not the limit-capped page size.
 export function availablePublicTasks(store, { limit = 50 } = {}) {
   const facade = store.publicWorkClaims;
   if (!facade?.list) return { items: [], total: 0 };
   const items = [];
+  let total = 0;
   let after = "";
-  while (items.length < limit) {
+  for (;;) {
     const page = facade.list({ limit: 100, after });
     const tasks = page?.tasks ?? [];
     for (const packet of tasks) {
-      if (packet?.claim?.state === "unclaimed") items.push(publicTaskItem(packet));
-      if (items.length >= limit) break;
+      if (packet?.claimable !== true) continue;
+      total += 1;
+      if (items.length < limit) items.push(publicTaskItem(packet));
     }
     if (!page?.nextCursor || tasks.length === 0) break;
     after = page.nextCursor;
   }
-  return { items, total: items.length };
+  return { items, total };
 }

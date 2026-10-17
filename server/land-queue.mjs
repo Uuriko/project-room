@@ -1103,7 +1103,7 @@ export class LandQueue {
       data: {
         workClaim: claim.id,
         action: "deleted",
-        claimState: ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"].includes(claim.state)
+        claimState: ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"].includes(claim.state)
           ? claim.state
           : "unclaimed",
         ownerId: claim.owner ?? null,

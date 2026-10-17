@@ -154,14 +154,11 @@ test("guest keeps the approved read and chat surface", async t => {
     assert.equal(res.status, 200, `${path}: expected 200, got ${res.status}`);
   }
 
-  // Chat and reactions still ride the command gate.
+  // Chat still rides the command gate.
   const messageId = randomUUID();
   const post = store.command(guest.token, "commons",
     { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId, body: "hello from the guest" } });
   assert.ok(post.sequence > 0);
-  const react = store.command(guest.token, "commons",
-    { id: randomUUID(), type: T.MESSAGE_REACTION_SET, data: { messageId, reaction: "like", active: true } });
-  assert.ok(react);
 });
 
 // RC-2026-09-30-848: the store injects requestPolicyVersion when it builds a

@@ -15,6 +15,41 @@ const digest = value => createHash("sha256").update(canonical(value)).digest("he
 const requireState = condition => { if (!condition) throw new Error("Recovery data requires operator reconciliation"); };
 const integer = value => Number.isSafeInteger(value);
 
+// Projection drift enumeration for the reconciliation report: the field
+// paths where a stored projection and its current-reducer replay disagree.
+// Subtrees whose canonical forms match are pruned, so the report names the
+// shallowest differing paths (bounded per room — a summary, not a dump) and
+// never carries values, because a projection can hold member data.
+const DRIFT_FIELD_LIMIT = 10;
+function driftFields(a, b, path = "", out = []) {
+  if (out.length >= DRIFT_FIELD_LIMIT) return out;
+  if (canonical(a) === canonical(b)) return out;
+  const aObj = a !== null && typeof a === "object";
+  const bObj = b !== null && typeof b === "object";
+  if (!aObj || !bObj || Array.isArray(a) !== Array.isArray(b)) {
+    out.push(path || "(root)");
+    return out;
+  }
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    driftFields(a[key], b[key], path ? `${path}.${key}` : key, out);
+    if (out.length >= DRIFT_FIELD_LIMIT) break;
+  }
+  return out;
+}
+
+// The one audit failure that is drift rather than corruption: a stored
+// projection the current reducer would not reproduce. The error names the
+// rooms and fields so the operator judging a refusal (or a report-mode
+// restore) can see exactly what diverged; `drift` carries the same
+// enumeration in structured form.
+function reconciliationError(drift) {
+  const named = drift.slice(0, 5).map(entry => `room ${entry.room}: ${entry.fields.join(", ")}`);
+  const more = drift.length > named.length ? `; and ${drift.length - named.length} more room(s)` : "";
+  const error = new Error(`Recovery data requires operator reconciliation: stored projection differs from replay — ${named.join("; ")}${more}`);
+  error.drift = drift;
+  return error;
+}
+
 export function auditRecovery(store) {
   return store.readTransaction(() => {
     requireState(store.storagePlatform.version(store.db) === STORE_SCHEMA_VERSION);
@@ -30,6 +65,7 @@ export function auditRecovery(store) {
     requireState(tables.every(name => allowed.has(name)));
     requireState(required.every(name => tables.includes(name)));
     const rooms = new Map();
+    const drift = [];
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {
       const actual = store.room(row.id), rebuilt = store.rebuildProjection(row.id);
@@ -70,7 +106,19 @@ export function auditRecovery(store) {
         }
         return copy;
       };
-      requireState(canonical(stripWorkControls(stripChannels(actual))) === canonical(stripWorkControls(stripChannels(rebuilt))));
+      const strippedActual = stripWorkControls(stripChannels(actual));
+      const strippedRebuilt = stripWorkControls(stripChannels(rebuilt));
+      const roomDrift = canonical(strippedActual) === canonical(strippedRebuilt)
+        ? [] : driftFields(strippedActual, strippedRebuilt);
+      if (roomDrift.length) {
+        // Drifted: record it and move on — the audit names every drifted
+        // room at the end rather than failing on the first. The two
+        // backfill verifications below refine this exact comparison (they
+        // prove the accommodations are the deterministic defaults), so the
+        // drift report subsumes them for this room; the structural checks
+        // further down (room id, checkpoints, event history) still run.
+        drift.push({ room: row.id, fields: roomDrift });
+      } else {
       // Verify the work-control backfill: where the stored projection already
       // carries the fields the replay must match it; where it lacks them
       // (legacy data) the replay must carry the deterministic defaults.
@@ -99,6 +147,7 @@ export function auditRecovery(store) {
           && actualGeneral?.name === rebuiltGeneral?.name
           && actualGeneral?.archivedAt === rebuiltGeneral?.archivedAt);
       }
+      }
       requireState(actual.state.room?.id === row.id);
       const checkpoint = store.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
       if (checkpoint) {
@@ -123,6 +172,9 @@ export function auditRecovery(store) {
       eventCount += history.length;
       rooms.set(row.id, actual.state);
     }
+    // Drift is reported whole: every drifted room is named before the audit
+    // fails, so one refusal carries the full reconciliation summary.
+    if (drift.length) throw reconciliationError(drift);
     const invitations = store.verifyInvitationAudit();
     store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
     store.requestRuns.verifySchema({ allowAbsent: true });
