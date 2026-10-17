@@ -23,7 +23,10 @@ import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
-import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
+import {
+  BACKUP_COMPRESSION_GZIP, BACKUP_MANIFEST_MIN_VERSION, backupCompressionOf, backupObjectKey, backupPartKey,
+  gunzipByteChunks, isGzipBytes
+} from "../cloudflare/room-backup.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
 // Parent-first table order, mirroring the exporter's FIRST list in
@@ -725,15 +728,27 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
   let manifest;
   try { manifest = JSON.parse(new TextDecoder().decode(manifestBytes)); }
   catch { return jsonResponse(422, { error: { code: "invalid_restore", message: "Backup manifest is not JSON" } }); }
+  // Format detection is per manifest, fail-closed (backupCompressionOf):
+  // version 3 declares "gzip"; a version 2 manifest with no compression
+  // field is the legacy uncompressed format; an unknown declared format
+  // is refused here, never guessed at part-sniffing time.
+  let compression;
+  try { compression = backupCompressionOf(manifest); }
+  catch (error) { return jsonResponse(422, { error: { code: "invalid_restore", message: error?.message ?? "Backup manifest declares an unknown compression format" } }); }
   const partsValid = manifest?.kind === "room-backup-manifest"
-    && Number(manifest?.version) >= BACKUP_MANIFEST_VERSION
+    && Number(manifest?.version) >= BACKUP_MANIFEST_MIN_VERSION
     && Array.isArray(manifest?.parts) && manifest.parts.length > 0
     && manifest.parts.every((part, index) => part?.key === backupPartKey(key, index)
       && Number.isSafeInteger(part?.bytes) && part.bytes > 0
       && typeof part?.sha256 === "string" && /^[0-9a-f]{64}$/.test(part.sha256))
     && Number.isSafeInteger(manifest?.bytes)
     && manifest.parts.reduce((sum, part) => sum + part.bytes, 0) === manifest.bytes
-    && typeof manifest?.sha256 === "string" && /^[0-9a-f]{64}$/.test(manifest.sha256);
+    && typeof manifest?.sha256 === "string" && /^[0-9a-f]{64}$/.test(manifest.sha256)
+    // A gzip manifest must also pin the uncompressed NDJSON it carries,
+    // so the decompressed stream is verified, not merely the stored one.
+    && (compression !== BACKUP_COMPRESSION_GZIP
+      || (Number.isSafeInteger(manifest?.uncompressedBytes) && manifest.uncompressedBytes > 0
+        && typeof manifest?.uncompressedSha256 === "string" && /^[0-9a-f]{64}$/.test(manifest.uncompressedSha256)));
   if (!partsValid) return jsonResponse(422, { error: { code: "invalid_restore", message: "Backup manifest is malformed" } });
 
   let session;
@@ -745,9 +760,14 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
     return jsonResponse(500, { error: { code: "restore_failed", message: "Restore failed before replay" } });
   }
   const whole = createHash("sha256");
+  const uncompressedHash = createHash("sha256");
   const decoder = new TextDecoder();
   let total = 0;
-  try {
+  let uncompressedBytes = 0;
+  // Stored parts, verified one at a time exactly as before: the per-part
+  // sizes/hashes and the whole stored hash in the manifest describe the
+  // bytes as stored (compressed for version 3, raw for legacy version 2).
+  async function* verifiedPartChunks() {
     for (const part of manifest.parts) {
       const bytes = kvBytes(await kv.get(part.key, "arrayBuffer")) ?? kvBytes(await kv.get(part.key));
       if (!bytes) throw new Error(`Backup part ${part.key} is missing`);
@@ -755,11 +775,44 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
         throw new Error(`Backup part ${part.key} does not match its manifest entry`);
       whole.update(bytes);
       total += bytes.byteLength;
-      session.writeText(decoder.decode(bytes, { stream: true }));
+      yield bytes;
+    }
+  }
+  // A gzip manifest's stream must actually start as gzip: the manifest
+  // declares the format and the first part's magic bytes confirm it —
+  // a mismatch is a corrupt backup, refused before any row is replayed.
+  async function* gzipCheckedPartChunks() {
+    let seen = false;
+    for await (const chunk of verifiedPartChunks()) {
+      if (!seen) {
+        seen = true;
+        if (!isGzipBytes(chunk)) throw new Error("Backup does not match its manifest: the first part is not a gzip stream");
+      }
+      yield chunk;
+    }
+    if (!seen) throw new Error("Backup does not match its manifest: the backup has no parts");
+  }
+  try {
+    const ndjsonChunks = compression === BACKUP_COMPRESSION_GZIP
+      ? gunzipByteChunks(gzipCheckedPartChunks())
+      : verifiedPartChunks();
+    try {
+      for await (const chunk of ndjsonChunks) {
+        uncompressedHash.update(chunk);
+        uncompressedBytes += chunk.byteLength;
+        session.writeText(decoder.decode(chunk, { stream: true }));
+      }
+    } catch (error) {
+      if (compression === BACKUP_COMPRESSION_GZIP && !/^Backup /.test(error?.message ?? ""))
+        throw new Error(`Backup does not match its manifest gzip stream (${error?.message ?? error})`);
+      throw error;
     }
     session.writeText(decoder.decode());
     if (total !== manifest.bytes || whole.digest("hex") !== manifest.sha256)
       throw new Error("Backup does not match its manifest sha256");
+    if (compression === BACKUP_COMPRESSION_GZIP
+      && (uncompressedBytes !== manifest.uncompressedBytes || uncompressedHash.digest("hex") !== manifest.uncompressedSha256))
+      throw new Error("Backup does not match its manifest uncompressed sha256");
     const result = session.finish();
     return jsonResponse(200, {
       ok: true,
@@ -772,6 +825,8 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       source: "kv-backup",
       key,
       bytes: total,
+      compression,
+      uncompressedBytes,
       skippedTables: result.skippedTables,
       note: RESTORE_NOTE,
     });

@@ -7,11 +7,15 @@ honestly cannot survive yet.
 
 - **Nightly backups are running.** The `room-backup` job writes one
   whole-store NDJSON export per day to Workers KV (binding `ROOM_BACKUPS_KV`,
-  namespace `project-room-backups`): parts of at most 16 MiB, each with its
-  sha256, plus a manifest carrying the whole file's size and sha256, written
-  last. Every key expires after 35 days. `GET /api/health/jobs` reported
-  `room-backup: ok`, last success 2026-10-14T06:30Z. Mechanics:
-  [BACKUPS.md](BACKUPS.md).
+  namespace `project-room-backups`): parts of at most 16 MiB of
+  gzip-compressed NDJSON (manifest version 3; compression is transport
+  only and decompresses byte-for-byte), each with its sha256, plus a
+  manifest carrying the stored bytes' size and sha256 and the
+  uncompressed NDJSON's size and sha256, written last. Legacy
+  uncompressed (version 2) backups remain restorable; a manifest
+  declaring an unknown format is refused. Every key expires after
+  35 days. `GET /api/health/jobs` reported `room-backup: ok`, last
+  success 2026-10-14T06:30Z. Mechanics: [BACKUPS.md](BACKUPS.md).
 - **It is a single copy.** R2 is not enabled on the Cloudflare account, so
   there is no second backup target. Enabling R2 (account action, then the
   `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.

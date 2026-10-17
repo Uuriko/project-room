@@ -133,9 +133,12 @@ test("restore-from-backup refuses a doctored manifest", async t => {
   assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0);
 });
 
-// The production failure in #3409: a representative backup LARGER than the
-// 64 MiB request-body cap. The body path refuses it with 413; the KV path
-// restores and verifies the identical backup.
+// The production failure in #3409: a representative backup whose NDJSON
+// is LARGER than the 64 MiB request-body cap. The body path refuses it
+// with 413; the KV path restores and verifies the identical backup.
+// (Since PERF-10X CALL 1 the KV parts are gzip-compressed, so the stored
+// bytes are now the smaller number; the cap comparison is against the
+// uncompressed NDJSON the body path would have to carry.)
 test("restore-from-backup restores a representative backup larger than RESTORE_MAX_BYTES", async t => {
   const seeded = openStore(t, "restore-kv-big-seed-");
   seeded.initialize(initialRoom());
@@ -162,13 +165,18 @@ test("restore-from-backup restores a representative backup larger than RESTORE_M
       else insert.run(roomId, `att-${i}`, text.length, textSha, text, now, now + 3600_000);
     }
   }
-  // Stream the backup into KV first: the manifest's byte count IS the
-  // export size, and nothing in this test ever holds the whole export in
-  // memory (that is the property under test — a buffered fixture would OOM
-  // the test runner long before it proved anything about the restore).
+  // Stream the backup into KV first: the manifest's uncompressed byte
+  // count IS the export size, and nothing in this test ever holds the
+  // whole export in memory (that is the property under test — a buffered
+  // fixture would OOM the test runner long before it proved anything
+  // about the restore). The fixture's staged bytes are highly
+  // compressible text, so the stored parts are small; a small part size
+  // keeps the backup genuinely chunked.
   const kv = fakeKv();
-  const manifest = await writeKvBackup(kv, KEY, exportNdjsonStream(seeded.db), { partBytes: 4 * 1024 * 1024 });
-  assert.ok(manifest.bytes > RESTORE_MAX_BYTES, `fixture is representative: ${manifest.bytes} bytes > the ${RESTORE_MAX_BYTES}-byte cap`);
+  const manifest = await writeKvBackup(kv, KEY, exportNdjsonStream(seeded.db), { partBytes: 2048 });
+  assert.equal(manifest.compression, "gzip");
+  assert.ok(manifest.uncompressedBytes > RESTORE_MAX_BYTES, `fixture is representative: ${manifest.uncompressedBytes} uncompressed bytes > the ${RESTORE_MAX_BYTES}-byte cap`);
+  assert.ok(manifest.bytes < manifest.uncompressedBytes, "the stored backup is the compressed one");
   assert.ok(manifest.parts.length > 16, `backup is genuinely chunked (${manifest.parts.length} parts)`);
 
   // The old path refuses a body of exactly this size (the declared-length
@@ -176,7 +184,7 @@ test("restore-from-backup restores a representative backup larger than RESTORE_M
   const bodyResponse = await operatorRestoreResponse({
     method: "POST",
     url: "https://room.example/api/operator/restore",
-    headers: new Headers({ authorization: `Bearer ${OPERATOR_TOKEN}`, "content-length": String(manifest.bytes) }),
+    headers: new Headers({ authorization: `Bearer ${OPERATOR_TOKEN}`, "content-length": String(manifest.uncompressedBytes) }),
     body: null,
     text: async () => "",
   }, OPERATOR_TOKEN, openStore(t, "restore-kv-big-body-"));
@@ -189,6 +197,8 @@ test("restore-from-backup restores a representative backup larger than RESTORE_M
   const payload = await response.json();
   assert.equal(payload.verified, true);
   assert.equal(payload.bytes, manifest.bytes);
+  assert.equal(payload.uncompressedBytes, manifest.uncompressedBytes);
+  assert.equal(payload.compression, "gzip");
   const attachments = target.db.prepare("SELECT count(*) AS n, sum(byte_length) AS total FROM room_attachments").get();
   assert.equal(attachments.n, 80);
   assert.equal(attachments.total, 80 * 1024 * 1024);
