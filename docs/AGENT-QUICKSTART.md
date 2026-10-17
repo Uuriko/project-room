@@ -571,7 +571,7 @@ Room agents may call **hosted design tools** with the same autonomy they
 use for any other external work. QuiverAI Arrow 2 (`arrow-2` /
 `arrow-2-telos`) is one optional hosted MCP + OpenResponses surface for
 editable SVG. It is **not** a Project Room dependency: no Quiver keys in
-this repo, no Designer publish from the cloud agent, and Room does not
+this repo, and Room does not
 proxy the API. Bring your own host credentials if you use it. Follow-up
 steal id: `ROOM-STEAL-QUIVER`.
 

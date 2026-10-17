@@ -24,6 +24,8 @@ import { claimWork, createWork } from "./work-claims.mjs";
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
+import { memberOf } from "./agent-identities.mjs";
 
 // Invite joins hand out a room-scoped rak_ token (POST /join returns it as
 // roomToken) plus, since #3380, the identity's durable secret shown once as
@@ -148,15 +150,70 @@ export class AgentRooms {
     if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
     if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
       fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
-    const links = this.store.db.prepare(`SELECT l.room_id AS roomId, r.archived_at AS archivedAt,
-        json_extract(r.projection, '$.room.title') AS title
-      FROM identity_links l JOIN rooms r ON r.id=l.room_id
-      WHERE l.identity_id=? AND l.room_id>? ORDER BY l.room_id LIMIT 101`).all(identity.identityId, after);
-    const rooms = links.slice(0, 100).flatMap(link => {
-      const auth = this.store.identities.resolveIdentityLink(identity.identityId, link.roomId);
-      return auth ? [{ ...link, memberId: auth.member.id }] : [];
-    });
-    return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
+    // Seats come from the shared resolver (#3882): identity_links plus
+    // guest_members trial seats — "my rooms" counts a guest seat too.
+    // Title/archivedAt ride from the rooms row, as the old JOIN supplied.
+    //
+    // Inactive seats do not fill the page (#2540): keep scanning seat
+    // batches until 100 LIVE rooms are collected or the seats run out.
+    // Cutting the seat list at 100 before the live recheck returned short
+    // or empty pages, and nextCursor named a seat the caller cannot open.
+    // nextCursor is the last live room of a full page, set only when
+    // further seats exist beyond it; otherwise the listing is exhausted
+    // and the cursor is null.
+    const pageSize = 100;
+    const rooms = [];
+    let cursor = after;
+    let nextCursor = null;
+    while (rooms.length < pageSize) {
+      const seats = identityRoomSeats(this.store.db, identity.identityId, { after: cursor, limit: pageSize + 1 });
+      if (seats.length === 0) break;
+      // A batch is pageSize + 1 seats (the look-ahead); bind its rooms
+      // rows in slices of at most 100 so no statement passes the
+      // Worker's 100-value Durable Object SQL limit.
+      const roomRows = [];
+      for (let i = 0; i < seats.length; i += pageSize) {
+        const slice = seats.slice(i, i + pageSize);
+        roomRows.push(...this.store.db.prepare(
+          `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title
+           FROM rooms WHERE id IN (${slice.map(() => "?").join(",")})`
+        ).all(...slice.map(seat => seat.roomId)));
+      }
+      const roomRowById = new Map(roomRows.map(row => [row.id, row]));
+      for (const seat of seats) {
+        cursor = seat.roomId;
+        const roomRow = roomRowById.get(seat.roomId);
+        if (!roomRow) continue;
+        // Live-membership recheck per representation: link seats resolve
+        // through the link primitive; guest seats have no link, so the
+        // seat's member record itself must be present and active.
+        let memberId = null;
+        if (seat.seat === "guest") {
+          const member = memberOf(this.store.roomAuthority(seat.roomId).members, seat.memberId);
+          if (member && member.active !== false) memberId = seat.memberId;
+        } else {
+          memberId = this.store.identities.resolveIdentityLink(identity.identityId, seat.roomId)?.member.id ?? null;
+        }
+        if (!memberId) continue;
+        if (rooms.length === pageSize) {
+          // A live room past a full page: the listing continues after
+          // the page's last live room.
+          nextCursor = rooms[pageSize - 1].roomId;
+          break;
+        }
+        rooms.push({ roomId: seat.roomId, archivedAt: roomRow.archivedAt, title: roomRow.title, memberId });
+      }
+      if (nextCursor) break;
+      // A short batch means the seat list is exhausted.
+      if (seats.length <= pageSize) break;
+    }
+    if (!nextCursor && rooms.length === pageSize) {
+      // The page filled exactly as the seats ran out: a cursor exists
+      // only if some seat (live or not) remains beyond the last live room.
+      const more = identityRoomSeats(this.store.db, identity.identityId, { after: rooms[pageSize - 1].roomId, limit: 1 });
+      if (more.length) nextCursor = rooms[pageSize - 1].roomId;
+    }
+    return { identityId: identity.identityId, rooms, nextCursor };
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):

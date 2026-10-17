@@ -118,12 +118,12 @@ test("C4 mention matching is exact and case-sensitive (C3 integration)", () => {
   assert.deepEqual(collector.query({}).map(e => e.type), ["message.sent"]);
 });
 
-test("C3 reaction.added and message.pinned project message identifiers", () => {
+test("C3 historical reaction.added and message.pinned project message identifiers", () => {
   const { state, collector } = fresh();
   let res = applyEventWithGrowth(state,
     roomEvent("ev-post", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "m-r", body: "react to me" }, 5), collector);
   res = applyEventWithGrowth(res.state,
-    roomEvent("ev-react", EVENT_TYPES.MESSAGE_REACTION_SET, "codex",
+    roomEvent("ev-react", "message.reaction_set", "codex",
       { messageId: "m-r", reaction: "like", active: true }, 6), collector);
   assert.equal(res.growthOk, true);
   assert.deepEqual(lastEnvelope(collector).fields, { roomId: ROOM, messageId: "m-r", reaction: "like" });
@@ -253,14 +253,14 @@ test("C3 reaction removals (active:false) do not emit reaction.added", () => {
   let res = applyEventWithGrowth(state,
     roomEvent("ev-post-rem", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "m-rem", body: "react then unreact" }, 19), collector);
   res = applyEventWithGrowth(res.state,
-    roomEvent("ev-add-rem", EVENT_TYPES.MESSAGE_REACTION_SET, "codex",
+    roomEvent("ev-add-rem", "message.reaction_set", "codex",
       { messageId: "m-rem", reaction: "like", active: true }, 20), collector);
   assert.equal(res.growthOk, true);
   assert.equal(collector.query({}).filter(e => e.type === "reaction.added").length, 1);
 
   // active:false removes the member's reaction in the room core; it is not
   // an addition and must neither build nor record a reaction.added envelope.
-  const removal = roomEvent("ev-del-rem", EVENT_TYPES.MESSAGE_REACTION_SET, "codex",
+  const removal = roomEvent("ev-del-rem", "message.reaction_set", "codex",
     { messageId: "m-rem", reaction: "like", active: false }, 21);
   assert.equal(buildGrowthEvent(removal, res.state), null);
   res = applyEventWithGrowth(res.state, removal, collector);

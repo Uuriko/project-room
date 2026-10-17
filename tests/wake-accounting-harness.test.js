@@ -2,7 +2,7 @@
 //
 // Drives the production surfaces end to end — real RoomStore, real HTTP
 // server, REST heartbeat/poll/ack doors, the hosted MCP wake tools, room
-// commands for mentions/DMs/reactions/claims/work — through one scripted
+// commands for mentions/DMs/claims/work — through one scripted
 // multi-agent scenario with an exact attempt tally, then reconciles the
 // accounting the fabric now emits against that tally.
 //
@@ -123,13 +123,12 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
   assert.equal(cPoll.value.pendingWakes[0].kind, "dm");
   await f.post("/api/agent-heartbeats/ack", { signalIds: [cPoll.value.pendingWakes[0].signalId] }, reviewer.secret);
 
-  // Phase D — reaction ack: worker's 👍 acks its own mention signal.
+  // Phase D — explicit ack: worker acks its own mention signal by id.
   f.say("one more @worker");
   const dPending = f.store.agentHeartbeats.pendingWakes(worker.identityId);
   assert.equal(dPending.length, 1);
-  f.store.command(worker.secret, "commons", { id: randomUUID(), type: "message.reaction_set",
-    data: { messageId: dPending[0].messageId, reaction: "👍", active: true } });
-  assert.equal(f.store.agentHeartbeats.pendingWakes(worker.identityId).length, 0, "the reaction acked the signal");
+  await f.post("/api/agent-heartbeats/ack", { signalIds: [dPending[0].signalId] }, worker.secret);
+  assert.equal(f.store.agentHeartbeats.pendingWakes(worker.identityId).length, 0, "the ack cleared the signal");
 
   // Phase E — push doorbell fault: reviewer goes stale with a dead push
   // endpoint; the mention still lands durably and acks normally after.
@@ -188,9 +187,8 @@ test("wake fabric accounting reconciles a scripted multi-agent scenario exactly"
   assert.equal(ackedTotal, 60, "every emitted signal was acked");
   assert.equal(acct.stock.signalsPending, 0);
   assert.equal(acct.stock.signalsAcked, 60);
-  assert.equal(s.ackedByDoor.rest, 58);
+  assert.equal(s.ackedByDoor.rest, 59);
   assert.equal(s.ackedByDoor.mcp, 1);
-  assert.equal(s.ackedByDoor.reaction, 1);
   assert.ok(s.deliveredByDoor.heartbeat >= 51 && s.deliveredByDoor.poll >= 57 && s.deliveredByDoor.mcp >= 51,
     "deliveries counted on every pull door");
   assert.equal(s.doorbell_failed, 1);

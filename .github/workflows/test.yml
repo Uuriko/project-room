@@ -6,6 +6,11 @@ on:
     branches: [main]
   merge_group:
     types: [checks_requested]
+  # Browser shards and the coverage ratchet run here nightly instead of on
+  # every main push (trunk-based pilot: main CI must stay under 10 minutes).
+  schedule:
+    - cron: "17 10 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -189,7 +194,8 @@ jobs:
     needs: changes
     # Skip only when the merge-base diff explicitly does not touch browser
     # paths. A skipped or failed filter, and every main push, still runs shards.
-    if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
+    # Main pushes skip the shards (nightly + PRs still run them).
+    if: always() && !cancelled() && github.event_name != 'push' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -237,11 +243,14 @@ jobs:
     steps:
       # Required check name stays `browser`. An intentional shard skip must
       # report success; a skip for any other reason fails closed.
+      - name: Main push defers browser shards to the nightly run
+        if: github.event_name == 'push' && needs.browser-shards.result == 'skipped'
+        run: echo "browser shards run nightly and on pull requests, not on main pushes" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Browser paths unchanged versus the merge base
         if: needs.changes.result == 'success' && needs.changes.outputs.browser == 'false' && needs.browser-shards.result == 'skipped'
         run: echo "browser shards skipped; pull request diff does not touch browser paths" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Fail closed when shards were skipped unexpectedly
-        if: needs.browser-shards.result == 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
+        if: github.event_name != 'push' && needs.browser-shards.result == 'skipped' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
         run: echo "browser shards skipped unexpectedly (changes=${{ needs.changes.result }}, browser=${{ needs.changes.outputs.browser }})" && exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: needs.browser-shards.result != 'skipped'
@@ -323,7 +332,8 @@ jobs:
     # coverage (no measured source, test, or gate-file changes). A skipped or
     # failed filter, and every main push, still runs the suite: the verdict
     # can only be skipped when it provably cannot change.
-    if: always() && !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false')
+    # Main pushes skip coverage (the ~12 min long pole); nightly + PRs run it.
+    if: always() && !cancelled() && github.event_name != 'push' && (needs.changes.result != 'success' || needs.changes.outputs.coverage != 'false')
     # Per-module coverage ratchet (backlog Q015): runs the root unit suite
     # with V8 coverage and fails when any module in coverage-thresholds.json
     # drops below its threshold. Zero dependencies; the script points TMPDIR
@@ -394,6 +404,7 @@ jobs:
             # coverage=false (diff cannot move module line coverage). Every
             # other path runs the suite.
             if [ "$name" = "coverage" ] && [ "$result" = "skipped" ]; then continue; fi
+            # browser=success already covers the intentional main-push skip.
             if [ "$result" != "success" ]; then failed=1; fi
           done
           exit "$failed"

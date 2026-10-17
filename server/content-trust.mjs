@@ -20,6 +20,10 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_list_peer_dms",
   "room_list_events",
   "room_activation_pack",
+  "get_room_context",
+  "room_get_file",
+  "inbox_get_attachment",
+  "room_list_access_requests",
   "public_work_recommend",
   "public_work_read_task",
   "public_work_my_review"
