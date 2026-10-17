@@ -540,7 +540,38 @@ export function replay(events) {
 // states) while every content branch keeps the full structuredClone.
 // The returned state is value-identical to the structuredClone result;
 // the #3408 replay-equivalence digest chains pin that claim.
-function cloneStateForApply(current) {
+//
+// WRITE-PATH-WINS win 2 (50x audit S1): the messages branch is the dominant
+// content clone (~870-char bodies x five-figure counts), and the message
+// handlers split cleanly by how they touch it:
+//   - message.posted only reads existing messages and pushes new ones
+//     (plus a possible ":channel" copy) — the array needs a fresh slice,
+//     never an element clone;
+//   - message.edited / message.deleted / message.redacted / poll.voted
+//     rewrite elements in place, but only the addressed message and its
+//     ":channel" copy — slice the array and deep-clone just those
+//     elements, so an in-place rewrite can never reach the input state's
+//     objects.
+// Every other branch (members, channels, workItems, replyRequests, ...)
+// keeps the full structuredClone, and every other event type keeps the
+// full messages clone: handlers that range over messages (redact's
+// receipt sweep reads workItems, which stays cloned) stay safe by
+// construction. Sharing unaddressed elements is safe because no handler
+// in the light set mutates them, and any later event that does address
+// one clones it first under the same rule. The projection-write-through
+// equivalence battery pins input-state immutability for the light set.
+const MESSAGE_REWRITE_TYPES = new Set([
+  EVENT_TYPES.MESSAGE_EDITED, EVENT_TYPES.MESSAGE_DELETED,
+  EVENT_TYPES.MESSAGE_REDACTED, EVENT_TYPES.POLL_VOTED
+]);
+function lightMessageCloneIds(incoming) {
+  if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
+  if (!MESSAGE_REWRITE_TYPES.has(incoming?.type)) return null;
+  const messageId = incoming.data?.messageId;
+  if (typeof messageId !== "string" || !messageId) return null;
+  return new Set([messageId, `${messageId}:channel`]);
+}
+function cloneStateForApply(current, incoming) {
   const state = { ...current };
   if (Array.isArray(current.eventLog)) state.eventLog = current.eventLog.slice();
   if (current.seenEvents && typeof current.seenEvents === "object") {
@@ -549,15 +580,22 @@ function cloneStateForApply(current) {
   if (current.seenIdempotencyKeys && typeof current.seenIdempotencyKeys === "object") {
     state.seenIdempotencyKeys = { ...current.seenIdempotencyKeys };
   }
+  const lightMessages = lightMessageCloneIds(incoming);
   for (const key of Object.keys(state)) {
     if (key === "eventLog" || key === "seenEvents" || key === "seenIdempotencyKeys") continue;
+    if (key === "messages" && lightMessages !== null && Array.isArray(current.messages)) {
+      state.messages = lightMessages.size === 0
+        ? current.messages.slice()
+        : current.messages.map(message => (message && lightMessages.has(message.id) ? structuredClone(message) : message));
+      continue;
+    }
     state[key] = structuredClone(current[key]);
   }
   return state;
 }
 
 export function applyEvent(current, incoming) {
-  const state = cloneStateForApply(current);
+  const state = cloneStateForApply(current, incoming);
   validateEnvelope(incoming);
   // H-11: fingerprint via eventFingerprint (handler-stamped markers excluded)
   // so the stored fingerprint agrees with the logged (post-handler) event.

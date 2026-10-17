@@ -1885,10 +1885,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Code drops: patch metadata and review checks. Unfenced and additive;
       // the bytes stay in room_attachments. The stamp includes this DDL.
       this.db.exec(CODE_DROPS_SCHEMA);
-      // Phase 1a: message bodies at rest, content-addressed, released by a
-      // trigger when the projection stops referencing them. The stamp
+      // Phase 1a: message bodies at rest, content-addressed. The stamp
       // includes this DDL.
       this.db.exec(PROJECTION_BODIES_SCHEMA);
+      // WRITE-PATH-WINS win 4: the serializer releases unreferenced body
+      // rows itself now; drop the json_each release trigger the schema
+      // used to install, so existing databases lose it on this pass (the
+      // schema string above is part of the stamp, so this pass runs).
+      this.db.exec("DROP TRIGGER IF EXISTS projection_bodies_release");
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -2903,28 +2907,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   storageStatus() {
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
-  room(roomId) {
+  room(roomId, { verifyBodyHashes = false } = {}) {
     // MSG-0 projection cache. The hit path reads sequence only.
     this._armProjectionWatch();
     const cache = this._projectionCache ??= new ProjectionCache();
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
-    const hit = cache.lookup(roomId, meta.sequence);
-    if (hit) {
-      if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence).value)) {
-        this._dropProjectionCache();
-        throw new Error(`Projection cache differs from storage for room ${roomId}`);
+    // WRITE-PATH-WINS win 3: hydration trusts the content-addressed body
+    // key on the hot path, so a cache hit cannot vouch for body bytes.
+    // A verified read (the conversation read's tamper recovery) bypasses
+    // the hit, re-hashes, and lets _readProjection repair any tampered
+    // or missing row from the event log; the repaired value replaces
+    // the cache entry, so the room self-heals exactly as it did when
+    // every read verified.
+    if (!verifyBodyHashes) {
+      const hit = cache.lookup(roomId, meta.sequence);
+      if (hit) {
+        if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence, { verifyBodyHashes: true }).value)) {
+          this._dropProjectionCache();
+          throw new Error(`Projection cache differs from storage for room ${roomId}`);
+        }
+        return hit;
       }
-      return hit;
     }
-    const { value, weight } = this._readProjection(roomId, meta.sequence);
+    const { value, weight } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
     cache.insert(roomId, meta.sequence, value, weight);
     return value;
   }
-  _readProjection(roomId, sequence) {
+  _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection));
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
     return { value: Object.freeze({ sequence, state }),
@@ -2951,7 +2964,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return sequence;
   }
   // Phase 1a/1b rollback: write every room back with full bodies and full
-  // message envelopes in one transaction. The release trigger then empties projection_bodies.
+  // message envelopes in one transaction. The serializer's release then empties projection_bodies.
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
@@ -2989,12 +3002,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   roomAuthority(roomId) {
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
-    const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?").get(roomId);
+    // WRITE-PATH-WINS win 5: ownerId and members are the first two
+    // top-level keys of every stored projection, ahead of ,"messages":[ —
+    // extracting them from that prefix avoids tokenizing the whole
+    // multi-megabyte text on every command. The prefix result is used
+    // only when it yields a well-formed authority pair; any other shape
+    // (a future key order, a member name quoting the boundary verbatim)
+    // falls back to the full-projection extract below, so the values
+    // returned are always the stored ones, read fresh.
+    const prefix = (this._roomAuthorityPrefixStmt ??= this.db.prepare(
+      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members') END AS authority FROM rooms WHERE id=?"));
+    let row = prefix.get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const authority = JSON.parse(row.authority);
-    const [ownerId, members] = Array.isArray(authority) ? authority : [];
-    if (typeof ownerId !== "string" || !members || typeof members !== "object")
-      fail(500, "projection_corrupt", "Room projection is missing authority fields");
+    let authority = null;
+    try { authority = JSON.parse(row.authority); } catch { /* fall through to the full extract */ }
+    let [ownerId, members] = Array.isArray(authority) ? authority : [];
+    if (typeof ownerId !== "string" || !members || typeof members !== "object") {
+      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?"));
+      row = full.get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      authority = JSON.parse(row.authority);
+      [ownerId, members] = Array.isArray(authority) ? authority : [];
+      if (typeof ownerId !== "string" || !members || typeof members !== "object")
+        fail(500, "projection_corrupt", "Room projection is missing authority fields");
+    }
     return { sequence: row.sequence, ownerId, members };
   }
   rebuildProjection(roomId, through = null) {
