@@ -69,11 +69,16 @@ export function summaryFailure(result) {
 
 const DETAIL_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 const DETAIL_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
+const DETAIL_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 // A job may attach a sanitized failure detail (stable codes and classes
 // only, e.g. the integrity job's failing sub-check — #3334). Every field
-// must be a short token, so no id, body or secret can ride this channel
-// onto the public health surface.
+// must be a short token, so no body or secret can ride this channel onto
+// the public health surface. One deliberate exception: the integrity job
+// may name the failing ROOM (recordId) for its room-record steps — a room
+// id is a public identifier that addresses the room in URLs, and without
+// it a poisoned room is diagnosable only from Worker logs. The shape
+// check below still bars everything that is not id-shaped.
 export function sanitizeFailureDetail(detail) {
   if (!detail || typeof detail !== "object") return null;
   const out = {};
@@ -81,6 +86,7 @@ export function sanitizeFailureDetail(detail) {
   for (const key of ["subcheck", "errorClass", "recordClass"]) {
     if (typeof detail[key] === "string" && DETAIL_TOKEN.test(detail[key])) out[key] = detail[key];
   }
+  if (typeof detail.recordId === "string" && DETAIL_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
   return Object.keys(out).length ? out : null;
 }
 
@@ -179,6 +185,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
       lastErrorClass: record.lastFailure?.errorClass ?? null,
       lastErrorRecordClass: record.lastFailure?.recordClass ?? null,
+      lastErrorRecordId: record.lastFailure?.recordId ?? null,
       lastDurationMs: record.lastDurationMs ?? null,
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,

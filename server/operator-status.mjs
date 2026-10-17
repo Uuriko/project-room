@@ -59,6 +59,13 @@ export function operatorStatus(store, options = {}) {
     version: { sourceRevision: SOURCE_REVISION, buildId: BUILD_ID },
     ready: operatorReady(store),
     jobs: "see /api/health/jobs",
+    // Outstanding isolated integrity failures: every (step, record) row
+    // the integrity job is currently reporting, with its stored one-line
+    // message and failure count. This surface is operator-token gated, so
+    // the full rows are shown — the public health view carries only the
+    // sanitized detail (code, sub-check, class, and the failing room's
+    // id). Stores predating batch isolation have no such rows.
+    integrityFailures: typeof store.integrityFailures === "function" ? store.integrityFailures() : [],
     lastColdStart: lastColdStart(store),
     tables: tables.tables,
     partial: tables.partial,

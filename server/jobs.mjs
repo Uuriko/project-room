@@ -153,6 +153,19 @@ const INTEGRITY_RECORD_CLASS = Object.freeze({
 });
 const SAFE_CARRIED_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 
+// Naming rule (integrity batch isolation): the steps below record ROOM ids
+// in integrity_failures — the store puts a room id in record_id for these
+// steps and no other kind of record. A room id is a public identifier (it
+// addresses the room in URLs), so the failure detail may name it: without
+// it, a wedged room is visible only in the console log line, and the
+// health surface can say a room is poisoned but never which one. Every
+// other record id (invitation ids above all) stays off the surface,
+// exactly as #3334 required, as do message bodies and secrets.
+export const INTEGRITY_ROOM_RECORD_STEPS = Object.freeze(new Set([
+  "messages_backfill", "messages_parity", "help_history"
+]));
+export const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 export function classifyIntegrityError(error) {
   const message = String(error?.message ?? error ?? "");
   let subcheck = INTEGRITY_SUBCHECKS.includes(error?.integritySubcheck) ? error.integritySubcheck : null;
@@ -320,13 +333,19 @@ export const JOBS = Object.freeze([
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
         // tick still fails — the verdict is unchanged — with the same
-        // sanitized detail shape as the throw path (stable codes and
-        // classes only; record ids stay in the operator log line).
+        // sanitized detail shape as the throw path. One extension: when an
+        // outstanding failure is recorded against a room, the detail names
+        // that room (INTEGRITY_ROOM_RECORD_STEPS) so the poisoned room is
+        // reachable from the health surface, not only from this log line.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
-          const first = failures[0];
+          const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
+            && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? failures[0];
           const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
           if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+          if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
+            failure.recordId = first.recordId;
+          }
           // The operator line carries the allowlisted fields only —
           // sub-check, record id, stable code, class, count. The stored
           // failure message is a diagnostic for the record's owner, not
@@ -561,6 +580,10 @@ export function startNodeScheduler({
     for (const key of ["code", "subcheck", "errorClass", "recordClass"]) {
       if (typeof detail[key] === "string" && detailToken.test(detail[key])) out[key] = detail[key];
     }
+    // A room id named by the integrity job (room-record steps only; the
+    // job attaches it, this layer only shape-checks it). Ids contain
+    // hyphens, which the token pattern above does not allow.
+    if (typeof detail.recordId === "string" && SAFE_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
     return Object.keys(out).length ? out : null;
   };
   const record = (name, at, ok, { error = null, failure = null, durationMs = null } = {}) => {
@@ -645,6 +668,7 @@ export function startNodeScheduler({
           lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
           lastErrorClass: rec.lastFailure?.errorClass ?? null,
           lastErrorRecordClass: rec.lastFailure?.recordClass ?? null,
+          lastErrorRecordId: rec.lastFailure?.recordId ?? null,
           lastDurationMs: rec.lastDurationMs ?? null,
           lastSummaryAt: iso(rec.lastSummaryAt),
           consecutiveFailures: rec.consecutiveFailures ?? 0
