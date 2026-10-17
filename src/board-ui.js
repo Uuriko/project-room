@@ -351,6 +351,126 @@ export function claimReviewForm(item) {
   ].join("");
 }
 
+// Operation identity for the board's lifecycle POSTs (#3829): an update
+// carrying a requestId records its outcome server-side, and the identical
+// retry replays that outcome instead of applying twice. The id is derived
+// from the operation itself — claim, delivery round, actor — so a retry of
+// the same click re-sends the same id, while a new round (a re-delivery
+// advances deliveryGeneration, #3684) or a different actor is a new
+// operation with a new id. Sanitized to the route's requestId shape.
+const requestIdPart = value => String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40);
+export function verifyRequestId(item, memberId) {
+  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+}
+const deliverRequestId = (item, memberId) =>
+  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+
+// The reviewer's verify as a pure body, so the requestId wiring is
+// unit-testable at this boundary (the newItemCreateBody precedent). Before
+// this the board posted { state: "done" } alone: no operation identity, so
+// a lost response could only be retried as a brand-new update against a
+// claim that was already done.
+export function claimVerifyBody(item, memberId) {
+  return { state: "done", requestId: verifyRequestId(item, memberId) };
+}
+
+const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
+const CHECK_RESULT_KEYS = { pass: "board.deliver.result.pass", fail: "board.deliver.result.fail",
+  error: "board.deliver.result.error", skipped: "board.deliver.result.skipped" };
+const CRITERION_STATUS_KEYS = { met: "board.deliver.criterion.met", not_met: "board.deliver.criterion.not_met",
+  na: "board.deliver.criterion.na" };
+
+// Delivery controls for a claim card (#3547): under a reviewed policy the
+// finish must carry the delivery bundle — { artifact, checks, criteria },
+// the kernel's own shape — or the kernel refuses it delivery_incomplete.
+// The form composes exactly that bundle from the holder's input, prefilled
+// with what the claim already carries: the linked PR as the artifact
+// reference, and the stored bundle itself on a re-delivery, so reusing a
+// valid bundle is one submit. Labels come from the strings catalog, like
+// claimReviewForm; criterion texts are claim data, escaped as values.
+export function claimDeliverForm(item) {
+  const id = escapeHtml(item.id);
+  const pulls = Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests
+    : (item.pullRequest?.url ? [item.pullRequest] : []);
+  const artifact = item.delivery?.artifact ?? null;
+  const kind = artifact?.kind ?? (pulls.length ? "pull_request" : "");
+  const ref = artifact?.ref ?? pulls[0]?.url ?? "";
+  const sha = artifact?.sha256 ?? "";
+  const checks = Array.isArray(item.delivery?.checks) && item.delivery.checks.length ? item.delivery.checks : [null];
+  // Composed like claimReviewForm — array pieces and complete-tag literals
+  // with at most one interpolation each — so the i18n harness sees no
+  // sentence building. Repeated rows share one field name; the body
+  // builder reads them back in order with getAll.
+  const option = (value, selected, label) => ["<option value=\"", value, "\"",
+    selected ? " selected" : "", ">", label, "</option>"].join("");
+  const parts = [
+    `<form class="board-new" data-claim-deliver="${id}">`,
+    "<span class=\"form-hint\">", uiText("board.deliver.legend"), "</span>",
+    "<label>", uiText("board.deliver.artifact.kind"),
+    ` <input name="artifactKind" required maxlength="64" autocomplete="off" value="${escapeHtml(kind)}">`, "</label>",
+    "<label>", uiText("board.deliver.artifact.ref"),
+    ` <input name="artifactRef" required maxlength="512" autocomplete="off" value="${escapeHtml(ref)}">`, "</label>",
+    "<label>", uiText("board.deliver.artifact.sha256"),
+    ` <input name="artifactSha256" required maxlength="71" autocomplete="off" value="${escapeHtml(sha)}">`, "</label>",
+  ];
+  checks.forEach(entry => {
+    parts.push("<label>", uiText("board.deliver.check.name"),
+      ` <input name="checkName" required maxlength="200" autocomplete="off" value="${escapeHtml(entry?.name ?? "")}">`, "</label>",
+      "<label>", uiText("board.deliver.check.result"), " <select name=\"checkResult\">",
+      ...DELIVERY_CHECK_RESULTS.map(result => option(result, entry?.result === result, uiText(CHECK_RESULT_KEYS[result]))),
+      "</select>", "</label>");
+  });
+  const criteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+  if (criteria.length) {
+    const mappedStatus = new Map((Array.isArray(item.delivery?.criteria) ? item.delivery.criteria : [])
+      .map(entry => [entry?.criterion, entry?.status]));
+    parts.push("<span class=\"form-hint\">", uiText("board.deliver.criteria.legend"), "</span>");
+    criteria.forEach(criterion => {
+      const selected = mappedStatus.get(criterion) ?? "met";
+      parts.push("<label>", escapeHtml(criterion), " <select name=\"criterion\">",
+        ...Object.keys(CRITERION_STATUS_KEYS).map(status => option(status, selected === status, uiText(CRITERION_STATUS_KEYS[status]))),
+        "</select>", "</label>");
+    });
+  }
+  parts.push("<button type=\"submit\" class=\"button primary\">", uiText("board.action.deliver"), "</button>", "</form>");
+  return parts.join("");
+}
+
+// The deliver POST body, composed from the form's fields — pure, so the
+// bundle wiring is unit-testable at this boundary. It mirrors the kernel's
+// shape bounds (deliveryOf / requireBundleComplete in work-claims.mjs) and
+// returns null when the fields cannot form a bundle the kernel accepts,
+// so the board refuses locally with the reason instead of posting a
+// refusal. Policy refusals the kernel owns (a failing check, say) still
+// surface from the server, which names them.
+export function claimDeliverBody(item, data, memberId) {
+  const field = name => String(data?.get(name) ?? "").trim();
+  const kind = field("artifactKind"), ref = field("artifactRef");
+  const sha256 = field("artifactSha256").replace(/^sha256:/, "");
+  if (!kind || kind.length > 64 || !ref || ref.length > 512 || !/^[0-9a-f]{64}$/.test(sha256)) return null;
+  const all = name => (typeof data?.getAll === "function" ? data.getAll(name) : [])
+    .map(value => String(value ?? "").trim());
+  const checkNames = all("checkName"), checkResults = all("checkResult");
+  const checks = [];
+  for (let index = 0; index < checkNames.length; index++) {
+    const name = checkNames[index], result = checkResults[index] ?? "";
+    if (!name || name.length > 200 || !DELIVERY_CHECK_RESULTS.includes(result)) return null;
+    checks.push({ name, result });
+  }
+  if (!checks.length) return null;
+  const statuses = all("criterion");
+  const criteria = [];
+  const wanted = Array.isArray(item?.acceptanceCriteria) ? item.acceptanceCriteria : [];
+  for (let index = 0; index < wanted.length; index++) {
+    const status = statuses[index] ?? "";
+    if (!Object.hasOwn(CRITERION_STATUS_KEYS, status)) return null;
+    criteria.push({ criterion: wanted[index], status });
+  }
+  return { state: "delivered",
+    delivery: { artifact: { kind, ref, sha256 }, checks, criteria },
+    requestId: deliverRequestId(item, memberId) };
+}
+
 // One anchor literal for both record targets, so the board's link shape
 // (and its i18n-harness footprint) stays exactly the one the legacy link
 // already had; claim links differ only by the prebuilt marker attribute.
@@ -412,11 +532,30 @@ function claimRecordHtml(item, members) {
   const evidence = Array.isArray(item.evidenceRefs) ? item.evidenceRefs : [];
   if (evidence.length) parts.push(section("board.record.evidence", listOf(evidence)));
   if (item.delivery) {
+    // The kernel's frozen bundle (#3547): { artifact, checks, criteria }
+    // plus digest / deliveredBy / deliveredAt (deliveryOf in
+    // work-claims.mjs). Render exactly those fields — an earlier version
+    // read result / merged / production, which no delivery carries, so
+    // the real evidence never reached the record.
     const delivery = item.delivery;
-    const bits = [delivery.result, delivery.merged, delivery.production].filter(value => typeof value === "string" && value);
+    const rows = [];
+    if (delivery.artifact) {
+      const artifact = delivery.artifact;
+      const line = [artifact.kind, artifact.ref, artifact.sha256 ? `sha256:${artifact.sha256}` : ""]
+        .filter(value => typeof value === "string" && value).join(" · ");
+      if (line) rows.push(["<p>", escapeHtml(line), "</p>"].join(""));
+    }
+    const checks = Array.isArray(delivery.checks) ? delivery.checks : [];
+    if (checks.length) rows.push(listOf(checks.map(entry => [entry?.name, entry?.result, entry?.command]
+      .filter(value => typeof value === "string" && value).join(" — "))));
+    const mapped = Array.isArray(delivery.criteria) ? delivery.criteria : [];
+    if (mapped.length) rows.push(listOf(mapped.map(entry => [entry?.criterion, entry?.status]
+      .filter(value => typeof value === "string" && value).join(" — ")
+      + (typeof entry?.evidenceRef === "string" && entry.evidenceRef ? ` · ${entry.evidenceRef}` : ""))));
     const by = delivery.deliveredBy ? memberName(members, delivery.deliveredBy) || delivery.deliveredBy : "";
-    const line = [...bits, by, delivery.deliveredAt ?? ""].filter(Boolean).join(" · ");
-    parts.push(section("board.record.delivery", ["<p>", escapeHtml(line), "</p>"].join("")));
+    const line = [by, delivery.deliveredAt ?? ""].filter(Boolean).join(" · ");
+    if (line) rows.push(["<p>", escapeHtml(line), "</p>"].join(""));
+    if (rows.length) parts.push(section("board.record.delivery", rows.join("")));
   }
   if (item.verification) {
     const by = item.verification.by ? memberName(members, item.verification.by) || item.verification.by : "";
@@ -502,10 +641,12 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     // Under a reviewed policy the single-step finish is refused
     // (work_not_delivered): the holder finishes to delivered with the
     // delivery bundle, and the reviewer verifies from there — so the card
-    // offers the step the policy actually accepts.
+    // offers the step the policy actually accepts. The step is the deliver
+    // form, not a bare button: a first finish without the bundle is
+    // refused delivery_incomplete, so the form composes it.
     const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
     if (policy === "self_attested") actions.push(button("done", "Done", "primary"));
-    else actions.push(button("deliver", uiText("board.action.deliver"), "primary"));
+    else actions.push(claimDeliverForm(item));
   }
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
     actions.push(button("release", "Release", "secondary"));
@@ -812,7 +953,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
-  async function act(run, focus, reconcile = null) {
+  async function act(run, focus, reconcile = null, unconfirmed = "Could not confirm the PR link. Refresh the board before trying again.") {
     const owned = context();
     if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
@@ -829,7 +970,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       // Keep duplicate mutations excluded until their new state is visible.
       const refreshed = await load({ force: true, focus });
       if (reconcile && actionFlight === pending && context() === owned) {
-        note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
+        note(refreshed ? reconcile(null) : unconfirmed);
       }
     } catch (error) {
       if (mine !== operation || context() !== owned) return;
@@ -837,7 +978,7 @@ export function installWorkBoard({ client, getState, getSession }) {
         note("Checking the current claim…");
         const refreshed = await load({ force: true, focus });
         if (actionFlight === pending && context() === owned) {
-          note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
+          note(refreshed ? reconcile(error) : unconfirmed);
         }
       } else {
         pendingFocus = null;
@@ -853,10 +994,10 @@ export function installWorkBoard({ client, getState, getSession }) {
   // aria-busy so the board never looks frozen mid-request. paint() removes
   // the node on success; if it survives (failed action, no repaint) it is
   // re-enabled here.
-  function flyButton(button, run, focus) {
+  function flyButton(button, run, focus, reconcile = null, unconfirmed = undefined) {
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
-    act(run, focus).finally(() => {
+    act(run, focus, reconcile, unconfirmed).finally(() => {
       if (root.contains(button)) { button.disabled = false; button.removeAttribute("aria-busy"); }
     });
   }
@@ -913,12 +1054,31 @@ export function installWorkBoard({ client, getState, getSession }) {
     else if (action === "close" || action === "cancel") flyButton(button, () => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
     else if (action === "progress") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
     else if (action === "done") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
-    // The reviewed-policy lifecycle from the card: the holder's finish lands
-    // on delivered; the reviewer's verify is the same update to done, gated
-    // server-side by their recorded approval (and by #3829's exact-retry
-    // replay if the response is lost).
-    else if (action === "deliver") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "delivered" } }), focus);
-    else if (action === "verify") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
+    // The reviewed-policy lifecycle from the card: the holder's finish is
+    // the deliver form's submit (below); the reviewer's verify is this
+    // update to done, gated server-side by their recorded approval. The
+    // verify carries its operation identity (#3829): the requestId is
+    // derived from the claim, the delivery round and the reviewer, so a
+    // retry after a lost response replays the landed outcome — bound
+    // server-side to this reviewer — instead of applying twice or
+    // erroring on the completed claim. The reconcile is the readback: on
+    // any failure the board reloads and reports what the claim shows.
+    else if (action === "verify") {
+      const item = items.find(entry => entry.id === id);
+      const me = viewerOf(getState(), getSession()).id;
+      const title = titleOf(id);
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (current?.state === "done") {
+          return current.verification?.by === me
+            ? uiText("board.action.outcome.verify", { title })
+            : uiText("board.action.verify.already", { title });
+        }
+        return error?.message || uiText("board.action.verify.unconfirmed", { title });
+      };
+      flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: claimVerifyBody(item, me) }), focus, reconcile,
+        uiText("board.action.verify.unconfirmed", { title }));
+    }
     else if (action === "renew") {
       flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
@@ -976,6 +1136,22 @@ export function installWorkBoard({ client, getState, getSession }) {
         linkForm.querySelector("input").readOnly = false;
         linkForm.querySelector("button").disabled = false;
       });
+      return;
+    }
+    const deliver = event.target.closest("[data-claim-deliver]");
+    if (deliver && root.contains(deliver)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = deliver.dataset.claimDeliver;
+      const viewer = viewerOf(getState(), getSession());
+      const item = items.find(entry => entry.id === id);
+      if (!item || item.owner !== viewer.id || item.state !== "in_progress") return;
+      const body = claimDeliverBody(item, new FormData(deliver), viewer.id);
+      if (!body) { note(uiText("board.deliver.invalid")); return; }
+      const title = item.title || id;
+      flySubmit(deliver,
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data: body }),
+        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) });
       return;
     }
     const review = event.target.closest("[data-claim-review]");

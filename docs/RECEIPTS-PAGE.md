@@ -38,9 +38,10 @@ which have a public page of their own (`/receipts/<lotId>`, below).
   owner setting is on.
 - A bounty lot (`/receipts/lot_<id>`) appears once its bounty's settlement
   verdict is recorded — paid out, failed, unverified, or split. The page
-  shows the one ledger movement the lot names (kind, amount, source and
-  destination accounts) plus the bounty's poster, worker, award, pinned
-  rubric hash, and settlement outcome. Before settlement, and for journal
+  shows every ledger movement the lot carries (each movement's kind,
+  amount, source and destination accounts) plus the settlement's worker
+  and refund amounts, the bounty's poster, worker, award, pinned rubric
+  hash, and settlement outcome. Before settlement, and for journal
   lots that are not bounty movements, the id is a 404. The record is
   composed from the credit ledger at read time, not stored as a copy.
   Unlike the claim and work-item shapes, a lot does not wait for the
