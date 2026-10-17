@@ -329,7 +329,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined,
-  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
+  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
+  statusProviders = null }) {
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
   // has to live in the source tree.
@@ -628,7 +629,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // so every RoomStore carries it; http.mjs only owns the service instance.
   const agentPlugin = createAgentPluginRoutes({ store, json, reject, body, rate, bearer, exact, pathId, origin });
   // CP-ADMIN-0: operator routes. An unset secret makes the handler return false.
-  const operatorRoutes = createOperatorRoutes({ store, json, reject, body, rate });
+  const operatorRoutes = createOperatorRoutes({ store, json, reject, body, rate, statusProviders: { origin, deployment, ...(statusProviders ?? {}) } });
   // RC-2026-09-25-911: ranked next-actions. Schema is applied in the store
   // open path (server/store.mjs), so every RoomStore carries it; http.mjs
   // only owns the service instance.
