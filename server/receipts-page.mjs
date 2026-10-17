@@ -2,6 +2,7 @@
 // Every interpolated string is escaped: titles and names are room data.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
@@ -87,7 +88,67 @@ ${next}
 </body></html>`;
 }
 
-export function renderReceiptDetailHtml(receipt) {
+// The verdict block (charter Workstream B, P2): one graded verdict with
+// its scope in the same first-screen block — what was checked, what was
+// not, by whom, and when. Verification comes from server/receipt-verify.mjs
+// (verify-at-read-time); this renderer is the only place a verdict is
+// worded, so the per-room proof page consumes the same block rather than
+// growing a parallel verdict UI. With no verification run, the block is
+// a displayed "not yet verified" state with the action that runs one —
+// absence is shown, never a blank. Raw hashes stay in the record below;
+// the verdict never asks a reader to compare hex.
+const CHECK_STATUS_WORDS = { pass: "matches", contradicted: "does not match", missing: "missing",
+  "not-checked": "not checked", observed: "as reported" };
+
+// Claim → source, at phrase level (proof-ux R3: the largest measured
+// checking improvement): a check's detail names its evidence in words,
+// and the words naming the pull request link to the pull request itself —
+// the checkable source — instead of sitting next to a bare URL elsewhere
+// on the page. Links are formed only from a pull URL the record carries;
+// nothing is linked that the record does not name.
+// The record's pull-request row names the claim ("Pull request #2099")
+// and links it to the pull itself; the raw URL stays the href and the
+// JSON field — the phrase is what a reader checks.
+const prPhrase = url => {
+  const parsed = parsePullRequestUrl(url);
+  return parsed ? `Pull request #${parsed.number}` : url;
+};
+
+function linkPullPhrase(escapedDetail, receipt) {
+  if (!receipt.pullRequest) return escapedDetail;
+  const parsed = parsePullRequestUrl(receipt.pullRequest);
+  if (!parsed) return escapedDetail;
+  const phrase = `pull request #${parsed.number}`;
+  return escapedDetail.split(phrase)
+    .join(`<a href="${escapeHtml(receipt.pullRequest)}">${phrase}</a>`);
+}
+
+export function renderVerificationBlock(receipt, verification) {
+  if (!verification) {
+    return `<section class="receipt-verification" aria-label="Verification">
+<h2>Verification</h2>
+<p><strong>Not yet verified.</strong> This page shows the record as stored; nothing on it has been re-checked at read time.</p>
+<p><a href="?verify=1">Verify this receipt now</a> — the server re-checks the record against its source${receipt.pullRequest ? " and re-fetches the linked pull request from GitHub" : ""}, and stamps the result with the time it ran.</p>
+</section>`;
+  }
+  const checks = verification.checks.map(check => {
+    const detail = check.id === "pull-request" ? linkPullPhrase(escapeHtml(check.detail), receipt) : escapeHtml(check.detail);
+    return `<li data-check="${escapeHtml(check.id)}" data-status="${escapeHtml(check.status)}"><strong>${escapeHtml(check.label)}</strong> — ${escapeHtml(CHECK_STATUS_WORDS[check.status] ?? check.status)}: ${detail}</li>`;
+  }).join("");
+  const notChecked = verification.scope.notChecked.map(item => `<li>${escapeHtml(item)}</li>`).join("");
+  return `<section class="receipt-verification" aria-label="Verification">
+<h2>Verification</h2>
+<p class="verification-verdict" data-verdict="${escapeHtml(verification.verdict)}"><strong>${escapeHtml(verification.verdictLabel)}</strong></p>
+<p>${escapeHtml(verification.summary)}</p>
+<p class="verification-meta">Checked <time datetime="${escapeHtml(verification.checkedAt)}">${escapeHtml(verification.checkedAt)}</time> by ${escapeHtml(verification.scope.by)}.</p>
+<h3>What was checked</h3>
+<ul>${checks}</ul>
+<h3>What was not checked</h3>
+<ul>${notChecked}</ul>
+</section>`;
+}
+
+export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   const description = `${receipt.title}. A public receipt from Project Room.`;
   const room = receipt.room?.title
     ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.title)}</dd></div>`
@@ -95,11 +156,11 @@ export function renderReceiptDetailHtml(receipt) {
       ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.id)}</dd></div>`
       : "";
   const pr = receipt.pullRequest
-    ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(receipt.pullRequest)}</a></dd></div>`
+    ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(prPhrase(receipt.pullRequest))}</a></dd></div>`
     : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
   const tierLabel = verificationLabel(receipt.verification?.state);
-  const verification = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
+  const verificationTier = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
     : "";
@@ -175,7 +236,9 @@ export function renderReceiptDetailHtml(receipt) {
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
   // unsigned (docs/RECEIPTS-PAGE.md).
-  const provenNote = receipt.source === "bounty-lot"
+  const provenNote = verification
+    ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
+    : receipt.source === "bounty-lot"
     ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest
     ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
@@ -188,11 +251,12 @@ export function renderReceiptDetailHtml(receipt) {
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
+${renderVerificationBlock(receipt, verification)}
 <dl class="detail">
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${verification}${hashes}${lot}
+${pr}${merged}${verificationTier}${hashes}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
@@ -227,6 +291,10 @@ export function receiptsListJson(page) {
   };
 }
 
-export function receiptJson(receipt) {
-  return publicJson(receipt);
+export function receiptJson(receipt, verification = null) {
+  // The verification (project-room-receipt-verification/1) rides the JSON
+  // shape only when a verify run produced it — readers can tell a fresh
+  // check ("checked just now") apart from stored values without parsing
+  // the verdict.
+  return { ...publicJson(receipt), ...(verification ? { verification } : {}) };
 }

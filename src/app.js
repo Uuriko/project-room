@@ -324,6 +324,7 @@ let referralBoardUI = null;
 let landQueueUI = null;
 let openQuestionsUI = null;
 let retentionUI = null;
+let bountyBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -445,6 +446,7 @@ const client = new RoomClient({
     landQueueUI?.sync();
     openQuestionsUI?.sync();
     retentionUI?.sync();
+    bountyBoardUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -538,6 +540,7 @@ const client = new RoomClient({
     landQueueUI?.reset();
     openQuestionsUI?.reset();
     retentionUI?.reset();
+    bountyBoardUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -710,6 +713,13 @@ retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
   load: () => import("./retention-ui.js"),
   install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
   onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
+// Bounties & credits (#3437): the in-room human money surface — list, post +
+// fund, review/accept/reject, own balances and receipts, all over the
+// existing bounty-escrow endpoints.
+bountyBoardUI = lazyDisclosure({ panel: $("#bounty-panel"),
+  load: () => import("./bounty-board.js"),
+  install: module => module.installBountyBoard({ client, getSession: () => session }),
+  onError: () => notice("Could not load bounties. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
@@ -3614,7 +3624,7 @@ function workCard(i, now, drafts, messages = []) {
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
-`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
+`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...(draft.body ?? "")].slice(0, 100).join(""))}${[...(draft.body ?? "")].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const staleBasis = latestDraft?.proposal && latestDraft.proposal.basisRevision < i.revision ? latestDraft.proposal.basisRevision : null;
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
@@ -3649,6 +3659,10 @@ function timelineWorkEntries() {
   for (let index = state.messages.length - 1; index >= 0; index--) {
     const message = state.messages[index];
     if (!message.workItemId || !message.proposal) continue;
+    // A deleted or redacted draft keeps its proposal context but its body is
+    // tombstoned to null: it is not a draft anymore, so it must neither count
+    // toward "Drafts (n)" nor be rendered (mirrors pinnedMessages' filter).
+    if (message.deletedAt || message.body == null) continue;
     if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
     draftsByWork.get(message.workItemId).push(message);
   }
@@ -6508,6 +6522,13 @@ $("#action-form").addEventListener("submit", e => {
       }
       // A rationale can settle after the result changed. Never silently rebase
       // its verdict; uncertain decision retries still reconcile the original.
+      // The gate below reads current state, so re-read first: a send() whose
+      // receipt was applied as a local delta (delta sync) settles without the
+      // snapshot read that used to guarantee this freshness.
+      if (entry.publishRationale && !entry.decisionDispatched) {
+        await client.refresh();
+        if (!owns()) return;
+      }
       if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
         entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
       }

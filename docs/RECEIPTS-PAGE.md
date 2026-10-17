@@ -63,8 +63,32 @@ time the room recorded a merge, and hash evidence already stored as
 
 Names are as recorded by the room — member display names on work-claim and
 work-item receipts, a self-supplied name on public-work receipts — not
-identity-verified. Hash values are stored as recorded, not re-verified at
-read time.
+identity-verified. Hash values are stored as recorded; the plain page does
+not re-verify them — verification is an explicit read-time action (below).
+
+## Verification
+
+Every detail page carries a verification block. Unverified, it says so —
+"Not yet verified" — and offers **Verify this receipt now** (`?verify=1`
+on the HTML or `.json` URL). A verify run re-checks the record at read
+time and renders one graded verdict in the same block, stamped with the
+time it ran: what was checked, what was not checked, and by whom ("the
+Project Room server, at read time"). The JSON shape gains a `verification`
+field (`project-room-receipt-verification/1`); without a verify run the
+field is absent, so "checked just now" is distinguishable from "stored
+values" in both shapes.
+
+The checks (server/receipt-verify.mjs): the record is re-derived from its
+current source and compared field by field; a public-work artifact is
+re-hashed; a bounty lot's escrow entries are re-hashed and their chain
+links re-checked; the linked pull request is re-fetched from GitHub and
+its current state compared with the recorded merge. Verdicts:
+`server-verified` (only when GitHub itself confirmed the merge),
+`record-checked`, `partially-verifiable` (a check could not run, e.g.
+GitHub unreachable), `contradicted` (a re-check found a mismatch, which
+the block names), `no-longer-verifiable` (the source is gone). Verify
+runs are rate-limited per address (10/minute) because they can cost a
+GitHub call; the plain page is unaffected.
 
 The JSON envelope is unsigned. Receipt Standard v1 was not used: that
 draft requires a fresh signature, and these pages are durable records of

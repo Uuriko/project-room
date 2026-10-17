@@ -11,6 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -127,7 +128,7 @@ function backupConfigured(env) {
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
@@ -181,6 +182,15 @@ export function classifyIntegrityError(error) {
   else if (/sqlite|database|storage|disk/i.test(message)) errorClass = "storage";
   else if (subcheck !== "unknown") errorClass = "integrity_mismatch";
   return { code, subcheck, errorClass, recordClass: INTEGRITY_RECORD_CLASS[subcheck] ?? "unknown" };
+}
+
+function integrityFailure(error) {
+  const failure = classifyIntegrityError(error);
+  return {
+    errors: 1,
+    scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+    failureDetail: failure
+  };
 }
 
 async function runNodeRetention(store, ctx) {
@@ -318,15 +328,18 @@ export const JOBS = Object.freeze([
     enabled: () => true,
     disabledReason: () => null,
     async run(store, ctx) {
+      let integrity;
       try {
-        const integrity = ctx.room?.verifyRoomIntegrity
+        integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
         // tick still fails — the verdict is unchanged — with the same
         // sanitized detail shape as the throw path (stable codes and
-        // classes only; record ids stay in the operator log line).
+        // classes only; record ids stay in the operator log line). The
+        // result is assigned, not returned, so the parked-block count
+        // below observes this path too.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
           const first = failures[0];
@@ -342,26 +355,45 @@ export const JOBS = Object.freeze([
           for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
-          return {
+          integrity = {
             ...summary,
             errors: failures.length,
             scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
             failureDetail: failure
           };
         }
-        return logIntegrity(integrity);
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
         // #3334: the failure detail survives reporting — the heartbeat turns
         // scanError into lastError and persists failureDetail, so the health
         // surface names the failing sub-check instead of "1 error(s) in tick".
-        const failure = classifyIntegrityError(error);
-        return {
-          errors: 1,
-          scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-          failureDetail: failure
-        };
+        integrity = integrityFailure(error);
       }
+      // A parked backfill does not throw again, and most rotation ticks do
+      // not visit it. Observe the durable set AFTER doing the normal work,
+      // even on a budget exit, so healthy rooms keep progressing while both
+      // runtimes retain an active, safe failure until every block clears.
+      try {
+        const blockedRooms = store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get()?.n;
+        if (!Number.isSafeInteger(blockedRooms) || blockedRooms < 0) {
+          throw new Error("Invalid database messages backfill block count");
+        }
+        integrity = { ...integrity, blockedRooms };
+        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({ integritySubcheck: "messages_backfill" }) };
+        }
+      } catch (error) {
+        // The general read() helper swallows SQL errors; using it here would
+        // turn an unreadable block table into a false recovery. Preserve an
+        // earlier failure, otherwise report this read failure without raw
+        // record identifiers or exception text on the public health surface.
+        if (!summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({
+            integritySubcheck: "messages_backfill", message: error?.message ?? error
+          }) };
+        }
+      }
+      return logIntegrity(integrity);
     }
   }),
   defineJob({
@@ -425,6 +457,25 @@ export const JOBS = Object.freeze([
         console.error(`[room-backup] ${oneLine(error?.message ?? error)}`);
         return { errors: 1 };
       }
+    }
+  }),
+  defineJob({
+    name: "patrol",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // ClueBot phase 1: enabled only while some room has events the patrol
+    // has not tailed, so an idle room never wakes for it (the registry's
+    // standing rule). Read-only: the patrol files findings, it never acts.
+    enabled: (_env, store) => (store ? patrolPending(store) : true),
+    disabledReason: () => "No unpatrolled events are waiting",
+    // Due at the caller's `now`, never a live Date.now(): a fresh clock
+    // read lands a hair past the arming computation, slips past the
+    // registry's push-out-by-one-cadence rule, and arms the alarm
+    // immediately — an idle room would wake at once (jobs-alarm proof).
+    nextDueAt: (store, now) => (patrolPending(store) ? now : null),
+    async run(store, ctx) {
+      if (ctx.room?.patrolTick) return ctx.room.patrolTick();
+      return runPatrolTick(store, { deadline: ctx.deadline });
     }
   }),
   defineJob({

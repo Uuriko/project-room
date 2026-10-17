@@ -48,6 +48,7 @@ import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native 
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
+import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
@@ -96,7 +97,7 @@ import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
+import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
@@ -1096,7 +1097,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
+    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1257,6 +1258,7 @@ const LOOKUP_INDEXES = `
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1336,6 +1338,14 @@ export class RoomStore {
     // the threshold and recovers on the next committed write.
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
+    // Delta sync: a per-room append stamp, bumped when an events INSERT
+    // commits (see _armProjectionWatch + transaction()). Stream pumps poll
+    // this in-memory counter instead of re-reading the store on a timer; a
+    // stamp is a counter, not a sequence, so a rolled-back append can never
+    // mask a later commit that reuses its sequence.
+    this._appendStamps = new Map();
+    this._pendingAppends = new Set();
+    this._appendListeners = new Set();
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
@@ -1461,6 +1471,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
+        this.guestInvites.verifyAuthoritySchema({ allowAbsent: true }); // F-5: guest-invite authority provenance, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
@@ -1758,6 +1769,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
       this.db.exec(guestSelfServeSchema);
+      // F-5: guest-invite issuing-authority provenance — purely additive
+      // side table (no events, no projection impact), same pattern.
+      this.db.exec(guestInviteAuthoritySchema);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -1964,10 +1978,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Code drops: patch metadata and review checks. Unfenced and additive;
       // the bytes stay in room_attachments. The stamp includes this DDL.
       this.db.exec(CODE_DROPS_SCHEMA);
-      // Phase 1a: message bodies at rest, content-addressed, released by a
-      // trigger when the projection stops referencing them. The stamp
+      // Phase 1a: message bodies at rest, content-addressed. The stamp
       // includes this DDL.
       this.db.exec(PROJECTION_BODIES_SCHEMA);
+      // WRITE-PATH-WINS win 4: the serializer releases unreferenced body
+      // rows itself now; drop the json_each release trigger the schema
+      // used to install, so existing databases lose it on this pass (the
+      // schema string above is part of the stamp, so this pass runs).
+      this.db.exec("DROP TRIGGER IF EXISTS projection_bodies_release");
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -2109,6 +2127,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   checkMessagesParity() {
     return verifyMessagesParity(this);
+  }
+  // ClueBot phase 1: the resident per-event invariant patrol. Read-only —
+  // it writes only patrol_* tables and files findings; see server/patrol.mjs.
+  patrolTick(options = {}) {
+    return runPatrolTick(this, options);
+  }
+  patrolFindings(options = {}) {
+    return listPatrolFindings(this, options);
   }
 
   ensureIntegrityFailures() {
@@ -3140,14 +3166,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
-        const run = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const result = run(...args);
-          invalidate();
-          return result;
-        };
-      }
+      if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      const roomsWrite = ROOMS_WRITE.test(sql), eventAppend = EVENT_APPEND.test(sql);
+      if (!roomsWrite && !eventAppend) return stmt;
+      const run = stmt.run.bind(stmt);
+      stmt.run = (...args) => {
+        const result = run(...args);
+        if (roomsWrite) invalidate();
+        // Every events insert in the codebase binds (roomId, sequence, ...)
+        // positionally; anything else is ignored rather than guessed at.
+        if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
+        return result;
+      };
       return stmt;
     };
     if (typeof this.db.exec === "function") {
@@ -3158,6 +3188,43 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return result;
       };
     }
+  }
+  // An events row was inserted for `roomId`. Inside a transaction the append
+  // is only pending: it becomes visible to stream pumps when the outermost
+  // transaction commits (_flushEventAppends, called from transaction()), and
+  // is dropped if that transaction rolls back. Outside a transaction the
+  // append has already committed by the time the statement returns.
+  _noteEventAppend(roomId) {
+    if (this.db.isTransaction) { this._pendingAppends.add(roomId); return; }
+    this._bumpAppendStamp(roomId);
+  }
+  _bumpAppendStamp(roomId) {
+    this._appendStamps.set(roomId, (this._appendStamps.get(roomId) ?? 0) + 1);
+    for (const listener of this._appendListeners) {
+      try { listener(roomId); } catch { /* a stream's wake must never fail a commit */ }
+    }
+  }
+  _flushEventAppends() {
+    if (!this._pendingAppends.size) return;
+    const rooms = [...this._pendingAppends];
+    this._pendingAppends.clear();
+    for (const roomId of rooms) this._bumpAppendStamp(roomId);
+  }
+  // The room's append stamp: a counter that changes whenever an event has
+  // committed to the room since the caller's last look. Purely in-memory.
+  eventStamp(roomId) { return this._appendStamps.get(roomId) ?? 0; }
+  // Subscribe to committed appends (the listener receives the roomId).
+  // Returns an unsubscribe function. Used by the SSE stream pump to wake on
+  // commit instead of polling the store.
+  onEventAppended(listener) {
+    this._appendListeners.add(listener);
+    return () => this._appendListeners.delete(listener);
+  }
+  // The room's committed head sequence in one primary-key read — the stream
+  // probe's change check, three orders of magnitude cheaper than a page read.
+  headSequence(roomId) {
+    const row = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    return row?.sequence ?? 0;
   }
   transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
@@ -3175,7 +3242,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
       this._dropProjectionCache();
-      if (boundary) frames.pop();
+      if (boundary) { frames.pop(); this._pendingAppends.clear(); }
       throw this.storageFailure(error, outermost);
     }
     if (boundary) {
@@ -3187,6 +3254,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const cache = this._projectionCache ??= new ProjectionCache();
         for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
       }
+      // Publish committed appends only after the cache promotion above, so
+      // streams woken by the flush observe the post-commit projection state.
+      // A rolled-back append never reaches here: the catch path clears
+      // _pendingAppends at the same boundary instead.
+      this._flushEventAppends();
     }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
@@ -3217,28 +3289,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   storageStatus() {
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
-  room(roomId) {
+  room(roomId, { verifyBodyHashes = false } = {}) {
     // MSG-0 projection cache. The hit path reads sequence only.
     this._armProjectionWatch();
     const cache = this._projectionCache ??= new ProjectionCache();
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
-    const hit = cache.lookup(roomId, meta.sequence);
-    if (hit) {
-      if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence).value)) {
-        this._dropProjectionCache();
-        throw new Error(`Projection cache differs from storage for room ${roomId}`);
+    // WRITE-PATH-WINS win 3: hydration trusts the content-addressed body
+    // key on the hot path, so a cache hit cannot vouch for body bytes.
+    // A verified read (the conversation read's tamper recovery) bypasses
+    // the hit, re-hashes, and lets _readProjection repair any tampered
+    // or missing row from the event log; the repaired value replaces
+    // the cache entry, so the room self-heals exactly as it did when
+    // every read verified.
+    if (!verifyBodyHashes) {
+      const hit = cache.lookup(roomId, meta.sequence);
+      if (hit) {
+        if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence, { verifyBodyHashes: true }).value)) {
+          this._dropProjectionCache();
+          throw new Error(`Projection cache differs from storage for room ${roomId}`);
+        }
+        return hit;
       }
-      return hit;
     }
-    const { value, weight } = this._readProjection(roomId, meta.sequence);
+    const { value, weight } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
     cache.insert(roomId, meta.sequence, value, weight);
     return value;
   }
-  _readProjection(roomId, sequence) {
+  _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection));
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
     return { value: Object.freeze({ sequence, state }),
@@ -3265,7 +3346,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return sequence;
   }
   // Phase 1a/1b rollback: write every room back with full bodies and full
-  // message envelopes in one transaction. The release trigger then empties projection_bodies.
+  // message envelopes in one transaction. The serializer's release then empties projection_bodies.
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
@@ -3303,12 +3384,30 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   roomAuthority(roomId) {
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
-    const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?").get(roomId);
+    // WRITE-PATH-WINS win 5: ownerId and members are the first two
+    // top-level keys of every stored projection, ahead of ,"messages":[ —
+    // extracting them from that prefix avoids tokenizing the whole
+    // multi-megabyte text on every command. The prefix result is used
+    // only when it yields a well-formed authority pair; any other shape
+    // (a future key order, a member name quoting the boundary verbatim)
+    // falls back to the full-projection extract below, so the values
+    // returned are always the stored ones, read fresh.
+    const prefix = (this._roomAuthorityPrefixStmt ??= this.db.prepare(
+      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members') END AS authority FROM rooms WHERE id=?"));
+    let row = prefix.get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const authority = JSON.parse(row.authority);
-    const [ownerId, members] = Array.isArray(authority) ? authority : [];
-    if (typeof ownerId !== "string" || !members || typeof members !== "object")
-      fail(500, "projection_corrupt", "Room projection is missing authority fields");
+    let authority = null;
+    try { authority = JSON.parse(row.authority); } catch { /* fall through to the full extract */ }
+    let [ownerId, members] = Array.isArray(authority) ? authority : [];
+    if (typeof ownerId !== "string" || !members || typeof members !== "object") {
+      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?"));
+      row = full.get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      authority = JSON.parse(row.authority);
+      [ownerId, members] = Array.isArray(authority) ? authority : [];
+      if (typeof ownerId !== "string" || !members || typeof members !== "object")
+        fail(500, "projection_corrupt", "Room projection is missing authority fields");
+    }
     return { sequence: row.sequence, ownerId, members };
   }
   rebuildProjection(roomId, through = null) {
@@ -5871,6 +5970,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
+      // Delegation lifecycle (F-1): an ownership transfer lapses every
+      // delegation grant the outgoing owner issued in this room — the
+      // grants are their personal issuance, and the incoming owner must
+      // not silently inherit them. Runs inside the transfer's own
+      // transaction, after the event persists, so a failed transfer
+      // revokes nothing. Account deletion revokes the same way through
+      // its own executor; it appends its transfer event directly and
+      // never reaches this hook.
+      if (command.type === T.OWNERSHIP_TRANSFERRED) {
+        state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
+      }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
@@ -5884,6 +5994,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       throw error;
     }
+  }
+
+  // F-1: lapse the outgoing owner's delegation grants on an ownership
+  // transfer. Grant rows are revoked and journaled under the
+  // "ownership_transferred" lifecycle actor by the two delegation modules;
+  // a grant-conferred invite_member bit is stripped here through the event
+  // path, with the incoming owner as actor (their authority replaces the
+  // lapsed grant), following the in-command event-append pattern of
+  // resumeRoundLimitPauses. Runs inside the transfer command's transaction:
+  // if a strip cannot apply, the whole transfer fails rather than leaving
+  // the bit behind. Returns the post-strip room state.
+  lapseDelegationOnTransfer(roomId, state, outgoingOwnerId, sequence, transferEvent) {
+    const actorId = "ownership_transferred";
+    this.ownerDelegates.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    const { stripTargets } = this.delegation.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    let next = state;
+    let seq = sequence;
+    for (const target of stripTargets) {
+      if (seq >= PILOT_LIMITS.eventsPerRoom) break;
+      const member = next.members?.[target.memberId];
+      if (!member || member.active === false || !member.permissions.includes("invite_member")) continue;
+      const stripEvent = event({
+        type: T.MEMBER_ACCESS_CHANGED, roomId, actorId: next.room.ownerId, at: transferEvent.at,
+        id: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        idempotencyKey: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        causationId: transferEvent.id,
+        data: { memberId: member.id, expectedMemberRevision: member.revision,
+          permissions: member.permissions.filter(permission => permission !== "invite_member"),
+          active: member.active, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+      });
+      const applied = compact(applyEventWithGrowth(next, stripEvent, growthCollector).state);
+      const projection = this.storedProjection(roomId, applied);
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
+      seq += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
+        .run(seq, projection, archivedAtOf(applied), roomId);
+      // Parity with a command-issued member.access_changed (see command()).
+      this.agentConnections.revokeMember(roomId, member.id);
+      next = applied;
+    }
+    return next;
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):

@@ -20,6 +20,10 @@ function storeFor(t) {
 
 test("scheduler jobHealth lists every registry job and records runs", async t => {
   const store = storeFor(t);
+  // The patrol starts caught up: the genesis log is not this test's
+  // subject, and a work-gated job that consumes its own waiting work
+  // mid-run flips enabled between the two health reads by design.
+  store.patrolTick();
   const scheduler = startNodeScheduler({ store, env: {}, tickMs: 0 });
   const before = scheduler.jobHealth();
   assert.deepEqual(before.map(j => j.name), JOBS.map(j => j.name), "every registry job, in order");
