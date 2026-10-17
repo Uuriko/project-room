@@ -834,11 +834,12 @@ export class RoomAgentClient {
     const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, acceptanceCriteria } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
       ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
+      ...(acceptanceCriteria === undefined ? {} : { acceptanceCriteria }),
       ...(tags === undefined ? {} : { tags }),
       ...(files === undefined ? {} : { files }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
@@ -875,14 +876,15 @@ export class RoomAgentClient {
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
         ...(pullRequest === undefined ? {} : { pullRequest }) }, signal);
   }
-  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
         ...(reviewedBy === undefined ? {} : { reviewedBy }),
         ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }),
         ...(parentClaimId === undefined ? {} : { parentClaimId }),
-        ...(evidenceRefs === undefined ? {} : { evidenceRefs }) }, signal);
+        ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
+        ...(delivery === undefined ? {} : { delivery }) }, signal);
   }
   linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
@@ -928,6 +930,11 @@ export class RoomAgentClient {
   }
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
     return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal });
+  }
+  // #3546: finish under a reviewed policy — the holder delivers the bundle,
+  // then the reviewer verifies with workComplete from their own session.
+  async workDeliver(id, { delivery, deliveryMode, note, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
+    return this.updateWorkItem(id, { state: "delivered", note, deliveryMode, tags, blobs, parentClaimId, evidenceRefs, delivery, signal });
   }
   async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });

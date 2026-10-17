@@ -107,6 +107,13 @@
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
         <h2 id="account-rooms-title" class="view-title" role="heading" aria-level="1">Rooms</h2>
         <p id="account-rooms-status" role="status"></p>
+        <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
+          <h3 id="owner-cockpit-title">Needs you</h3>
+          <p id="cockpit-summary" role="status"></p>
+          <div id="cockpit-decisions"></div>
+          <div id="cockpit-exceptions"></div>
+          <div id="cockpit-room-stubs"></div>
+        </section>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
         <p class="form-hint">Join a room through its invitation.</p>
@@ -372,6 +379,7 @@
             <button id="thread-mute" class="button ghost" type="button" aria-pressed="false">Mute thread</button>
           </div>
           <p id="conversation-announcement" class="sr-only" role="status" aria-live="polite"></p>
+          <p id="work-announcement" class="sr-only" role="status" aria-live="polite"></p>
           <details id="pinned-panel" class="pinned-panel" hidden>
             <summary id="pinned-heading" class="section-summary"><span class="section-label"><strong>Pinned</strong></span><span id="pinned-count" class="count-chip"></span></summary>
             <ol id="pinned-list" class="pinned-list" aria-labelledby="pinned-heading"></ol>
@@ -379,12 +387,6 @@
           <button id="work-navigation-return" class="button ghost" type="button" hidden>Back to room</button>
           <ol id="message-list" class="timeline" tabindex="0" aria-label="Messages and work"></ol>
           <button id="new-messages-button" class="new-messages-button" type="button" hidden></button>
-          <dialog id="reaction-sheet" aria-labelledby="reaction-sheet-label">
-            <p id="reaction-sheet-label" class="reaction-sheet-label"></p>
-            <input id="reaction-search" class="reaction-search" type="search" placeholder="Search emoji" aria-label="Search emoji" autocomplete="off" spellcheck="false">
-            <div id="reaction-sheet-options" class="reaction-sheet-options"></div>
-            <button id="reaction-sheet-close" class="button ghost" type="button">Close</button>
-          </dialog>
           <div id="reply-bar" class="reply-bar" hidden><span id="reply-context"></span><span class="reply-bar-actions"><button id="reply-mention" type="button" class="button ghost" hidden aria-pressed="false">Also @</button><button id="cancel-reply" type="button" class="button ghost">Cancel</button></span></div>
           <div id="chat-suggestions" class="chat-suggestions" role="group" aria-label="Suggested replies" hidden></div>
           <div id="typing-indicator" class="typing-indicator" aria-live="polite" hidden></div>
@@ -417,7 +419,6 @@
             <p id="composer-hint" class="form-hint composer-hint">Enter to send · Shift + Enter for a new line</p>
             <div id="composer-attachments" class="composer-attachments" hidden></div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
-            <ul id="emoji-list" class="mention-list emoji-list" role="listbox" aria-label="Emoji" hidden></ul>
             <p id="message-length-status" class="status form-status" role="alert" hidden></p>
             <p id="composer-status" class="status form-status" role="status"></p>
             <div id="guest-upgrade-hint" class="guest-upgrade-hint" hidden>
@@ -492,13 +493,12 @@
 
         <dialog id="activity-dialog" aria-labelledby="activity-title">
           <div class="dialog-head"><h2 id="activity-title">Activity</h2><button id="activity-close" class="button ghost" type="button">Close</button></div>
-          <p class="form-hint">Mentions, replies, thread replies, and reactions naming you — newest first. Opening an item marks it read.</p>
+          <p class="form-hint">Mentions, replies, and thread replies naming you — newest first. Opening an item marks it read.</p>
           <div id="activity-filters" class="filter-row" role="group" aria-label="Filter activity">
             <button class="button ghost" type="button" data-activity-filter="" aria-pressed="true">All</button>
             <button class="button ghost" type="button" data-activity-filter="mention" aria-pressed="false">Mentions</button>
             <button class="button ghost" type="button" data-activity-filter="reply" aria-pressed="false">Replies</button>
             <button class="button ghost" type="button" data-activity-filter="thread_reply" aria-pressed="false">Threads</button>
-            <button class="button ghost" type="button" data-activity-filter="reaction" aria-pressed="false">Reactions</button>
           </div>
           <p id="activity-status" class="status form-status" role="status"></p>
           <ul id="activity-list" class="rb-list"></ul>
@@ -581,6 +581,11 @@
             <summary class="sidebar-label"><span>Retention</span><span id="retention-alert" class="count-chip" hidden></span></summary>
             <div id="retention-panel-host" class="retention-board"></div>
             <p id="retention-status" class="form-hint" role="status"></p>
+          </details>
+          <details id="bounty-panel" class="sidebar-panel">
+            <summary class="sidebar-label"><span>Bounties &amp; credits</span><span id="bounty-count" class="count-chip"></span></summary>
+            <div id="bounty-board-host" class="bounty-board"></div>
+            <p id="bounty-status" class="form-hint" role="status"></p>
           </details>
           </details>
           <details id="room-tools" class="room-tools"><summary>Suggestions and automations</summary>

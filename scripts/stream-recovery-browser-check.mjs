@@ -139,9 +139,23 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
     // Initial startup awaits this snapshot before constructing EventSource.
     // The other schedule keeps its established stream open during the read.
     const started = schedule === "initial-handover" ? signInFixture(page, f.keys.owner) : Promise.resolve();
-    if (schedule === "connected-refresh") first = admit("nrc1-seed-command", "message.posted", { messageId: "nrc1-seed", body: "Before handover" });
+    let heldTarget = null;
+    if (schedule === "connected-refresh") {
+      first = admit("nrc1-seed-command", "message.posted", { messageId: "nrc1-seed", body: "Before handover" });
+      // Delta sync: the seed's frame continues the held history exactly, so
+      // the client applies it locally and no snapshot read follows for the
+      // route to hold. The held read is therefore the one a pin forces: a
+      // pin is neither a delta type nor a recent-window event, so it takes
+      // the full read path, and the snapshot it fetches (seed visible, the
+      // edit below not yet admitted) is the stale read the edit/add frames
+      // must outrun. heldSequence matching the pin's sequence is itself the
+      // proof the seed needed no read — a seed read would have been held
+      // in its place. The pin is not part of the admitted journal asserted
+      // below; it changes pins, never the message view.
+      heldTarget = f.store.command(f.keys.owner, "commons", { id: "nrc1-pin-command", type: "message.pinned", data: { messageId: "nrc1-seed" } });
+    }
     await held.promise;
-    assert.equal(heldSequence, first.sequence);
+    assert.equal(heldSequence, schedule === "connected-refresh" ? heldTarget.sequence : first.sequence);
     if (schedule === "initial-handover") assert.equal(trace.some(entry => entry.kind === "stream-request"), false);
     admit("nrc1-edit-command", "message.edited", { messageId: "nrc1-seed", body: "Newer admitted content", expectedMessageRevision: 0 });
     const latest = admit("nrc1-add-command", "message.posted", { messageId: "nrc1-added", body: "Admitted during handover" });
@@ -216,9 +230,11 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
   });
 }
 
-// Live refreshes after a new message re-read only the newest messages
-// (`?messages=recent`) and keep the older history already on screen; an edit to
-// an older message still reads the full snapshot and shows the edit.
+// Live refreshes after a new message keep the older history already on
+// screen: the arrival is applied as a local delta or re-reads only the
+// newest messages (`?messages=recent`); an edit to an older message is
+// applied as a delta or reads the full snapshot — never the window —
+// and shows the edit.
 test("a new message refreshes a busy room with the recent window, an old edit with the full snapshot", { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture();
   f.store.roomFlood = { consume() {} };
@@ -234,10 +250,11 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(10000);
-  const errors = [], reads = [];
+  const errors = [], reads = [], pages = [];
   page.on("pageerror", error => errors.push(error.message));
   page.on("response", async response => {
     const url = new URL(response.url());
+    if (url.pathname === "/api/rooms/commons/conversation" && response.request().method() === "GET") pages.push(url.search);
     if (url.pathname === "/api/rooms/commons" && response.request().method() === "GET")
       reads.push({ search: url.search, messages: (await response.json().catch(() => null))?.state?.messages?.length });
   });
@@ -246,7 +263,7 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent.startsWith("Connected"));
   await page.locator(`[data-message-record-id="${ids.at(-1)}"]`).waitFor({ state: "visible" });
   const rendered = () => page.locator("[data-message-record-id]").evaluateAll(nodes => nodes.map(node => node.dataset.messageRecordId));
-  // Opening reads only the newest window; a quiet background full read then fills in the rest.
+  // Opening reads only the newest window; a quiet paged background fill then brings in the rest.
   // Convergence is proven by the oldest message appearing and every history id being on screen.
   assert.equal(reads[0]?.search, "?messages=recent", "opening reads the recent window first");
   assert.equal(reads[0].messages, 100, "the first read carries only the newest window");
@@ -255,8 +272,13 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   const before = await rendered();
   for (const id of ids) assert.ok(before.includes(id), `history message ${id} converged after the background fill`);
   const fills = reads.filter(read => read.search === "");
-  assert.equal(fills.length, 1, "exactly one background full read: " + JSON.stringify(reads));
-  assert.ok(fills[0].messages >= ids.length, "the fill carries the whole history");
+  // Delta sync P1: the background fill pages history over /conversation and
+  // merges the segment that provably continues the window; the monolithic
+  // full read survives only as the fallback when paging cannot prove the
+  // merge. Convergence above (every history id on screen) is the contract;
+  // in this fixture the paged fill proves it, so no full read is owed.
+  assert.equal(fills.length, 0, "the paged fill replaced the background full read: " + JSON.stringify(reads));
+  assert.ok(pages.length >= 1, "the fill paged over /conversation: " + JSON.stringify(pages));
   assert.ok(reads.filter(read => read.search !== "").every(read => read.search === "?messages=recent"), JSON.stringify(reads));
 
   const opened = reads.length;
@@ -264,19 +286,21 @@ test("a new message refreshes a busy room with the recent window, an old edit wi
   await page.locator(`[data-message-record-id="${arrival}"]`).waitFor({ state: "visible" });
   await page.waitForFunction(count => document.querySelectorAll("[data-message-record-id]").length >= count, before.length);
   const live = reads.slice(opened);
-  // With the server's recent view each read carries 100 messages; a server
-  // without it answers in full, and the client uses that as is.
-  assert.ok(live.length >= 1 && live.every(read => read.search === "?messages=recent" && [100, reads[0].messages + 1].includes(read.messages)), JSON.stringify(live));
+  // The arrival may be applied as a local delta (no read at all). With the
+  // server's recent view each read it does cause carries 100 messages; a
+  // server without it answers in full, and the client uses that as is.
+  assert.ok(live.every(read => read.search === "?messages=recent" && [100, reads[0].messages + 1].includes(read.messages)), JSON.stringify(live));
   assert.deepEqual((await rendered()).filter(id => id !== arrival), before, "the history on screen is unchanged apart from the arrival");
 
   // An edit to the oldest message (outside the window) must still show.
   const oldest = ids[0], edited = reads.length;
   assert.ok(before.includes(oldest), "the oldest message is on screen");
-  const fullRead = page.waitForResponse(response => { const url = new URL(response.url());
-    return url.pathname === "/api/rooms/commons" && url.search === "" && response.request().method() === "GET"; });
   f.store.command(f.keys.producer, "commons", { id: randomUUID(), type: "message.edited", data: { messageId: oldest, body: "history 0, edited", expectedMessageRevision: 0 } });
-  await fullRead;
   await page.locator(`[data-message-record-id="${oldest}"]`, { hasText: "history 0, edited" }).waitFor({ state: "attached" });
-  assert.deepEqual(reads.slice(edited).map(read => read.search), [""]);
+  // Delta sync P1: with complete history held, the edit may be applied
+  // locally with no read at all; the fallback is exactly one full snapshot
+  // read. A windowed read is never correct for an edit outside the window.
+  const editReads = reads.slice(edited).map(read => read.search);
+  assert.ok(editReads.length <= 1 && editReads.every(search => search === ""), "the old edit applied as a delta or one full read: " + JSON.stringify(editReads));
   assert.deepEqual(errors, []);
 });
