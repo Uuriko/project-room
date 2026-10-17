@@ -437,7 +437,11 @@ export const JOBS = Object.freeze([
     // standing rule). Read-only: the patrol files findings, it never acts.
     enabled: (_env, store) => (store ? patrolPending(store) : true),
     disabledReason: () => "No unpatrolled events are waiting",
-    nextDueAt: store => (patrolPending(store) ? Date.now() : null),
+    // Due at the caller's `now`, never a live Date.now(): a fresh clock
+    // read lands a hair past the arming computation, slips past the
+    // registry's push-out-by-one-cadence rule, and arms the alarm
+    // immediately — an idle room would wake at once (jobs-alarm proof).
+    nextDueAt: (store, now) => (patrolPending(store) ? now : null),
     async run(store, ctx) {
       if (ctx.room?.patrolTick) return ctx.room.patrolTick();
       return runPatrolTick(store, { deadline: ctx.deadline });

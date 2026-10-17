@@ -142,7 +142,16 @@ export function patrolPending(store) {
   const db = store?.db;
   if (!db?.prepare) return false;
   if (!tableExists(db, "rooms")) return false;
-  if (!tableExists(db, "patrol_cursor")) return true;
+  if (!tableExists(db, "patrol_cursor")) {
+    // The patrol has never run against this store. That is work waiting
+    // only when some room actually has events to tail — a store with no
+    // rooms (or only empty ones) has nothing to patrol, and treating it
+    // as pending would arm the job in rooms that should stay asleep.
+    try {
+      const row = db.prepare("SELECT 1 AS hit FROM rooms WHERE sequence > 0 LIMIT 1").get();
+      return Boolean(row?.hit);
+    } catch { return true; }
+  }
   try {
     const row = db.prepare(`SELECT 1 AS hit FROM rooms r
       LEFT JOIN patrol_cursor c ON c.room_id = r.id

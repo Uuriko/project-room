@@ -175,6 +175,9 @@ test("gmail and channel drain stay disabled, not stale, when nothing is configur
   const store = new RoomStore(join(directory, "room.sqlite"));
   try {
     store.initialize(initialRoom("commons"));
+    // The genesis log starts tailed: the patrol is work-gated on untailed
+    // events, and this test grades the gmail/channel gates, not the patrol.
+    store.patrolTick();
     const now = Date.parse("2026-09-24T22:00:00Z");
     const alwaysOn = ["retention", "integrity", "public-read-model"];
     const fresh = applyOutcomes({}, alwaysOn.map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));

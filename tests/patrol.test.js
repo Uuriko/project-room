@@ -82,6 +82,15 @@ test("clean room: messages and a full claim lifecycle file zero findings", () =>
   } finally { store.close(); }
 });
 
+test("an empty store does not arm the patrol job", () => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-patrol-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  try {
+    assert.equal(patrolPending(store), false, "no rooms means nothing to patrol, even before the first tick");
+    assert.equal(jobByName("patrol").enabled({}, store), false);
+  } finally { store.close(); }
+});
+
 test("control A: a truncated log files head_gap at the first missing sequence", () => {
   const store = openStore();
   try {
