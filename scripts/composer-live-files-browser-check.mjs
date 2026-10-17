@@ -87,13 +87,14 @@ async function uploadFixture(t) {
   }
   const server = createRoomServer({ store, streamInterval: 50 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  let browser = null;
   t.after(async () => {
     await browser?.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
     store.close(); rmSync(directory, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(10000);
   const errors = [];
