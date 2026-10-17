@@ -1855,7 +1855,17 @@ function restoreDisclosures(container, snap) {
 // replacement content, so a selection inside a node whose innerHTML was
 // refreshed comes back too. A selection outside the list is never touched, and
 // if the selected row is gone the selection is left alone.
+// window.getSelection() makes Chromium recalculate style, about 7 ms on every
+// arriving message in a busy room even when nothing is selected. A
+// selectionchange listener notes whether the selection touches the timeline,
+// so a render reads the selection only when there is one to keep.
+let timelineSelectionMaybe = false;
+document.addEventListener("selectionchange", () => {
+  const selection = window.getSelection();
+  timelineSelectionMaybe = Boolean(selection?.rangeCount && $("#message-list")?.contains(selection.getRangeAt(0).commonAncestorContainer));
+});
 function captureTimelineSelection(list) {
+  if (!timelineSelectionMaybe) return null;
   const selection = window.getSelection();
   if (!selection || !selection.rangeCount) return null;
   const range = selection.getRangeAt(0);
