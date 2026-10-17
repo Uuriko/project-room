@@ -80,14 +80,19 @@ test('chat requests activity only; Record loads the complete tail, retries failu
   await page.locator('[data-record-retry]').click();
   await page.locator(`[data-event-record-id="${sourceEventId}"]`).waitFor();
   assert.deepEqual(reads.slice(before).filter(view => view === 'full'), ['full', 'full']);
+  const beforeClose = reads.length;
+  const closeActivityRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons'
+    && response.request().headers()['x-project-room-audit-view'] === 'activity-v1');
   await page.locator('#settings-close').click();
   await page.waitForFunction(() => !document.querySelector('#settings-dialog').open);
+  await closeActivityRead;
+  assert.ok(reads.slice(beforeClose).includes('activity'), 'closing Record revalidates in the activity view');
   await page.locator('#message-input').fill('A draft stays here.');
   const after = reads.length;
   f.store.command(f.keys.owner, 'commons', { id: 'audit-arrival', type: 'message.posted', data: { messageId: 'audit-new-message', body: 'A new arrival' } });
   await page.locator('[data-message-record-id="audit-new-message"]').waitFor();
   assert.equal(await page.locator('#message-input').inputValue(), 'A draft stays here.');
-  assert.ok(reads.slice(after).includes('activity'));
+  // A covered message may apply as a local delta without another snapshot read.
   assert.equal(reads.slice(after).includes('full'), false, 'closing Record restores lightweight live updates');
   const absentRecordRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && !response.request().headers()['x-project-room-audit-view']);
   await page.evaluate(() => { location.hash = '#event-no-such-record'; });
