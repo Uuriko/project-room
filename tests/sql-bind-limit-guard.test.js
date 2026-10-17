@@ -51,10 +51,9 @@ function fakeKv() {
   return { async get(key) { return map.has(key) ? map.get(key) : null; }, async put(key, value) { map.set(key, typeof value === "string" ? value : Buffer.from(value)); }, async delete(key) { map.delete(key); } };
 }
 
-// Lands as a todo: on main the restore look-up binds every distinct parent
-// key at once, so this fails under the guard until the bind-limit fix
-// (research-r40-do-bind-limits) lands; then drop the todo.
-test("under the guard, restore-from-backup survives 101 browser sessions with distinct parent keys", { todo: "passes once the restore look-up is chunked (research-r40-do-bind-limits)" }, async t => {
+// The stacked parent includes the chunked restore lookup, so this end-to-end
+// regression is active under the real 100-bind guard.
+test("under the guard, restore-from-backup survives 101 browser sessions with distinct parent keys", async t => {
   withLimit(t, "100");
   const seed = openStore(t, "bind-guard-seed-");
   seed.initialize(initialRoom());
