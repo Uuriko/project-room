@@ -2637,7 +2637,17 @@ async function refreshRoomFiles() {
 }
 async function attachComposerFiles(fileList) {
   if (!state || !client.session || isRoomArchived(state)) return;
+  // Bind the batch before any await: room changes must stop later files,
+  // and removed entries must not receive late success or error updates.
+  const authSession = client.session, generation = client.generation, roomId = state.room.id;
+  const draftOwner = drafts, key = composerKey(), draft = drafts.get(key);
+  const uploadPath = client.path("/files");
+  const owns = () => Boolean(state && session === authSession && client.session === authSession
+    && client.generation === generation && state.room?.id === roomId && authSession.roomId === roomId
+    && client.ownsAccountSession() && !isRoomArchived(state)
+    && drafts === draftOwner && drafts.entries.get(key) === draft && composerKey() === key);
   for (const file of [...(fileList ?? [])]) {
+    if (!owns()) return;
     if (file.size > COMPOSER_FILE_BYTES) {
       setComposerError("That file is larger than 1 MB.");
       continue;
@@ -2646,15 +2656,17 @@ async function attachComposerFiles(fileList) {
     const entry = { id, filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "uploading" };
     composerFiles = [...composerFiles, entry];
     renderComposerFiles();
+    const ownsEntry = () => owns() && composerFiles.includes(entry);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!ownsEntry()) continue;
       const payload = attachmentFromBytes({ id, filename: entry.filename, mediaType: entry.mediaType, bytes });
-      await client.request(client.path("/files"), { method: "POST", data: payload });
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "staged";
+      await client.request(uploadPath, { method: "POST", data: payload, authSession, authMode: authSession.authMode });
+      if (!ownsEntry()) continue;
+      entry.status = "staged";
     } catch (error) {
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "error";
+      if (!ownsEntry()) continue;
+      entry.status = "error";
       setComposerError(attachFailureCopy(error));
     }
     renderComposerFiles();
