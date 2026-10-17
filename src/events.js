@@ -601,11 +601,11 @@ export function applyEvent(current, incoming) {
   // so the stored fingerprint agrees with the logged (post-handler) event.
   const fingerprint = eventFingerprint(incoming);
 
-  if (state.seenEvents[incoming.id]) {
+  if (Object.hasOwn(state.seenEvents, incoming.id)) {
     if (state.seenEvents[incoming.id] !== fingerprint) throw new Error("Conflicting reuse of event id");
     return state;
   }
-  if (state.seenIdempotencyKeys[incoming.idempotencyKey]) {
+  if (Object.hasOwn(state.seenIdempotencyKeys, incoming.idempotencyKey)) {
     const earlierId = state.seenIdempotencyKeys[incoming.idempotencyKey];
     if (state.seenEvents[earlierId] !== fingerprint) throw new Error("Conflicting reuse of idempotency key");
     return state;
@@ -919,7 +919,7 @@ function setPublicName(state, incoming) {
 function setPublicTask(state, incoming) {
   requireFields(incoming.data, ["workItemId"]);
   const actor = requireMember(state, incoming.actorId);
-  const item = state.workItems[incoming.data.workItemId];
+  const item = Object.hasOwn(state.workItems, incoming.data.workItemId) && state.workItems[incoming.data.workItemId];
   if (!item) throw new Error("Unknown work item");
   if (actor.id !== state.room.ownerId && actor.id !== item.proposedById) throw new Error("Only the Room owner or the proposer may publish this task");
   requireEnabled(incoming, "Public task");
@@ -1290,14 +1290,13 @@ function postMessage(state, incoming) {
     }
     channelId = messageChannelId(root);
   }
-  const channel = state.channels[channelId];
-  if (!channel) throw new Error("Unknown channel");
+  const channel = knownChannel(state, channelId);
   if (channel.archivedAt) {
     const error = new Error("Channel is archived");
     error.code = CHANNEL_ARCHIVED_CODE;
     throw error;
   }
-  const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
+  const proposal = proposalContext(incoming.data, Object.hasOwn(state.workItems, incoming.data.workItemId) && state.workItems[incoming.data.workItemId]);
   if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
   state.messages.push({
     id: incoming.data.messageId || incoming.id,
@@ -1361,7 +1360,7 @@ function createChannel(state, incoming) {
   if (Object.keys(state.channels).length >= MAX_CHANNELS_PER_ROOM) throw new Error("Channel limit reached");
   if (Object.values(state.channels).some(c => c.name === name)) throw new Error("Channel name is taken");
   const id = incoming.data.channelId || incoming.id;
-  if (state.channels[id]) throw new Error("Channel already exists");
+  if (Object.hasOwn(state.channels, id)) throw new Error("Channel already exists");
   state.channels[id] = { id, name, createdBy: actor.id, createdAt: incoming.at, archivedAt: null };
 }
 
@@ -1369,8 +1368,7 @@ function renameChannel(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requireChannelOwner(state, actor);
   requireFields(incoming.data, ["channelId", "name"]);
-  const channel = state.channels[incoming.data.channelId];
-  if (!channel) throw new Error("Unknown channel");
+  const channel = knownChannel(state, incoming.data.channelId);
   if (channel.id === DEFAULT_CHANNEL_ID) throw new Error("The main channel can't be renamed");
   if (channel.archivedAt) throw new Error("Channel is archived");
   const name = normalizeChannelName(incoming.data.name);
@@ -1382,8 +1380,7 @@ function archiveChannel(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requireChannelOwner(state, actor);
   requireFields(incoming.data, ["channelId"]);
-  const channel = state.channels[incoming.data.channelId];
-  if (!channel) throw new Error("Unknown channel");
+  const channel = knownChannel(state, incoming.data.channelId);
   if (channel.id === DEFAULT_CHANNEL_ID) throw new Error("The main channel can't be archived");
   channel.archivedAt ??= incoming.at;
 }
@@ -1599,7 +1596,7 @@ function votePoll(state, incoming) {
 function proposeWork(state, incoming) {
   requirePermission(state, incoming.actorId, "steer");
   requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
-  if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
+  if (Object.hasOwn(state.workItems, incoming.data.workItemId)) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
   // Trust off refuses a cross-owner assign before the item is recorded.
   // Same-owner assigns, including an owner handing work to their own agent,
@@ -1762,7 +1759,7 @@ function recordBond(state, incoming) {
   requireFields(incoming.data, ["bondId", "agentAId", "agentBId"]);
   state.bonds ??= {};
   const id = incoming.data.bondId;
-  const prior = state.bonds[id] ?? {};
+  const prior = Object.hasOwn(state.bonds, id) ? state.bonds[id] : {};
   if (incoming.type === EVENT_TYPES.BOND_PROPOSED) {
     requireFields(incoming.data, ["proposerIdentityId", "scopes"]);
     state.bonds[id] = {
@@ -2352,6 +2349,12 @@ function knownMember(state, memberId) {
   const member = Object.hasOwn(state.members, memberId) && state.members[memberId];
   if (!member) throw new Error(`Unknown member: ${memberId}`);
   return member;
+}
+
+function knownChannel(state, channelId) {
+  const channel = Object.hasOwn(state.channels, channelId) && state.channels[channelId];
+  if (!channel) throw new Error("Unknown channel");
+  return channel;
 }
 
 // F2: the cited source must be a live public message in this room — the same
