@@ -53,7 +53,7 @@ async function certify(store, roomId) {
   return false;
 }
 
-test("wedged room: the poisoned room is named on the job detail, the health view, and operator status", async t => {
+test("wedged room: the poisoned room is named on the job detail and operator status; the public health view stays id-free", async t => {
   const store = await settle(t, ["alpha", "gamma"]);
   post(store, "gamma", "g1", "first");
   post(store, "gamma", "g2", "second");
@@ -80,7 +80,10 @@ test("wedged room: the poisoned room is named on the job detail, the health view
   assert.equal(run.failureDetail.recordId, "gamma", "the job detail names the poisoned room");
   assert.ok(!run.scanError.includes("gamma"), "the public error string carries no id");
 
-  // The heartbeat chain behind GET /api/health/jobs keeps the name.
+  // The heartbeat chain behind GET /api/health/jobs is public: it keeps
+  // the sanitized code/sub-check but never the room's id — a private
+  // room's id is block evidence (integrity-block-health on main). The
+  // name lives on the job detail (above) and operator status (below).
   const outcomes = await runCronJobs(
     { integrity: () => integrityJob.run(store, { deadline: Date.now() + 5000 }) },
     { now: () => Date.now(), log: () => {} }
@@ -88,7 +91,8 @@ test("wedged room: the poisoned room is named on the job detail, the health view
   const view = jobHealthView(applyOutcomes({}, outcomes), Date.now()).jobs.find(job => job.name === "integrity");
   assert.equal(view.lastErrorCode, "messages_backfill_failed");
   assert.equal(view.lastErrorSubcheck, "messages_backfill");
-  assert.equal(view.lastErrorRecordId, "gamma", "the health view names the poisoned room");
+  assert.equal(view.lastErrorRecordId, undefined, "the public health view carries no record id");
+  assert.ok(!JSON.stringify(view).includes("gamma"), "the public health view contains no block evidence");
 
   // The token-gated operator status carries the full outstanding list.
   const rows = operatorStatus(store).integrityFailures;

@@ -176,12 +176,14 @@ const SAFE_CARRIED_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 
 // Naming rule (integrity batch isolation): the steps below record ROOM ids
 // in integrity_failures — the store puts a room id in record_id for these
-// steps and no other kind of record. A room id is a public identifier (it
-// addresses the room in URLs), so the failure detail may name it: without
-// it, a wedged room is visible only in the console log line, and the
-// health surface can say a room is poisoned but never which one. Every
-// other record id (invitation ids above all) stays off the surface,
-// exactly as #3334 required, as do message bodies and secrets.
+// steps and no other kind of record. The failure detail may name that
+// room, so the poisoned room is reachable from the job detail and the
+// token-gated operator status, not only from the console log line. The
+// PUBLIC health views deliberately do not project it: a private room's
+// id is block evidence on an unauthenticated surface
+// (integrity-block-health). Every other record id (invitation ids above
+// all) stays off every surface, exactly as #3334 required, as do message
+// bodies and secrets.
 export const INTEGRITY_ROOM_RECORD_STEPS = Object.freeze(new Set([
   "messages_backfill", "messages_parity", "help_history"
 ]));
@@ -413,7 +415,7 @@ export const JOBS = Object.freeze([
         // below observes this path too. One extension: when an
         // outstanding failure is recorded against a room, the detail names
         // that room (INTEGRITY_ROOM_RECORD_STEPS) so the poisoned room is
-        // reachable from the health surface, not only from this log line.
+        // reachable from the operator surfaces, not only from this log line.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
           const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
@@ -867,7 +869,6 @@ export function startNodeScheduler({
           lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
           lastErrorClass: rec.lastFailure?.errorClass ?? null,
           lastErrorRecordClass: rec.lastFailure?.recordClass ?? null,
-          lastErrorRecordId: rec.lastFailure?.recordId ?? null,
           lastDurationMs: rec.lastDurationMs ?? null,
           lastSummaryAt: iso(rec.lastSummaryAt),
           lastGrade: rec.lastGrade ?? null,
