@@ -1176,6 +1176,7 @@ const LOOKUP_INDEXES = `
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1231,6 +1232,14 @@ export class RoomStore {
     // the threshold and recovers on the next committed write.
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
+    // Delta sync: a per-room append stamp, bumped when an events INSERT
+    // commits (see _armProjectionWatch + transaction()). Stream pumps poll
+    // this in-memory counter instead of re-reading the store on a timer; a
+    // stamp is a counter, not a sequence, so a rolled-back append can never
+    // mask a later commit that reuses its sequence.
+    this._appendStamps = new Map();
+    this._pendingAppends = new Set();
+    this._appendListeners = new Set();
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
@@ -2768,14 +2777,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
-        const run = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const result = run(...args);
-          cache()?.clear();
-          return result;
-        };
-      }
+      if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      const roomsWrite = ROOMS_WRITE.test(sql), eventAppend = EVENT_APPEND.test(sql);
+      if (!roomsWrite && !eventAppend) return stmt;
+      const run = stmt.run.bind(stmt);
+      stmt.run = (...args) => {
+        const result = run(...args);
+        if (roomsWrite) cache()?.clear();
+        // Every events insert in the codebase binds (roomId, sequence, ...)
+        // positionally; anything else is ignored rather than guessed at.
+        if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
+        return result;
+      };
       return stmt;
     };
     if (typeof this.db.exec === "function") {
@@ -2787,6 +2800,43 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
   }
+  // An events row was inserted for `roomId`. Inside a transaction the append
+  // is only pending: it becomes visible to stream pumps when the outermost
+  // transaction commits (_flushEventAppends, called from transaction()), and
+  // is dropped if that transaction rolls back. Outside a transaction the
+  // append has already committed by the time the statement returns.
+  _noteEventAppend(roomId) {
+    if (this.db.isTransaction) { this._pendingAppends.add(roomId); return; }
+    this._bumpAppendStamp(roomId);
+  }
+  _bumpAppendStamp(roomId) {
+    this._appendStamps.set(roomId, (this._appendStamps.get(roomId) ?? 0) + 1);
+    for (const listener of this._appendListeners) {
+      try { listener(roomId); } catch { /* a stream's wake must never fail a commit */ }
+    }
+  }
+  _flushEventAppends() {
+    if (!this._pendingAppends.size) return;
+    const rooms = [...this._pendingAppends];
+    this._pendingAppends.clear();
+    for (const roomId of rooms) this._bumpAppendStamp(roomId);
+  }
+  // The room's append stamp: a counter that changes whenever an event has
+  // committed to the room since the caller's last look. Purely in-memory.
+  eventStamp(roomId) { return this._appendStamps.get(roomId) ?? 0; }
+  // Subscribe to committed appends (the listener receives the roomId).
+  // Returns an unsubscribe function. Used by the SSE stream pump to wake on
+  // commit instead of polling the store.
+  onEventAppended(listener) {
+    this._appendListeners.add(listener);
+    return () => this._appendListeners.delete(listener);
+  }
+  // The room's committed head sequence in one primary-key read — the stream
+  // probe's change check, three orders of magnitude cheaper than a page read.
+  headSequence(roomId) {
+    const row = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    return row?.sequence ?? 0;
+  }
   transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
     const outermost = !this.db.isTransaction;
@@ -2797,10 +2847,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      if (outermost || isolated) { this._dropProjectionCache(); this._pendingAppends.clear(); }
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
+    if (outermost || isolated) { this._dropProjectionCache(); this._flushEventAppends(); }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }

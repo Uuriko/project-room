@@ -1,5 +1,6 @@
 import { accountSessionError, sameAccountSession } from "./account-client.js";
 export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, IDENTITY_MINT_POW_ESCALATION_BITS, escalatedIdentityMintPowBits, solveIdentityMintProof, submitIdentityMint } from "./account-client.js";
+import { applyEvent } from "./events.js";
 import { uiText } from "./strings.js";
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
@@ -34,6 +35,40 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
 // Room events that only append: they never change a message already held, so
 // a live refresh for them can read `?messages=recent` and keep older history.
 const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated"]);
+// Delta sync: message mutations whose stream event carries everything the
+// shared reducer needs to advance the held snapshot locally — no refetch.
+// Any other event type, and any covered event whose preconditions fail,
+// keeps the refresh() read path below (see tryDelta).
+const DELTA_EVENT_TYPES = new Set(["message.posted", "message.edited", "message.deleted", "message.redacted"]);
+// The server's activity audit tail (store.snapshot): the last 100 events,
+// filtered to decisions and work-bearing events. Mirrored so a locally
+// advanced snapshot carries the same Record tail a fresh read would serve.
+const ACTIVITY_TAIL_TYPES = /^(work\.|work_claim\.|verification\.|owner_decision\.)/;
+const activityTailEvent = event => event?.type === "decision.recorded" || ACTIVITY_TAIL_TYPES.test(event?.type ?? "") || event?.data?.workItemId !== undefined;
+// Mirror of the server's read-time redaction for the one message a delta
+// touched (server/redact-read.mjs): edit-history bodies never ride a served
+// record, and earlier log entries for the message show only its current
+// body (null once deleted or redacted). Entries are replaced, not mutated.
+function deltaReadModel(state, tail, event) {
+  const data = event?.data ?? {};
+  const messageId = event?.type === "message.posted" ? (typeof data.messageId === "string" ? data.messageId : event.id) : data.messageId;
+  if (typeof messageId !== "string" || !Array.isArray(state.messages)) return;
+  const record = state.messages.find(message => message.id === messageId);
+  if (record && Array.isArray(record.editHistory)) {
+    record.editHistory = record.editHistory.map(entry => {
+      if (!entry || typeof entry !== "object" || !Object.hasOwn(entry, "body")) return entry;
+      const { body, ...rest } = entry;
+      return rest;
+    });
+  }
+  const current = !record || record.deletedAt || record.body == null ? null : record.body;
+  for (let i = 0; i < tail.length; i++) {
+    const logged = tail[i];
+    if (!logged || !["message.posted", "message.edited"].includes(logged.type) || !logged.data || !Object.hasOwn(logged.data, "body")) continue;
+    const loggedId = typeof logged.data.messageId === "string" ? logged.data.messageId : logged.type === "message.posted" ? logged.id : null;
+    if (loggedId === messageId && logged.data.body !== current) tail[i] = { ...logged, data: { ...logged.data, body: current } };
+  }
+}
 // Join held history with a `?messages=recent` window. The window must start on
 // a held message with exactly `omitted` messages before it; anything else
 // returns null and the caller reads the full snapshot.
@@ -70,6 +105,13 @@ export class RoomClient {
     this.accountOwnership = null;
     this.streamRetryDelay = 1000;
     this.lastTypingSent = 0;
+    // Delta sync: the last snapshot handed to the app (any completeness),
+    // the raw event tail it carried, and the apply/fallback counters.
+    this.live = null;
+    this.rawTail = [];
+    this.windowOmitted = null;
+    this.backfilling = false;
+    this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -224,6 +266,10 @@ export class RoomClient {
   // sequence, so older history is corrected by those events' own reads.
   refresh(receipt = null, { revalidate = false, fill = false } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return Promise.resolve(); }
+    // Delta sync: a covered message event that continues the held snapshot
+    // exactly is applied locally; tryDelta declines (and counts) anything
+    // else, and the read path below handles it as before.
+    if (receipt && this.tryDelta(receipt)) return Promise.resolve();
     // Only sequenced room events can prove a snapshot already contains a change.
     // Reconnects, explicit refreshes and non-event receipts always revalidate access.
     const sequence = receipt?.event?.roomId === this.session?.roomId && Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
@@ -265,6 +311,7 @@ export class RoomClient {
             throw new Error(uiText("record.invalidView"));
           // A server without the recent view ignores the parameter and answers in full.
           const whole = full || !Object.hasOwn(read, "messagesWindow");
+          if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
           let snapshot, partial = false, complete = whole;
           if (whole) snapshot = read;
           else if (!holding || holding.partial) {
@@ -279,6 +326,8 @@ export class RoomClient {
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
               partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
+            this.live = { generation, session, snapshot };
+            this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
@@ -306,12 +355,19 @@ export class RoomClient {
   // changes the status line: the page is already usable. A failure retries quietly
   // with backoff; only an ended session (401/403) is surfaced.
   scheduleFill(delay = FILL_DELAY_MS) {
-    if (this.fillTimer) return;
+    if (this.fillTimer || this.backfilling) return;
     const generation = this.generation, session = this.session;
     this.fillTimer = setTimeout(() => {
       this.fillTimer = null;
-      if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull) return;
-      this.refresh(null, { fill: true }).then(() => { this.fillDelay = 1000; }, error => {
+      if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull || this.backfilling) return;
+      this.backfilling = true;
+      (async () => {
+        try {
+          // Paged history first; the legacy full read is the fallback
+          // whenever paging cannot prove a contiguous merge (backfill()).
+          if (!await this.backfill()) await this.refresh(null, { fill: true });
+        } finally { if (generation === this.generation) this.backfilling = false; }
+      })().then(() => { this.fillDelay = 1000; }, error => {
         if (generation !== this.generation || this.session !== session) return;
         if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { this.handleFailure(error); return; }
         const next = this.fillDelay || 1000;
@@ -320,10 +376,107 @@ export class RoomClient {
       });
     }, delay);
   }
+  // Paged history backfill over /conversation: walk the cursor chain from
+  // the newest page down to the floor and merge the older segment in front
+  // of the held recent window. The merge is accepted only when the segment
+  // is exactly the window's `omitted` count, id-disjoint from the window,
+  // and anchored by a head page identical to the window — cursor chains
+  // are head-anchored, so a mutation mid-walk restarts the chain (bounded)
+  // instead of splicing two heads. The records are the server's history
+  // read model, the same surface the recent window serves (edit-history
+  // bodies ride neither). Returns false — the legacy full read takes over —
+  // whenever contiguity cannot be proved; auth failures throw, like
+  // refresh()'s reads.
+  async backfill() {
+    const generation = this.generation, session = this.session;
+    const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    const held0 = this.heldMessages();
+    if (!held0?.partial || !anchored()) return false;
+    const expected = this.windowOmitted;
+    if (!Number.isSafeInteger(expected) || expected <= 0) return false;
+    const windowIds = () => held0.messages.map(message => message.id);
+    let seen = new Set(windowIds());
+    let older = [], cursor = null, resets = 0, headPage = true;
+    for (let page = 0; page < 1000 && older.length < expected; page++) {
+      let result;
+      try { result = await this.conversation({ limit: 100, cursor }); }
+      catch (error) {
+        // A server without the history endpoint (or a garbled page) is a
+        // paging failure, not a fill failure: the legacy read takes over.
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") throw error;
+        return false;
+      }
+      if (generation !== this.generation || this.session !== session) return false;
+      if (result.mode === "reset") { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; headPage = true; continue; }
+      if (headPage) {
+        // The chain's first page is the anchor: it must overlap the held
+        // window (else this chain's head is not our window's head at all),
+        // and nothing is collected or marked seen from it — anything on it
+        // that is not in the window arrived after the window was read, so
+        // it is newer than the window, never part of the older segment.
+        if (!result.messages.some(message => seen.has(message.id))) { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; continue; }
+      } else {
+        for (const message of result.messages) if (!seen.has(message.id)) { seen.add(message.id); older.push(message); }
+      }
+      headPage = false;
+      if (result.nextCursor == null) break;
+      cursor = result.nextCursor;
+    }
+    const heldNow = this.heldMessages(), live = anchored();
+    if (!heldNow || !live) return false;
+    if (!heldNow.partial) return true; // a full read completed history meanwhile
+    if (older.length !== expected || this.windowOmitted !== expected) return false;
+    const state = { ...live.snapshot.state, messages: [...older, ...heldNow.messages] };
+    const snapshot = { ...live.snapshot, state };
+    this.held = { ...heldNow, messages: state.messages.slice(), partial: false, owesFull: false, fullSequence: live.snapshot.sequence };
+    this.live = { generation, session, snapshot };
+    this.onSnapshot(snapshot, session);
+    return true;
+  }
   // History held from this session's last snapshot, for windowed refreshes.
   heldMessages() {
     const held = this.held;
     return held && held.generation === this.generation && held.session === this.session && Array.isArray(held.messages) ? held : null;
+  }
+  // Delta sync: advance the held snapshot with one stream/command receipt
+  // instead of re-reading the room. Only a covered message mutation that
+  // continues the held history exactly — next sequence, complete non-partial
+  // history, no read already in flight, same audit view — is applied, through
+  // the shared reducer, so derived state (thread roots, pins, receipt
+  // withdrawals) matches the server by construction. Anything else returns
+  // false and the caller falls back to refresh()'s reads; every decline of a
+  // covered type is counted in deltaStats for diagnosis.
+  tryDelta(receipt) {
+    const event = receipt?.event;
+    if (!event || !DELTA_EVENT_TYPES.has(event.type)) return false;
+    const decline = reason => { this.deltaStats.fallback++; const reasons = this.deltaStats.reasons; reasons[reason] = (reasons[reason] ?? 0) + 1; return false; };
+    if (this.flight) return decline("flight");
+    const held = this.heldMessages();
+    if (!held || held.partial || held.owesFull || held.fullSequence !== this.sequence) return decline("held");
+    const live = this.live;
+    if (!live || live.generation !== this.generation || live.session !== this.session || live.snapshot.sequence !== this.sequence) return decline("live");
+    if ((live.snapshot.auditView ?? "full") !== this.auditView) return decline("view");
+    if (!Number.isSafeInteger(receipt.sequence) || receipt.sequence !== this.sequence + 1 || event.roomId !== this.session?.roomId) return decline("gap");
+    let state;
+    try { state = applyEvent(live.snapshot.state, event); } catch { return decline("reducer"); }
+    // The stored projection keeps no replay bookkeeping; match its shape so
+    // the next delta (or the app's own reads) sees the served form.
+    state.seenEvents = {}; state.seenIdempotencyKeys = {};
+    // The event tail: the last 100 raw events, from our own copy of the
+    // stream event (a snapshot's log never carries the stream-only mention
+    // chips), presented with the same activity filter a fresh read applies.
+    const { mentions, ...logged } = event;
+    const tail = [...this.rawTail, logged].slice(-100);
+    deltaReadModel(state, tail, event);
+    this.rawTail = tail;
+    state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+    const snapshot = { ...live.snapshot, sequence: receipt.sequence, state };
+    this.sequence = receipt.sequence;
+    this.held = { ...held, messages: Array.isArray(state.messages) ? state.messages.slice() : null, fullSequence: receipt.sequence };
+    this.live = { generation: this.generation, session: this.session, snapshot };
+    this.deltaStats.applied++;
+    this.onSnapshot(snapshot, this.session);
+    return true;
   }
   async send(command) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
