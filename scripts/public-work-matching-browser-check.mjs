@@ -78,7 +78,7 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
   assert.equal((await client.readReview(submitted.receipt)).review.state, 'accepted');
   if (width === 320) await visitor.reload(); else await visitor.locator('#refresh-offers').click();
   await visitor.locator('#contribution-artifact').waitFor();
-  assert.match(await visitor.locator('#contribution-status').textContent(), /Submitted/); assert.doesNotMatch(await visitor.locator('#contribution-status').textContent(), /review pending|Accepted|Private contributor feedback/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
+  assert.match(await visitor.locator('#contribution-status').textContent(), /Verified/); assert.doesNotMatch(await visitor.locator('#contribution-status').textContent(), /review pending|Accepted|Private contributor feedback/); assert.match(await visitor.locator('#contribution-status').textContent(), /Hash-only/);
   assert.match(await visitor.locator('#contribution-artifact').textContent(), new RegExp(`${Buffer.byteLength(artifactText, 'utf8')} bytes`));
   assert.equal(await visitor.locator('#contribution-status script').count(), 0);
   if (process.env.ROOM_MATCH_SCREENSHOT_DIR) await visitor.locator('#contribution-status').screenshot({ path: `${process.env.ROOM_MATCH_SCREENSHOT_DIR}/public-contribution-result-${width}.png` });
@@ -96,14 +96,19 @@ for (const width of [1280, 320]) test(`owner enables scoped public work and anon
 
 
 test('an empty bounded recommendation page recovers failed fresh and continuation searches', { timeout: 45000 }, async t => {
-  const f = await setup(t, 320), identity = f.store.identities.create('Synthetic prior worker');
+  const f = await setup(t, 320);
+  // The 100 holds are spread across identities holding three each:
+  // since #3707 one identity may hold at most 3 live public-work
+  // claims, so a single holder for the whole page would be the squat
+  // that ceiling refuses.
+  const holders = Array.from({ length: 34 }, (_, n) => f.store.identities.create('Page holder ' + n));
   f.store.initialize(initialRoom('overflow'));
   for (let n = 0; n < 101; n++) {
     const id = `page-${String(n).padStart(3, '0')}`, room = n === 100 ? 'overflow' : 'commons';
     f.store.projectOffers.create(room, 'owner', { requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'], terms: { kind: 'task', title: id, summary: 'A useful contribution', acceptanceCriteria: ['Read the declared paths'], repositoryUrl: 'https://github.com/Uuriko/project-room', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
     f.store.projectOffers.transition(room, 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
     f.store.publicWorkClaims.enable(room, 'owner', id, { requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: [`files/${id}`] });
-    if (n < 100) f.store.publicWorkClaims.act(id, identity.secret, 'claim', { requestId: `hold-${id}`, expectedTermsVersion: 1 });
+    if (n < 100) f.store.publicWorkClaims.act(id, holders[Math.floor(n / 3)].secret, 'claim', { requestId: `hold-${id}`, expectedTermsVersion: 1 });
   }
   await f.page.goto(`${f.origin}/offers`); await f.page.locator('#find-work-form [type=submit]').click();
   await f.page.locator('#more-matches').waitFor({ state: 'visible' }); assert.equal(await f.page.locator('[data-match-offer]').count(), 0);

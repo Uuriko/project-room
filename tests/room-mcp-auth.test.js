@@ -111,12 +111,12 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   assert.equal(names.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
   assert.deepEqual(names.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
   assert.deepEqual(names.slice(CORE_MCP_TOOLS.length), JOIN_TOOLS);
-  assert.equal(names.includes("room_react"), true);
+  assert.equal(names.includes("room_react"), false);
   assert.equal(names.includes("bond.list"), false);
   for (const name of names) assert.match(name, MCP_TOOL_NAME_RE);
   const full = await rpc(origin, "tools/list", { profile: "full" }, owner.secret);
   const fullNames = (await full.json()).result.tools.map(tool => tool.name);
-  assert.equal(fullNames.includes("room_react"), true);
+  assert.equal(fullNames.includes("room_react"), false);
   assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
   assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
