@@ -17,7 +17,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
-import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
+import { commitMessageRedaction, readRedactionLog, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
 import { ServiceError } from "./store.mjs";
@@ -337,8 +337,16 @@ function redactRoomMessages(store, roomId, actorId) {
   let state = room.state;
   let removed = 0;
   const at = new Date(store.now()).toISOString();
-  for (const messageId of ids) {
-    const result = commitMessageRedaction(store.db, { roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest });
+  // One read of the room's log for the whole pass, and one projection write
+  // (on the last message). Per message, each call re-read and re-parsed the
+  // entire log and rewrote the whole projection: O(messages x events), which
+  // put a solely owned room of a few thousand messages past the Worker's
+  // 30 s CPU limit, so the account could not be deleted.
+  const log = readRedactionLog(store.db, roomId);
+  for (const [index, messageId] of ids.entries()) {
+    const result = commitMessageRedaction(store.db, {
+      roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest, log, writeProjection: index === ids.length - 1
+    });
     state = result.state;
     removed += result.rewritten;
   }
