@@ -71,7 +71,7 @@
     "src/auth-signin-ui.js": "sha256:19e8506661ff06dfbc6f2e79883d379a8620f45e0abadd7e53301a4b122cf0a6",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
-    "src/board-ui.js": "sha256:c0fa91126825fecb1186b5c56937c0fb875ef421c5ed0770081004556730b50f",
+    "src/board-ui.js": "sha256:0ceeb4073988677ad5c2b2a6fbcf7e12d045b32175132ac8e227eefa77b19acd",
     "src/board.css": "sha256:97883f6b1ab6817bde7b020f1fe1ac463eb0cc002e19cda8b76895474b2c0a47",
     "src/bounty-board.js": "sha256:3c65ff411c06bcbaed3825f2b9145233af79a5439f31de36ecb152e0e1a2be14",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
