@@ -88,9 +88,7 @@ export function publicJoinInviteHref(token, purposePath = "", locationLike = glo
   const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
     || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])\b/i.test(origin);
   const pathAware = humanJoinShareBase(locationLike);
-  // R29-3: the door is only for the getdasha site, whose root is not the app.
-  // Any other https host serving the app (room.trydemigod.com) keeps its own
-  // address, so the Invite dialog's personal link and a created link share one host.
+  // Keep created and personal links on the app host; getdasha roots use the door.
   const appHere = /^https:\/\//i.test(origin) && !/(^|\.)getdasha\.com$/i.test(hostname)
     && !/\.html$/i.test(pathAware);
   const base = local

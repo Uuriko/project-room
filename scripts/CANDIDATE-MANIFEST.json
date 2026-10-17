@@ -125,7 +125,7 @@
     "src/retention-ui.js": "sha256:2b444302ca6d074a7c549af1d6a79fa2ff217c426aea36096213f27ae9a81a47",
     "src/return-brief.js": "sha256:bf1c2775a5347645110b87a1d8ef22810950089c3616e7b4467e79788bdd4114",
     "src/room-charter.js": "sha256:594e8a1486774d56cd197349996e6225ce9a435918641717c8794c0c2ee21d64",
-    "src/room-deep-link.js": "sha256:edb030705ce5f8a6fe742cccfc3d5767df16f251288104241cbbea64d9262e90",
+    "src/room-deep-link.js": "sha256:fc111ee798a43ee05991c147fa1b4cf0b743c5cc5530a8357ff8770146ea98c3",
     "src/room-instructions.js": "sha256:f44a40e9edcf346e1804bdbd87dd7529d51b16e212a74f1d74d7aa79ea91901c",
     "src/room-layout.js": "sha256:1834ec27dcef282e535190e7851483cfd37cfcef6343b5f66c58da3844f1c5d8",
     "src/room-roster.js": "sha256:938feb4cf75c13f4ffbda8e59b6354b00c3a6512fc05de1fc902dbbd82f2a5e1",
