@@ -53,8 +53,7 @@ test("composer: live file chips for other members, autosize", { timeout: 60000 }
 
   // 12650: Maya sees the owner's file chip without reloading.
   await ownerPage.locator("#composer-file").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
-  await ownerPage.locator(".composer-files .file-chip, #composer-files .file-chip").first().waitFor({ state: "visible" }).catch(() => {});
-  await ownerPage.waitForFunction(() => !document.querySelector("[aria-busy='true']#message-form"), null, { timeout: 5000 }).catch(() => {});
+  await ownerPage.waitForFunction(() => document.querySelector("#composer-attachments")?.textContent === "notes.txt×");
   await input.fill("with a file");
   await ownerPage.locator('#message-form button[type="submit"]').click();
   await mayaPage.locator('#message-list [data-download-file]', { hasText: "notes.txt" }).waitFor({ state: "visible", timeout: 10000 });
