@@ -653,7 +653,7 @@ const nodeStorage = {
   transaction(db, fn, readOnly, { isolated = false } = {}) {
     const run = () => {
       const result = fn();
-      if (isolated && result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
+      if (result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
       return result;
     };
     if (db.isTransaction) {
@@ -3146,7 +3146,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
-  close() { this._projectionCache?.clear(); this.db.close(); }
+  close() {
+    // Idempotent: a repeated or re-entrant close is a no-op, so a teardown
+    // that unwinds through close() twice cannot mask the real shutdown
+    // error with a raw "database is not open".
+    if (this._closed) return;
+    this._closed = true;
+    this._projectionCache?.clear();
+    this.db.close();
+  }
   // Invalidate both parsed reads and unpublished command candidates.
   _dropProjectionCache() {
     this._projectionCache?.clear();
