@@ -17,18 +17,13 @@
 //   board claim  — not invalidated (no premiseFlag, not supersededBy),
 //                  state "unclaimed", kind "work", every dependsOn done,
 //                  and (when a viewer is named) the viewer may write claims.
-//   public task  — the facade packet's own claimable verdict (#3707):
-//                  claim.state "unclaimed" AND the submission deadline
-//                  has not passed. claim.state alone is the weaker rule
-//                  the facade moved past — it offers tasks the claim
-//                  operation refuses with 409 (#3879).
 // Work items are not a separate source: decision #10 migrated them onto
 // the board (server/work-item-board.mjs), so an accepted work item IS a
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 
-export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
+export const AVAILABLE_WORK_SOURCES = ["board"];
 
 const usableClaim = item => Boolean(item) && !item.premiseFlag && !item.supersededBy;
 
@@ -61,22 +56,6 @@ const boardItem = (roomId, item) => ({
   }
 });
 
-const publicTaskItem = packet => ({
-  id: packet.taskId,
-  title: packet.title ?? packet.taskId,
-  source: "publicTask",
-  roomId: packet.namespaceId,
-  state: "unclaimed",
-  owner: null,
-  leaseExpiresAt: packet.claim?.leaseExpiresAt ?? null,
-  terms: { termsVersion: packet.termsVersion, generation: packet.claim?.generation },
-  untrusted: true,
-  claimAction: {
-    method: "POST",
-    endpoint: `/api/public-work/tasks/${packet.taskId}/claim`,
-    params: { requestId: "<uuid>" }
-  }
-});
 
 // May this viewer take board work in the room? Mirrors needs-me's gate:
 // no named viewer (public/internal reads) means no viewer narrowing.
@@ -126,29 +105,4 @@ export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 
   let state = null;
   try { state = store.room(roomId)?.state ?? null; } catch { state = null; }
   return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
-}
-
-// Cross-room public pool: published public-work tasks the facade itself
-// calls claimable. Scans the facade's own paginated list so the
-// availability classification stays the facade's (packet()). The scan
-// always walks the whole pool: total is the pool-wide claimable count
-// (the availableWorkInRoom contract), not the limit-capped page size.
-export function availablePublicTasks(store, { limit = 50 } = {}) {
-  const facade = store.publicWorkClaims;
-  if (!facade?.list) return { items: [], total: 0 };
-  const items = [];
-  let total = 0;
-  let after = "";
-  for (;;) {
-    const page = facade.list({ limit: 100, after });
-    const tasks = page?.tasks ?? [];
-    for (const packet of tasks) {
-      if (packet?.claimable !== true) continue;
-      total += 1;
-      if (items.length < limit) items.push(publicTaskItem(packet));
-    }
-    if (!page?.nextCursor || tasks.length === 0) break;
-    after = page.nextCursor;
-  }
-  return { items, total };
 }
