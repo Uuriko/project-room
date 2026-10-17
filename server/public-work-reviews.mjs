@@ -17,7 +17,11 @@ import { projectPublicWorkReceipt } from './public-read-model.mjs';
 // altered, and the stamp is derived entirely from the review fact
 // recorded here. A verify PASS additionally executes the platform's own
 // artifact-integrity check first: the stored bytes are re-hashed and
-// must match the hash the receipt was issued under.
+// must match the hash the receipt was issued under. The outcome recorded
+// here is not private, though: receipt reads compose this record's
+// verdict and decision onto the canonical and public receipt faces
+// (#3733, publicWorkReceiptOutcome in server/public-read-model.mjs);
+// the reviewer identity, reason and fingerprint stay member-side.
 export const publicWorkReviewsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_reviews (
   receipt_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL

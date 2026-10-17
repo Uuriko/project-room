@@ -206,3 +206,92 @@ test('cash rewards still cannot enter the public board, and unpaid review behavi
   assert.equal(store.publicWorkSettlement.link('cash-task'), null);
   conserved(store);
 });
+
+// Mutation-testing lane 2026-10-16 (B1): the two pins below close survivor
+// holes found by anchored mutation of server/public-work-settlement.mjs.
+
+test('attach: a second, different receipt is refused and the first binding stands', t => {
+  // Kills PS-05 (already-attached refusal removed from attachSubmission).
+  // Without the refusal the call falls through to the escrow, which happens
+  // to refuse the second claim too — but with the wrong error, after doing
+  // escrow work inside the finish transaction. The rail's own 409 is the
+  // contract: settlement_already_attached, and the first binding untouched.
+  const f = fixture(t), { store } = f;
+  f.enable();
+  const receipt = f.claimAndFinish();
+  const before = store.publicWorkSettlement.link('paid-task');
+  assert.equal(before.receipt_id, receipt.receiptId);
+  // Control: re-attaching the SAME receipt is the idempotent path (a view).
+  assert.ok(store.publicWorkSettlement.attachSubmission('commons', 'paid-task', receipt));
+  assert.throws(() => store.publicWorkSettlement.attachSubmission('commons', 'paid-task',
+    { ...receipt, receiptId: 'pwr_forged_second_submission' }), code('settlement_already_attached'));
+  const after = store.publicWorkSettlement.link('paid-task');
+  assert.equal(after.receipt_id, receipt.receiptId);
+  assert.equal(after.claimant_lane, before.claimant_lane);
+  conserved(store);
+});
+
+test('settle: a funded task with no attached submission cannot be settled', t => {
+  // Kills PS-06 (not-submitted leg removed from settleOnVerdict). Without
+  // it the call falls through to the escrow, which refuses with its own
+  // invalid_state; the rail's settlement_not_submitted is the refusal the
+  // review surface keys on, and it must fire for both verdicts.
+  const f = fixture(t), { store } = f;
+  f.enable(); // funded, but nobody has claimed or finished
+  assert.throws(() => store.publicWorkSettlement.settleOnVerdict('commons', 'paid-task', { decision: 'accepted', reason: 'premature' }),
+    code('settlement_not_submitted'));
+  assert.throws(() => store.publicWorkSettlement.settleOnVerdict('commons', 'paid-task', { decision: 'rejected', reason: 'premature' }),
+    code('settlement_not_submitted'));
+  conserved(store);
+});
+
+test('claimable gate: the poster cannot claim their own paid task on the rail', t => {
+  // Kills PS-04 (poster leg removed from the rail's assertClaimable). The
+  // escrow refuses a poster self-claim as well, but only at claim time
+  // inside the escrow; the rail's own 403 is what stops the poster before
+  // a public-work claim record is created.
+  const f = fixture(t), { store } = f;
+  const ownerIdentity = store.identities.create('Owen');
+  store.db.prepare('INSERT INTO identity_links VALUES (?,?,?,?)').run('commons', ownerIdentity.identityId, 'owner', store.now());
+  f.enable();
+  assert.throws(() => store.publicWorkSettlement.assertClaimable('commons', 'paid-task', ownerIdentity.identityId),
+    code('public_work_not_owner'));
+  // Control: the linked worker identity is claimable.
+  assert.equal(store.publicWorkSettlement.assertClaimable('commons', 'paid-task', f.producer.identityId), 'worker');
+  conserved(store);
+});
+
+test('claimable gate: a probation-band lane is refused above the probation cap on the rail', t => {
+  // Kills PS-09 (probation leg removed from the rail's assertClaimable).
+  // The escrow enforces the same gate inside claimBounty; the rail checks
+  // first so a paid-task claim fails with the rail's own refusal before any
+  // escrow state moves. Repeated claim flakes (-6 each, 30-day half-life)
+  // put the worker lane in the probation band (score < -20); each flake
+  // also starts a 7-day claim cooldown, so the clock steps a week between
+  // flakes — six flakes land near -27, clear of the threshold. An 8-credit
+  // task is above the 5-credit probation cap; a 4-credit task is not
+  // (control).
+  const f = fixture(t, { amountMinor: '8000' }), { store } = f;
+  const escrow = store.bountyEscrow;
+  for (let i = 0; i < 6; i++) {
+    const { bounty } = escrow.postBounty('commons',
+      { poster: 'owner', title: `flake ${i}`, criteria: 'C', amount: 8, deadline: new Date(store.now() + 3_600_000).toISOString() });
+    escrow.fundBounty('commons', bounty.bountyId, { funder: 'owner' });
+    escrow.claimBounty('commons', bounty.bountyId, { claimant: 'worker' });
+    f.tick(3_600_000 + 1);
+    assert.equal(escrow.finalizeBounty('commons', bounty.bountyId, { caller: 'owner' }).action, 'refunded');
+    f.tick(7 * 24 * 3_600_000);
+  }
+  f.enable();
+  assert.throws(() => store.publicWorkSettlement.assertClaimable('commons', 'paid-task', f.producer.identityId),
+    code('reputation_probation'));
+  // Control: at 4 credits the same probation lane is claimable (never a ban).
+  const terms = { kind: 'task', title: 'Small paid task', summary: 'Settle me', acceptanceCriteria: ['Correct result'],
+    repositoryUrl: 'https://github.com/example/project', reward: { kind: 'work_trade', unit: 'credit', amountMinor: '4000' }, approvalPolicy: { mode: 'human' } };
+  store.projectOffers.create('commons', 'owner', { requestId: 'create-small', offerId: 'small-task', reviewerMemberIds: ['owner'], terms });
+  store.projectOffers.transition('commons', 'owner', 'small-task', 'publish', { requestId: 'publish-small', expectedRevision: 1 });
+  store.publicWorkClaims.enable('commons', 'owner', 'small-task',
+    { requestId: 'enable-small', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['result.txt'] });
+  assert.equal(store.publicWorkSettlement.assertClaimable('commons', 'small-task', f.producer.identityId), 'worker');
+  conserved(store);
+});
