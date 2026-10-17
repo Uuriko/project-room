@@ -3,6 +3,13 @@
 // probes. One failed run records a streak and stays quiet. The second failed
 // run in a row notifies once. A later pass sends one recovery notice.
 //
+// A probe that cannot read or write its own streak state confesses loudly:
+// runExternalProbe throws a ProbeStateError, which the scheduled handler
+// surfaces as a failed Cron invocation. It never returns a healthy-looking
+// result — without state the two-failure threshold is unreachable, so a
+// quiet return would make a dead watcher indistinguishable from a healthy
+// one.
+//
 // Destinations are inert until their secrets exist:
 //   PROBE_ALERT_WEBHOOK_URL — HTTPS webhook (a Cloudflare notification URL
 //     is one option). http is accepted only for 127.0.0.1 and localhost.
@@ -281,6 +288,14 @@ async function postJson(fetchImpl, url, body, headers, limitMs) {
   return response.status >= 200 && response.status < 300;
 }
 
+export class ProbeStateError extends Error {
+  constructor(code, options) {
+    super(`external probe state failure: ${code}`, options);
+    this.name = "ProbeStateError";
+    this.code = code;
+  }
+}
+
 async function loadState(kv) {
   if (!kv || typeof kv.get !== "function" || typeof kv.put !== "function") return { state: null, error: "state_unbound" };
   try {
@@ -311,11 +326,9 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
   const limitMs = timeoutMs(env);
   if (!origin) return { ok: false, error: "invalid_origin", checks: [], alerts: [], consecutiveFailures: null };
   const loaded = await loadState(env.PROBE_STATE);
+  if (loaded.error) throw new ProbeStateError(loaded.error);
   const checks = await runChecks(origin, fetchImpl, limitMs);
   const failed = checks.some(check => !check.ok);
-  if (loaded.error) {
-    return { ok: !failed, error: loaded.error, checks, alerts: [], consecutiveFailures: null };
-  }
   const at = new Date().toISOString();
   const previous = loaded.state;
   let state = failed
@@ -334,8 +347,8 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
     };
   try {
     await saveState(env.PROBE_STATE, state);
-  } catch {
-    return { ok: !failed, error: "state_unwritable", checks, alerts: [], consecutiveFailures: state.consecutiveFailures };
+  } catch (error) {
+    throw new ProbeStateError("state_unwritable", { cause: error });
   }
   const webhook = webhookDestination(env);
   const room = roomDestination(env);
@@ -381,8 +394,8 @@ export async function runExternalProbe(env = {}, fetchImpl = globalThis.fetch) {
   if (recover && !state.alertedWebhook && !state.alertedRoom) state = { ...state, incidentId: null };
   try {
     await saveState(env.PROBE_STATE, state);
-  } catch {
-    return { ok: !failed, error: "state_unwritable", checks, alerts, consecutiveFailures: state.consecutiveFailures };
+  } catch (error) {
+    throw new ProbeStateError("state_unwritable", { cause: error });
   }
   return { ok: !failed, error: null, checks, alerts, consecutiveFailures: state.consecutiveFailures };
 }
