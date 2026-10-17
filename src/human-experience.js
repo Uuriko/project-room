@@ -10,12 +10,13 @@ export function faceRun(runs) {
   const latest = items => items.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0] ?? null;
   return latest(list.filter(run => !CLOSED.includes(run.status))) ?? latest(list);
 }
-export function askFaceStatus(run, now = Date.now()) {
+export function askFaceStatus(run, now = Date.now(), assistant = null) {
   if (!run) return null;
   if (run.stopOutcome === 'attempt_revoked') return { key: 'unknown', text: uiText('human.face.connectionInterrupted') };
   const waited = Math.max(0, now - (run.createdAt ?? now));
-  const key = run.status === 'queued' ? (waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
-  const textKey = ({ asked: 'asked', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
+  // R366-1: a paused assistant will not claim; say so instead of "may be offline".
+  const key = run.status === 'queued' ? (assistant?.availability === 'paused' ? 'host_paused' : waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
+  const textKey = ({ asked: 'asked', host_paused: 'hostPaused', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
   return { key, text: textKey ? uiText(`human.face.${textKey}`) : run.status };
 }
 // A plain message in a one-person room goes to the Room assistant only when it
@@ -27,7 +28,7 @@ export function soloUnaddressed({ body, replyToId, members, messages, selfId, as
   const source = replyToId ? (messages ?? []).find(m => m.id === replyToId) : null;
   return !source || source.authorId === selfId || source.authorId === assistantId;
 }
-export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript }) {
+export function installHumanExperience({ getState, getSession, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
@@ -102,7 +103,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     section.querySelector('strong').textContent = assistant.name || 'Room';
-    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
+    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : assistant.availability === 'paused' ? uiText("human.assistantPaused") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     const runs = Object.values(projection.runs ?? {});
@@ -143,7 +144,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         controls && !sourceDeleted && run.status === 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-resolve=\"true\" data-revision=\"", run.revision, "\">", uiText('human.resolveDirection'), "</button>"].join('') : '',
         "</div></details>"].join('');
     }).join('');
-    const current = faceRun(Object.values(projection.runs ?? {}).filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current);
+    const current = faceRun(Object.values(projection.runs ?? {}).filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current, Date.now(), projection.assistant);
     const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
     const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
     const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.attemptId, current.stopOutcome, current.resultMessageId, faceControls, faceSource?.body?.slice(0, 120)]) : '';
@@ -196,16 +197,24 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     catch (failure) { if (stamp === key()) { error = failure.status === 404 ? uiText("human.copy.014") : failure.message; $('#assistant-error').textContent = error; } }
     finally { reading = false; }
   }
-  async function invoke() {
+  async function invoke({ rethrow = false } = {}) {
     if (!operation || !getState()) return;
     const owned = operation, stamp = key();
-    try { await client.request(path(), { method: 'POST', data: owned }); if (stamp !== key() || operation !== owned) return; operation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0; await refresh(); }
+    try {
+      const value = await client.request(path(), { method: 'POST', data: owned });
+      if (stamp !== key() || operation !== owned) return value;
+      operation = null; rejectedOperation = null; persistOperation(); contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false'); error = ''; lastRead = 0;
+      if (owned.action === 'submit' && value.receipt) onSubmitted?.(owned, value.result);
+      // A failed refresh does not undo an accepted send. The stream can catch up.
+      if (value.receipt) { try { await client.refresh(value.receipt); } catch { /* durable receipt already received */ } }
+      await refresh(); return value;
+    }
     catch (failure) { if (stamp === key()) {
       const rejected = failure.status >= 400 && failure.status < 500;
       error = ["", owned.sourceMessageId && ['invoke','contribute','resolve'].includes(owned.action) ? 'Message sent. ' : '', "Assistant request ", rejected ? 'was rejected' : 'not confirmed', ": ", failure.message, ""].join('');
       if (rejected) { rejectedOperation = owned; operation = null; persistOperation(); }
       paint();
-    } }
+    } if (rethrow) throw failure; }
   }
   $('#assistant-retry').onclick = invoke;
   $('#assistant-discard').onclick = () => { operation = null; rejectedOperation = null; persistOperation(); error = ''; contribution = null; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed','false'); paint(); };
@@ -213,9 +222,11 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     const original = rejectedOperation, stamp = key(); if (!original) return;
     try {
       const latest = await client.request(path()); if (stamp !== key() || original !== rejectedOperation) return;
-      const run = latest.runs.find(r => r.id === original.runId);
-      if (original.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
-      operation = { ...original, requestId: crypto.randomUUID(), ...(original.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in original ? { expectedAttemptId: run.attemptId || null } : {}) }; rejectedOperation = null; projection = latest; persistOperation();
+      const intent = original.action === 'submit' ? original.intent : original;
+      const run = latest.runs.find(r => r.id === intent.runId);
+      if (intent.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
+      const reviewed = { ...intent, ...(intent.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in intent ? { expectedAttemptId: run.attemptId || null } : {}) };
+      operation = { ...(original.action === 'submit' ? { ...original, intent: reviewed } : reviewed), requestId: crypto.randomUUID() }; rejectedOperation = null; projection = latest; persistOperation();
       error = uiText("human.copy.016"); paint();
     } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
   };
@@ -305,7 +316,9 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0; selected = false; ask.textContent = 'Ask Room'; ask.setAttribute('aria-pressed', 'false');
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
-          if (pending && ['invoke','contribute','resolve','pause','resume','cancel'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
+          if (pending?.action === 'submit' && typeof pending.requestId === 'string' && pending.command?.type === 'message.posted'
+            && typeof pending.command?.data?.messageId === 'string' && Array.isArray(pending.fileIds)) { operation = pending; error = uiText("human.copy.023"); }
+          else if (pending && ['invoke','contribute','resolve','pause','resume','cancel'].includes(pending.action) && typeof pending.requestId === 'string' && typeof pending.runId === 'string'
             && (['pause','resume','cancel'].includes(pending.action) || getState().messages.some(m => m.id === pending.sourceMessageId && m.authorId === getSession().member.id && !m.toMemberId))) { operation = pending; error = uiText("human.copy.023"); }
         } catch { /* corrupt/unavailable saved state is not executed */ }
         let enabled = false; try { enabled = sessionStorage.getItem(`room-human-advanced:${boundary}`) === 'true'; } catch { /* defaults */ }
@@ -316,6 +329,15 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       paint(); void refresh();
     },
     syncContribution,
+    hasSubmission(command) {
+      return [operation, rejectedOperation].some(item => item?.action === 'submit' && item.command.id === command.id);
+    },
+    async submit(command, intent, fileIds) {
+      const previous = [operation, rejectedOperation].find(item => item?.action === 'submit' && item.command.id === command.id);
+      operation = previous || { action: 'submit', requestId: `ask-${command.data.messageId}`, command, intent, fileIds };
+      persistOperation();
+      return invoke({ rethrow: true });
+    },
     intent(content) {
       syncContribution();
       if (contribution) {
@@ -337,10 +359,6 @@ export function installHumanExperience({ getState, getSession, client, notice, o
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
       $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
       resultDialog.showModal(); return true;
-    },
-    async posted(messageId, wanted) {
-      if (!wanted || !human()) return;
-      operation = { ...wanted, requestId: `ask-${messageId}`, ...(wanted.action === 'invoke' ? { runId: `run-${messageId}` } : {}), sourceMessageId: messageId }; persistOperation(); await invoke();
     }
   };
 }
