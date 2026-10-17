@@ -209,15 +209,6 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_messages": {
       "inputSchema": "ddc58b6f3ab954c3",
       "annotations": {
@@ -451,7 +442,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "heartbeat_ack": {
@@ -473,7 +464,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "120eddde3b5107ab",
+      "inputSchema": "ae83402d9f38b5a4",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -514,7 +505,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "inbox_list_attachments": {
@@ -784,7 +775,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "room_introduce_outside_agent": {
@@ -847,7 +838,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "room_list_agent_invites": {
@@ -985,17 +976,8 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_board": {
-      "inputSchema": "7ec815b9fd824037",
+      "inputSchema": "7dac81175f92cec4",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1292,7 +1274,7 @@
       }
     },
     "wake_register": {
-      "inputSchema": "943d47b61724e3b3",
+      "inputSchema": "cfbd879003bd7093",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1344,7 +1326,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "room_accept_work": {
@@ -1425,7 +1407,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "room_join_kits": {
@@ -1733,7 +1715,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "room_assistant_context": {
@@ -1835,15 +1817,6 @@
         "openWorldHint": false
       }
     },
-    "room_react": {
-      "inputSchema": "7036b9806ce99e0d",
-      "annotations": {
-        "readOnlyHint": false,
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false
-      }
-    },
     "room_read_inbox": {
       "inputSchema": "cd4b47e787ec024d",
       "annotations": {
@@ -1915,7 +1888,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "list_land_queue": {
@@ -1951,7 +1924,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "room_join_kits": {
@@ -2115,7 +2088,7 @@
         "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false
+        "openWorldHint": true
       }
     },
     "heartbeat_ack": {
@@ -2137,7 +2110,7 @@
       }
     },
     "heartbeat_set": {
-      "inputSchema": "120eddde3b5107ab",
+      "inputSchema": "ae83402d9f38b5a4",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2281,7 +2254,7 @@
       }
     },
     "wake_register": {
-      "inputSchema": "943d47b61724e3b3",
+      "inputSchema": "cfbd879003bd7093",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

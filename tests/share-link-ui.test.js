@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, reuseVisibleRoom, readUncertainJoin, writeUncertainJoin, clearUncertainJoin } from "../src/share-links.js";
+import { formatShareInvitation, humanJoinShareBase, humanJoinShareUrl, installShareLinks, setShareLinkStatus, invitationFailureMessage, invitationManagementFailureMessage, requestFailureMessage, failureTextWithHint, reuseVisibleRoom, readUncertainJoin, writeUncertainJoin, clearUncertainJoin } from "../src/share-links.js";
 
 test("human join share URLs keep the app path so www /room is not dropped", () => {
   const token = "T".repeat(43);
@@ -79,6 +79,18 @@ test("general request failures hide raw transport and parser text but keep servi
     assert.equal(requestFailureMessage(error), "The connection was interrupted and the result could not be confirmed");
   }
   assert.equal(requestFailureMessage(new Error("Membership is inactive.")), "Membership is inactive.");
+});
+
+test("failureTextWithHint joins message and hint with exactly one period (#3597)", () => {
+  // Service messages already end with a period: the join must not double it.
+  assert.equal(
+    failureTextWithHint(new Error("Something went wrong on our side. Try again in a moment."), "Draft kept. Send again to retry."),
+    "Something went wrong on our side. Try again in a moment. Draft kept. Send again to retry.");
+  // The interrupted base has no trailing period: the join supplies it.
+  assert.equal(
+    failureTextWithHint(new TypeError("Failed to fetch"), "Your entries were kept; try again."),
+    "The connection was interrupted and the result could not be confirmed. Your entries were kept; try again.");
+  assert.doesNotMatch(failureTextWithHint(new Error("Membership is inactive."), "Sign in again."), /\.\./);
 });
 
 test("invitation management recovery distinguishes listing, creation and cancellation", () => {

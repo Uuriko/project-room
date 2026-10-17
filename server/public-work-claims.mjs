@@ -5,6 +5,7 @@ import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
@@ -199,10 +200,14 @@ export class PublicWorkClaims {
   }
   offer(row) {
     // Recheck publication, archive state and immutable public terms each time.
+    // Paid tasks carry the existing work_trade/credit reward vocabulary and
+    // settle through the escrow rail (server/public-work-settlement.mjs);
+    // cash rewards remain not-configured and unavailable here.
     const offer = this.store.projectOffers.read(row.offer_id);
-    if (offer.version !== row.terms_version || offer.reward.kind !== 'unpaid') fail(409, 'public_work_unavailable', 'Task is no longer available');
+    if (offer.version !== row.terms_version || publicWorkRewardMillis(offer) === undefined) fail(409, 'public_work_unavailable', 'Task is no longer available');
     return offer;
   }
+  settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
   request(row, actorId, action, input, operation) {
     check(identifier(input.requestId), 'Invalid request ID');
     const encoded = canonicalJson({ action, ...input });
@@ -217,18 +222,28 @@ export class PublicWorkClaims {
   }
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
-    const receipt = this.db.prepare('SELECT receipt_id,identity_id FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
-    const state = receipt ? 'submitted' : live.owner ? 'claimed' : 'unclaimed';
+    const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    // #3546: submitted is the delivered state, not the end of the story —
+    // once the named review accepts the submission, the receipt's state
+    // becomes "verified" and the packet says so distinctly.
+    let receiptBody = null;
+    if (receipt) { try { receiptBody = JSON.parse(receipt.receipt_json); } catch { receiptBody = null; } }
+    const state = receipt ? (receiptBody?.state === 'verified' ? 'verified' : 'submitted') : live.owner ? 'claimed' : 'unclaimed';
     // #3707: a task whose submission deadline (terms.deadline) has passed is
     // not claimable, whatever its claim state — the board must not offer
     // work whose submission window is already closed.
     const deadlinePassed = offer.deadline != null && Number.isFinite(Date.parse(offer.deadline)) && Date.parse(offer.deadline) <= this.store.now();
+    const settlement = this.settlementService().viewForOffer(row.offer_id);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
+      reward: offer.reward, ...(settlement ? { settlement } : {}),
       claimable: state === 'unclaimed' && !deadlinePassed,
       claim: { state, generation: row.generation,
-        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null } };
+        identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
+        verification: receipt ? (receiptBody?.verification ?? 'hash_only') : null,
+        deliveryDigest: receiptBody?.deliveryDigest ?? null,
+        criteriaAttestation: receiptBody?.criteriaAttestation ?? null } };
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -250,7 +265,7 @@ export class PublicWorkClaims {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
         JOIN rooms r ON r.id=t.room_id WHERE o.status='published' AND r.archived_at IS NULL
-        AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id`).all();
+        AND o.version=t.terms_version AND (json_extract(o.terms,'$.reward.kind')='unpaid' OR (json_extract(o.terms,'$.reward.kind')='work_trade' AND json_extract(o.terms,'$.reward.unit')='credit')) ORDER BY t.offer_id`).all();
       // Claim state lives in the work-claims store and receipts, not in a
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
@@ -381,12 +396,17 @@ export class PublicWorkClaims {
         if (!row) fail(404, 'offer_not_found', 'Offer not found');
         if (row.revision !== input.expectedRevision || row.version !== input.expectedTermsVersion) fail(409, 'stale_offer', 'Offer changed; read it again');
         const offer = this.store.projectOffers.read(offerId);
-        if (offer.reward.kind !== 'unpaid' || !offer.repositoryUrl) fail(422, 'public_work_not_eligible', 'Public claims currently require an unpaid offer with a repository URL');
+        const rewardMillis = publicWorkRewardMillis(offer);
+        if (rewardMillis === undefined || !offer.repositoryUrl) fail(422, 'public_work_not_eligible', 'Public claims require an unpaid or work_trade credit offer with a repository URL');
         if (this.db.prepare('SELECT 1 FROM public_work_tasks WHERE offer_id=?').get(offerId)) fail(409, 'public_work_already_enabled', 'Public claims already enabled');
         const url = new URL(offer.repositoryUrl); url.pathname = url.pathname.replace(/\/$/, '').replace(/\.git$/, '');
         if (url.hostname === 'github.com') url.pathname = url.pathname.toLowerCase();
         const namespace = 'public_' + hash(roomId + '\n' + url.href + '\n' + input.repositoryRef);
         this.db.prepare('INSERT INTO public_work_tasks VALUES (?,?,?,?,?,?,?,?,?)').run(offerId, namespace, roomId, offer.version, url.href, input.repositoryRef, JSON.stringify(files), 0, this.store.now());
+        // Paid tasks fund their escrow at enable time, inside this same
+        // transaction: the posted price locks from the poster's existing
+        // payable balance, and a funding failure lists nothing.
+        if (rewardMillis !== null) this.settlementService().fund(roomId, actorId, offer, rewardMillis);
         // Kernel done means submitted delivery here, never independent acceptance.
         const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'self_attested' }, { now: this.store.now() });
         this.store.workClaims.set(namespace, item);
@@ -399,7 +419,7 @@ export class PublicWorkClaims {
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
     check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
-    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : []);
+    shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation'] : []);
     check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
       && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
@@ -421,6 +441,9 @@ export class PublicWorkClaims {
         for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now())) this.store.workClaims.set(row.namespace_key, item);
         let item = this.store.workClaims.get(row.namespace_key, offerId);
         if (action === 'claim') {
+          // Paid tasks gate the claim on the settlement lane + reputation
+          // claim gate before any lease moves (no-op for unpaid tasks).
+          this.settlementService().assertClaimable(row.room_id, offerId, identity.identityId);
           if (item.state !== 'unclaimed') {
             // G4: name the holder and the lease expiry — a bare
             // "Task already claimed" teaches the raced agent nothing actionable.
@@ -482,11 +505,75 @@ export class PublicWorkClaims {
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
             && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
           check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
+          // #3547: the delivery bundle's criteria leg. artifactText +
+          // checksReported stay the bundle's v1 serialization; when the
+          // deliverer adds a per-criterion attestation, the platform
+          // validates it against the offer's acceptanceCriteria itself —
+          // coverage is executed here, never trusted from the caller — and
+          // the executed result rides the receipt. An absent attestation
+          // stays absent (recorded null, never fabricated).
+          const offerCriteria = Array.isArray(offer.acceptanceCriteria) ? offer.acceptanceCriteria : [];
+          let criteriaAttestation = null;
+          const executedChecks = [];
+          if (input.criteriaAttestation !== undefined) {
+            check(Array.isArray(input.criteriaAttestation) && input.criteriaAttestation.length <= 64
+              && input.criteriaAttestation.every(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
+                && typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500
+                && ['met', 'not_met', 'na'].includes(entry.status)
+                && (entry.evidenceRef === undefined || entry.evidenceRef === null
+                  || (typeof entry.evidenceRef === 'string' && entry.evidenceRef.length > 0 && entry.evidenceRef.length <= 512))),
+              'Invalid criteria attestation');
+            check(new Set(input.criteriaAttestation.map(entry => entry.criterion)).size === input.criteriaAttestation.length,
+              'criteriaAttestation maps a criterion more than once');
+            criteriaAttestation = input.criteriaAttestation.map(entry => ({ criterion: entry.criterion, status: entry.status,
+              ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) }));
+            if (offerCriteria.length > 0) {
+              const mapped = new Set(criteriaAttestation.map(entry => entry.criterion));
+              const missing = offerCriteria.find(criterion => !mapped.has(criterion));
+              check(missing === undefined, `criteriaAttestation does not cover criterion "${missing}"`);
+              // #3683: coverage executes the attestation's statuses, not
+              // just its names. A criterion the deliverer declares not_met
+              // fails the check, and an na counts only when its
+              // evidenceRef resolves to something the platform holds: one
+              // of the reported checks that passed ("unit: pass"), or the
+              // submitted artifact itself (sha256:<artifact hash>, which
+              // the platform computes from the bytes at this very finish).
+              const byCriterion = new Map(criteriaAttestation.map(entry => [entry.criterion, entry]));
+              const passedChecks = new Set();
+              for (const text of input.checksReported) {
+                const match = /^(.+?):\s*(pass|passed)\s*$/i.exec(text);
+                if (match) passedChecks.add(match[1].trim());
+              }
+              const naBacked = entry => {
+                if (!entry || typeof entry.evidenceRef !== 'string' || entry.evidenceRef.length === 0) return false;
+                if (entry.evidenceRef === `sha256:${hash(input.artifactText)}`) return true;
+                const name = entry.evidenceRef.startsWith('check:') ? entry.evidenceRef.slice('check:'.length) : entry.evidenceRef;
+                return passedChecks.has(name);
+              };
+              const coveragePass = offerCriteria.every(criterion => {
+                const entry = byCriterion.get(criterion);
+                return entry.status === 'met' || (entry.status === 'na' && naBacked(entry));
+              });
+              executedChecks.push({ name: 'criteria_coverage', result: coveragePass ? 'pass' : 'fail', at: new Date(this.store.now()).toISOString() });
+            }
+          }
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
+          const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
-            artifact: { sha256, bytes }, checksReported: input.checksReported, verification: 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            // #3683: the system_checked label is earned by a check that
+            // PASSED — a recorded failure is honest evidence on the
+            // receipt, never a label upgrade.
+            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+          // Paid tasks attach the submission to the funded escrow bounty
+          // before the receipt lands, so a receipt never exists without its
+          // settlement vehicle in 'submitted' state (no-op when unpaid).
+          // attachSubmission reads only receiptId/identityId/artifact.sha256/
+          // checksReported, so the #3546 evidence fields ride along inertly.
+          const settlement = this.settlementService().attachSubmission(row.room_id, offerId, receipt);
+          if (settlement) outcome.settlement = settlement;
           this.db.prepare('INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)').run(receiptId, offerId, row.namespace_key, row.generation, identity.identityId, input.artifactText, sha256, bytes, JSON.stringify(receipt), this.store.now());
           projectPublicWorkReceipt(this.store, receipt, sha256);
           item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
