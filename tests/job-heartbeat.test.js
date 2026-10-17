@@ -67,9 +67,10 @@ function roomStub(overrides = {}) {
 test("every worker job has a heartbeat entry and its cadence", () => {
   assert.deepEqual(CRON_JOBS.map(job => job.name), [
     "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
-    "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol"
+    "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol",
+    "store-growth"
   ]);
-  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60, 3600]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {
@@ -240,9 +241,12 @@ test("gmail and channel drain stay disabled, not stale, when nothing is configur
     // events, and this test grades the gmail/channel gates, not the patrol.
     store.patrolTick();
     const now = Date.parse("2026-09-24T22:00:00Z");
-    const alwaysOn = ["retention", "integrity", "public-read-model"];
+    const alwaysOn = ["retention", "integrity", "public-read-model", "room-backup", "store-growth"];
     const fresh = applyOutcomes({}, alwaysOn.map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));
-    const env = { ROOM_GMAIL_ENABLED: "0" };
+    // The backups binding is present in this deployment: room-backup is a
+    // required job (#3894), so an unbound fixture would fail the rollup
+    // by design and drown the gmail/channel gates under test here.
+    const env = { ROOM_GMAIL_ENABLED: "0", ROOM_BACKUPS_KV: { async put() {}, async get() { return null; } } };
     const view = jobHealthView(fresh, now, env, store);
     const gmail = view.jobs.find(job => job.name === "gmail-sync");
     const channel = view.jobs.find(job => job.name === "channel-drain");
@@ -270,7 +274,10 @@ test("gmail and channel drain stay disabled, not stale, when nothing is configur
 });
 
 test("GET /api/health/jobs is read-only, no-store, and 503 when stale", async () => {
-  const env = (stub) => ({ ROOM_ORIGIN: "https://room.example.test", ROOM: { getByName: () => stub } });
+  // The modeled deployment has its backups binding: room-backup is a
+  // required job (#3894), so without one the board could never read ok.
+  const env = (stub) => ({ ROOM_ORIGIN: "https://room.example.test", ROOM: { getByName: () => stub },
+    ROOM_BACKUPS_KV: { async put() {}, async get() { return null; } } });
   const { stub, self } = roomStub();
   let res = await worker.fetch(new Request("https://room.example.test/api/health/jobs"), env(stub));
   assert.equal(res.status, 503);
