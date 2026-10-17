@@ -121,30 +121,55 @@ test('dispute on accepted work is decidable: the seated decider rules and the pu
   assert.equal(issued(store), issuedBefore); conserved(store);
 });
 
-test('the designated decider cannot dispute into their own seat (party-as-judge)', t => {
+test('the designated decider cannot dispute into their own seat (party-as-judge): refused before the bond locks (#3727 × #3866)', t => {
   const f = fixture(t), { store } = f;
   const issuedBefore = issued(store);
   f.enable();
   const receipt = f.claimAndFinish();
   // Option A (#3726): disputes open only on accepted work, so the
   // scenario sits behind an acceptance; the seating refusal below is
-  // the pin (#3866) and is unchanged.
+  // the pin (#3866) as composed with #3770's refuse-at-open.
   store.publicWorkReviews.decide('commons', 'reviewer2', receipt.receiptId,
     f.decideInput('rota-accept', 'accepted')(receipt));
   // The rail designated 'reviewer' (a human member) as the dispute decider
   // at fund time. The reviewer raises a dispute against the very bounty
-  // they would judge: no seat may be granted, and they cannot rule on
-  // their own challenge.
-  const { dispute } = store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
-    { challenger: 'reviewer', bond: 1, grounds: 'judging my own challenge' });
-  assert.equal(dispute.decider, null);
-  assert.match(dispute.unavailable, /challenger/);
-  assert.equal(dispute.raisedBy, 'reviewer');
-  // The bond still locks (the dispute exists; it simply has no decider).
-  assert.deepEqual(millis(store, 'reviewer'), [99_000, 1_000, 0, 0]);
+  // they would judge: seating reports the designee unavailable — they
+  // are the challenger (party-as-judge, #3866's signal) — and #3770
+  // refuses the dispute at open on that signal. The record never
+  // exists, no seat is granted, and the bond never locks.
+  assert.throws(() => store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
+    { challenger: 'reviewer', bond: 1, grounds: 'judging my own challenge' }), code('dispute_unavailable'));
+  assert.deepEqual(millis(store, 'reviewer'), [100_000, 0, 0, 0]);
+  assert.equal(bountyOf(store).state, 'accepted');
+  assert.equal(bountyOf(store).disputeId, null);
+  // Nothing exists for the reviewer — or anyone — to rule on.
   assert.throws(() => store.bountyEscrow.decideDispute('commons', bountyOf(store).bountyId,
-    { decider: 'reviewer', outcome: 'upheld', reasonCodes: ['criterion-unmet'] }), code('not_authorized'));
-  assert.equal(bountyOf(store).state, 'disputed');
+    { decider: 'reviewer', outcome: 'upheld', reasonCodes: ['criterion-unmet'] }), code('invalid_state'));
+  assert.equal(issued(store), issuedBefore); conserved(store);
+});
+
+test('a designated decider who is no longer an active member cannot be seated: refused before the bond locks (#3727)', t => {
+  const f = fixture(t), { store } = f;
+  const issuedBefore = issued(store);
+  f.enable();
+  const receipt = f.claimAndFinish();
+  store.publicWorkReviews.decide('commons', 'reviewer', receipt.receiptId,
+    f.decideInput('honest-accept', 'accepted')(receipt));
+  assert.equal(bountyOf(store).disputeDecider, 'reviewer');
+  // The designated decider leaves the room (membership deactivated)
+  // between designation and dispute. Lane cards enumerate agent
+  // members, and the human-decider path seats only a LIVE member — an
+  // inactive designee produces no card, seating reports unavailable,
+  // and the dispute refuses at open: the challenger's bond never locks
+  // and the bounty is never frozen into an undecidable record.
+  const state = structuredClone(store.room('commons').state);
+  state.members.reviewer.active = false;
+  store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
+  assert.throws(() => store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
+    { challenger: 'rival', bond: 1, grounds: 'the judge has left' }), code('dispute_unavailable'));
+  assert.deepEqual(millis(store, 'rival'), [100_000, 0, 0, 0]);
+  assert.equal(bountyOf(store).state, 'accepted');
+  assert.equal(bountyOf(store).disputeId, null);
   assert.equal(issued(store), issuedBefore); conserved(store);
 });
 

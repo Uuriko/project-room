@@ -293,10 +293,13 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
   }, keys.reviewer);
   assert.equal(badBond.status, 422);
 
-  // Exactly 25% opens the dispute.
+  // Exactly 25% opens the dispute. The challenger is a third member:
+  // the designated verifier (reviewer) cannot raise it — seating would
+  // refuse the designee-as-challenger dispute as unavailable (#3866),
+  // so a neutral member challenges and the reviewer seats as decider.
   const dispute = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/dispute`, {
     bond: 25, grounds: "deliverable incomplete",
-  }, keys.reviewer);
+  }, keys.guest);
   assert.equal(dispute.status, 201);
 
   // Credit history is movement-level with before/after and hash links.

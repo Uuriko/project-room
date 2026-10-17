@@ -348,8 +348,8 @@ test("dispute bond must be exactly 25% of the bounty", () => {
   const { escrow } = makeEscrow();
   const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
   for (const bond of [2.4, 2.6, 5])
-    expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond, grounds: "bad" }), "invalid_bond");
-  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "bad work" });
+    expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond, grounds: "bad" }), "invalid_bond");
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad work" });
   assert.equal(dispute.bond, 2.5);
   assert.equal(escrow.getBounty(ROOM, bounty.bountyId).group, "in-review");
   expectConserved(escrow);
@@ -414,8 +414,8 @@ test("the claimant cannot dispute their own submission; double disputes rejected
   const { escrow } = makeEscrow();
   const bounty = runToAccepted(escrow, { verifier: INSTINCT });
   expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: GROK, bond: 2.5, grounds: "self" }), "not_authorized");
-  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "bad" });
-  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "also bad" }), "dispute_exists");
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "bad" });
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "also bad" }), "dispute_exists");
   expectConserved(escrow);
 });
 
@@ -444,6 +444,22 @@ test("a designated verifier who cannot sit (verifier is the claimant) also refus
   expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 1, grounds: "meh" }), "dispute_unavailable");
   assert.deepEqual(bal(escrow, INSTINCT), challengerBefore);
   assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "accepted");
+  expectConserved(escrow);
+});
+
+test("a disputeDecider-designated bounty opens and seats the designee (#3727)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = runToAcceptedDesignated(escrow, { disputeDeciderId: CODEX }); // verifier stays null
+  assert.equal(bounty.verifier, null);
+  assert.equal(bounty.disputeDecider, CODEX);
+  // The early seat-or-refuse check resolves the designation as
+  // disputeDecider ?? verifier — a verifier-only read would refuse this
+  // dispute as unavailable (the rail's shape: verifier null, decider
+  // named). A neutral challenger disputes; the designee seats.
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "bad work" });
+  assert.equal(dispute.decider, CODEX);
+  assert.equal(dispute.unavailable, null);
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "disputed");
   expectConserved(escrow);
 });
 
@@ -495,29 +511,40 @@ function runToAcceptedDesignated(escrow, overrides = {}) {
   return escrow.getBounty(ROOM, bounty.bountyId);
 }
 
-test("the designated verifier cannot dispute into their own decider seat", () => {
+test("the designated verifier cannot dispute into their own decider seat: refused before the bond locks (#3727 × #3866)", () => {
   const { escrow } = makeEscrow();
   const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
-  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "judging my own case" });
-  const d = escrow.getDispute(ROOM, dispute.disputeId);
-  assert.equal(d.decider, null); // the designee IS the challenger: no seat
-  assert.match(d.unavailable, /challenger/);
-  assert.equal(d.raisedBy, INSTINCT);
-  // Nobody may rule on it — least of all the challenger.
+  const challengerBefore = bal(escrow, INSTINCT);
+  // The designee IS the challenger (party-as-judge): seating reports the
+  // `unavailable` signal #3866 introduced for exactly this case, and
+  // #3727 refuses the dispute at open on that signal — the record never
+  // exists, so there is no seat to abuse and no bond is ever locked.
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 2.5, grounds: "judging my own case" }), "dispute_unavailable");
+  assert.deepEqual(bal(escrow, INSTINCT), challengerBefore);
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "accepted");
+  assert.equal(after.disputeId, null);
+  // Nothing exists for anyone to rule on — least of all the challenger.
   expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
-    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+    { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "invalid_state");
   expectConserved(escrow);
 });
 
-test("the designated dispute decider cannot dispute into their own seat either", () => {
+test("the designated dispute decider cannot dispute into their own seat either: refused before the bond locks (#3727 × #3866)", () => {
   const { escrow } = makeEscrow();
   const bounty = runToAcceptedDesignated(escrow, { disputeDeciderId: CODEX });
-  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "my own case" });
-  const d = escrow.getDispute(ROOM, dispute.disputeId);
-  assert.equal(d.decider, null);
-  assert.match(d.unavailable, /challenger/);
+  const challengerBefore = bal(escrow, CODEX);
+  // Same composition on the disputeDecider designation: the designee
+  // raising the dispute makes the seat unavailable (#3866's signal),
+  // and the dispute refuses at open (#3727) instead of opening
+  // seat-less with the challenger's bond locked.
+  expectCode(() => escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "my own case" }), "dispute_unavailable");
+  assert.deepEqual(bal(escrow, CODEX), challengerBefore);
+  const after = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(after.state, "accepted");
+  assert.equal(after.disputeId, null);
   expectCode(() => escrow.decideDispute(ROOM, bounty.bountyId,
-    { decider: CODEX, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "not_authorized");
+    { decider: CODEX, outcome: "upheld", reasonCodes: ["criterion-unmet"] }), "invalid_state");
   expectConserved(escrow);
 });
 
@@ -559,7 +586,7 @@ test("getDispute is room-scoped: another room's dispute reads as absent (L-P2-10
   const OTHER = "room-other";
   escrow.ensureGenesis(OTHER);
   const bounty = runToAccepted(escrow, { amount: 4, verifier: INSTINCT });
-  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: INSTINCT, bond: 1, grounds: "meh" });
+  const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 1, grounds: "meh" });
   assert.ok(escrow.getDispute(ROOM, dispute.disputeId), "own room reads it");
   assert.equal(escrow.getDispute(OTHER, dispute.disputeId), undefined,
     "cross-room read must not leak the dispute");
