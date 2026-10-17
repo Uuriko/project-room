@@ -16,7 +16,7 @@
 //      order inside one transaction.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
+import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
 import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
@@ -34,13 +34,14 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // What deletion removes vs retains, and why. Served verbatim at
 // GET /api/account/retention and attached to every deletion plan.
 export const RETENTION_POLICY = Object.freeze({
-  version: "1.6.0",
+  version: "1.7.0",
   summary: "Account deletion purges the account's sign-in credentials, "
     + "sessions, room memberships, connected Gmail data, private inbox content "
     + "(imported messages, drafts, read state), connected email data, derived "
     + "stitch data, inbox handoff packets, SLA breach alerts, channel update journals, account setup answers, "
     + "terms-of-service acceptance, "
-    + "and profile data. Guest invites, share links, "
+    + "and profile data. Owner and membership delegation grants issued by the account are revoked in every "
+    + "room, and any member permission a grant conferred is stripped. Guest invites, share links, "
     + "membership invitations, and agent and referral invites issued by the account are revoked, and agent "
     + "connections the account sponsored are disconnected. Personal rooms this account solely owns are archived "
     + "and their messages and files are purged. Security audit rows, inbox/email "
@@ -64,7 +65,8 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "stitch", description: "Derived cross-channel stitch data (stitch_identities, stitch_links, stitch_suggestions, stitch_receipts, stitch_revocations) is permanently deleted." }),
     Object.freeze({ category: "derived_inbox", description: "Account-keyed inbox and channel rows are permanently deleted: handoff packets (inbox_handoffs), SLA breach alerts (sla_breach_alerts), the channel update journal (pending_channel_updates), and channel live status (telegram_live_status)." }),
     Object.freeze({ category: "member_issued_invites", description: "Unredeemed agent invites (agent_invite_codes) and referral invites (referral_invites) minted by the account's room members are revoked before the account leaves its rooms; their history stays for audit." }),
-    Object.freeze({ category: "issued_access", description: "Access granted by the account is revoked: active guest invites (guest_invites), share links (share_links), and pending membership invitations it issued or that were issued to it." }),
+    Object.freeze({ category: "delegated_authority", description: "Delegation grants issued by the account (owner_delegate_grants, membership_delegation_grants) are revoked in every room; a member permission bit a grant conferred (invite_member) is stripped unless the member holds it from another source. Grant rows and journals stay for audit." }),
+    Object.freeze({ category: "issued_access", description: "Access granted by the account is revoked: active guest invites (guest_invites) — including invites minted by the account's delegates under its authority — share links (share_links), and pending membership invitations it issued or that were issued to it." }),
     Object.freeze({ category: "sponsored_agents", description: "Agent connections sponsored by the account are disconnected: their room credentials are revoked (agentConnections.revokeAccount), the same revocation a deactivation performs." }),
     Object.freeze({ category: "terms", description: "The terms-of-service acceptance record (account_terms) is deleted." }),
     Object.freeze({ category: "oauth_tokens", description: "Third-party OAuth grants (authorization codes, access and refresh tokens) are deleted and revoked; connectors lose access immediately." }),
@@ -136,11 +138,31 @@ const countMemberIssuedInvites = (store, accountId) => {
 // Access grants issued by (or pending for) the account that revocation must retire.
 const countIssuedAccess = (store, accountId) => {
   const db = store.db;
-  const guests = db.prepare("SELECT count(*) AS n FROM guest_invites WHERE minted_by_account_id=? AND status='active'").get(accountId)?.n ?? 0;
+  // F-5: guest invites minted by the account's delegates carry no account
+  // id on the invite row; their provenance row names the granting account,
+  // so count (and later revoke) through it as well — one count per invite.
+  const traced = tableExists(db, "guest_invite_authority")
+    ? " OR id IN (SELECT invite_id FROM guest_invite_authority WHERE authority_account_id=?)"
+    : "";
+  const guests = db.prepare(`SELECT count(*) AS n FROM guest_invites WHERE status='active' AND (minted_by_account_id=?${traced})`)
+    .get(...(traced ? [accountId, accountId] : [accountId]))?.n ?? 0;
   const links = db.prepare("SELECT count(*) AS n FROM share_links WHERE issuer_account_id=? AND revoked_at IS NULL").get(accountId)?.n ?? 0;
   const issued = db.prepare("SELECT count(*) AS n FROM membership_invitations WHERE issuer_account_id=? AND status='pending'").get(accountId)?.n ?? 0;
   const intended = db.prepare("SELECT count(*) AS n FROM membership_invitations WHERE intended_account_id=? AND status='pending'").get(accountId)?.n ?? 0;
   return guests + links + issued + intended;
+};
+
+// F-1: active delegation grants the account issued, keyed like the invites
+// above by (room, member) bindings — the only link from the account to the
+// member ids its grants are recorded under.
+const countDelegatedAuthority = (store, accountId) => {
+  const db = store.db;
+  let n = 0;
+  for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
+    n += db.prepare("SELECT count(*) AS n FROM owner_delegate_grants WHERE room_id=? AND granted_by=? AND revoked_at IS NULL").get(roomId, memberId)?.n ?? 0;
+    n += db.prepare("SELECT count(*) AS n FROM membership_delegation_grants WHERE room_id=? AND granted_by=? AND revoked_at IS NULL").get(roomId, memberId)?.n ?? 0;
+  }
+  return n;
 };
 
 // Some tables are created on first use; count them only when they exist.
@@ -474,6 +496,12 @@ export function inventoryFromStore(store, accountId, rooms = null) {
       itemCount: countMemberIssuedInvites(store, accountId),
 
     },
+    // F-1: delegation grants issued by the account's members. Delegated
+    // authority is issued access like any other; it lapses with the
+    // granter's account (see the executor for the revocation semantics).
+    delegated_authority: {
+      itemCount: countDelegatedAuthority(store, accountId),
+    },
   };
   if (roomWork) inventory.owned_rooms = { itemCount: owned.archive.length + owned.transfer.length, dependsOn: [] };
   return inventory;
@@ -627,6 +655,39 @@ const EXECUTORS = {
     }
     return revoked;
   },
+  // F-1: delegated authority lapses with the granter's account — the
+  // issued_access invariant below ("nothing issued by a deleted account
+  // may still grant access") covers delegation grants too; they were the
+  // one issued-access instrument it missed. Revoke, never delete: grant
+  // rows and both journals stay for audit. Runs before owned_rooms
+  // (priority 44 < 45) while the granter is still in place as room owner,
+  // so a grant-conferred invite_member bit is stripped through the normal
+  // event path with the granter as actor. Where the granter is no longer
+  // the room's owner (a grant that predates an earlier transfer) or the
+  // room is already archived, the rows are still revoked — only the bit
+  // strip needs an owner-actor event, and an archived room's bits are not
+  // exercisable; the strip bound is recorded here rather than hidden.
+  delegated_authority: (store, accountId) => {
+    let revoked = 0;
+    for (const { room_id: roomId, member_id: memberId } of memberBindings(store, accountId)) {
+      revoked += store.ownerDelegates.revokeAllGrantedBy(roomId, memberId, { actorId: "account_deleted" });
+      const lapse = store.delegation.revokeAllGrantedBy(roomId, memberId, { actorId: "account_deleted" });
+      revoked += lapse.revoked;
+      if (!lapse.stripTargets.length) continue;
+      const state = store.room(roomId).state;
+      if (isRoomArchived(state) || store.roomAuthority(roomId).ownerId !== memberId) continue;
+      for (const target of lapse.stripTargets) {
+        const member = store.room(roomId).state.members?.[target.memberId];
+        if (!member || member.active === false || !member.permissions.includes("invite_member")) continue;
+        appendRoomEvent(store, roomId, memberId, EVENT_TYPES.MEMBER_ACCESS_CHANGED, {
+          memberId: member.id, expectedMemberRevision: member.revision,
+          permissions: member.permissions.filter(permission => permission !== "invite_member"),
+          active: member.active, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+        });
+      }
+    }
+    return revoked;
+  },
   // Revoke, never delete: invite/link history stays for audit, but nothing
   // issued by a deleted account may still grant access.
   issued_access: (store, accountId) => {
@@ -634,6 +695,13 @@ const EXECUTORS = {
     const now = typeof store.now === "function" ? store.now() : Date.now();
     let revoked = 0;
     revoked += db.prepare("UPDATE guest_invites SET status='revoked' WHERE minted_by_account_id=? AND status='active'").run(accountId).changes;
+    // F-5: guest invites minted by the account's delegates carry no account
+    // id on the invite row; their provenance names the granting owner's
+    // account, and revocation follows it.
+    if (tableExists(db, "guest_invite_authority")) {
+      revoked += db.prepare(`UPDATE guest_invites SET status='revoked' WHERE status='active' AND id IN
+        (SELECT invite_id FROM guest_invite_authority WHERE authority_account_id=?)`).run(accountId).changes;
+    }
     // share_link_scope_immutable forbids touching scope columns; revoked_at /
     // revoked_by_member_id are outside it. Self-revocation attribution.
     revoked += db.prepare("UPDATE share_links SET revoked_at=?, revoked_by_member_id=issuer_member_id WHERE issuer_account_id=? AND revoked_at IS NULL").run(now, accountId).changes;

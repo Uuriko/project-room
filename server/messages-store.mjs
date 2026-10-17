@@ -108,7 +108,9 @@ export function threadRootId(messages, message) {
   return current?.id && current.id !== message.id ? current.id : null;
 }
 
-function affectedMessageIds(event) {
+// Exported for the resident patrol (server/patrol.mjs), which folds the
+// same affected-id set per message event into its shadow records.
+export function affectedMessageIds(event) {
   const data = event?.data ?? {};
   if (event?.type === "message.redacted" && typeof data.messageId === "string") {
     return data.messageId.endsWith(":channel") ? [data.messageId] : [data.messageId, `${data.messageId}:channel`];
@@ -304,6 +306,14 @@ function saveCursor(db, roomId, appliedSeq, eventId, state) {
 // Messages at or below projection.messagesArchive.throughSeq were moved out of
 // the projection and live only in this table; they are not stale rows.
 export function archiveMarker(db, roomId) {
+  // WRITE-PATH-WINS win 5: this runs on message paths (a post whose id is
+  // not in the projection probes for an archived row), and json_extract
+  // must tokenize the whole multi-megabyte projection to prove the marker
+  // absent — the common case. A raw substring probe answers "absent" at
+  // memchr speed; it can only false-positive (a body quoting the key),
+  // never false-negative, because our serializer writes the key verbatim.
+  const probe = db.prepare("SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?").get(roomId);
+  if (!probe?.found) return { throughSeq: 0, count: 0, retainedIds: [], retainedJson: "[]" };
   const row = db.prepare(`SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,
     json_extract(projection, '$.messagesArchive.count') AS count,
     json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?`).get(roomId);
@@ -753,7 +763,7 @@ function certifyMessagesParity(store) {
   if (numbers.projectionCount !== numbers.tableCount || numbers.projectionLastSeq !== numbers.tableLastSeq) {
     throw new Error(`messages parity failed for ${roomId}: projection count ${numbers.projectionCount}, table count ${numbers.tableCount}, projection last seq ${numbers.projectionLastSeq}, table last seq ${numbers.tableLastSeq}`);
   }
-  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection));
+  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection), { verifyBodyHashes: true });
   if (hydration.missing.length) throw new Error(`messages parity failed for ${roomId}: stored message body missing`);
   const state = hydration.state;
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));

@@ -174,19 +174,57 @@ test("a settled payout lot composes a public receipt with the ledger's real fiel
 // the refund leg of an accepted-split and the fee leg of a payout
 // entirely. The JSON was always complete; these tests pin the HTML face.
 
+// #3726 (Option A) closed the submitted -> disputed edge: no new dispute
+// can open on submitted work. A store written before the gate can still
+// hold one, and _settleDispute keeps its from-submitted arm for exactly
+// those rows — so seed the state the way such a store holds it: the
+// dispute machine walked to a seated decider, the challenger's bond
+// locked, the bounty row disputed, all through the escrow's own
+// writers, minus the one gate check disputeBounty now applies first.
+function seedLegacySubmittedDispute(escrow, bountyId) {
+  escrow._ensure();
+  const row = escrow.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(ROOM, bountyId);
+  const bounty = escrow._mutable(row);
+  const disputeId = "dsp_legacysubmitted";
+  const bondMillis = 2500; // exactly 25% of the 10-credit award, as disputeBounty requires
+  escrow._move({ roomId: ROOM, at: new Date(nowMs).toISOString(),
+    from: { account: CODEX, state: "payable" }, to: { account: CODEX, state: "locked" },
+    amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId: "lot_deadbeefdeadbeef",
+    memo: `dispute bond for ${disputeId}`, actor: escrow._actorFor(ROOM, undefined, CODEX),
+    receipt: { type: "bond-locked", payload: { bondKind: "dispute", fromAccount: CODEX } } });
+  const machine = escrow._disputes;
+  let dispute = machine.open({ disputeId, bountyId, bountyAmount: bounty.amountMillis,
+    raisedBy: CODEX, reason: "partial credit", kind: "economic", bond: bondMillis });
+  escrow._persistDispute(ROOM, dispute);
+  dispute = machine.challenge(disputeId, { by: CODEX });
+  escrow._persistDispute(ROOM, dispute);
+  dispute = machine.submitEvidence(disputeId, { by: CODEX, summary: "partial credit" });
+  escrow._persistDispute(ROOM, dispute);
+  dispute = machine.seatDecider(disputeId, { decider: INSTINCT });
+  escrow._persistDispute(ROOM, dispute);
+  bounty.disputeId = disputeId;
+  bounty.disputeOpenedMs = nowMs;
+  escrow._transition(bounty, "disputed");
+  escrow._saveBounty(bounty);
+}
+
 function runToSplit(escrow, { fromAccepted }) {
   const bounty = post(escrow, { verifierId: INSTINCT });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK, evidence });
-  if (fromAccepted) escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: attest() });
-  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
+  if (fromAccepted) {
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: attest() });
+    escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
+  } else {
+    seedLegacySubmittedDispute(escrow, bounty.bountyId);
+  }
   escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
   return escrow.getBounty(ROOM, bounty.bountyId);
 }
 
-test("split from submitted: the page shows both halves, not the full award to the worker", () => {
+test("split from a pre-gate submitted dispute: the page shows both halves, not the full award to the worker", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToSplit(escrow, { fromAccepted: false });
   // The decide lot carries attribute (full award) + approve (worker half)

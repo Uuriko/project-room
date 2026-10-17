@@ -2,7 +2,7 @@
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
-import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_SEARCH_CSP, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
+import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
@@ -895,7 +895,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     let cursor = after;
     let timer;
     const signal = resolveRequestSignal(req);
-    const cleanup = () => { clearInterval(timer); streams.delete(entry); signal?.removeEventListener("abort", abort); };
+    // Delta sync: the store stamps every committed append (store.eventStamp).
+    // A commit for this room wakes the pump immediately; the interval below
+    // survives only as a cheap cadence for typing changes, keepalives, and
+    // backstops. An idle tick reads the in-memory stamp and the typist map —
+    // no store transaction, no message-map build. Store doubles without the
+    // stamp API keep the legacy pump-on-interval behavior.
+    const beacon = typeof store.eventStamp === "function" && typeof store.onEventAppended === "function";
+    let stampSeen = beacon ? store.eventStamp(roomId) : 0;
+    let headKnown = after;
+    let lastFullAt = 0, lastWriteAt = Date.now();
+    let wakeQueued = false, unsubscribe = null, drainPending = false;
+    const cleanup = () => { clearInterval(timer); unsubscribe?.(); streams.delete(entry); signal?.removeEventListener("abort", abort); };
     const end = data => { cleanup(); if (!res.destroyed && !res.writableEnded) res.end(data); };
     const abort = () => end();
     // Per-connection send queue: a consumer whose unsent bytes exceed the cap
@@ -921,7 +932,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (lagging()) { lag(); return; }
       const backlog = res.writableLength;
       try {
-        const batch = redactEventPage(store.eventsAfter(token, roomId, cursor, 100, binding), store.redactionMessages(roomId));
+        const raw = store.eventsAfter(token, roomId, cursor, 100, binding);
+        // An empty page needs no redaction — and redactionMessages() copies
+        // the room's whole message array, so skipping it on idle ticks is
+        // most of the per-tick saving.
+        const batch = raw.events.length ? redactEventPage(raw, store.redactionMessages(roomId)) : raw;
         if (!batch.events.length) res.write(": connected transport only\n\n");
         let queued = 0, partial = false, lagged = false;
         for (const item of batch.events) {
@@ -951,6 +966,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // was queued. A partial tick resumes from its last sent event, so a
         // lagging stream resumes from the last event the client can see.
         else if (!partial) cursor = batch.next;
+        if (beacon && !lagged) {
+          stampSeen = store.eventStamp(roomId);
+          lastFullAt = Date.now(); lastWriteAt = lastFullAt;
+          drainPending = partial || batch.hasMore;
+          if (!partial && batch.hasMore) setImmediate(pump);
+          else if (!partial) headKnown = batch.next;
+        }
       } catch (error) {
         if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
           end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
@@ -960,7 +982,69 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
       }
     };
-    timer = setInterval(pump, streamInterval);
+    // The cheap cadence. An idle tick reads only the in-memory stamp and the
+    // typist map. When the RECHECK cadence falls due, a probe — one
+    // authenticate plus one primary-key head read, both indexed — stands in
+    // for the legacy full read: it detects revocation and session-binding
+    // changes (access-ended), storage failure (unavailable), and any head
+    // movement the stamp missed, and only then pays for a full pump.
+    const RECHECK_MS = Math.min(10000, Math.max(250, streamInterval * 8));
+    const probe = () => {
+      if (res.destroyed || res.writableEnded) { cleanup(); return; }
+      try {
+        store.authenticate(token, roomId, binding);
+        const headNow = typeof store.headSequence === "function" ? store.headSequence(roomId) : headKnown;
+        lastFullAt = Date.now();
+        if (headNow !== headKnown) { pump(); return; }
+        // The head read proves the rooms row is readable, but the stream's
+        // own read path is eventsAfter: a failure that manifests only there
+        // must still surface as an interruption, never silence, or the
+        // client waits forever on a stream that can no longer serve it.
+        // One indexed event at the recheck cadence keeps that detection
+        // without restoring per-tick reads; an event the stamp missed
+        // (a store that appends without the watch) pumps as before.
+        const page = store.eventsAfter(token, roomId, cursor, 1, binding);
+        if (page.events.length || page.next !== cursor) pump();
+      } catch (error) {
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") {
+          end('event: access-ended\ndata: {"message":"Access ended; sign in again"}\n\n');
+        } else {
+          diagnostics.record({ operationId, at: new Date().toISOString(), status: 503, code: "stream_unavailable", category: "unavailable", route: "/api/rooms/:roomId/stream", roomId });
+          end('event: unavailable\ndata: {"message":"Connection interrupted; reconnect to recover"}\n\n');
+        }
+      }
+    };
+    const tick = () => {
+      if (res.destroyed || res.writableEnded) { cleanup(); return; }
+      if (!beacon) { pump(); return; }
+      const now = Date.now();
+      if (store.eventStamp(roomId) !== stampSeen || drainPending) { pump(); return; }
+      if (now - lastFullAt >= RECHECK_MS) { probe(); return; }
+      // Typing-only wake: the typist set is in-memory, so this costs a map
+      // walk over current typists, never a store read.
+      const typists = currentTypists(typingBeats, roomId, entry.memberId);
+      const key = typingKey(typists);
+      if (key !== entry.lastTypingKey) {
+        if (lagging()) { lag(); return; }
+        entry.lastTypingKey = key;
+        lastWriteAt = now;
+        res.write(`event: typing\ndata: ${JSON.stringify({ typists })}\n\n`);
+        return;
+      }
+      // The keepalive comment is the cheapest liveness signal there is (the
+      // store reads were the cost, never these bytes): one per second of
+      // silence keeps proxies, clients, and dead-socket detection honest.
+      if (now - lastWriteAt >= 1000) { lastWriteAt = now; res.write(": connected transport only\n\n"); }
+    };
+    if (beacon) {
+      // Wake on commit: bursts coalesce into one pump per macrotask.
+      unsubscribe = store.onEventAppended(changedRoomId => {
+        if (changedRoomId !== roomId || wakeQueued) return;
+        wakeQueued = true;
+        setImmediate(() => { wakeQueued = false; pump(); });
+      });
+    }
+    timer = setInterval(tick, streamInterval);
     timer.unref();
     res.once("close", cleanup); res.once("finish", cleanup); res.once("error", abort);
     // Workers' Node bridge does not emit close when a browser leaves. The
@@ -1978,6 +2062,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const gr2Alias = gr2PublicPath(url.pathname);
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
+      // GET /api/public/front-door (EXP-7 Variant B live facts) is a
+      // route-table row: server/routes/front-door.mjs, dispatched above.
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail) && ["GET", "HEAD"].includes(req.method)) {
         rate(`receipts:${remoteAddress}`, 120);
@@ -2161,7 +2247,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_SEARCH_CSP));
+        if (canonical && publicSearchMarketingPolicy(canonical)) res.setHeader("Content-Security-Policy", publicSearchPageCsp(canonical, expectedOrigin()));
         // JDOT-PUBLIC-CSP-RUM end
         if (canonical && !url.search) {
           if (canonical !== url.pathname) {

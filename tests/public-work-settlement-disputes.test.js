@@ -69,7 +69,7 @@ test('fund designates the first non-poster named reviewer as the dispute decider
   conserved(store);
 });
 
-test('confederate dispute is decidable: the seated decider rules and the pump pays nothing extra', t => {
+test('dispute on accepted work is decidable: the seated decider rules and the pump pays nothing extra', t => {
   const f = fixture(t), { store } = f;
   const issuedBefore = issued(store);
   f.enable();
@@ -77,7 +77,16 @@ test('confederate dispute is decidable: the seated decider rules and the pump pa
   assert.deepEqual(millis(store, 'owner'), [96_000, 4_000, 0, 0]);
   assert.deepEqual(millis(store, 'worker'), [99_000, 1_000, 0, 0]);
 
-  // The confederate disputes the submitted bounty for exactly 25%.
+  // Option A (#3726): disputes open only on accepted work, so the
+  // confederate's route now runs through an acceptance first — a
+  // colluding rota seat accepts the junk, and the award moves to the
+  // worker as attributed.
+  const outcome = store.publicWorkReviews.decide('commons', 'reviewer2', receipt.receiptId,
+    f.decideInput('colluding-accept', 'accepted')(receipt));
+  assert.equal(outcome.settlement.phase, 'accepted');
+  assert.deepEqual(millis(store, 'worker'), [99_000, 1_000, 4_000, 0]);
+
+  // The confederate disputes the accepted bounty for exactly 25%.
   const { dispute } = store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
     { challenger: 'rival', bond: 1, grounds: 'junk artifact' });
   assert.equal(dispute.decider, 'reviewer');
@@ -87,9 +96,16 @@ test('confederate dispute is decidable: the seated decider rules and the pump pa
   assert.equal(bountyOf(store).state, 'disputed');
   conserved(store);
 
-  // While disputed, the rota verdict is frozen out: no settlement can land.
-  assert.throws(() => store.publicWorkReviews.decide('commons', 'reviewer', receipt.receiptId,
-    f.decideInput('accept-while-disputed', 'accepted')(receipt)), code('invalid_state'));
+  // While disputed, settlement is frozen out: the keeper cannot
+  // finalize the bounty, and an epoch sweep lands nothing — the
+  // accepted award stays attributed and unpaid until the dispute
+  // resolves. (Pre-Option-A this freeze surfaced at the rota decide
+  // itself, the receipt still being undecided; on accepted work the
+  // verdict is already in, so the freeze binds the settlement path.)
+  assert.throws(() => store.bountyEscrow.finalizeBounty('commons', bountyOf(store).bountyId, {}), code('invalid_state'));
+  store.bountyEscrow.closeEpoch('commons');
+  assert.deepEqual(millis(store, 'worker'), [99_000, 1_000, 4_000, 0]);
+  assert.equal(bountyOf(store).state, 'disputed');
   conserved(store);
 
   // The seated decider rules the challenge upheld: the award refunds to
@@ -105,33 +121,70 @@ test('confederate dispute is decidable: the seated decider rules and the pump pa
   assert.equal(issued(store), issuedBefore); conserved(store);
 });
 
-test('the designated decider cannot dispute into their own seat (party-as-judge)', t => {
+test('the designated decider cannot dispute into their own seat (party-as-judge): refused before the bond locks (#3727 × #3866)', t => {
   const f = fixture(t), { store } = f;
   const issuedBefore = issued(store);
   f.enable();
-  f.claimAndFinish();
+  const receipt = f.claimAndFinish();
+  // Option A (#3726): disputes open only on accepted work, so the
+  // scenario sits behind an acceptance; the seating refusal below is
+  // the pin (#3866) as composed with #3770's refuse-at-open.
+  store.publicWorkReviews.decide('commons', 'reviewer2', receipt.receiptId,
+    f.decideInput('rota-accept', 'accepted')(receipt));
   // The rail designated 'reviewer' (a human member) as the dispute decider
   // at fund time. The reviewer raises a dispute against the very bounty
-  // they would judge: no seat may be granted, and they cannot rule on
-  // their own challenge.
-  const { dispute } = store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
-    { challenger: 'reviewer', bond: 1, grounds: 'judging my own challenge' });
-  assert.equal(dispute.decider, null);
-  assert.match(dispute.unavailable, /challenger/);
-  assert.equal(dispute.raisedBy, 'reviewer');
-  // The bond still locks (the dispute exists; it simply has no decider).
-  assert.deepEqual(millis(store, 'reviewer'), [99_000, 1_000, 0, 0]);
+  // they would judge: seating reports the designee unavailable — they
+  // are the challenger (party-as-judge, #3866's signal) — and #3770
+  // refuses the dispute at open on that signal. The record never
+  // exists, no seat is granted, and the bond never locks.
+  assert.throws(() => store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
+    { challenger: 'reviewer', bond: 1, grounds: 'judging my own challenge' }), code('dispute_unavailable'));
+  assert.deepEqual(millis(store, 'reviewer'), [100_000, 0, 0, 0]);
+  assert.equal(bountyOf(store).state, 'accepted');
+  assert.equal(bountyOf(store).disputeId, null);
+  // Nothing exists for the reviewer — or anyone — to rule on.
   assert.throws(() => store.bountyEscrow.decideDispute('commons', bountyOf(store).bountyId,
-    { decider: 'reviewer', outcome: 'upheld', reasonCodes: ['criterion-unmet'] }), code('not_authorized'));
-  assert.equal(bountyOf(store).state, 'disputed');
+    { decider: 'reviewer', outcome: 'upheld', reasonCodes: ['criterion-unmet'] }), code('invalid_state'));
   assert.equal(issued(store), issuedBefore); conserved(store);
 });
 
-test('undecided dispute timeout: award vests, but the challenger bond goes to the pool, never the claimant', t => {
+test('a designated decider who is no longer an active member cannot be seated: refused before the bond locks (#3727)', t => {
   const f = fixture(t), { store } = f;
   const issuedBefore = issued(store);
   f.enable();
-  f.claimAndFinish();
+  const receipt = f.claimAndFinish();
+  store.publicWorkReviews.decide('commons', 'reviewer', receipt.receiptId,
+    f.decideInput('honest-accept', 'accepted')(receipt));
+  assert.equal(bountyOf(store).disputeDecider, 'reviewer');
+  // The designated decider leaves the room (membership deactivated)
+  // between designation and dispute. Lane cards enumerate agent
+  // members, and the human-decider path seats only a LIVE member — an
+  // inactive designee produces no card, seating reports unavailable,
+  // and the dispute refuses at open: the challenger's bond never locks
+  // and the bounty is never frozen into an undecidable record.
+  const state = structuredClone(store.room('commons').state);
+  state.members.reviewer.active = false;
+  store.db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(JSON.stringify(state), 'commons');
+  assert.throws(() => store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
+    { challenger: 'rival', bond: 1, grounds: 'the judge has left' }), code('dispute_unavailable'));
+  assert.deepEqual(millis(store, 'rival'), [100_000, 0, 0, 0]);
+  assert.equal(bountyOf(store).state, 'accepted');
+  assert.equal(bountyOf(store).disputeId, null);
+  assert.equal(issued(store), issuedBefore); conserved(store);
+});
+
+test('undecided dispute timeout on accepted work: award vests, but the challenger bond goes to the pool, never the claimant', t => {
+  const f = fixture(t), { store } = f;
+  const issuedBefore = issued(store);
+  f.enable();
+  const receipt = f.claimAndFinish();
+  // Option A (#3726): the dispute opens on ACCEPTED work — the rota
+  // accepts first, so when the timeout default later releases the
+  // award, the vesting is the honest accept path's gain, not a pump:
+  // acceptance is what makes the worker's entitlement legitimate.
+  store.publicWorkReviews.decide('commons', 'reviewer', receipt.receiptId,
+    f.decideInput('honest-accept', 'accepted')(receipt));
+  assert.deepEqual(millis(store, 'worker'), [99_000, 1_000, 4_000, 0]);
   const { dispute } = store.bountyEscrow.disputeBounty('commons', bountyOf(store).bountyId,
     { challenger: 'rival', bond: 1, grounds: 'stall the verdict' });
   assert.equal(dispute.decider, 'reviewer');
@@ -143,8 +196,9 @@ test('undecided dispute timeout: award vests, but the challenger bond goes to th
   const settled = bountyOf(store);
   assert.equal(settled.resolution.kind, 'release');
   assert.equal(settled.resolution.outcome, 'timeout-default');
-  // The award vests with the worker, but the 1-credit dispute bond is in
-  // the POOL — the worker's balances show no trace of it, and the
+  // The award vests with the worker (approved, exactly where the honest
+  // accept path leaves it), but the 1-credit dispute bond is in the
+  // POOL — the worker's balances show no trace of it, and the
   // challenger does not get it back either (the projector scores the
   // timeout as the challenger's loss).
   assert.deepEqual(millis(store, 'worker'), [99_000, 1_000, 0, 4_000]);

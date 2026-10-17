@@ -190,3 +190,46 @@ test("expanding an already explicit two-mode database never rewrites pinned choi
   expectCode(() => current.acceptWork(ROOM, agent.bountyId, { acceptor: JILL, verifierAttestation: attest() }), "not_authorized");
   db.close();
 });
+
+// Mutation-testing lane 2026-10-16 (B1): four pins for escrow guards that
+// survived the core+extended suite sets. Each fails under its mutant and
+// passes on clean code (validated individually).
+
+test("agent mode: the claimant cannot accept their own work, even as designated verifier", () => {
+  // Kills BE-15 (acceptWork's distinct-from-claimant check removed). The
+  // approver-authorization check passes here — the claimant IS the
+  // designated verifier — so only the self-acceptance leg can refuse.
+  const { escrow } = makeEscrow();
+  const bounty = runToSubmitted(escrow, { approvalMode: "agent", verifier: GROK });
+  expectCode(() => escrow.acceptWork(ROOM, bounty.bountyId,
+    { acceptor: GROK, verifierAttestation: attest() }), "not_authorized");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "submitted");
+});
+
+test("keeper: an accepted bounty auto-approves at exactly its challenge deadline", () => {
+  // Kills BE-17 (challenge boundary >= became >). One tick at the exact
+  // boundary instant is the only place the two differ; every suite clock
+  // step overshoots it.
+  const { escrow } = makeEscrow();
+  const bounty = runToSubmitted(escrow, { approvalMode: "human" });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: attest() });
+  const accepted = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(accepted.state, "accepted");
+  nowMs = accepted.challengeEndsMs;
+  escrow.finalizeBounty(ROOM, bounty.bountyId, { caller: JILL });
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "approved");
+});
+
+test("claim: the claim window is closed at exactly the deadline instant", () => {
+  // Kills BE-25 (claim deadline < became <=).
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow);
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  const funded = escrow.getBounty(ROOM, bounty.bountyId);
+  nowMs = funded.deadlineMs - 1; // control: one ms before, the claim lands
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  const second = post(escrow);
+  escrow.fundBounty(ROOM, second.bountyId, { funder: JILL });
+  nowMs = escrow.getBounty(ROOM, second.bountyId).deadlineMs;
+  expectCode(() => escrow.claimBounty(ROOM, second.bountyId, { claimant: CODEX }), "invalid_state");
+});

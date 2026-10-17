@@ -243,3 +243,66 @@ test("registry read path dedupes cards for the same lane (first card wins)", () 
   assert.deepEqual(lanes.map(l => l.lane), ["quill", "instinct"]);
   assert.equal(lanes[0].trust_level, "elevated");
 });
+
+// Mutation-testing lane 2026-10-16 (B1): the five pins below close survivor
+// holes found by anchored mutation of server/dispute-arbiters.mjs. Each test
+// kills exactly the mutant named in its comment and passes on clean code.
+
+test("verifier on the executor's own lane is not independent even with disjoint domains", () => {
+  // Kills DA-01 (lane-equality leg of isIndependent removed). The executor
+  // fixture in "executor cannot verify its own claim" also shares runtime and
+  // credentialChain with the executor, so it cannot see this branch alone.
+  // The escrow seats tier-1 with executor = { lane: claimant } and nothing
+  // else, so disjoint domains are exactly the production shape.
+  const arbiters = createArbiters();
+  const card = { lane: "quill", trust_level: "elevated", runtime: "rt-other", credentialChain: "cred-other", delegatedChain: "john>other" };
+  assert.equal(arbiters.isIndependent(card, { lane: "quill" }).independent, false);
+  assert.equal(arbiters.isIndependent(card, { lane: "quill" }).reason, "verifier is the executor");
+  const r = arbiters.resolveTier1({ verifierId: "quill", executor: { lane: "quill" }, lanes: [card] });
+  assert.equal(r.unavailable, "no-arbitrator");
+  assert.match(r.reason, /not independent/);
+});
+
+test("delegated chains equal as segments but different as strings still overlap", () => {
+  // Kills DA-03 (containsRun needle-length off-by-one). Chain equality is a
+  // segment comparison: "john > quill" and "john>quill" are the same chain.
+  const arbiters = createArbiters();
+  const verifier = { lane: "codex", runtime: "rt-x", credentialChain: "cred-z", delegatedChain: "john > quill" };
+  const executor = { lane: "quill", runtime: "rt-quill-1", credentialChain: "cred-john-a", delegatedChain: "john>quill" };
+  assert.equal(arbiters.isIndependent(verifier, executor).independent, false);
+  assert.equal(arbiters.isIndependent(verifier, executor).reason, "delegated chain overlap");
+});
+
+test("a verifier with no lane identity is not independent", () => {
+  // Kills DA-06 (no-lane leg of isIndependent inverted to independent).
+  const arbiters = createArbiters();
+  assert.equal(arbiters.isIndependent({}, EXECUTOR).independent, false);
+  assert.equal(arbiters.isIndependent({}, EXECUTOR).reason, "verifier has no lane identity");
+  assert.equal(arbiters.isIndependent({ runtime: "rt-x" }, EXECUTOR).independent, false);
+});
+
+test("tier-1 decision with no reason codes is refused", () => {
+  // Kills DA-08 (empty-reasonCodes leg removed from recordTier1Decision).
+  const arbiters = createArbiters();
+  const { decider } = arbiters.resolveTier1({ verifierId: "instinct", executor: EXECUTOR, lanes: LANES });
+  throwsCode(() => arbiters.recordTier1Decision({ decider, outcome: "upheld", reasonCodes: [] }), "invalid_arbiter");
+});
+
+test("sortition never seats a below-standard lane for any dispute id", () => {
+  // Kills DA-09 (trust-eligibility leg removed from drawPanel). The
+  // single-seed assertion in the sortition test above cannot see a draw that
+  // only picks the ineligible lane under other dispute ids.
+  const arbiters = createArbiters();
+  const lanes = [
+    { lane: "quill", trust_level: "elevated" },
+    { lane: "instinct", trust_level: "elevated" },
+    { lane: "grokbot", trust_level: "standard" },
+    { lane: "codex", trust_level: "standard" },
+    { lane: "newbie", trust_level: "new" },
+  ];
+  for (let i = 0; i < 64; i++) {
+    const { panel } = arbiters.drawPanel({ disputeId: `D-seed-${i}`, lanes });
+    assert.equal(panel.length, 3);
+    assert.ok(!panel.some(p => p.lane === "newbie"), `seed ${i} seated a below-standard lane`);
+  }
+});
