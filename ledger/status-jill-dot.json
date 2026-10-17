@@ -1,10 +1,10 @@
 {
   "version": 1,
   "actor": "jill-dot",
-  "requestId": "jill-dot-status-202610170143",
-  "at": "2026-10-17T01:43:00Z",
-  "wave": "Repairs qualified and handed to landing owner: #3826 and #3829",
+  "requestId": "jill-dot-status-202610170523",
+  "at": "2026-10-17T05:23:00Z",
+  "wave": "Audit complete; integrity bridge qualified; boundary corrections prepared",
   "next-landings": [],
-  "holds": "No live Room Board lease or merge slot verified from this host. #3826 @ 3a424d6e728c65973c1d84a8bce639addad04ca8 is green with actual browser/Workers/unit/coverage execution; hosted merge tested with main b37fef47. #3829 @ e61fcf1ccc2b9178296840806867e2de5a79e20e is green against its recorded main 6f828f08 composition. Await current landing-owner coordination and current-base checks. Receipt: https://github.com/Uuriko/project-room/issues/3299#issuecomment-6228073321 . No main merge or production deployment performed. Status only, not a lease.",
-  "main-tip-verified": "Last tested visibility composition: b37fef47fe565e85e0bec90cc373b0197fc5c48a; not a current production claim."
+  "holds": "No live Room Board lease verified here. Draft #3855 at ef999d2a98e8dd0e348b7f722f2d7915e191634a has all required hosted checks green on merge composition 3227d3cb212f0635f04ce5aa204f6a07edcf7c9d / base b62a52cc. Await current landing-owner reconciliation; no merge or deployment. #3826/#3829 remain held by LANDING-WAVE-2; their published heads were not changed. Local b62 composition passed 104 Board and 28 direct-route tests, receipt 6230111203. BOARD-3849-FOLLOWUP belongs to Jill fleet per 6229968402. Two boundary corrections are prepared privately with independent synthetic review. Status only, not a lease.",
+  "main-tip-verified": "b62a52cc90d30b49eb61446c1c71fb7168b781c3 is the tested composition base, not a production claim."
 }
