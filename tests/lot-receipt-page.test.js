@@ -45,6 +45,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 const ROOM = "room-test";
 const JILL = "id:agent/jill";      // poster lane
 const GROK = "id:agent/grokbot";   // worker lane
+const INSTINCT = "id:agent/instinct"; // designated verifier / dispute decider
+const CODEX = "id:agent/codex";    // dispute challenger lane
 const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 
 let nowMs = 1_786_000_000_000;
@@ -161,6 +163,141 @@ test("a settled payout lot composes a public receipt with the ledger's real fiel
   assert.equal(json.schema, "project-room-public-receipt/1");
   assert.equal(json.lot.bountyId, bounty.bountyId);
   assert.equal(json.lot.settlement.kind, "verified-complete");
+});
+
+// --- Multi-movement lots: the HTML face must state the whole settlement ---
+//
+// One lot id can carry several journal movements (dispute splits, epoch
+// payout+fee). The headline fields derive from the first legs only, so
+// before the #3765 fix the HTML face headlined a split lot as the full
+// award going to the worker though half refunded to the poster, and hid
+// the refund leg of an accepted-split and the fee leg of a payout
+// entirely. The JSON was always complete; these tests pin the HTML face.
+
+// #3726 (Option A) closed the submitted -> disputed edge: no new dispute
+// can open on submitted work. A store written before the gate can still
+// hold one, and _settleDispute keeps its from-submitted arm for exactly
+// those rows — so seed the state the way such a store holds it: the
+// dispute machine walked to a seated decider, the challenger's bond
+// locked, the bounty row disputed, all through the escrow's own
+// writers, minus the one gate check disputeBounty now applies first.
+function seedLegacySubmittedDispute(escrow, bountyId) {
+  escrow._ensure();
+  const row = escrow.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(ROOM, bountyId);
+  const bounty = escrow._mutable(row);
+  const disputeId = "dsp_legacysubmitted";
+  const bondMillis = 2500; // exactly 25% of the 10-credit award, as disputeBounty requires
+  escrow._move({ roomId: ROOM, at: new Date(nowMs).toISOString(),
+    from: { account: CODEX, state: "payable" }, to: { account: CODEX, state: "locked" },
+    amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId: "lot_deadbeefdeadbeef",
+    memo: `dispute bond for ${disputeId}`, actor: escrow._actorFor(ROOM, undefined, CODEX),
+    receipt: { type: "bond-locked", payload: { bondKind: "dispute", fromAccount: CODEX } } });
+  const machine = escrow._disputes;
+  let dispute = machine.open({ disputeId, bountyId, bountyAmount: bounty.amountMillis,
+    raisedBy: CODEX, reason: "partial credit", kind: "economic", bond: bondMillis });
+  escrow._persistDispute(ROOM, dispute);
+  dispute = machine.challenge(disputeId, { by: CODEX });
+  escrow._persistDispute(ROOM, dispute);
+  dispute = machine.submitEvidence(disputeId, { by: CODEX, summary: "partial credit" });
+  escrow._persistDispute(ROOM, dispute);
+  dispute = machine.seatDecider(disputeId, { decider: INSTINCT });
+  escrow._persistDispute(ROOM, dispute);
+  bounty.disputeId = disputeId;
+  bounty.disputeOpenedMs = nowMs;
+  escrow._transition(bounty, "disputed");
+  escrow._saveBounty(bounty);
+}
+
+function runToSplit(escrow, { fromAccepted }) {
+  const bounty = post(escrow, { verifierId: INSTINCT });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK, evidence });
+  if (fromAccepted) {
+    escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL, verifierAttestation: attest() });
+    escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
+  } else {
+    seedLegacySubmittedDispute(escrow, bounty.bountyId);
+  }
+  escrow.decideDispute(ROOM, bounty.bountyId,
+    { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
+  return escrow.getBounty(ROOM, bounty.bountyId);
+}
+
+test("split from a pre-gate submitted dispute: the page shows both halves, not the full award to the worker", () => {
+  const { escrow, db, store } = makeEscrow();
+  const bounty = runToSplit(escrow, { fromAccepted: false });
+  // The decide lot carries attribute (full award) + approve (worker half)
+  // + refund (poster half) under one lot id.
+  const lotId = lotOfKind(db, bounty.bountyId, "approve");
+  const receipt = publicReceiptById(store, lotId);
+  assert.ok(receipt, "the split decide lot must resolve");
+  const lot = receipt.lot;
+  assert.deepEqual(lot.movements.map(movement => movement.kind),
+    ["attribute", "attribute", "approve", "approve", "refund", "refund"]);
+  assert.equal(lot.settlement.kind, "partial");
+  assert.equal(lot.settlement.workerCredits, 5);
+  assert.equal(lot.settlement.refundCredits, 5);
+  // The JSON headline still names the first movement; the truth a stranger
+  // needs is the settlement amounts and the full movement list, both now
+  // on the HTML face.
+  assert.equal(lot.kind, "attribute");
+  assert.equal(lot.amountCredits, 10);
+
+  const html = renderReceiptDetailHtml(receipt);
+  assert.ok(html.includes("Movement</dt><dd>attribute, approve, refund</dd>"),
+    "the movement row names every kind in the lot");
+  assert.ok(html.includes("Worker received</dt><dd>5 credits</dd>"));
+  assert.ok(html.includes("Refunded to poster</dt><dd>5 credits</dd>"));
+  assert.ok(html.includes(`attribute: ${JILL} · locked → ${GROK} · attributed — 10 credits (10000 milli-credits)`));
+  assert.ok(html.includes(`approve: ${GROK} · attributed → ${GROK} · approved — 5 credits (5000 milli-credits)`));
+  assert.ok(html.includes(`refund: ${GROK} · attributed → ${JILL} · payable — 5 credits (5000 milli-credits)`),
+    "the poster-half refund is on the face, naming the poster as recipient");
+});
+
+test("split from accepted: the page shows the poster refund the headline omits", () => {
+  const { escrow, db, store } = makeEscrow();
+  const bounty = runToSplit(escrow, { fromAccepted: true });
+  const lotId = lotOfKind(db, bounty.bountyId, "approve");
+  const receipt = publicReceiptById(store, lotId);
+  assert.ok(receipt, "the split decide lot must resolve");
+  const lot = receipt.lot;
+  assert.deepEqual(lot.movements.map(movement => movement.kind),
+    ["approve", "approve", "refund", "refund"]);
+  // The headline is the approve leg alone (worker half); on its own it
+  // reads as the whole story. The face must still show the refund leg.
+  assert.equal(lot.kind, "approve");
+  assert.equal(lot.amountCredits, 5);
+  assert.equal(lot.settlement.workerCredits, 5);
+  assert.equal(lot.settlement.refundCredits, 5);
+
+  const html = renderReceiptDetailHtml(receipt);
+  assert.ok(html.includes("Movement</dt><dd>approve, refund</dd>"));
+  assert.ok(html.includes("Worker received</dt><dd>5 credits</dd>"));
+  assert.ok(html.includes("Refunded to poster</dt><dd>5 credits</dd>"));
+  assert.ok(html.includes(`approve: ${GROK} · attributed → ${GROK} · approved — 5 credits (5000 milli-credits)`));
+  assert.ok(html.includes(`refund: ${GROK} · attributed → ${JILL} · payable — 5 credits (5000 milli-credits)`));
+});
+
+test("payout lot: the page shows the pool fee leg; single-movement lots gain no movements list", () => {
+  const { escrow, db, store } = makeEscrow();
+  const bounty = runToPaid(escrow);
+  const lotId = lotOfKind(db, bounty.bountyId, "payout");
+  const receipt = publicReceiptById(store, lotId);
+  assert.ok(receipt);
+  const html = renderReceiptDetailHtml(receipt);
+  assert.ok(html.includes("Movement</dt><dd>payout, fee</dd>"));
+  assert.ok(html.includes(`payout: ${GROK} · approved → ${GROK} · payable — 9.9 credits (9900 milli-credits)`));
+  assert.ok(html.includes("fee: " + GROK + " · approved → pool · payable — 0.1 credits (100 milli-credits)"),
+    "the 1% pool fee leg is on the face");
+  assert.ok(html.includes("Worker received</dt><dd>9.9 credits</dd>"));
+  assert.ok(html.includes("Refunded to poster</dt><dd>0 credits</dd>"));
+
+  // The funding lot is a single movement: its headline is already exact,
+  // so no Movements list appears.
+  const fundReceipt = publicReceiptById(store, lotOfKind(db, bounty.bountyId, "escrow-lock"));
+  assert.ok(fundReceipt);
+  assert.doesNotMatch(renderReceiptDetailHtml(fundReceipt), /<dt>Movements<\/dt>/);
 });
 
 test("every lot of a settled bounty resolves, each showing its own movement", () => {

@@ -749,6 +749,16 @@ const ROWS = [
     }
   },
   {
+    "table": "guest_invite_authority",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "guest_selfserve",
     "key": "room_id",
     "action": "delete",

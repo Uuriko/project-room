@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonStream, exportNdjsonText, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
+import { exportNdjsonStream, exportNdjsonText, exportTrailer, createTableDigests, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import {
   operatorRestoreResponse, operatorRestoreFromBackupResponse, RESTORE_MAX_BYTES,
 } from "../server/restore-ndjson.mjs";
@@ -428,4 +428,144 @@ test("restore-from-backup refuses a backup whose credentials were tampered befor
   const ok = await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY }), OPERATOR_TOKEN, target, goodKv);
   assert.equal(ok.status, 200);
   assert.equal((await ok.json()).contentVerification, "full");
+});
+
+// Bug sweep 2026-10-16 F1: a byte-valid backup whose stored projections
+// were written by older code can differ from current-reducer replay. The
+// file replay has an audit "report" mode for exactly this case; the KV
+// session path — the only one that fits the real over-cap backup —
+// refused with a generic 500. Strict stays the default, but the refusal
+// now names the drift (room + fields) as a legible 422, and the operator
+// opt-in (audit: "report") lands the data with the drift as a named
+// qualification on the result.
+async function driftedBackup(t) {
+  const seeded = seedStore(t);
+  const row = seeded.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get();
+  const state = JSON.parse(row.projection);
+  state.members.agent.displayName = "Drifted Name";
+  seeded.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(state));
+  const { kv } = await backupToKv(t, seeded);
+  return kv;
+}
+
+test("restore-from-backup refuses a drifted backup in strict mode and names the drift", async t => {
+  const kv = await driftedBackup(t);
+  const target = openStore(t, "restore-kv-drift-strict-");
+  const response = await operatorRestoreFromBackupResponse(fakeRequest({ body: JSON.stringify({ key: KEY }) }), OPERATOR_TOKEN, target, kv);
+  assert.equal(response.status, 422, "the reconciliation refusal is operator-legible, not a generic 500");
+  const payload = await response.json();
+  assert.equal(payload.error.code, "restore_verification_failed");
+  assert.match(payload.error.message, /commons/);
+  assert.match(payload.error.message, /displayName/);
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0, "no partial restore remains");
+});
+
+test("restore-from-backup lands a drifted backup under the report opt-in, drift named", async t => {
+  const kv = await driftedBackup(t);
+  const target = openStore(t, "restore-kv-drift-report-");
+  const response = await operatorRestoreFromBackupResponse(
+    fakeRequest({ body: JSON.stringify({ key: KEY, audit: "report" }) }), OPERATOR_TOKEN, target, kv);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.verified, true);
+  assert.equal(payload.contentVerification, "full");
+  assert.equal(payload.audit.ok, false, "verified never stands unqualified when the audit failed");
+  assert.match(payload.audit.error, /requires operator reconciliation/);
+  assert.deepEqual(payload.audit.drift, [{ room: "commons", fields: ["state.members.agent.displayName"] }]);
+  assert.equal(target.room("commons").state.members.agent.displayName, "Drifted Name", "the drifted data landed as stored");
+
+  // The same opt-in via query parameter.
+  const queryTarget = openStore(t, "restore-kv-drift-report-query-");
+  const headers = new Headers({ authorization: `Bearer ${OPERATOR_TOKEN}` });
+  const queryResponse = await operatorRestoreFromBackupResponse(
+    { method: "POST", url: `https://room.example/api/operator/restore-from-backup?key=${encodeURIComponent(KEY)}&audit=report`, headers, text: async () => "" },
+    OPERATOR_TOKEN, queryTarget, kv);
+  assert.equal(queryResponse.status, 200);
+  assert.equal((await queryResponse.json()).audit.ok, false);
+
+  // An unrecognized audit value is refused, never silently treated as strict.
+  const badTarget = openStore(t, "restore-kv-drift-bad-");
+  const bad = await operatorRestoreFromBackupResponse(
+    fakeRequest({ body: JSON.stringify({ key: KEY, audit: "bogus" }) }), OPERATOR_TOKEN, badTarget, kv);
+  assert.equal(bad.status, 422);
+  assert.equal((await bad.json()).error.code, "invalid_restore");
+});
+
+// Bug sweep 2026-10-16 F2: a credentials row whose parent_hash names no
+// row in the export was held back by the session's per-row hold-back at
+// every flush and silently never landed, while the restore reported
+// verified:true / "full" — the trailer pins the stream, the foreign-key
+// check only sees landed rows, and the watermark's per-table counts are
+// never written by the exporter. The session now refuses by name.
+test("restore-from-backup refuses a backup whose self-referencing row can never land", async t => {
+  const seeded = seedStore(t);
+  const hex = seedText => createHash("sha256").update(seedText).digest("hex");
+  const digests = createTableDigests();
+  const out = [];
+  let fabricated = null;
+  for (const line of exportNdjsonText(seeded.db).split("\n")) {
+    if (!line.trim()) continue;
+    const record = JSON.parse(line);
+    if (record.kind === "trailer") continue; // rebuilt below over the doctored stream
+    if (record.kind === "watermark") { out.push(line); continue; }
+    digests.add(record.table, record.row);
+    out.push(line);
+    if (record.table === "credentials" && !fabricated) {
+      fabricated = { table: "credentials", row: { ...record.row,
+        hash: hex("fabricated-child-credential"),
+        parent_hash: hex("parent-that-is-not-in-the-export") } };
+      digests.add(fabricated.table, fabricated.row);
+      out.push(JSON.stringify(fabricated));
+    }
+  }
+  assert.ok(fabricated, "fixture export has a credentials row to clone");
+  out.push(JSON.stringify(exportTrailer(seeded.db, digests.finish())));
+  const kv = fakeKv();
+  await writeKvBackup(kv, KEY, out.join("\n") + "\n", { partBytes: 2048 });
+  const target = openStore(t, "restore-kv-held-row-");
+  const response = await operatorRestoreFromBackupResponse(fakeRequest({ body: JSON.stringify({ key: KEY }) }), OPERATOR_TOKEN, target, kv);
+  assert.equal(response.status, 422, "an unlandable row is a named refusal, not a silent drop under a full claim");
+  const payload = await response.json();
+  assert.equal(payload.error.code, "restore_verification_failed");
+  assert.match(payload.error.message, /credentials/);
+  assert.match(payload.error.message, /parent_hash/);
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0, "no partial restore remains");
+  // The intact backup restores into the same target — the failure was not sticky.
+  const { kv: goodKv } = await backupToKv(t, seeded);
+  const retry = await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY }), OPERATOR_TOKEN, target, goodKv);
+  assert.equal(retry.status, 200);
+});
+
+// Bug sweep 2026-10-16 F3: production runs bodies-at-rest, so its
+// projections carry bodyRefs and a populated projection_bodies table —
+// but no restore test ever enabled the flag, including the standing
+// proof above. The slim shape must survive the KV restore and the body
+// must round-trip through room().
+test("restore-from-backup restores the production bodies-at-rest shape and the slim body round-trips", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "restore-kv-slim-seed-"));
+  const seeded = new RoomStore(join(directory, "room.sqlite"), { bodiesAtRest: true });
+  t.after(() => { try { seeded.close(); } catch { /* already closed */ } rmSync(directory, { recursive: true, force: true }); });
+  seeded.initialize(initialRoom());
+  const key = seeded.issueAccessKey("commons", "owner");
+  const body = "at-rest body that must survive the restore ".repeat(30).trim();
+  const messageId = randomUUID();
+  seeded.command(key, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
+    data: { messageId, body } });
+  // Fixture validity: the stored shape really is the production slim one.
+  const projection = seeded.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
+  assert.ok(projection.includes('"bodyRef"'), "seed projection carries a bodyRef");
+  assert.ok(!projection.includes(body.slice(0, 40)), "seed projection does not inline the body");
+  assert.ok(seeded.db.prepare("SELECT count(*) AS n FROM projection_bodies").get().n >= 1, "seed has projection_bodies rows");
+  const { kv } = await backupToKv(t, seeded);
+
+  const targetDirectory = mkdtempSync(join(tmpdir(), "restore-kv-slim-target-"));
+  const target = new RoomStore(join(targetDirectory, "room.sqlite"), { bodiesAtRest: true });
+  t.after(() => { try { target.close(); } catch { /* already closed */ } rmSync(targetDirectory, { recursive: true, force: true }); });
+  const response = await operatorRestoreFromBackupResponse(fakeRequest({ body: JSON.stringify({ key: KEY }) }), OPERATOR_TOKEN, target, kv);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.verified, true);
+  assert.equal(payload.contentVerification, "full");
+  const message = target.room("commons").state.messages.find(entry => entry.id === messageId);
+  assert.equal(message?.body, body, "the slim body round-trips through the restore");
 });
