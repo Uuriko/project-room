@@ -1,14 +1,5 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
 // Conversation structure is derived from immutable reply links, including older logs.
-// Legacy names remain the input aliases. Pills render the Unicode key.
-export const REACTIONS = LEGACY_REACTIONS;
-
-export function reactionPills(reactions = {}) {
-  return Object.entries(foldedReactionMap(reactions)).map(([key, memberIds]) => (
-    { key, symbol: key, memberIds, count: memberIds.length, used: memberIds.length > 0 }
-  ));
-}
 
 // Composition, key repeat, and touch Return must never accidentally submit.
 export function sendsOnEnter(event, touchKeyboard = false) {
@@ -17,9 +8,8 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
-export function escapeChatAction({ dialogOpen = false, mentionOpen = false, emojiOpen = false, replyOpen = false, inThread = false } = {}) {
+export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
   if (dialogOpen) return null;
-  if (emojiOpen) return "hide-emoji";
   if (mentionOpen) return "hide-mentions";
   if (replyOpen) return "clear-reply";
   if (inThread) return "leave-thread";
@@ -215,7 +205,7 @@ export function messageBodyHtml(body, members, esc, messageId) {
   const lines = text.split("\n");
   const full = mentionHtml(text, members, esc);
   if (text.length <= 1200 && lines.length <= 12) return full;
-  const preview = renderEmojiShortcodes([...lines.slice(0, 6).join("\n")].slice(0, 600).join(""));
+  const preview = [...lines.slice(0, 6).join("\n")].slice(0, 600).join("");
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
 }
 
@@ -247,7 +237,7 @@ export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
 }
 
 export function mentionHtml(body, members, esc) {
-  const text = renderEmojiShortcodes(body);
+  const text = String(body ?? "");
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
   if (!names.length) return markdownHtml(esc(text));
   const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");

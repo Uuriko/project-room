@@ -117,7 +117,14 @@ const idemKeyOf = (req, payload) => {
 const readPayload = async (reject, readBody, req) => {
   let payload;
   try { payload = await readBody(req); }
-  catch { invalidInput(reject, "a JSON body"); }
+  catch (error) {
+    // The shared body reader's over-limit refusal (413 too_large) already
+    // names the actual size and the limit — pass it through instead of
+    // misreporting an oversized body as a malformed one (#3436).
+    if (error && error.status === 413 && error.code === "too_large")
+      reject(413, "too_large", error.message);
+    invalidInput(reject, "a JSON body");
+  }
   if (payload === undefined || payload === null || payload === "") return {};
   if (typeof payload !== "object" || Array.isArray(payload)) invalidInput(reject, "a JSON object");
   return payload;
