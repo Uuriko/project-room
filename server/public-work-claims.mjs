@@ -4,7 +4,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
-import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
@@ -685,7 +685,22 @@ export class PublicWorkClaims {
   receipt(receiptId, viewer = {}) {
     const row = this._receiptRow(receiptId);
     this._requireReceiptVisible(row.roomId, viewer.memberId);
-    return JSON.parse(row.receiptJson);
+    const body = JSON.parse(row.receiptJson);
+    // #3733, reconciled with the settlement train: the stored record is
+    // the train's truth and this read never rewrites it — an acceptance
+    // already stamped it "verified" at decide time (#3546), and its tier
+    // and executed checks are the record's own. What the record cannot
+    // say is a rejection or a revision request (neither stamps, by
+    // design), so the canonical read composes the review outcome on top:
+    // the decision state for those two, plus the review summary whenever
+    // a review is recorded. Review binding and artifact checks keep
+    // reading the stored record itself.
+    const outcome = publicWorkReceiptOutcome(this.store, receiptId);
+    if (outcome) {
+      if (outcome.review && (outcome.review.state === "rejected" || outcome.review.state === "revision_requested")) body.state = outcome.state;
+      if (outcome.review) body.review = outcome.review;
+    }
+    return body;
   }
   artifact(receiptId, viewer = {}) {
     const row = this._receiptRow(receiptId);

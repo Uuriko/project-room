@@ -66,6 +66,20 @@ work-item receipts, a self-supplied name on public-work receipts — not
 identity-verified. Hash values are stored as recorded; the plain page does
 not re-verify them — verification is an explicit read-time action (below).
 
+A public-work receipt also carries its outcome, composed at read time
+from the receipt record and the room's review record: `state` (the
+record's own state — `submitted` until the designated reviewer's
+acceptance stamps it `verified`; a rejection or revision request, which
+never stamps the record, reads as `rejected` or `revision_requested`),
+`verification` (the tier the record carries, `hash_only` or
+`system_checked`), `checksReported` (the checks the worker reported),
+`executedChecks` when the record carries platform-executed checks, and —
+once a review is recorded — a `review` summary (review state, the
+reviewer's verdict and kind, and the verdict/decision times). The
+reviewer's identity, reason, and review fingerprint never appear. A
+rejected delivery reads as rejected on the page, in the JSON, and in
+the list — it is not removed, and it is not dressed as accepted work.
+
 ## Verification
 
 Every detail page carries a verification block. Unverified, it says so —

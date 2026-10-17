@@ -20,14 +20,35 @@ function packet(value, taskId) {
     || value.claim.submittedReceiptId !== null && !validId(value.claim.submittedReceiptId)) throw invalid();
   return value;
 }
+// The stored receipt is minted as "submitted"; the canonical read
+// composes the review outcome onto it (#3733). Acceptance is the
+// settlement train's stamp, so an accepted review reads with state
+// "verified"; a rejection or revision request (which never stamp the
+// record) reads as the decision itself; a pending review leaves the
+// minted state. Exactly these five review fields are public — the
+// reviewer id, reason and fingerprint never project — and the state must
+// agree with the review, so a composed read that contradicts its own
+// review block is refused.
+function receiptReview(value) {
+  const review = value.review;
+  if (review === undefined) return ['submitted', 'verified'].includes(value.state);
+  if (!object(review) || Object.keys(review).length !== 5
+    || !['pending', 'accepted', 'rejected', 'revision_requested'].includes(review.state)
+    || review.verificationVerdict !== null && !['PASS', 'FAIL'].includes(review.verificationVerdict)
+    || review.verificationReviewerKind !== null && !['human', 'agent'].includes(review.verificationReviewerKind)
+    || review.verifiedAt !== null && !date(review.verifiedAt)
+    || review.decidedAt !== null && !date(review.decidedAt)) return false;
+  return value.state === { pending: 'submitted', accepted: 'verified', rejected: 'rejected', revision_requested: 'revision_requested' }[review.state];
+}
 function receipt(value, receiptId) {
   if (!object(value) || value.schema !== 'public-work-receipt/1' || !validId(value.receiptId)
     || receiptId !== undefined && value.receiptId !== receiptId || !validId(value.taskId) || !validId(value.namespaceId)
     || !positive(value.termsVersion) || !positive(value.generation) || !validId(value.identityId)
-    || !['submitted', 'verified'].includes(value.state) || !['hash_only', 'system_checked'].includes(value.verification) || !date(value.createdAt)
+    || !['submitted', 'verified', 'rejected', 'revision_requested'].includes(value.state) || !['hash_only', 'system_checked'].includes(value.verification) || !date(value.createdAt)
     || !object(value.artifact) || !/^[a-f0-9]{64}$/.test(value.artifact.sha256)
     || !Number.isSafeInteger(value.artifact.bytes) || value.artifact.bytes < 0 || value.artifact.bytes > 65536
-    || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')) throw invalid();
+    || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')
+    || !receiptReview(value)) throw invalid();
   return value;
 }
 export class PublicWorkClaimsClient {

@@ -150,7 +150,13 @@ test("online capture preserves all application tables, identity boundaries and e
     assert.deepEqual(recovered.db.prepare("SELECT * FROM public_work_successor_requests ORDER BY request_id").all(), followJournal);
     assert.deepEqual(recovered.publicWorkSuccessors.create("commons", "owner", followReceipt.receiptId, followInput), followResult, "restoration retains the exact original creation outcome");
     assert.deepEqual(recovered.publicWorkReviews.contributorReview(publicIdentity.secret, followReceipt.receiptId).followUp, followResult.followUp);
-    assert.deepEqual(recovered.publicWorkClaims.receipt(followReceipt.receiptId), followReceipt);
+    // #3733: the canonical read composes the review outcome onto the
+    // stored record (the follow parent carries a recorded decision), so
+    // the round-trip guarantee is asserted in its two halves: the stored
+    // record returns byte-for-byte, and the recovered store's composed
+    // read equals the source store's composed read of the same records.
+    assert.deepEqual(JSON.parse(recovered.db.prepare("SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?").get(followReceipt.receiptId).receipt_json), followReceipt);
+    assert.deepEqual(recovered.publicWorkClaims.receipt(followReceipt.receiptId), f.store.publicWorkClaims.receipt(followReceipt.receiptId));
 
     assert.equal(recovered.db.prepare("SELECT enabled FROM public_work_claim_writer_permit").get().enabled, 0);
     for (const offer of f.projectOffers) for (const retry of offer.retries) {
