@@ -32,6 +32,7 @@ import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
+import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -280,8 +281,9 @@ function bondRequestsOf(store, roomId, pending, after) {
   // the bondId extract, so each bond costs a full scan of the room's events.
   // GROUP BY returns the same latest (MAX) sequence per bondId.
   const seqByBond = new Map();
-  for (let i = 0; i < mine.length; i += 900) {
-    const chunk = mine.slice(i, i + 900);
+  // SQL_BIND_CHUNK, not 900: the Worker's SQL takes at most 100 binds.
+  for (let i = 0; i < mine.length; i += SQL_BIND_CHUNK) {
+    const chunk = mine.slice(i, i + SQL_BIND_CHUNK);
     const rows = store.db.prepare(
       `SELECT json_extract(body,'$.data.bondId') AS bondId, MAX(sequence) AS sequence FROM events
        WHERE room_id=? AND json_extract(body,'$.type')='bond.proposed'
