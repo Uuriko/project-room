@@ -5,7 +5,7 @@ import { ensurePeopleOpen, openMemberProfile } from "./room-chrome.mjs";
 // identities and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
@@ -17,7 +17,7 @@ import { signInFixture } from "./auth-signin.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
-test("People at 390: owner removes a guest with a two-click confirm; no Pause for people", { timeout: 90000 }, async t => {
+for (const theme of ["dark", "light"]) test(`People at 390 (${theme}): owner removes a guest with a two-click confirm; no Pause for people`, { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-person-remove-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
@@ -34,6 +34,7 @@ test("People at 390: owner removes a guest with a two-click confirm; no Pause fo
   });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: "reduce" })).newPage();
+  await page.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [], dialogs = [];
   page.on("pageerror", error => errors.push(error.message));
   page.on("dialog", dialog => { dialogs.push(dialog.type()); dialog.dismiss(); });
@@ -50,13 +51,19 @@ test("People at 390: owner removes a guest with a two-click confirm; no Pause fo
   assert.equal(await row.locator("[data-member-pause]").count(), 0, "Pause is agent-only");
   assert.equal(await ownerRow.locator("[data-member-remove]").count(), 0, "the owner can't remove themselves");
   assert.ok((await remove.boundingBox()).height >= 24);
-  await remove.tap();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), theme === "light" ? "light" : null);
+  await remove.press("Enter");
   assert.equal(await remove.textContent(), "Confirm remove");
   assert.equal(await page.locator("#main").evaluate(node => node.classList.contains("sidebar-open")), true, "arming Remove keeps the phone drawer open (R327-n1)");
   assert.equal(await row.locator("[data-member-remove-cancel]").isVisible(), true, "Keep is on screen");
   assert.equal(store.room("commons").state.members.riley.active, true, "one tap never removes");
-  await row.locator("[data-member-remove-cancel]").tap();
+  await row.locator("[data-member-remove-cancel]").press("Enter");
   assert.equal(await remove.textContent(), "Remove");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "phone viewport has no horizontal overflow");
+  if (process.env.ROOM_TEST_SCREENSHOT_DIR) {
+    mkdirSync(process.env.ROOM_TEST_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(process.env.ROOM_TEST_SCREENSHOT_DIR, `person-remove-${theme}.png`) });
+  }
   await remove.tap();
   await remove.tap();
   await row.locator(".member-actions").waitFor({ state: "detached" });
