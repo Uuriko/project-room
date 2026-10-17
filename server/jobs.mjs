@@ -33,6 +33,10 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// Slow jobs ride the */30 safety-net cron, whose phase can land a few
+// seconds before the job's own anchor. Without slack the job waits a
+// whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
+export const SLOW_JOB_DUE_SLACK_MS = 60 * 1000;
 
 const oneLine = value => String(value ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
 
@@ -613,7 +617,10 @@ export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) 
     return next != null && next <= now;
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
-  return last + cadenceMs <= now;
+  // Only slow jobs get slack: they run from the safety-net cron, so a tick
+  // landing a few seconds before the anchor would otherwise skip a period.
+  const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
+  return last + cadenceMs - slack <= now;
 }
 
 export function lastRanFrom(stored) {

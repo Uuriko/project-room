@@ -59,6 +59,16 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
       && typeof entry.data?.body === "string" && postedBody === null) postedBody = entry.data.body;
   }
   const byteLength = typeof postedBody === "string" ? Buffer.byteLength(postedBody, "utf8") : null;
+  // Every text this message ever carried in the log, read before the rewrite
+  // below nulls it: the kept replay snapshot must contain none of them.
+  const removedTexts = [];
+  if (!messageId.endsWith(":channel")) {
+    for (const row of parsed) {
+      if (eventTargetsMessage(row.entry, messageId) && typeof row.entry.data?.body === "string" && row.entry.data.body) {
+        removedTexts.push(row.entry.data.body);
+      }
+    }
+  }
   const sourceId = messageId.endsWith(":channel") ? null : messageId;
   const update = db.prepare("UPDATE events SET body=? WHERE room_id=? AND sequence=?");
   let rewritten = 0;
@@ -111,9 +121,13 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
       db.prepare(`UPDATE messages SET record_json=NULL WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(roomId, ...ids);
     }
     // A replay snapshot may retain old edit text and attachment metadata.
-    // Clear it in the same deletion transaction; the next backfill reconstructs
-    // its prefix from the already-redacted log instead of resurrecting text.
-    db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
+    // Redact the message inside it in the same deletion transaction, the way
+    // the rewritten log now replays it. Discarding the snapshot instead made
+    // the next backfill replay the room's whole log from sequence 0 through
+    // today's reducer, and one old event written before a validation
+    // tightening then parked the room for good (integrity red, r35). When
+    // the snapshot cannot be redacted provably clean, it is still discarded.
+    redactReplaySnapshot(db, roomId, ids, removedTexts);
   } catch (error) {
     if (!/no such table/i.test(error?.message ?? "")) throw error;
   }
@@ -145,6 +159,50 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   return { state: stored, sequence, rewritten };
 }
 
+// The messages backfill resumes from cursor.state_json (a compact replay state
+// at state_seq). Null the deleted message's text in that state; if any text
+// the message carried still appears anywhere in the snapshot (a quote, a
+// receipt, an unexpected field), discard the snapshot as before so the next
+// backfill rebuilds it from the redacted log. Never keeps a snapshot that
+// still holds removed text.
+function redactReplaySnapshot(db, roomId, ids, removedTexts) {
+  const cursor = db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  if (!cursor) return;
+  const discard = () => {
+    db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
+    // A split snapshot (cursor parts, research r21) goes with its marker.
+    try { db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId); }
+    catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
+  };
+  if (typeof cursor.state_json !== "string") return discard();
+  let state;
+  try { state = JSON.parse(cursor.state_json); } catch { return discard(); }
+  if (!state || !Array.isArray(state.messages)) return discard();
+  for (const message of state.messages) {
+    if (!message || !ids.includes(message.id)) continue;
+    if (typeof message.body === "string") removedTexts.push(message.body);
+    for (const entry of Array.isArray(message.editHistory) ? message.editHistory : []) {
+      if (typeof entry?.body === "string") removedTexts.push(entry.body);
+    }
+    message.body = null;
+    message.redacted = true;
+    if (Array.isArray(message.editHistory)) message.editHistory = message.editHistory.map(entry => ({ ...entry, body: null }));
+    if (message.attachments != null) message.attachments = null;
+  }
+  // Any string left in the state that is (or, for texts of 8+ characters,
+  // contains) a removed text keeps the old behaviour: discard. Short texts
+  // compare whole so "ok" does not match every "token".
+  const texts = [...new Set(removedTexts.filter(text => typeof text === "string" && text))];
+  const holdsRemovedText = value => {
+    if (typeof value === "string") return texts.some(text => (text.length >= 8 ? value.includes(text) : value === text));
+    if (Array.isArray(value)) return value.some(holdsRemovedText);
+    if (value && typeof value === "object") return Object.entries(value).some(([key, inner]) => holdsRemovedText(key) || holdsRemovedText(inner));
+    return false;
+  };
+  if (holdsRemovedText(state)) return discard();
+  db.prepare("UPDATE messages_backfill_cursor SET state_json=?, parity_at_seq=NULL WHERE room_id=?").run(JSON.stringify(state), roomId);
+}
+
 // Account deletion also clears dm.posted and any string body the per-message
 // pass did not own. Replay accepts body null with redacted true.
 export function redactRemainingMessageBodies(db, roomId) {
@@ -161,6 +219,12 @@ export function redactRemainingMessageBodies(db, roomId) {
     if (Object.hasOwn(entry.data, "attachments") && entry.data.attachments != null) entry.data.attachments = null;
     update.run(JSON.stringify(entry), roomId, row.sequence);
     rewritten += 1;
+  }
+  // These bodies are not tied to one message's snapshot redaction: discard
+  // the replay snapshot so no removed text survives in it.
+  if (rewritten) {
+    try { db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId); }
+    catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
   }
   return rewritten;
 }
