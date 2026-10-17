@@ -4,6 +4,7 @@ import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
+import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
 import { DemigodOffers, demigodOffersSchema } from "./demigod-offers.mjs";
 import { DemigodContracts, demigodContractsSchema } from "./demigod-contracts.mjs";
@@ -11,6 +12,7 @@ import { BuyerSignoff, buyerSignoffSchema } from "./buyer-signoff.mjs";
 import { TrialTasks, trialTaskSchema } from "./trial-task-store.mjs";
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 // ServiceError lives in server/service-error.mjs (shared, cycle-free); the
 // local import keeps the binding in scope (e.g. for StorageUnavailableError
@@ -44,7 +46,7 @@ import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFe
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
@@ -60,10 +62,10 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
-import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
+import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
-import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
@@ -98,6 +100,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-i
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -147,6 +150,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
+import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -691,7 +695,7 @@ const work = "workItemId expectedRevision";
 // Commands that name an existing message, and which field names it.
 const ARCHIVED_REF_FIELDS = Object.freeze({
   [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
-  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
+  [T.POLL_VOTED]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
   [T.MESSAGE_POSTED]: "replyToId"
 });
 
@@ -722,7 +726,7 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
-  [T.MESSAGE_REACTION_SET]: "messageId reaction active",
+  [T.POLL_VOTED]: "messageId option active",
   ...PIN_COMMAND_SHAPES,
   [T.CHANNEL_CREATED]: "channelId name",
   [T.CHANNEL_RENAMED]: "channelId name",
@@ -763,7 +767,7 @@ const shapes = {
 export const COMMAND_TYPES = Object.freeze(Object.keys(shapes));
 
 // An unknown type names the closest real types, so "message.post" or
-// "message.reacted" points at message.posted / message.reaction_set
+// "message.edit" points at message.edited
 // instead of a bare "invalid type".
 function unknownCommandTypeMessage(type) {
   const given = typeof type === "string" ? type.slice(0, 64) : "";
@@ -781,7 +785,7 @@ function unknownCommandTypeMessage(type) {
   };
   const types = Object.keys(shapes);
   const sameFamily = family ? types.filter(t => t.split(".")[0] === family) : [];
-  // Prefer a same-family type sharing the verb's stem (reacted -> reaction_set).
+  // Prefer a same-family type sharing the verb's stem (edit -> edited).
   const stem = (given.split(".")[1] ?? "").slice(0, 5);
   const stemmed = stem.length >= 4 ? sameFamily.find(t => t.split(".")[1].startsWith(stem)) : undefined;
   const closest = stemmed ?? (given ? [...types].sort((a, b) => distance(given, a) - distance(given, b))[0] : null);
@@ -804,7 +808,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1088,6 +1092,7 @@ function roomSchemaStamp() {
     referralInviteSchema, referralSchema,
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
+    wakeQueuePauseBySchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
@@ -1097,13 +1102,13 @@ function roomSchemaStamp() {
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
-    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1167,8 +1172,8 @@ const LOOKUP_INDEXES = `
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Commit and rollback of a write transaction drop
-// the whole cache, including a parse of uncommitted bytes. Callers receive
+// write drops the entry. Successful commands refill it after outer commit;
+// rollback and unregistered writes discard candidates. Callers receive
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
@@ -1179,6 +1184,28 @@ function deepFreeze(value) {
   if (Array.isArray(value)) { for (const item of value) deepFreeze(item); }
   else { for (const key of Object.keys(value)) deepFreeze(value[key]); }
   return Object.freeze(value);
+}
+
+// Reuse only JSON-stable reducer state. Exotic values (undefined, sparse
+// arrays, -0, accessors, etc.) must still take the canonical cold-read path.
+// Freezing in this same walk prevents later command helpers changing a
+// candidate after its bytes have been persisted.
+function freezeJsonState(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
+  if (typeof value !== "object") return false;
+  const array = Array.isArray(value);
+  if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
+  const keys = Object.keys(value);
+  if (Reflect.ownKeys(value).length !== keys.length + (array ? 1 : 0) || array && keys.length !== value.length) return false;
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (array && key !== String(index)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
+  }
+  Object.freeze(value);
+  return true;
 }
 
 class ProjectionCache {
@@ -1207,9 +1234,11 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1", workItemBoardBackfill = "auto" } = {}) {
+    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    this.verifyProjectionCache = verifyProjectionCache === true;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
@@ -1295,6 +1324,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
+    this.publicWorkSettlement = new PublicWorkSettlement(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -1321,11 +1351,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.wakeQueue.verifySchema({ allowAbsent: true });
         this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
+        this.wakeQueue.verifyPauseBySchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
         this.publicWorkReviews.verifySchema({ allowAbsent: true });
         this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
+        this.publicWorkSettlement.verifySchema({ allowAbsent: true });
         verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
         this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
@@ -1566,6 +1598,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(wakeQueueSchema);
       // The pause surface (W4-48) is purely additive as well.
       this.db.exec(wakeQueuePauseSchema);
+      // R327-1: who set each pause, as a separate additive side table (the
+      // guest_selfserve all-or-nothing pattern; legacy stores keep verifying).
+      this.db.exec(wakeQueuePauseBySchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
@@ -1625,6 +1660,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Empty public read-model tables. Filling them is the public-read-model
       // cron (or the opt-in write). The constructor does not scan rooms.
       this.db.exec(PUBLIC_READ_MODEL_SCHEMA);
+      // Result-mode receipts (#3636) record their verification tier on the
+      // public row; tables predating the column gain it additively.
+      ensurePublicReceiptVerificationColumn(this.db);
       // Existing directory rows predate the independent feed visibility bit.
       // Default them on so upgrading does not silently hide public work.
       const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
@@ -1754,6 +1792,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkSuccessorsSchema);
       this.publicWorkSuccessors.verifySchema();
+      this.publicWorkSettlement.verifySchema({ allowAbsent: true });
+      this.db.exec(publicWorkSettlementSchema);
+      this.publicWorkSettlement.verifySchema();
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
@@ -1832,6 +1873,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      // MSG-2 blocks: rooms parked on an un-replayable event, named for the
+      // operator. Unfenced and additive, like the cursor.
+      this.db.exec(MESSAGES_BACKFILL_BLOCKS_SCHEMA);
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
       }
@@ -1857,6 +1901,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
+      this.wakeQueue.verifyPauseBySchema();
       this.attention.verifySchema();
       this.moderation.verifySchema();
       this.bountyEscrow.verifySchema(); // Escrowed bounties: additive at v36, verified like the other journals.
@@ -2036,23 +2081,40 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ON CONFLICT(singleton) DO UPDATE SET step=excluded.step`).run(next);
     });
     let ran = 0;
+    let backfillBlocked = [];
     while (ran < 2) {
       if (Date.now() > deadline) {
         // A step that finished is not run again on the next tick.
         if (ran > 0) remember(step);
-        return { ran, next: step, budgetExceeded: 1 };
+        return { ran, next: step, budgetExceeded: 1, ...(backfillBlocked.length ? { blocked: backfillBlocked } : {}) };
       }
+      let stepResult;
       try {
-        steps[step][1]();
+        stepResult = steps[step][1]();
       } catch (error) {
         throw tagIntegritySubcheck(error, steps[step][0]);
+      }
+      if (steps[step][0] === "messages_backfill" && Array.isArray(stepResult?.blocked)) {
+        backfillBlocked = stepResult.blocked;
       }
       step = (step + 1) % steps.length;
       ran += 1;
       await yieldBetween();
     }
+    // A newly parked room is surfaced once as a named failure (the block
+    // record carries the room, sequence, event id and error) instead of an
+    // anonymous throw every tick; the step cursor is deliberately not
+    // remembered, so the next tick re-runs this step, finds the room
+    // parked, and advances. Steady-state ticks return the block list in
+    // the result, where the job summary keeps it visible.
+    const freshBlock = backfillBlocked.find(block => block.fresh);
+    if (freshBlock) {
+      throw tagIntegritySubcheck(new Error(
+        `messages backfill blocked in room ${freshBlock.roomId} at sequence ${freshBlock.sequence} (event ${freshBlock.eventId ?? "none"}): ${freshBlock.error}`
+      ), "messages_backfill");
+    }
     remember(step);
-    return { ran, next: step };
+    return { ran, next: step, ...(backfillBlocked.length ? { blocked: backfillBlocked } : {}) };
   }
 
   ensureIntegrityRoomState() {
@@ -2745,13 +2807,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
   }
   close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
-  _dropProjectionCache() { this._projectionCache?.clear(); }
+  // Invalidate both parsed reads and unpublished command candidates.
+  _dropProjectionCache() {
+    this._projectionCache?.clear();
+    for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
+  }
+  _queueProjectionCache(roomId, sequence, state, projection) {
+    const pending = this._pendingProjectionFrames?.at(-1);
+    if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
+      || !freezeJsonState(state)) return;
+    const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight });
+  }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
-    const cache = () => this._projectionCache;
+    const invalidate = () => this._dropProjectionCache();
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
@@ -2759,7 +2830,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const run = stmt.run.bind(stmt);
         stmt.run = (...args) => {
           const result = run(...args);
-          cache()?.clear();
+          invalidate();
           return result;
         };
       }
@@ -2769,7 +2840,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
+        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) invalidate();
         return result;
       };
     }
@@ -2781,13 +2852,28 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+    // Savepoints collect candidates separately, but never publish before
+    // the outer commit. Every rooms write invalidates all earlier candidates.
+    const boundary = outermost || isolated;
+    const frames = this._pendingProjectionFrames ??= [];
+    if (boundary) frames.push(new Map());
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      this._dropProjectionCache();
+      if (boundary) frames.pop();
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
+    if (boundary) {
+      const pending = frames.pop();
+      this._projectionCache?.clear();
+      if (!outermost) {
+        for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
+      } else {
+        const cache = this._projectionCache ??= new ProjectionCache();
+        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+      }
+    }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -2824,15 +2910,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
     const hit = cache.lookup(roomId, meta.sequence);
-    if (hit) return hit;
+    if (hit) {
+      if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence).value)) {
+        this._dropProjectionCache();
+        throw new Error(`Projection cache differs from storage for room ${roomId}`);
+      }
+      return hit;
+    }
+    const { value, weight } = this._readProjection(roomId, meta.sequence);
+    cache.insert(roomId, meta.sequence, value, weight);
+    return value;
+  }
+  _readProjection(roomId, sequence) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
     const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection));
-    if (missing.length) this._restoreBodiesFromLog(roomId, meta.sequence, parsed, missing);
+    if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
-    const value = Object.freeze({ sequence: meta.sequence, state });
-    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0));
-    return value;
+    return { value: Object.freeze({ sequence, state }),
+      weight: Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh
@@ -4430,6 +4526,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Replacing history may preserve the head id and sequence. Invalidate
       // message replay snapshots and full-record certification explicitly.
       this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+      // A parked room's block described the replaced log; it does not carry.
+      this.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
@@ -4976,8 +5074,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
-      // GX-invite design). Guest members may post chat messages and set
-      // reactions; drafts (message.posted carrying a workItemId) need the
+      // GX-invite design). Guest members may post chat messages and vote in
+      // polls; drafts (message.posted carrying a workItemId) need the
       // contributor tier recorded at redemption. Every other command type
       // is refused outright — a guest can never hold a scope outside
       // guest:*, even if some other path granted permission bits.
@@ -4991,7 +5089,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // prepareReplyPost scopes responses to requests addressed to the
         // guest itself.
         const opensReplyRequest = command.type === T.MESSAGE_POSTED && command.data?.requestKind != null;
-        const allowed = command.type === T.MESSAGE_REACTION_SET
+        const allowed = command.type === T.POLL_VOTED
           || (command.type === T.MESSAGE_POSTED && !opensReplyRequest && (!isDraft || tier === "contributor"));
         if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
@@ -5123,23 +5221,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(409, "command_rejected", "Message already exists");
         }
       }
-      // A reaction on a DM is shown to its parties and the answer would
+      // A vote on a DM poll is shown to its parties and the answer would
       // confirm the private id, so a non-party is told "no such message".
-      // Live admission only; reactions already in a log keep replaying.
-      if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
+      if (command.type === T.POLL_VOTED && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
-        // Reply requests are directed but room-threaded: members may react to them.
+        // Reply requests are directed but room-threaded.
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
             && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
-          fail(422, "command_rejected", "Reaction must reference a message in this Room");
+          fail(422, "command_rejected", "Vote must reference a message in this Room");
         }
       }
       // r233: after a block, the blocked member's edit of its own DM (a new
-      // body in the blocker's view) or reaction to the blocker's DM (a new
-      // activity event for her) is new contact in the denied direction, so it
-      // gets the same consent check as a fresh DM. Retracting a reaction and
-      // deleting stay open; reply requests are room-threaded and exempt.
-      if ((command.type === T.MESSAGE_EDITED || (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true))
+      // body in the blocker's view) or vote on the blocker's DM poll is new
+      // contact in the denied direction, so it gets the same consent check as
+      // a fresh DM. Retracting a vote and deleting stay open; reply requests are room-threaded and exempt.
+      if ((command.type === T.MESSAGE_EDITED || (command.type === T.POLL_VOTED && command.data?.active === true))
           && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)) {
@@ -5257,7 +5353,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (error?.code === CHANNEL_ARCHIVED_CODE) fail(409, CHANNEL_ARCHIVED_CODE, error.message);
         if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
-        if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
+        if (command.type === T.POLL_VOTED && (/^Event data missing /.test(error.message) || error.message === "Invalid poll vote" || error.message === "Vote must reference a poll")) {
           fail(422, "invalid_arguments", error.message);
         }
         // The reducer's generic "Invalid title" also covers values longer
@@ -5305,6 +5401,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        this._queueProjectionCache(roomId, sequence, state, projection);
         // Board is the claim authority the MCP tools share with /work-claims.
         // Same transaction as the projection event: decision #10's write-path
         // cutover syncs the item's board claim from post-command state via
@@ -5346,17 +5443,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.MEMBER_ACCESS_CHANGED && command.data.active === false) {
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
-      }
-      // RC-2026-10-07: reaction-as-ack. The agent.wake payload's one-tap ack
-      // copy (WAKE_ACK_HINT) says "react 👍 to acknowledge", so an active
-      // reaction by a member marks THEIR OWN pending wake signals for that
-      // message delivered. Without this the same signal re-appears on every
-      // heartbeat poll after the member reacted (the phantom re-wake loop).
-      // Runs in the same transaction as the reaction event; never throws —
-      // an ack is best-effort and must not fail the reaction.
-      if (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true
-        && typeof command.data.messageId === "string") {
-        try { this.ackWakesOnReaction(roomId, auth.member.id, command.data.messageId); } catch {}
       }
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
@@ -5409,8 +5495,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (@handles whose target is ambiguous or unknown); they ride the response below.
       let mentionWarnings = null;
       if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
-      // Attention: write-time activity fan-out (mention/reply/thread_reply/
-      // reaction). Runs in the same transaction as the triggering event.
+      // Attention: write-time activity fan-out (mention/reply/thread_reply).
+      // Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
       // #3261: but it is no longer silent either. The fan-out is atomic
       // per recipient set (see activity.mjs), the failure is logged and
@@ -5565,51 +5651,39 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
-  // RC-2026-10-07: reaction-as-ack. The agent.wake payload carries the
-  // one-tap ack hint "react 👍 to acknowledge" — honor it: an active
-  // reaction marks the REACTING member's own undelivered wake signals for
-  // that message delivered. Only their own signals are touched (a reaction
-  // is personal acknowledgment, never someone else's), and a member with
-  // no identity link or no pending signals for the message is a no-op.
-  // Defensive against pre-schema databases; never throws.
-  ackWakesOnReaction(roomId, memberId, messageId) {
-    let link = null;
-    try {
-      link = this.db.prepare(
-        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-    } catch { return; }
-    if (!link?.identityId) return;
-    try {
-      this.db.prepare(
-        "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=? AND delivered_at IS NULL"
-      ).run(this.now(), link.identityId, roomId, messageId);
-    } catch { /* pre agent_wake_signals schema: nothing to ack */ }
-  }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
-    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     // Decision #25: trial seats receive mention wakes in their room. Guest
     // members are seated through guest_members, never identity_links, so
-    // the identity_links-only lookup silently dropped every trial-seat
-    // wake. Fall back to the guest seat's identity. Deliberately local to
-    // this fan-out: identityIdForMember (the work-wake resolver) keeps
-    // NOT resolving guests — work wakes stay excluded for trial seats.
-    const guestLinkOf = this.db.prepare("SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=? AND member_id=?");
+    // an identity_links-only lookup silently drops every trial-seat wake.
+    // Resolve through the shared guest-aware resolver
+    // (server/wake-identity-resolution.mjs), the same one the webhook fan-out
+    // uses. identityIdForMember (the work-wake
+    // resolver) deliberately keeps NOT resolving guests — work wakes stay
+    // excluded for trial seats.
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
-      if (!link) continue;
+      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+      // #3345: a mention target with no identity link on either table can
+      // never be woken — that used to be a silent `continue`; it is now a
+      // counted, journaled loss (the member exists; the fabric cannot
+      // address them).
+      if (!identityId) {
+        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+          event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+        continue;
+      }
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
-        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+        agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
-        this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+        this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
+        this.agentHeartbeats.pushNotify({ identityId: identityId,
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }

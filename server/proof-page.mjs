@@ -14,8 +14,8 @@
 // Honesty contract (docs/RECEIPTS-PAGE.md): names are as the room recorded
 // them, not identity-verified; hashes are stored values, not re-verified at
 // read time; these records are unsigned. Credit movements are NOT claimed
-// here: bounty lots are proved by signed, member-gated lot receipts, which
-// have no public page, so this page makes no payment claim at all.
+// here: bounty lots are proved by signed lot receipts on their own public
+// pages (/receipts/<lotId>), so this page makes no payment claim at all.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
@@ -31,6 +31,14 @@ export const PROOF_LEVELS = Object.freeze({
   "server-verified-merge": Object.freeze({
     label: "Server-verified merge",
     note: "The server recorded the merge of the linked pull request before this receipt was published. This is the strongest claim a receipt on this page makes.",
+  }),
+  "member-verified-completion": Object.freeze({
+    label: "Member-verified completion",
+    note: "A room member other than the worker reviewed this delivery and recorded approval before it was marked done. No server-verified merge backs this entry.",
+  }),
+  "self-attested-completion": Object.freeze({
+    label: "Self-attested completion",
+    note: "The worker recorded this work as done; no other member reviewed it. No server-verified merge backs this entry.",
   }),
   "room-recorded-completion": Object.freeze({
     label: "Room-recorded completion",
@@ -50,7 +58,7 @@ export const PROOF_HONESTY = Object.freeze([
   "Names are as the room recorded them — member display names, or a self-supplied name on public-work receipts — not identity-verified.",
   "Hashes are stored sha256 values, not re-verified when this page is read.",
   "These records are unsigned. A receipt proves the room stored this record and the owner chose to publish it — nothing beyond the level named on each entry.",
-  "No payment is proved on this page. Bounty credit movements are proved by signed lot receipts, which are member-gated and have no public page today.",
+  "No payment is proved on this page. Bounty credit movements are proved by signed lot receipts, each served on its own public page once its bounty settles, unless the room owner has turned public receipts off.",
   "Only receipts the room owner chose to publish appear here. Turning public receipts off removes this page's entries; private work is never listed.",
 ]);
 
