@@ -2744,6 +2744,33 @@ function saveComposer() {
     assistantDraft, ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
 }
+// A receipt owns only its original draft, even when Retry was clicked after
+// editing, navigating away, or restoring the tab after a lost response.
+function confirmSharedSubmission({ command, fileIds }, result) {
+  saveComposer();
+  const activeKey = composerKey(), acceptedFiles = new Set(fileIds);
+  let activeChanged = false;
+  for (const [key, draft] of drafts.entries) {
+    if (draft.pending?.command.id !== command.id) continue;
+    const files = (draft.files ?? []).filter(file => !acceptedFiles.has(file.id));
+    const unchanged = draft.body.trim() === command.data.body
+      && (draft.toMemberId || null) === (command.data.toMemberId || null)
+      && draft.replyToId === command.data.replyToId && !files.length;
+    if (unchanged) drafts.clear(key);
+    else drafts.save(key, { pending: null, error: "", files,
+      ...(draft.assistantDraft?.runId === result.id ? { assistantDraft: { ...draft.assistantDraft, expectedRevision: result.revision } } : {}) });
+    if (key === activeKey) activeChanged = true;
+  }
+  if (activeChanged) {
+    const cleared = !drafts.entries.has(activeKey);
+    if (cleared && assistantDraft) assistantDraft = null;
+    restoreComposer(drafts.get(cleared ? composerKey() : activeKey));
+    if (cleared) $("#also-send-to-channel").checked = false;
+    updateReply(); syncRequestComposer(); renderComposerError();
+  }
+  persistDrafts();
+  if (acceptedFiles.size) void refreshRoomFiles();
+}
 function restoreComposer(draft) {
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
@@ -3897,7 +3924,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
-  openWork: id => revealWork(id), openMessage: id => revealMessage(id),
+  openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
   getContribution: () => assistantDraft, endContribution: () => switchThread(currentThreadId),
   startContribution: (sourceMessageId, intent) => {
     const source = conversation?.byId.get(sourceMessageId);
@@ -4080,6 +4107,9 @@ $("#message-form").addEventListener("submit", e => {
   // Preserve the exact legacy payload, including an omitted default channel.
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+  const sendingCommand = pendingMessage.command;
+  const sharedRequest = Boolean(askRoom || humanExperience.hasSubmission(sendingCommand));
+  const stagedFileIds = composerFiles.filter(file => file.status === "staged").map(file => file.id);
   saveComposer();
   const generation = client.generation, draftKey = composerKey();
   submit(e.currentTarget, async () => {
@@ -4087,10 +4117,15 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
     try {
-      await client.send(pendingMessage.command);
+      if (sharedRequest) {
+        await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
+        if (generation === client.generation && state) maybeShowGuestUpgradeHint();
+        return;
+      }
+      await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
+      throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
     await commitComposerFiles(data.messageId);
@@ -4103,7 +4138,6 @@ $("#message-form").addEventListener("submit", e => {
       assistantDraft = null; restoreComposer(drafts.get(composerKey()));
       updateReply(); syncRequestComposer(); persistDrafts();
     }
-    await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
