@@ -166,10 +166,11 @@ export function claimBand(escrow, roomId, agentId, { nowMs } = {}) {
 // Returns { allowed, band, maxClaimMillis }. Probation caps the bounty
 // size; everything else is unchanged.
 export function claimEligibility(escrow, roomId, agentId, amountMillis, { nowMs } = {}) {
-  const band = claimBand(escrow, roomId, agentId, { nowMs });
-  if (band === REPUTATION_BANDS.PROBATION && amountMillis > PROBATION_MAX_CLAIM_MILLIS)
-    return { allowed: false, band, maxClaimMillis: PROBATION_MAX_CLAIM_MILLIS };
-  return { allowed: true, band, maxClaimMillis: null };
+  const summary = reputationSummary(escrow, roomId, agentId, { nowMs });
+  const isCapped = summary.band === REPUTATION_BANDS.PROBATION || (!summary.positive || summary.positive === 0);
+  if (isCapped && amountMillis > PROBATION_MAX_CLAIM_MILLIS)
+    return { allowed: false, band: (!summary.positive || summary.positive === 0) ? REPUTATION_BANDS.PROBATION : summary.band, maxClaimMillis: PROBATION_MAX_CLAIM_MILLIS };
+  return { allowed: true, band: summary.band, maxClaimMillis: null };
 }
 
 // Routing visibility for one lane: the band-derived view the routing layer
