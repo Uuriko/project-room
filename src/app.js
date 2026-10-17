@@ -328,7 +328,8 @@ let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
+let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
+const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 let navigationBoardEpoch = 0;
@@ -3004,6 +3005,11 @@ function revealWorkTimeline(id) {
 }
 // JDOT-COH-NAV begin
 function revealWork(id) {
+  // #3795: a record id the legacy workItems projection does not hold may be
+  // a board claim — its record lives on the board. Reveal it there instead
+  // of reporting the record missing; deep links, reloads and the
+  // needs-attention Review anchor all arrive through this path.
+  if (state && !Object.hasOwn(state.workItems ?? {}, id)) { void revealClaimRecord(id); return; }
   if (activeWorkNavigationId && activeWorkNavigationId !== id) {
     const previous = workRecord(activeWorkNavigationId)?.querySelector(".work-details");
     if (previous) previous.open = false;
@@ -3083,10 +3089,23 @@ function showWorkDestination(kind, id, presentation = "details") {
   else if (kind === "work") revealWork(id); else revealMessage(id);
   syncWorkReturnControl();
 }
+// #3795: open the board on one claim's record — the destination behind
+// revealWork's claim fallback (deep links and reloads carry no origin, so
+// the return control falls back to "Back to room" like a work deep link).
+async function revealClaimRecord(id) {
+  if (!workNavigationContext() || busy) return;
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || !workNavigationContext()) return;
+  await navigationBoardRevealClaim?.(id);
+  syncWorkReturnControl();
+}
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
   if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
-    notice("That source is no longer available in this room.", true); return false;
+    notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "details";
   const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
@@ -3119,6 +3138,52 @@ function navigateWorkRecord(kind, id, extra = {}) {
   showWorkDestination(kind, id, presentation);
   return true;
 }
+// #3795: navigate to a board claim's record. The destination is the board
+// itself — the claim's card with its record disclosure open — so this
+// mirrors navigateWorkRecord's origin/ticket bookkeeping without a
+// workItems destination: the origin is captured before the board opens,
+// the claim's presence is proven by revealing it, and only then is the
+// record URL pushed, so a claim the board cannot show never becomes a
+// history entry whose Back leads nowhere.
+async function navigateClaimRecord(id) {
+  if (!workNavigationContext() || busy) return false;
+  const target = recordHref("work", id);
+  const origin = { ...captureWorkOrigin(), targetClaimId: id };
+  const current = currentWorkOrigin();
+  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+    // Same record, new surface: refresh the return context, keep the entry.
+    if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
+      { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
+    workHistoryReplayKey = null;
+    if (!$("#board-dialog").open) $("#tasks-board-open").click();
+    if (await navigationBoardReady?.()) await navigationBoardRevealClaim?.(id);
+    syncWorkReturnControl();
+    return true;
+  }
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  if (!await navigationBoardRevealClaim?.(id)) {
+    notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    return false;
+  }
+  if (opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  const ticket = crypto.randomUUID();
+  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
+  workNavigationOrigins.set(ticket, origin);
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
+  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
+  activeWorkNavigation = ticket;
+  // Pre-seed the replay key exactly like navigateWorkRecord, so the pushed
+  // entry's own hashchange/popstate echo dedupes instead of reprocessing.
+  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
+  syncWorkReturnControl();
+  return true;
+}
 async function restoreWorkOrigin(ticket) {
   const origin = currentWorkOrigin(ticket);
   if (!origin || busy) { returnToCurrentRoom(); return; }
@@ -3126,6 +3191,10 @@ async function restoreWorkOrigin(ticket) {
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
   inboxUI?.showRooms();
+  // #3795: a claim record's destination is the board itself; returning to an
+  // origin that was not the board closes it again (a work record's
+  // destination never had it open).
+  if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
   if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
   if (origin.mode) setRequestMode(origin.mode);
@@ -3196,7 +3265,9 @@ function replayWorkNavigation() {
   if (returning) { void restoreWorkOrigin(back); return true; }
   if (targetOrigin && targetOrigin.targetUrl === location.href) {
     activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
-    if ($("#board-dialog").open) $("#board-dialog").close();
+    // A claim record's destination keeps the board open; every other
+    // record destination starts with it closed.
+    if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
     if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
     else revealLocationHash();
@@ -4941,7 +5012,11 @@ $("#main").addEventListener("click", e => {
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
-    navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
+    // #3795: a claim record link (marked data-open-claim), and any record id
+    // the legacy workItems projection does not hold, resolves to the board
+    // claim's record instead of the work timeline.
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork]) void navigateClaimRecord(link.dataset.openWork);
+    else navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
     // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
@@ -7822,6 +7897,7 @@ const ready = (async () => {
       import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
         .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
       navigationBoardReady = () => controller.whenReady();
+      navigationBoardRevealClaim = id => controller.revealClaim(id);
       return controller;
     },
     // JDOT-COH-NAV end
