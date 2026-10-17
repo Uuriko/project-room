@@ -68,8 +68,13 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   assert.equal(stamped.state, 'verified');
   assert.equal(stamped.verified.by, 'owner');
   assert.equal(stamped.verification, 'hash_only');
+  // #3733: the canonical read also composes the review summary onto the
+  // stamped record. The summary is the whole public outcome — no decider
+  // member id, no reason, no fingerprint.
+  assert.deepEqual(stamped.review, { state: 'accepted', verificationVerdict: null, verificationReviewerKind: null,
+    verifiedAt: null, decidedAt: accepted.review.decision.at });
   const receiptRest = { ...stamped };
-  delete receiptRest.verified;
+  delete receiptRest.verified; delete receiptRest.review;
   assert.deepEqual({ ...receiptRest, state: 'submitted' }, f.receipt);
   assert.deepEqual(f.store.publicWorkClaims.artifact(id), artifact);
   assert.equal(f.store.workClaims.get(kernel.namespaceId, kernel.taskId).state, 'done');

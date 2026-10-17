@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { PURGE_TABLES } from "../server/purge-registry.mjs";
+import { syncRoomPublication } from "../server/public-read-model.mjs";
 import { countPurge, createOperatorPurge } from "../server/operator-purge.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { collectLargestTables, revisionDrift } from "../server/operator-status.mjs";
@@ -260,6 +261,35 @@ describe("operator purge and status", { concurrency: false }, () => {
     assert.deepEqual(columns, ["id", "at", "action", "target_kind", "target_id", "reason", "plan_hash", "counts_json", "result", "request_id"]);
     assert.throws(() => store.db.prepare("UPDATE operator_actions SET result='rewritten'").run(), /append-only/);
     assert.throws(() => store.db.prepare("DELETE FROM operator_actions").run(), /append-only/);
+  });
+
+  test("purging a room removes its recorded public-receipts setting and spares the other room's", async t => {
+    const { store, call } = await serve(t);
+    const roomA = "qa2-receipts-setting-room";
+    const roomB = "room-b-keep";
+    store.initialize(createdRoom(roomA, "qa2 receipts setting"));
+    store.initialize(createdRoom(roomB, "Keep me"));
+    // Record both rooms' public-receipts settings through the product write
+    // path: syncRoomPublication mirrors the recorded setting into
+    // room_public_receipts_setting (a null previous is authoritative, so it
+    // always re-mirrors). A recorded OFF for the room being purged — the row
+    // an opt-out leaves behind — and a recorded ON for the room that stays.
+    syncRoomPublication(store, { roomId: roomA, state: { room: { id: roomA, publicReceipts: { enabled: false, revision: 1 } } } });
+    syncRoomPublication(store, { roomId: roomB, state: { room: { id: roomB, publicReceipts: { enabled: true, revision: 1 } } } });
+    const settingRow = roomId => store.db.prepare("SELECT enabled FROM room_public_receipts_setting WHERE room_id=?").get(roomId);
+    assert.equal(settingRow(roomA)?.enabled, 0);
+    assert.equal(settingRow(roomB)?.enabled, 1);
+    // Public receipts state for the purged room, so its whole public face is
+    // proven gone together (public_receipts itself was already registered).
+    store.db.prepare(`INSERT INTO public_receipts (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, hashes_json, at, start_href)
+      VALUES ('pwr_0123456789abcdef', 'Fixture receipt', 'work-claim', ?, ?, 'qa2 receipts setting', '[]', '[]', '[]', '2026-10-16T00:00:00.000Z', '/?start=room')`).run(roomA, roomA);
+    const { plan, executed } = await planAndExecute(call, [{ kind: "room", id: roomA }]);
+    assert.equal(plan.body.counts.find(row => row.table === "room_public_receipts_setting")?.rows, 1);
+    assert.equal(executed.status, 200, JSON.stringify(executed.body));
+    assert.equal(executed.body.result, "executed");
+    assert.equal(settingRow(roomA), undefined);
+    assert.equal(settingRow(roomB)?.enabled, 1);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM public_receipts WHERE origin_room_id=?").get(roomA).n, 0);
   });
 
   test("a new event between plan and execute refuses and deletes nothing", async t => {

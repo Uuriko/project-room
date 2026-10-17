@@ -1,5 +1,6 @@
 import { handlePublicWorkMcp, isPublicWorkMcpTool } from './mcp-public-work.mjs';
 import { handleIdentityMintMcp, isIdentityMintMcpTool } from './mcp-identity-mint.mjs';
+import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 // Authenticated hosted MCP profile for the Room Worker.
 //
 // The public join tools stay on POST /mcp when no Authorization header is
@@ -67,9 +68,9 @@ function rpcError(message, code, text) {
   return { jsonrpc: "2.0", id, error: { code, message: text } };
 }
 
-function toolResult(value, isError = false) {
+function toolResult(value, isError = false, redactions = []) {
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text: mcpResultText(value, redactions) }],
     structuredContent: value,
     ...(isError ? { isError: true } : {})
   };
@@ -526,7 +527,14 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
-    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50), store.redactionMessages(roomId)), auth.member.id);
+    // B4 agent read-path: same filters as GET /events — type (comma-separated
+    // event types), mentions (a member id, or "me"), compact (drop envelope
+    // noise). All optional; omitting them keeps the legacy page.
+    return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50, {
+      types: typeof args.type === "string" ? args.type.split(",").map(part => part.trim()).filter(part => part.length > 0) : null,
+      mentions: typeof args.mentions === "string" ? args.mentions : null,
+      compact: args.compact === true
+    }), store.redactionMessages(roomId)), auth.member.id);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET
@@ -930,7 +938,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(await callRoomTool(store, secret, identity, name, args, agentRooms)) };
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
+      // A minted invite code is a one-time credential: it rides in
+      // structuredContent only, never in the text block hosts log
+      // verbatim (issue #3750). room_run_action recurses into this same
+      // handler with the inner tool name, so it is covered here too.
+      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false,
+        name === "room_create_agent_invite" ? [mcpRedaction(value?.code, "structuredContent.code")] : []) };
     } catch (error) {
       const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };

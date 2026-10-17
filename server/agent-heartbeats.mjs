@@ -23,6 +23,7 @@ import { randomBytes } from "node:crypto";
 import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
 import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
+import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
 const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
@@ -588,11 +589,34 @@ export class AgentHeartbeats {
       reachableUntil,
     });
     const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId, door });
+    const pausedRooms = this.pausedRoomsOf(agentId);
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
       pendingWakes: page.signals, more: page.more,
+      ...(pausedRooms.length ? { paused: pausedRooms } : {}),
       pushConfigured, pushSuspended, reachability,
     });
+  }
+
+  // R327-1 (r6): the rooms where this identity's member has wakes paused,
+  // with who holds the pause ("owner" or "self"). Empty when nothing is
+  // paused, so callers can spread the field conditionally.
+  pausedRoomsOf(agentId) {
+    let rows = [];
+    try {
+      rows = this.db.prepare(`SELECT l.room_id AS roomId, p.paused_at AS pausedAt, p.reason AS reason, b.paused_role AS role
+        FROM identity_links l JOIN wake_queue_pause p ON p.room_id=l.room_id AND p.member_id=l.member_id
+        LEFT JOIN wake_queue_pause_by b ON b.room_id=l.room_id AND b.member_id=l.member_id
+        WHERE l.identity_id=? ORDER BY l.room_id`).all(agentId);
+    } catch (error) {
+      // A store without the pause tables has nothing paused; never fail the
+      // wake/heartbeat path for it.
+      if (!isMissingTable(error)) throw error;
+      rows = [];
+    }
+    return rows.map(row => Object.freeze({ roomId: row.roomId, pausedAt: row.pausedAt, reason: row.reason ?? null,
+      heldBy: row.role === "self" ? "self" : "owner",
+      resume: row.role === "self" ? "wake_resume lifts your own pause" : "only the room owner or a member manager can resume" }));
   }
 
   // Per-host reachability window (RC-2026-09-24-203):
@@ -782,21 +806,23 @@ export class AgentHeartbeats {
     }
     const at = this.now();
     this.ensureListenerSchema();
-    const placeholders = signalIds.map(() => "?").join(",");
+    // The Worker's SQL takes at most 100 binds and the REST door does not cap
+    // signalIds, so the id lists below are bound in chunks (sql-binds.mjs).
+    const chunks = [...sqlChunks(signalIds)];
     // The store's own transaction runner owns the write lock: BEGIN IMMEDIATE on
     // Node, transactionSync on a Durable Object (which rejects raw BEGIN,
     // SAVEPOINT and COMMIT), and a join when the caller already holds one. The
     // check and the UPDATE loop run under one lock, so a lease expiring or
     // changing hands between them cannot let a stale ack through.
     return this.store.transaction(() => {
-      const holders = this.db.prepare(`SELECT DISTINCT l.fencing_token AS fencingToken
+      const holders = chunks.flatMap(chunk => this.db.prepare(`SELECT DISTINCT l.fencing_token AS fencingToken
         FROM agent_wake_signals s
         JOIN agent_wake_listener_leases l
           ON l.agent_id = s.agent_id AND l.room_key = COALESCE(s.room_id, '')
-        WHERE s.agent_id = ? AND s.signal_id IN (${placeholders})
+        WHERE s.agent_id = ? AND s.signal_id IN (${sqlPlaceholders(chunk)})
           AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id = ?)
           AND l.lease_expires_at > ?`)
-        .all(agentId, ...signalIds, roomId, roomId, at);
+        .all(agentId, ...chunk, roomId, roomId, at));
       if (holders.some(({ fencingToken: holder }) => holder !== fencingToken)) {
         fail(409, "listener_fenced",
           "a live listener lease holds this agent's wake queue — ack with its fencing token");
@@ -807,13 +833,13 @@ export class AgentHeartbeats {
       // flag and never deleted by a listener that did not handle it. Signals
       // that were never claimed keep the old behavior. Same write lock as the
       // check above, so nothing can change between this read and the UPDATE.
-      const foreign = this.db.prepare(`SELECT COUNT(*) AS n FROM agent_wake_signals s
+      const foreign = chunks.reduce((n, chunk) => n + this.db.prepare(`SELECT COUNT(*) AS n FROM agent_wake_signals s
         JOIN agent_wake_signal_claims c ON c.signal_id = s.signal_id
-        WHERE s.agent_id = ? AND s.signal_id IN (${placeholders})
+        WHERE s.agent_id = ? AND s.signal_id IN (${sqlPlaceholders(chunk)})
           AND s.delivered_at IS NULL AND (? IS NULL OR s.room_id = ?)
           AND (? IS NULL OR c.claimed_by != ?)`)
-        .get(agentId, ...signalIds, roomId, roomId, fencingToken, fencingToken);
-      if (foreign.n > 0) {
+        .get(agentId, ...chunk, roomId, roomId, fencingToken, fencingToken).n, 0);
+      if (foreign > 0) {
         fail(409, WAKE_SIGNAL_FENCED_CODE, WAKE_SIGNAL_FENCED_MESSAGE);
       }
       const acknowledged = [];
@@ -825,10 +851,9 @@ export class AgentHeartbeats {
       // #3345: acks are the delivery completion — count them per door,
       // with each signal's own kind/room (an ack may span rooms).
       if (acknowledged.length > 0) {
-        const marks = acknowledged.map(() => "?").join(",");
-        const kinds = new Map(this.db.prepare(
-          `SELECT signal_id AS signalId, kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id IN (${marks})`)
-          .all(...acknowledged).map(row => [row.signalId, row]));
+        const kinds = new Map([...sqlChunks(acknowledged)].flatMap(chunk => this.db.prepare(
+          `SELECT signal_id AS signalId, kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id IN (${sqlPlaceholders(chunk)})`)
+          .all(...chunk)).map(row => [row.signalId, row]));
         for (const signalId of acknowledged) {
           const row = kinds.get(signalId);
           recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",
@@ -980,7 +1005,9 @@ export class AgentHeartbeats {
       "SELECT * FROM agent_wake_signals WHERE agent_id=? AND room_id IS ? AND message_id=?").get(agentId, roomId, messageId);
     // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
     // poll waiter (coalesced duplicates don't — nothing new arrived).
-    if (applied.changes > 0) this._releaseWakeWaiter(agentId, roomId);
+    // R327-1 (r6): a held (paused) room wake does not release the host's
+    // poll; it stays queued until the pause is lifted.
+    if (applied.changes > 0 && !(roomId && this.pausedRoomsOf(agentId).some(p => p.roomId === roomId))) this._releaseWakeWaiter(agentId, roomId);
     return Object.freeze({ enqueued: applied.changes > 0, signal: signalView(row) });
   }
 
@@ -1002,7 +1029,11 @@ export class AgentHeartbeats {
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
       .all(agentId, roomId, roomId, probe).map(signalView);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
-    const combined = [...messages, ...work].sort((a, b) => a.createdAt - b.createdAt);
+    // R327-1 (r6): a paused member's room wakes are HELD, not dropped - they
+    // stay unacknowledged and reappear on resume. The caller learns why from
+    // pausedRoomsOf() (heartbeat and poll carry `paused`).
+    const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
+    const combined = [...messages, ...work].filter(s => !held.has(s.roomId)).sort((a, b) => a.createdAt - b.createdAt);
     const page = combined.slice(0, limit);
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
