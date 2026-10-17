@@ -342,6 +342,14 @@ let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+// A message deep link whose target is older than the first (windowed)
+// snapshot cannot reveal on arrival: revealMessage no-ops while the id is
+// not held. A pending hash reveal remembers such a target until a fill or
+// sync snapshot first holds it, then reveals it exactly once. It is
+// cancelled when the user takes over first — another hash, another room,
+// a thread/channel switch, or a reader scroll (the noteReaderScroll
+// gesture tracker below) — so the late reveal never steals the view.
+let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
@@ -481,6 +489,7 @@ const client = new RoomClient({
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
+    retryPendingHashReveal();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -505,6 +514,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
     // JDOT-COH-NAV end
@@ -3381,7 +3391,30 @@ function revealEvent(id, requireExisting = false) {
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
+// Remember a message deep-link target the held history does not contain
+// yet, with the navigation context at arm time, so the retry can tell a
+// still-waiting cold load apart from a user who has since gone elsewhere.
+function pendHashReveal(messageId) {
+  pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
+    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+}
+// Runs on every snapshot. The pending reveal fires only when this
+// snapshot first holds the target and nothing about the navigation
+// context changed since it was armed; any change cancels it for good.
+function retryPendingHashReveal() {
+  const pending = pendingHashReveal;
+  if (!pending) return;
+  if (!state || client.generation !== pending.generation
+    || (state.room?.id ?? session?.roomId) !== pending.roomId
+    || location.hash !== pending.hash
+    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId
+    || readerScrollAt !== pending.readerScrollAt) { pendingHashReveal = null; return; }
+  if (busy || !conversation?.byId.has(pending.messageId)) return;
+  pendingHashReveal = null;
+  revealMessage(pending.messageId);
+}
 function revealLocationHash() {
+  if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash) return;
   const hash = location.hash;
   // Account destinations also work before any room has been opened.
@@ -3423,7 +3456,15 @@ function revealLocationHash() {
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
-    if (id !== null) ({ message: revealMessage, work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
+    if (id !== null && current[1] === "message") {
+      // Held already: reveal now (and drop any pending twin). Not held
+      // yet — an older message still behind the background fill: pend it
+      // for the first snapshot that holds it instead of dropping it.
+      if (conversation.byId.has(id)) { pendingHashReveal = null; revealMessage(id); }
+      else pendHashReveal(id);
+      return;
+    }
+    if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
   const rawWorkId = decodeFragment(hash.slice(1));
@@ -3441,6 +3482,7 @@ function revealLocationHash() {
       : prefix === "#member-" ? Boolean(state.members[id])
       : state.eventLog.some(event => event.id === id);
     if (id !== null && exists) { reveal(id); return; }
+    if (id !== null && prefix === "#message-") pendHashReveal(id);
     break;
   }
 }
