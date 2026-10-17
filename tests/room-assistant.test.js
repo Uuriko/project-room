@@ -23,6 +23,26 @@ async function setup(t) {
   return { f, api, message, origin };
 }
 
+const grantSteer = (f, memberId) => {
+  const member = f.store.room('commons').state.members[memberId];
+  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'member.access_changed', data: { memberId, expectedMemberRevision: member.revision ?? 0, permissions: [...new Set([...member.permissions, 'steer'])], active: true } });
+};
+
+test('a person without steer can post but cannot ask the room assistant (R301-n1)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  assert.deepEqual(f.store.room('commons').state.members.guest.permissions, []);
+  message('guest', 'guest-ask', 'What is this room for?');
+  assert.ok(f.store.room('commons').state.messages.some(m => m.id === 'guest-ask'), 'posting stays allowed');
+  const refused = await api('guest', { action: 'invoke', runId: 'guest-run', sourceMessageId: 'guest-ask' }, 403);
+  assert.equal(refused.error.code, 'assistant_denied');
+  assert.match(refused.error.message, /steer/);
+  assert.equal((await api('owner')).runs.some(run => run.id === 'guest-run'), false, 'no run is queued for the agent');
+  grantSteer(f, 'guest');
+  const asked = await api('guest', { action: 'invoke', runId: 'guest-run', sourceMessageId: 'guest-ask' });
+  assert.equal(asked.result.status, 'queued');
+});
+
 test('unfinished assistant work stays discoverable after more than 100 newer terminal requests', async t => {
   const { f, api, message } = await setup(t);
   const assistant = new RoomAssistant(f.store);
@@ -351,6 +371,7 @@ for (const stopBeforeDelete of [false, true]) test(`deleted opening retains cont
   const { f, api, message, origin } = await setup(t);
   const erased = 'ERASED-OPENING-CONTENT';
   await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  grantSteer(f, 'guest'); // asking needs steer (R301-n1); the guest is a non-owner initiator here
   message('guest','deleted-opening',erased);
   await api('guest',{action:'invoke',runId:'deleted-run',sourceMessageId:'deleted-opening'});
   await api('producer',{action:'claim',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:0});
