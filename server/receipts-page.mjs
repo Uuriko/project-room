@@ -4,7 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptProvenNote, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
+import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
