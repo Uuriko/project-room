@@ -468,6 +468,17 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
+// ERROR-CENSUS F-4: server-configuration codes whose recovery is
+// operator-directed (see the branch in agentErrorAx below); their hint/next
+// copy is catalog-owned under agentError.<code>.hint / agentError.<code>.next.
+const OPERATOR_CONFIG_CODES = new Set([
+  "github_not_configured",
+  "github_unconfigured",
+  "google_configuration_invalid",
+  "webhook_unconfigured",
+  "misconfigured",
+]);
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
@@ -978,6 +989,18 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required", reason: "storage_unavailable",
       hint: "Storage is unavailable and the write was rolled back. Wait for Retry-After, then retry the exact request; reconcile afterward. No success is claimed.",
       next: [command("Wait for Retry-After (30s), then retry the exact same request; reconcile afterward")]
+    };
+  }
+  // ERROR-CENSUS F-4: operator-configuration codes must not get the generic
+  // 5xx "reconcile or retry the exact command" below — the caller cannot fix
+  // missing server configuration and retrying is futile. Same shape as
+  // mail_not_configured: failed status, operator named as the mover. The
+  // sentences live in the strings catalog (agentError.<code>.hint/.next).
+  if (OPERATOR_CONFIG_CODES.has(reasonCode)) {
+    return {
+      status: "failed", reason: reasonCode,
+      hint: uiText(`agentError.${reasonCode}.hint`),
+      next: [command(uiText(`agentError.${reasonCode}.next`))]
     };
   }
   if (reasonCode === "mail_not_configured") {
