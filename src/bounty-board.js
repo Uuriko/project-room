@@ -137,6 +137,53 @@ export function bountyBoardModel({ bounties, balances, receipts, selfId } = {}) 
   };
 }
 
+// Focus preservation across panel re-renders (A11Y-LOOP): render() replaces
+// the host's innerHTML after every action, destroying the focused control
+// and dropping keyboard focus to <body> inside the settings dialog. Capture
+// a stable key for the focused control before the swap; afterwards, focus
+// its equivalent if one still exists (an action whose control legitimately
+// vanished — e.g. Accept on a settled bounty — restores nothing and the
+// outcome is announced through the status live region instead).
+export function bountyFocusKey(el) {
+  if (!el || typeof el !== "object") return null;
+  if (el.id) return `id:${el.id}`;
+  if (el.dataset?.bountyAction) return ["action", el.dataset.bountyAction, el.dataset.bountyId || ""].join(":");
+  if (el.dataset?.verdictFor) return `verdict:${el.dataset.verdictFor}`;
+  if (el.dataset?.rejectReason) return `reject:${el.dataset.rejectReason}`;
+  const label = typeof el.getAttribute === "function" ? el.getAttribute("aria-label") : null;
+  if (label) return `aria:${label}`;
+  if (el.type === "submit") return "submit:";
+  return null;
+}
+
+export function restoreBountyFocus(root, key) {
+  if (!root || !key || typeof root.querySelector !== "function") return false;
+  const [kind, ...rest] = String(key).split(":");
+  // Escape quotes for the attribute selectors below via split/join, not a
+  // /"/g replace: a quote inside a regex literal desyncs the i18n harness's
+  // comment stripper and manufactures a phantom hardcoded-string downstream.
+  const value = rest.join(":").split('"').join('\\"');
+  let target = null;
+  if (kind === "id") target = root.querySelector(`[id="${value}"]`);
+  else if (kind === "action") {
+    const splitAt = value.lastIndexOf(":");
+    // Assembled from parts rather than one multi-interpolation template:
+    // these are machine strings (a key format, a selector), not UI copy,
+    // and the i18n harness's sentence-concatenation ratchet counts the
+    // template form. Output is byte-identical.
+    const selector = [
+      "[data-bounty-action=\"", value.slice(0, splitAt),
+      "\"][data-bounty-id=\"", value.slice(splitAt + 1), "\"]",
+    ].join("");
+    target = root.querySelector(selector);
+  } else if (kind === "verdict") target = root.querySelector(`[data-verdict-for="${value}"]`);
+  else if (kind === "reject") target = root.querySelector(`[data-reject-reason="${value}"]`);
+  else if (kind === "aria") target = root.querySelector(`[aria-label="${value}"]`);
+  else if (kind === "submit") target = root.querySelector('button[type="submit"], input[type="submit"]');
+  if (target && typeof target.focus === "function") { target.focus(); return true; }
+  return false;
+}
+
 export function bountyBalanceHtml(model) {
   const b = model?.balance ?? {};
   return `<div class="bounty-balance"><strong>Your credits</strong>` +
@@ -150,7 +197,7 @@ export function bountyBalanceHtml(model) {
 function reviewHtml(item) {
   const criteria = item.rubricCriteria.map(c =>
     `<li><span>${escapeHtml(c.description || c.criterionId)}</span>` +
-    `<select data-verdict-for="${escapeHtml(item.bountyId)}:${escapeHtml(c.criterionId)}" aria-label="Verdict for ${escapeHtml(c.criterionId)}">` +
+    `<select data-verdict-for="${escapeHtml(item.bountyId)}:${escapeHtml(c.criterionId)}" aria-label="Verdict for ${escapeHtml(c.description || c.criterionId)}">` +
     `<option value="pass">Pass</option><option value="fail">Fail</option></select></li>`).join("");
   const evidence = item.evidence
     ? `<p class="bounty-delivery"><strong>Delivery:</strong> ${escapeHtml(item.evidence.summary || "(no summary)")}` +
@@ -266,10 +313,12 @@ export function installBountyBoard({ client, getSession }) {
   function render(model) {
     lastModel = model;
     if (chip) chip.textContent = String(model.count);
+    const focusKey = typeof host.contains === "function" && host.contains(document.activeElement) ? bountyFocusKey(document.activeElement) : null;
     host.innerHTML = bountyFormHtml() +
       `<div id="bounty-balance-host">${bountyBalanceHtml(model)}</div>` +
       `<div id="bounty-list-host">${bountyListHtml(model)}</div>` +
       `<div id="bounty-receipts-host">${bountyReceiptsHtml(model, highlightReceiptId)}</div>`;
+    if (focusKey) restoreBountyFocus(host, focusKey);
   }
 
   async function load(force = false) {
