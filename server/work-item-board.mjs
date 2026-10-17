@@ -983,7 +983,7 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   }
 
   const events = roomEvents(store, roomId);
-  const { rows, diverged } = planWorkItemBoardBackfill({
+  const { rows: plannedRows, diverged } = planWorkItemBoardBackfill({
     items: Object.values(state.workItems ?? {}), events, existing, nowMs,
   });
   // Surface the computed divergence (D.2.3 monitor) even when the sync
@@ -994,6 +994,22 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // parity). A rework primary is the exception: its repaired row is in
   // the plan and flows through the normal write/event path below.
   if (diverged.some(entry => entry.claimId === claimId && entry.class !== "rework")) return current;
+  // #3465 parity (find:work-item-board-002): validate every planned row
+  // through the state machine BEFORE storing it, exactly as
+  // backfillRoomWorkItems does above. The rows here are built by the same
+  // mapping from the same free-form projection fields (a full URL in
+  // `repository` -> `repo`, say), and the registry's persisted-row codec
+  // decodes without validation, so an unvalidated row stored on this live
+  // path is the same #3464 poison the backfill was hardened against. A
+  // row that fails validation is dropped from the plan: never stored,
+  // never emitted, and the command is not rolled back — the backfill
+  // likewise reports the row as an error and leaves the projection's
+  // claim alone, and the room's next backfill names it for cleanup.
+  const rows = new Map();
+  for (const [rowId, row] of plannedRows) {
+    try { workOf(row); } catch { continue; }
+    rows.set(rowId, row);
+  }
   const mapped = rows.get(claimId) ?? null;
 
   // Caps, checked before any write so a refusal rolls the command back
