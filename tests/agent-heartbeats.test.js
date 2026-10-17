@@ -485,7 +485,9 @@ test("opted-in work wakes survive retries and obey current pause, preferences, r
   send(identity.secret, "notifications.preferences_set", { preferences: { work_updates: "all" } });
   assert.equal((await heartbeat()).pendingWakes.length, 1);
   const minute = Math.floor(at / 60000) % 1440;
-  f.store.attention.mutate(identity.secret, "commons", { requestId: randomUUID(), quietStart: minute, quietEnd: (minute + 2) % 1440, delivery: "immediate", digestHour: null });
+  // T-6 (2026-10-16): Attention.mutate was removed; seed the prefs row directly.
+  f.store.db.prepare("INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)")
+    .run("commons", f.store.attention.list(identity.secret, "commons").viewerId, minute, (minute + 2) % 1440, "immediate", null, at);
   assert.deepEqual((await heartbeat()).pendingWakes, []);
   at += 3 * 60000;
   assert.equal((await heartbeat()).pendingWakes.length, 1);

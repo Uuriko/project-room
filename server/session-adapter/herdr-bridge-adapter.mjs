@@ -17,6 +17,16 @@
  * and not registered in scripts/runtime-package.mjs — mounting is deferred
  * to the integration step (lease respected).
  *
+ * T-6 DEAD-VERDICT LABEL (2026-10-16, coordinator adjudication): NOT
+ * MOUNTED at pin e49e9c81 — `connectSession` has no production importer;
+ * only scripts/herdr-migrate.mjs, scripts/reachability.mjs and tests
+ * reference session-adapter. Verdict shape is LABEL ONLY (removal is not
+ * a lane call): this module is retained, unmounted, awaiting the
+ * mount-or-remove decision — mount it via a production importer of
+ * connectSession, or remove the session-adapter surface wholesale.
+ * Do not re-derive its deadness in a future census; the open question is
+ * the mount-or-remove decision, not the mounting fact.
+ *
  * ---------------------------------------------------------------------------
  * DEGRADATION TABLE — fail-closed semantics (the load-bearing contract)
  * ---------------------------------------------------------------------------

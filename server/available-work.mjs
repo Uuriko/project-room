@@ -58,23 +58,6 @@ const boardItem = (roomId, item) => ({
   }
 });
 
-const publicTaskItem = packet => ({
-  id: packet.taskId,
-  title: packet.title ?? packet.taskId,
-  source: "publicTask",
-  roomId: packet.namespaceId,
-  state: "unclaimed",
-  owner: null,
-  leaseExpiresAt: packet.claim?.leaseExpiresAt ?? null,
-  terms: { termsVersion: packet.termsVersion, generation: packet.claim?.generation },
-  untrusted: true,
-  claimAction: {
-    method: "POST",
-    endpoint: `/api/public-work/tasks/${packet.taskId}/claim`,
-    params: { requestId: "<uuid>" }
-  }
-});
-
 // May this viewer take board work in the room? Mirrors needs-me's gate:
 // no named viewer (public/internal reads) means no viewer narrowing.
 function viewerMayClaim(state, viewerId) {
@@ -125,23 +108,7 @@ export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 
   return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
 }
 
-// Cross-room public pool: published public-work tasks whose packet claim
-// state is "unclaimed". Scans the facade's own paginated list so the
-// availability classification stays the facade's (packet()).
-export function availablePublicTasks(store, { limit = 50 } = {}) {
-  const facade = store.publicWorkClaims;
-  if (!facade?.list) return { items: [], total: 0 };
-  const items = [];
-  let after = "";
-  while (items.length < limit) {
-    const page = facade.list({ limit: 100, after });
-    const tasks = page?.tasks ?? [];
-    for (const packet of tasks) {
-      if (packet?.claim?.state === "unclaimed") items.push(publicTaskItem(packet));
-      if (items.length >= limit) break;
-    }
-    if (!page?.nextCursor || tasks.length === 0) break;
-    after = page.nextCursor;
-  }
-  return { items, total: items.length };
-}
+// (Removed 2026-10-16, T-6 dead-verdicts: the cross-room
+// availablePublicTasks read had zero production callers at main
+// 6f828f08 — only tests/available-work.test.js called it. The public-work
+// facade's own list remains the surface for public tasks.)

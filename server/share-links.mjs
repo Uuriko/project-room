@@ -61,6 +61,14 @@ export const shareLinkSchema = `
 // invitations issue links only. Preserve historical alias redemption. Purely additive
 // and unfenced (older writers have no code path here). The plaintext code is
 // shown once at mint; only the hash is stored.
+//
+// T-6 DEAD-VERDICT LABEL (2026-10-16): READER-NO-WRITER, RETAINED — at
+// main 6f828f08 no production code inserts into share_link_codes (only
+// tests and check scripts seed it), but find() below reads it in
+// production to redeem historical alias codes, so the table is NOT dead
+// and was not removed. It waits on a product decision to retire legacy
+// alias codes (a sunset after which find()'s alias branch and this
+// schema can be deleted together).
 export const shareLinkCodeSchema = `
   CREATE TABLE IF NOT EXISTS share_link_codes (
     code_hash TEXT PRIMARY KEY CHECK(length(code_hash)=64),

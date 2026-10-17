@@ -113,8 +113,6 @@
     "src/project-offers-ui.js": "sha256:26166599f4b7df43d5feeddcb15acae7585e4c01e34875909f992fcc256f41a8",
     "src/project-offers.css": "sha256:1d736d3aceb0317a4dda92966103e221d6201859076ee1b83e499a8e51664054",
     "src/public-a11y.css": "sha256:8295b367053469cb2c9ee4ff9a106dd5e746a2d5bee43cc6fa387fb4bcf34b30",
-    "src/push-ask.js": "sha256:a81105c001f9043a657b203d642b64933107cc11fbf486386451f2336d417c5a",
-    "src/pwa-install.js": "sha256:791a9565cf007a24505af10e893255b854ba73d6f332612840946238912f9788",
     "src/referral-board.js": "sha256:9c88b94d2aace68b00d0f714127b7f80b4b2e6159c590f672327f5d38ee220a9",
     "src/reminder-time.js": "sha256:fdf4caefab0ccaa0291bdd74e2e97fa169e2ea791c233fef5b2ff002735016b7",
     "src/reminders.js": "sha256:b1a57316743260616b3925384d5e37cbc04ee9dd311fad9198d18e2dc46b6800",
@@ -161,6 +159,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:ee69330abc35933da3ee6f088ea6a73fb474a6c70bcb94c52f2dab9cd06acb07"
+    "package.json": "sha256:340936c76fa6bd43f46682696a60de14648018487fc3fa5d9c216c51ef31033c"
   }
 }

@@ -477,11 +477,19 @@ const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
   "analytics_events",
   "analytics_room_cursor",
   "analytics_table_cursor",
-  "analytics_firsts",
   "analytics_daily",
   "analytics_ctx",
   "claim_bond_shadow",
   "claim_reputation_signals",
+]);
+// Retired analytics_firsts (T-6 dead-verdicts, 2026-10-16): it was a
+// schema-only dead table — no reader or writer at main 6f828f08 — so
+// server/analytics/schema.mjs no longer creates it. Databases where the
+// analytics tooling already ran still carry it (no DROP, for data
+// preservation); it stays in the allowed set so the recovery audit
+// passes on those databases, while fresh databases never have it.
+const RETIRED_ANALYTICS_TABLES = Object.freeze([
+  "analytics_firsts",
 ]);
 // seeker_declarations + work_offer_terms (matchmaking, Fo ship-train
 // 2026-10-05, server/work-declarations.mjs): purely additive, created on
@@ -510,7 +518,7 @@ const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...RETIRED_ANALYTICS_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

@@ -2,6 +2,16 @@
  * owner-alerts.mjs — Pure owner-alert dispatcher: raise, dispatch, acknowledge,
  * resolve, dedupe, escalate, and audit owner-facing alerts.
  *
+ * T-6 DEAD-VERDICT LABEL (2026-10-16): NOT WIRED — createOwnerAlertDispatcher
+ * has no production caller at main 6f828f08; no wiring injects a notifier,
+ * so this machinery never runs in production. Only
+ * tests/audit-wave-3c.test.js exercises it (the module was restored for
+ * that regression coverage, #2893; scripts/reachability.mjs KEEPs it
+ * explicitly unwired). Verdict: LABEL, awaiting a product decision to
+ * wire it (inject a real notifier/backoff in production) or remove it.
+ * The "production wiring MUST inject" notes below describe that future
+ * wiring, not current behaviour.
+ *
  * Nothing here touches the network, the DOM, localStorage, or any secret — it
  * is a pure state machine. Delivery happens through the injected `notifier`
  * dependency; production wiring injects the real channel (email, push, …).

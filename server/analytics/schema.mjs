@@ -39,12 +39,10 @@ CREATE TABLE IF NOT EXISTS analytics_table_cursor (
   source TEXT PRIMARY KEY,
   last_key TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS analytics_firsts (
-  kind TEXT NOT NULL,
-  scope TEXT NOT NULL,
-  at INT NOT NULL,
-  PRIMARY KEY (kind, scope)
-);
+-- (analytics_firsts was removed from this schema 2026-10-16, T-6
+-- dead-verdicts: schema-only dead table — no reader or writer existed at
+-- main 6f828f08; firsts are tracked in memory by map-room-event.mjs.
+-- Databases that already have the table keep it; nothing reads it.)
 CREATE TABLE IF NOT EXISTS analytics_daily (
   day TEXT NOT NULL,
   metric TEXT NOT NULL,

@@ -810,7 +810,6 @@
   "tests/push-subscriptions.test.js": 12665,
   "tests/push-sw.test.js": 4161,
   "tests/pwa-icons.test.js": 4291,
-  "tests/pwa-install.test.js": 5171,
   "tests/qa2-load-smoke.test.js": 6564,
   "tests/qa2/abuse-guards.test.js": 73.181,
   "tests/qa2/agent-journeys.test.js": 71.192,
