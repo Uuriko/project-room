@@ -1024,6 +1024,26 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    // #3880: dependsOn gates the AvailableWork projection (a claim is
+    // claimable only when every dependency is done); the claim write path
+    // must enforce the same definition, or the projection's "claimable"
+    // is unenforced at its own endpoint and direct API/MCP claimers can
+    // take work whose prerequisites are unfinished. The checked set is
+    // the one the claim records — the body's dependsOn when supplied,
+    // else the item's stored list, exactly as claimWork resolves it —
+    // and "done" is the projection's test (availableBoardRows): a usable
+    // claim (not premise-flagged, not superseded) in state "done".
+    const effectiveDeps = data.dependsOn !== undefined ? (data.dependsOn ?? []) : (item.dependsOn ?? []);
+    if (effectiveDeps.length) {
+      const board = registry.list(roomId);
+      const doneIds = new Set(board.filter(entry => entry && !entry.premiseFlag && !entry.supersededBy && entry.state === "done").map(entry => entry.id));
+      const unmet = effectiveDeps.filter(dep => !doneIds.has(dep));
+      if (unmet.length) {
+        const stateOf = id => board.find(entry => entry?.id === id)?.state ?? "missing";
+        reject(409, "work_claim_dependencies_unmet",
+          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.`);
+      }
+    }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {

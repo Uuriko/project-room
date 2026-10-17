@@ -15,7 +15,11 @@ import { createWork, claimWork, updateWork, recordReview, recordCi } from '../se
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
 function setup(t) {
-  const store = new RoomStore(':memory:');
+  // Pin the store clock to the scenario date: the fixtures kernel-claim
+  // at t0 with default 24h leases and intend LIVE claims. Since #3898
+  // the sections derive lease liveness from store.now(), so an unpinned
+  // (wall-clock) store would read every fixture claim as long expired.
+  const store = new RoomStore(':memory:', { now: () => Date.parse('2026-10-05T00:00:00Z') });
   t.after(() => store.close());
   const rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen');
@@ -170,4 +174,52 @@ test('a fresh delivery generation retires the changes-requested ask', t => {
   const page = collectNeedsMe(store, ada.secret, {});
   assert.equal(page.actionsNeeded, undefined, 'a new delivery generation answers the ask until a reviewer speaks again');
   assert.equal(page.myClaims[0].top[0].next, 'await_review');
+});
+
+// #3898: the standing sections read raw stored rows, so a claim whose
+// lease lapsed on a quiet board (no sweep traffic) was still served as
+// held — with a forward "next" verb and a ci_failed action — long after
+// the domain's own derivation (releaseExpired) says the member no
+// longer holds it. The sections must derive lease liveness from the
+// store clock instead of trusting the stored row.
+function pinnedSetup(t) {
+  let clock = Date.parse('2026-10-05T00:00:00Z');
+  const store = new RoomStore(':memory:', { now: () => clock });
+  t.after(() => store.close());
+  const rooms = new AgentRooms(store);
+  const owner = store.identities.create('Owen');
+  const ada = store.identities.create('Ada');
+  const bob = store.identities.create('Bob');
+  rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
+  for (const identity of [ada, bob]) {
+    store.identities.link(owner.secret, 'board', { identityId: identity.identityId, displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
+  }
+  const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?')
+    .get(identity.identityId, 'board').m;
+  return { store, ada, bob, memberOf, t0: clock, advance: ms => { clock += ms; } };
+}
+
+test('an expired lease is not reported as held: myClaims and actionsNeeded derive liveness (#3898)', t => {
+  const { store, ada, bob, memberOf, t0, advance } = pinnedSetup(t);
+  const adaId = memberOf(ada);
+  let stale = { ...createWork({ id: 'stale-task', title: 'Stale task' }, { now: t0, agentId: adaId }) };
+  stale = claimWork(stale, adaId, { now: t0, leaseHours: 1 });
+  stale = recordCi(stale, { state: 'failure', headSha: 'a'.repeat(40), url: 'https://ci.example/stale' }, t0).item;
+  store.workClaims.set('board', stale);
+  let live = { ...createWork({ id: 'live-task', title: 'Live task' }, { now: t0, agentId: adaId }) };
+  live = claimWork(live, adaId, { now: t0, leaseHours: 72 });
+  store.workClaims.set('board', live);
+
+  advance(2 * 3600 * 1000); // stale-task's 1h lease has lapsed; live-task's has not
+
+  const page = collectNeedsMe(store, ada.secret, {});
+  assert.deepEqual(page.myClaims?.[0]?.top.map(row => row.id), ['live-task'],
+    'the lapsed claim is no longer served as held');
+  assert.deepEqual(page.actionsNeeded ?? [], [],
+    'no ci_failed action for a claim the member no longer holds');
+  // The same derivation feeds openWork: the lapsed work is open again
+  // for everyone else instead of hidden behind a dead claim.
+  const bobPage = collectNeedsMe(store, bob.secret, {});
+  assert.ok(bobPage.openWork?.[0]?.top.some(row => row.id === 'stale-task'),
+    'lapsed claim returns to open work');
 });
