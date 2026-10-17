@@ -67,6 +67,7 @@
     "scripts/help-offer-browser-check.mjs": 20156,
     "scripts/human-experience-browser-check.mjs": 15298,
     "scripts/human-push-browser-check.mjs": 2401,
+    "scripts/identity-revoked-people-browser-check.mjs": 1842,
     "scripts/inbox-browser-check.mjs": 145352,
     "scripts/inbox-collaboration-check.mjs": 10868,
     "scripts/inbox-conversation-browser-check.mjs": 2879,

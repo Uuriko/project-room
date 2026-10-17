@@ -455,5 +455,6 @@ export default {
   "work.announce.decision_approved": "{actor} approved '{title}'.",
   "work.announce.decision_changes_requested": "{actor} requested changes on '{title}'.",
   "work.announce.decision_rejected": "{actor} rejected '{title}'.",
-  "work.announce.decision_recorded": "{actor} recorded a decision on '{title}'."
+  "work.announce.decision_recorded": "{actor} recorded a decision on '{title}'.",
+  "people.status.signed_out_for_good": "Signed out for good"
 };
