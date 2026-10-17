@@ -748,6 +748,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   // events?afterSequence= used to be ignored, which restarted catch-up at 0.
+  // tail/compact refusals share this code but are not about afterSequence:
+  // the message names the bad value, so point at it instead.
+  if (reasonCode === "invalid_event_cursor" && !/afterSequence/.test(String(message || ""))) {
+    return {
+      status: "action_required",
+      reason: "invalid_event_cursor",
+      hint: "Fix the query value named in the message: tail is used alone as 1-200, compact is 1 or 0.",
+      next: [
+        path(roomId ? `/api/rooms/${roomId}/events?tail=50` : "/api/session"),
+        command("Correct the named query value and resend.")
+      ]
+    };
+  }
   if (reasonCode === "invalid_event_cursor") {
     const eventsPath = roomId ? `/api/rooms/${roomId}/events?after=0&limit=100` : "/api/session";
     return {
