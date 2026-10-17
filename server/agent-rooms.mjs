@@ -24,6 +24,8 @@ import { claimWork, createWork } from "./work-claims.mjs";
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
+import { memberOf } from "./agent-identities.mjs";
 
 // Invite joins hand out a room-scoped rak_ token (POST /join returns it as
 // roomToken) plus, since #3380, the identity's durable secret shown once as
@@ -148,15 +150,33 @@ export class AgentRooms {
     if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
     if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
       fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
-    const links = this.store.db.prepare(`SELECT l.room_id AS roomId, r.archived_at AS archivedAt,
-        json_extract(r.projection, '$.room.title') AS title
-      FROM identity_links l JOIN rooms r ON r.id=l.room_id
-      WHERE l.identity_id=? AND l.room_id>? ORDER BY l.room_id LIMIT 101`).all(identity.identityId, after);
-    const rooms = links.slice(0, 100).flatMap(link => {
-      const auth = this.store.identities.resolveIdentityLink(identity.identityId, link.roomId);
-      return auth ? [{ ...link, memberId: auth.member.id }] : [];
+    // Seats come from the shared resolver (#3882): identity_links plus
+    // guest_members trial seats — "my rooms" counts a guest seat too.
+    // Title/archivedAt ride from the rooms row, as the old JOIN supplied.
+    const seats = identityRoomSeats(this.store.db, identity.identityId, { after, limit: 101 });
+    const roomRows = seats.length ? this.store.db.prepare(
+      `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title
+       FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
+    ).all(...seats.map(seat => seat.roomId)) : [];
+    const roomRowById = new Map(roomRows.map(row => [row.id, row]));
+    const rooms = seats.slice(0, 100).flatMap(seat => {
+      const roomRow = roomRowById.get(seat.roomId);
+      if (!roomRow) return [];
+      // Live-membership recheck per representation: link seats resolve
+      // through the link primitive; guest seats have no link, so the
+      // seat's member record itself must be present and active.
+      let memberId = null;
+      if (seat.seat === "guest") {
+        const member = memberOf(this.store.roomAuthority(seat.roomId).members, seat.memberId);
+        if (member && member.active !== false) memberId = seat.memberId;
+      } else {
+        memberId = this.store.identities.resolveIdentityLink(identity.identityId, seat.roomId)?.member.id ?? null;
+      }
+      return memberId
+        ? [{ roomId: seat.roomId, archivedAt: roomRow.archivedAt, title: roomRow.title, memberId }]
+        : [];
     });
-    return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
+    return { identityId: identity.identityId, rooms, nextCursor: seats.length > 100 ? seats[99].roomId : null };
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):
