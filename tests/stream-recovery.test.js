@@ -7,10 +7,15 @@ import { createRoomServer } from "../server/http.mjs";
 import { StorageUnavailableError } from "../server/store.mjs";
 
 async function fixture(t, failPump) {
-  const f = createAcceptanceFixture(), original = f.store.eventsAfter.bind(f.store);
+  const f = createAcceptanceFixture(), original = f.store.authenticate.bind(f.store);
   let calls = 0;
-  f.store.eventsAfter = (...args) => {
-    if (++calls === 3) failPump(f);
+  // Delta sync: an idle stream no longer re-reads events on a timer. Its
+  // periodic liveness probe authenticates instead, so the transient failure
+  // is injected there. Authenticate calls for one stream, in order: the
+  // route's auth resolution, the stream's entry read, its first pump — the
+  // fourth is the first idle probe, which is where the failure lands.
+  f.store.authenticate = (...args) => {
+    if (++calls === 4) failPump(f);
     return original(...args);
   };
   const server = createRoomServer({ store: f.store, streamInterval: 50 });

@@ -26,6 +26,26 @@ test("coverage runs when a new test-discoverable script is added", () => {
   assert.equal(classifyChanges(["scripts/check-smoke-test.mjs"]).coverage, true);
 });
 
+test("coverage runs when the resolution and entry-point layer changes", () => {
+  // Bug sweep lane 14 F2 (#3901): package.json can carry dependency-version
+  // changes, `imports` subpath remaps, and engines changes; the lockfile
+  // pins what actually resolves; server.mjs is the root entry point the
+  // suites spawn. All three sat outside every measured prefix, so a diff
+  // touching only one of them skipped the ratchet entirely.
+  assert.equal(classifyChanges(["package.json"]).coverage, true);
+  assert.equal(classifyChanges(["package-lock.json"]).coverage, true);
+  assert.equal(classifyChanges(["server.mjs"]).coverage, true);
+});
+
+test("coverage runs when a scripts helper the tests import changes", () => {
+  // Non-test-discoverable scripts/*.mjs helpers execute inside the root
+  // suite through test imports (the acceptance fixture drives the store
+  // through the invariant/acceptance scenarios). Reachability through the
+  // test-import closure, not the filename, decides.
+  assert.equal(classifyChanges(["scripts/acceptance-fixture.mjs"]).coverage, true);
+  assert.equal(classifyChanges(["scripts/email-contract-fixture.mjs"]).coverage, true);
+});
+
 test("coverage skips when the diff cannot move module line coverage", () => {
   assert.equal(classifyChanges(["docs/INDEX.md"]).coverage, false);
   assert.equal(classifyChanges(["scripts/deploy-prod.mjs"]).coverage, false);

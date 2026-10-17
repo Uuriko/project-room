@@ -14,7 +14,12 @@ import { createWork, claimWork, updateWork, recordReview, recordCi, flagPremiseI
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
 function setup(t) {
-  const store = new RoomStore(':memory:');
+  // Pin the store clock to the scenario date: the fixtures kernel-claim
+  // at 2026-10-01 with default 24h leases and intend LIVE claims. Since
+  // #3898 the sections derive lease liveness from store.now(), so an
+  // unpinned (wall-clock) store would read every fixture claim as long
+  // expired.
+  const store = new RoomStore(':memory:', { now: () => Date.parse('2026-10-01T00:00:00Z') });
   t.after(() => store.close());
   const rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen');
