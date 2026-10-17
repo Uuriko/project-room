@@ -8,7 +8,15 @@ import ProjectRoomKit
 #endif
 
 @main struct Acceptance {
-    @MainActor static func main() async throws {
+    @MainActor static func main() {
+        _ = NSApplication.shared
+        Task { @MainActor in
+            do { try await run(); exit(0) }
+            catch { fputs("FAIL: \(error)\n", stderr); exit(1) }
+        }
+        NSApp.run()
+    }
+    @MainActor static func run() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("room-native-setup-\(UUID())")
         try fm.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -69,6 +77,54 @@ import ProjectRoomKit
         check(!nodeLabel.isHiddenOrHasHiddenAncestor, "advanced runtime selection remains available")
         advanced.performClick(nil)
         content.layoutSubtreeIfNeeded()
+        // Exercise the actual sheet and subprocess bridge through a room switch.
+        // No production invitation, credentials or provider calls are involved.
+        let helper = root.appendingPathComponent("native-agent-setup.mjs")
+        try """
+        let input='';for await(const chunk of process.stdin)input+=chunk;
+        const request=JSON.parse(input);
+        const result=request.target.endsWith('/a')?{status:'connected',roomId:'a',configDirectory:'/fixture/room-a'}:
+          request.target.endsWith('/preview')?{status:'approval_required',roomId:'preview',permissions:[],expectedPreview:'fixture'}:
+          {status:'admission_pending'};
+        process.stdout.write(JSON.stringify(result)+'\\n');
+        """.write(to: helper, atomically: true, encoding: .utf8)
+        func field(_ name: String) -> NSTextField {
+            controls.compactMap { $0 as? NSTextField }.first { $0.placeholderString == name }!
+        }
+        let targetField = field("Paste a room or invitation link")
+        let connectionField = field("Room connection folder")
+        field("Node executable").stringValue = node.path
+        field("Room host script").stringValue = root.appendingPathComponent("run-codex-room.mjs").path
+        let connect = controls.compactMap { $0 as? NSButton }.first { $0.title == "Connect room" }!
+        func enter(_ link: String) {
+            targetField.stringValue = link
+            NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: targetField)
+        }
+        func connectAndWait() async throws {
+            connect.performClick(nil)
+            for _ in 0..<100 {
+                if connect.isEnabled { return }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            throw NSError(domain: "SetupDidNotFinish", code: 1)
+        }
+        enter("https://example.test/a"); try await connectAndWait()
+        check(connectionField.stringValue == "/fixture/room-a", "successful room enrollment populates the selected connection")
+        enter("https://example.test/b")
+        check(connectionField.stringValue.isEmpty, "editing the room link invalidates the previous connection before Save")
+        try await connectAndWait()
+        check(connectionField.stringValue.isEmpty, "pending room admission cannot reuse a different room connection")
+        enter("https://example.test/preview"); try await connectAndWait()
+        check(connect.title == "Accept invitation", "invitation preview offers acceptance")
+        enter("https://example.test/a")
+        check(connect.title == "Connect room", "changing an invitation discards its previous acceptance state")
+        try await connectAndWait()
+        check(connectionField.stringValue == "/fixture/room-a", "reconnecting succeeds after a pending room switch")
+        // A subsequent failed check must not silently fall back to the old room.
+        try "process.exit(1)".write(to: helper, atomically: true, encoding: .utf8)
+        try await connectAndWait()
+        check(connectionField.stringValue.isEmpty, "failed reconnect cannot save a stale room connection")
+        withExtendedLifetime(setup) {}
         parent.endSheet(sheet); parent.close()
         #endif
         print("NATIVE_SETUP_ACCEPTANCE_OK")

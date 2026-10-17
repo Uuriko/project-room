@@ -1,6 +1,6 @@
 import AppKit
 
-@MainActor final class LocalRoomHostSetupWindow: NSObject {
+@MainActor final class LocalRoomHostSetupWindow: NSObject, NSTextFieldDelegate {
     private let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
     private let operation = NativeSetupProcess()
     private let target = NSTextField()
@@ -11,6 +11,7 @@ import AppKit
     private var choosingButtons: [NSButton] = []
     private var preview: String?
     private var previewTarget: String?
+    private var connectedTarget: String?
     private var closing = false
     private let managed = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Project Room/Room Host")
     private var fields: [NSTextField] = []
@@ -26,6 +27,7 @@ import AppKit
         stack.translatesAutoresizingMaskIntoConstraints = false
         let note = NSTextField(wrappingLabelWithString: "Connect a room, choose a workspace, then sign in to your provider. Installed Node and Codex tools are required for this development build; use Advanced if they are not detected.")
         stack.addArrangedSubview(note); note.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        target.delegate = self
         target.placeholderString = "Paste a room or invitation link"; target.setAccessibilityLabel("Room or invitation link")
         joinButton.target = self; joinButton.action = #selector(connectRoom); joinButton.bezelStyle = .rounded
         let joinRow = NSStackView(views: [target, joinButton]); joinRow.spacing = 8
@@ -68,10 +70,25 @@ import AppKit
         let picker = NSOpenPanel(); picker.canChooseDirectories = sender.tag < 3; picker.canChooseFiles = sender.tag >= 3
         picker.allowsMultipleSelection = false; picker.title = fields[sender.tag].placeholderString ?? "Choose"
         picker.beginSheetModal(for: panel) { [weak self] response in
-            if response == .OK, let url = picker.url { self?.fields[sender.tag].stringValue = url.path }
+            if response == .OK, let url = picker.url, let self {
+                if sender.tag == 0 {
+                    self.target.stringValue = ""
+                    self.invalidateRoomSelection()
+                }
+                self.fields[sender.tag].stringValue = url.path
+            }
         }
     }
     func stop() { operation.cancel() }
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSTextField === target else { return }
+        invalidateRoomSelection()
+        issue.stringValue = "Connect this room before saving setup."
+    }
+    private func invalidateRoomSelection() {
+        fields[0].stringValue = ""; connectedTarget = nil
+        preview = nil; previewTarget = nil; joinButton.title = "Connect room"
+    }
     @objc private func toggleAdvanced(_ sender: NSButton) { for row in advancedRows { row.isHidden = sender.state != .on }; panel.setContentSize(NSSize(width: 680, height: sender.state == .on ? 680 : 500)) }
     @objc private func cancelSetup() {
         if operation.isRunning { closing = true; operation.cancel(); issue.stringValue = "Cancelling setup…"; return }
@@ -99,6 +116,9 @@ import AppKit
         } catch { setBusy(false); issue.stringValue = "Could not start setup. Check the installed runtime in Advanced." }
     }
     @objc private func connectRoom() {
+        // Every check must establish the current connection anew. Pending or
+        // failed admission must never leave a previously connected room saved.
+        fields[0].stringValue = ""; connectedTarget = nil
         let link = target.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !link.isEmpty else { issue.stringValue = "Paste a room or invitation link."; return }
         var input: [String: Any] = ["action": "connect", "target": link, "directory": managed.appendingPathComponent("Enrollment").path, "name": "Mac agent"]
@@ -124,6 +144,7 @@ import AppKit
             issue.stringValue = "Room: \(event["roomTitle"] as? String ?? event["roomId"] as? String ?? "") · Access: \(grants.isEmpty ? "chat" : grants). Choose Accept invitation to join."
             joinButton.title = "Accept invitation"
         case "connected":
+            connectedTarget = target.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             fields[0].stringValue = event["configDirectory"] as? String ?? ""
             preview = nil; previewTarget = nil; joinButton.title = "Connect room"
             issue.stringValue = "Room connected: \(event["roomId"] as? String ?? ""). Choose a workspace and sign in, then save."
@@ -144,6 +165,9 @@ import AppKit
         }
     }
     @objc private func saveSetup() {
+        if let connectedTarget, connectedTarget != target.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) {
+            invalidateRoomSelection(); issue.stringValue = "Connect this room before saving setup."; return
+        }
         guard fields.allSatisfy({ !$0.stringValue.isEmpty }) else { issue.stringValue = "Connect a room, choose a workspace and sign in. If tools are missing, check Advanced."; return }
         let urls = fields.map { URL(fileURLWithPath: $0.stringValue) }
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Project Room/Room Host/Setups")
