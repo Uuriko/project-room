@@ -325,6 +325,7 @@ const publicWorkSchemas = {
       schema: { const: "public-work-task/1" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
       namespaceId: { type: "string" }, repositoryUrl: { type: "string", format: "uri" }, repositoryRef: { type: "string" },
       title: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, files: { type: "array", items: { type: "string" } },
+      reward: { type: "object" }, settlement: { type: "object" },
       claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
         state: { enum: ["unclaimed", "claimed", "submitted", "verified"] }, generation: { type: "integer", minimum: 0 },
         identityId: { type: ["string", "null"] }, leaseExpiresAt: { type: ["string", "null"] }, submittedReceiptId: { type: ["string", "null"] },

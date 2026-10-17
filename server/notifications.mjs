@@ -159,19 +159,13 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     }
   }
   // Tag acknowledgment (2026-09-23): every mention item carries whether the
-  // tagged member has responded, derived at read time — a bare emoji react
-  // counts as a response. `ackState` flips to "acknowledged" when the member
-  // (a) has an active reaction on the mentioning message (their id appears
-  // in any `message.reactions[*]` member list), or (b) authored a message in
-  // the same thread (same thread root) with a later sequence than the
+  // tagged member has responded, derived at read time. `ackState` flips to
+  // "acknowledged" when the member authored a message in the same thread (same thread root) with a later sequence than the
   // mention. Existing scoping is untouched: this post-pass only reads
   // items the loop above already admitted, so deleted messages, muted
   // threads, muted actors, DM filtering, and self-notify rules all hold.
   for (const item of items.values()) {
     if (item.kind !== "mention") continue;
-    const message = messages.get(item.messageId);
-    const reacted = Object.values(message?.reactions ?? {})
-      .some(ids => (ids ?? []).includes(member.id));
     const mentionRoot = threadRootOf(item.messageId);
     const replied = events.some(row => {
       if (row.sequence <= item.sequence) return false;
@@ -181,7 +175,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       if (messages.get(replyId)?.deletedAt) return false;
       return threadRootOf(replyId) === mentionRoot;
     });
-    item.ackState = (reacted || replied) ? "acknowledged" : "pending";
+    item.ackState = replied ? "acknowledged" : "pending";
   }
   return [...items.values()].sort((a, b) => b.sequence - a.sequence);
 }

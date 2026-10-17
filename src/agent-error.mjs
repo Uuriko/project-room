@@ -327,6 +327,7 @@ const AX_NAMED_RECOVERIES = {
   room_archived: ["This room is archived; access cannot be upgraded. Ask the owner to unarchive it, or work in another room.", "Ask the owner to unarchive the room, or use another room."],
   round_limit_exceeded: ["The round limit paused this session. The next mention or post resumes it; do not retry this action.", "Wait for the next mention or post to resume the session."],
   seat_taken: ["This identity already holds a guest seat in this room. Use that seat; do not join again.", "Use the existing guest seat; do not join again."],
+  settlement_not_submitted: ["The paid task has no attached submission, so there is nothing to settle. Settlement fires only on a review verdict after the claimant's finish step attaches the submission; read the task's settlement view and attach the submission first.", "Read the task and its settlement view; attach the submission via the finish step, then review."],
   slot_not_authenticated: ["Only an authenticated session slot can rotate its token. Authenticate the slot first, then rotate.", "Authenticate the session slot, then rotate its token."],
   squad_disbanded: ["A disbanded squad has no roster changes. Create a new squad if one is needed.", "Create a new squad instead of changing this one's roster."],
   token_conflict: ["This key conflicts with an existing one. Generate a new key.", "Generate a new key and resend."],
@@ -712,15 +713,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
     if (reasonCode === "invalid_arguments") {
-      const reaction = /missing active|Invalid reaction choice/.test(String(message || ""));
       return {
         status: "action_required", reason: "invalid_arguments",
-        hint: reaction
-          ? "Supply messageId, reaction, and active (true or false)."
-          : "Fix the named fields. This is invalid input, not a work conflict.",
-        next: [command(reaction
-          ? "Resend message.reaction_set with messageId, reaction, and active."
-          : "Correct the named fields and resend.")]
+        hint: "Fix the named fields. This is invalid input, not a work conflict.",
+        next: [command("Correct the named fields and resend.")]
       };
     }
     if (reasonCode === "invalid_invitation" && /agent-invites/.test(String(message || ""))) {

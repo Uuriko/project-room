@@ -38,7 +38,10 @@ const EMPTY_UNTIL_CRON = new Set([
   "spend_authorizations",
   "spend_room_reservations",
   // GA-2 link exchange records exist only after a guest joins via a single-use link.
-  "guest_link_exchanges"
+  "guest_link_exchanges",
+  // Settlement links exist only once a paid public task is enabled
+  // (First Shift settlement rail).
+  "public_work_settlements"
 ]);
 
 const EVENTS = 200_000;

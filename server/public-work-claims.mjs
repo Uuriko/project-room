@@ -5,6 +5,7 @@ import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
@@ -138,10 +139,14 @@ export class PublicWorkClaims {
   }
   offer(row) {
     // Recheck publication, archive state and immutable public terms each time.
+    // Paid tasks carry the existing work_trade/credit reward vocabulary and
+    // settle through the escrow rail (server/public-work-settlement.mjs);
+    // cash rewards remain not-configured and unavailable here.
     const offer = this.store.projectOffers.read(row.offer_id);
-    if (offer.version !== row.terms_version || offer.reward.kind !== 'unpaid') fail(409, 'public_work_unavailable', 'Task is no longer available');
+    if (offer.version !== row.terms_version || publicWorkRewardMillis(offer) === undefined) fail(409, 'public_work_unavailable', 'Task is no longer available');
     return offer;
   }
+  settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
   request(row, actorId, action, input, operation) {
     check(identifier(input.requestId), 'Invalid request ID');
     const encoded = canonicalJson({ action, ...input });
@@ -163,9 +168,11 @@ export class PublicWorkClaims {
     let receiptBody = null;
     if (receipt) { try { receiptBody = JSON.parse(receipt.receipt_json); } catch { receiptBody = null; } }
     const state = receipt ? (receiptBody?.state === 'verified' ? 'verified' : 'submitted') : live.owner ? 'claimed' : 'unclaimed';
+    const settlement = this.settlementService().viewForOffer(row.offer_id);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
       title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
+      reward: offer.reward, ...(settlement ? { settlement } : {}),
       claimable: state === 'unclaimed',
       claim: { state, generation: row.generation,
         identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
@@ -193,7 +200,7 @@ export class PublicWorkClaims {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
         JOIN rooms r ON r.id=t.room_id WHERE o.status='published' AND r.archived_at IS NULL
-        AND o.version=t.terms_version AND json_extract(o.terms,'$.reward.kind')='unpaid' ORDER BY t.offer_id`).all();
+        AND o.version=t.terms_version AND (json_extract(o.terms,'$.reward.kind')='unpaid' OR (json_extract(o.terms,'$.reward.kind')='work_trade' AND json_extract(o.terms,'$.reward.unit')='credit')) ORDER BY t.offer_id`).all();
       // Claim state lives in the work-claims store and receipts, not in a
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
@@ -324,12 +331,17 @@ export class PublicWorkClaims {
         if (!row) fail(404, 'offer_not_found', 'Offer not found');
         if (row.revision !== input.expectedRevision || row.version !== input.expectedTermsVersion) fail(409, 'stale_offer', 'Offer changed; read it again');
         const offer = this.store.projectOffers.read(offerId);
-        if (offer.reward.kind !== 'unpaid' || !offer.repositoryUrl) fail(422, 'public_work_not_eligible', 'Public claims currently require an unpaid offer with a repository URL');
+        const rewardMillis = publicWorkRewardMillis(offer);
+        if (rewardMillis === undefined || !offer.repositoryUrl) fail(422, 'public_work_not_eligible', 'Public claims require an unpaid or work_trade credit offer with a repository URL');
         if (this.db.prepare('SELECT 1 FROM public_work_tasks WHERE offer_id=?').get(offerId)) fail(409, 'public_work_already_enabled', 'Public claims already enabled');
         const url = new URL(offer.repositoryUrl); url.pathname = url.pathname.replace(/\/$/, '').replace(/\.git$/, '');
         if (url.hostname === 'github.com') url.pathname = url.pathname.toLowerCase();
         const namespace = 'public_' + hash(roomId + '\n' + url.href + '\n' + input.repositoryRef);
         this.db.prepare('INSERT INTO public_work_tasks VALUES (?,?,?,?,?,?,?,?,?)').run(offerId, namespace, roomId, offer.version, url.href, input.repositoryRef, JSON.stringify(files), 0, this.store.now());
+        // Paid tasks fund their escrow at enable time, inside this same
+        // transaction: the posted price locks from the poster's existing
+        // payable balance, and a funding failure lists nothing.
+        if (rewardMillis !== null) this.settlementService().fund(roomId, actorId, offer, rewardMillis);
         // Kernel done means submitted delivery here, never independent acceptance.
         const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'self_attested' }, { now: this.store.now() });
         this.store.workClaims.set(namespace, item);
@@ -364,6 +376,9 @@ export class PublicWorkClaims {
         for (const item of releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now())) this.store.workClaims.set(row.namespace_key, item);
         let item = this.store.workClaims.get(row.namespace_key, offerId);
         if (action === 'claim') {
+          // Paid tasks gate the claim on the settlement lane + reputation
+          // claim gate before any lease moves (no-op for unpaid tasks).
+          this.settlementService().assertClaimable(row.room_id, offerId, identity.identityId);
           if (item.state !== 'unclaimed') {
             // G4: name the holder and the lease expiry — a bare
             // "Task already claimed" teaches the raced agent nothing actionable.
@@ -465,6 +480,13 @@ export class PublicWorkClaims {
             // PASSED — a recorded failure is honest evidence on the
             // receipt, never a label upgrade.
             verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+          // Paid tasks attach the submission to the funded escrow bounty
+          // before the receipt lands, so a receipt never exists without its
+          // settlement vehicle in 'submitted' state (no-op when unpaid).
+          // attachSubmission reads only receiptId/identityId/artifact.sha256/
+          // checksReported, so the #3546 evidence fields ride along inertly.
+          const settlement = this.settlementService().attachSubmission(row.room_id, offerId, receipt);
+          if (settlement) outcome.settlement = settlement;
           this.db.prepare('INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)').run(receiptId, offerId, row.namespace_key, row.generation, identity.identityId, input.artifactText, sha256, bytes, JSON.stringify(receipt), this.store.now());
           projectPublicWorkReceipt(this.store, receipt, sha256);
           item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
