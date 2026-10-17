@@ -786,6 +786,51 @@ export function publicReceiptById(store, id) {
   return row ? rowToPublic(row) : null;
 }
 
+// Verify-at-read-time support (server/receipt-verify.mjs): rebuild the
+// record this id would project from its CURRENT source, so a checker can
+// compare it against the stored row. Returns { row, artifactHashOk } —
+// row in insertReceipt shape, null when the source no longer yields this
+// receipt; artifactHashOk only for public-work receipts (the stored
+// artifact still hashes to its recorded sha256), null otherwise. Lot
+// receipts return null: the journal is their source, read directly.
+export function rederivePublicReceipt(store, id) {
+  if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id) || LOT_RECEIPT_ID.test(id)) return null;
+  const stored = store.db.prepare("SELECT source, origin_room_id FROM public_receipts WHERE id=?").get(id);
+  if (!stored) return null;
+  if (stored.source === "public-work") {
+    let record;
+    try {
+      record = store.db.prepare("SELECT artifact_text, artifact_sha256, receipt_json FROM public_work_receipts WHERE receipt_id=?").get(id);
+    } catch { return null; }
+    if (!record) return null;
+    let body = null;
+    try { body = JSON.parse(record.receipt_json); } catch { body = null; }
+    if (!body || body.receiptId !== id) return null;
+    const artifactHashOk = HEX64.test(record.artifact_sha256 ?? "")
+      && createHash("sha256").update(record.artifact_text, "utf8").digest("hex") === record.artifact_sha256;
+    return {
+      artifactHashOk,
+      row: {
+        id, title: cleanName(body.title) ?? "Public work", source: "public-work",
+        agents: typeof body.agentName === "string" && body.agentName ? [body.agentName]
+          : typeof body.identityId === "string" && body.identityId ? [body.identityId] : [],
+        humans: [], pullRequest: null, mergedAt: null,
+        hashes: hashList([
+          HEX64.test(record.artifact_sha256 ?? "") ? `sha256:${record.artifact_sha256}` : null,
+          HEX64.test(body.artifact?.sha256 ?? "") ? `sha256:${body.artifact.sha256}` : null,
+        ].filter(Boolean)),
+        at: iso(body.createdAt) ?? new Date(0).toISOString(),
+      },
+    };
+  }
+  if (!stored.origin_room_id) return null;
+  let state;
+  try { state = store.room(stored.origin_room_id)?.state; } catch { return null; }
+  if (!state) return null;
+  const row = optedInRows(store, state).find(candidate => candidate.id === id) ?? null;
+  return { row, artifactHashOk: null };
+}
+
 const cleanText = (value, max) => {
   if (typeof value !== "string") return null;
   const text = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
