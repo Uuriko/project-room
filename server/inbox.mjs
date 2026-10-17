@@ -1,6 +1,6 @@
 import { gmailImportAuth } from './gmail-import-authority.mjs';
 import { createHash } from "node:crypto";
-import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
+import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass, ownMember } from "../src/events.js";
 import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
 import { historyFloor, messageVisibleToViewer } from "./history-visibility.mjs";
@@ -936,7 +936,7 @@ export class Inbox {
     const status = share.request.sourceRevision !== sourceRevision ? "source_changed"
       : item.supersededBy || item.state === "superseded" ? "superseded"
       : !item.receipt?.nativeText ? "no_native_result"
-      : !hasConfirmedIndependentPass(item) || !currentApproval(item) || state.members[item.decision?.actorId]?.kind !== "human" ? "needs_review" : "ready";
+      : !hasConfirmedIndependentPass(item) || !currentApproval(item) || ownMember(state.members, item.decision?.actorId)?.kind !== "human" ? "needs_review" : "ready";
     if (status !== "ready") return { ...base, status, resultVersion: null };
     // R206-1: a result body is room text. It is readable only where the room's
     // read rules make it readable: a DM reaches only its parties, a message
@@ -944,7 +944,7 @@ export class Inbox {
     // active Room membership reaches nothing. viewerId null is the audit
     // replay, which must reproduce journaled receipts from the stored text.
     if (viewerId !== null) {
-      const member = state.members[viewerId];
+      const member = ownMember(state.members, viewerId);
       const message = state.messages.find(m => m.id === item.receipt.nativeText.messageId);
       if (!member || member.active === false || !message
         || !messageVisibleToViewer(message, viewerId, historyFloor(this.db, state, state.room.id, viewerId)))

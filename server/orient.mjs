@@ -14,7 +14,7 @@
 // (room_not_found).
 import { roomOrientation } from "../src/work-selectors.js";
 import { nextWorkStep } from "../src/workflow.js";
-import { pinnedMessages, roomKind, WORK_STATES } from "../src/events.js";
+import { pinnedMessages, roomKind, WORK_STATES, ownMember } from "../src/events.js";
 import { charterContext } from "../src/room-charter.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { orientSections } from "./updates.mjs";
@@ -139,7 +139,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
   const { sequence, state } = store.room(roomSlug);
   if (!state.room) throw new Error("Room projection is missing its room record");
-  const member = state.members?.[viewerId];
+  const member = ownMember(state.members, viewerId);
   if (!member) throw new Error("Viewer is not a member of this room");
   const now = store.now();
   const query = parseOrientQuery(options);

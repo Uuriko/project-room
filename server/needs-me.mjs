@@ -25,6 +25,7 @@ import { sessionWatermark } from "./read-cursor.mjs";
 // when the caller does not pass a cursor.
 
 import { ServiceError } from "./store.mjs";
+import { ownMember } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
@@ -374,7 +375,7 @@ function claimBoardOf(store, roomId) {
 // The cursor acknowledges discovery, not completion. Only advance through
 // sequence groups returned in full; multiple attention kinds may share an event.
 export function openWorkOf(store, roomId, memberId, authority, claims = null, nowMs = Date.now()) {
-  const member = authority?.members?.[memberId];
+  const member = ownMember(authority?.members, memberId);
   const ownerId = typeof authority?.ownerId === "string" && authority.ownerId ? authority.ownerId : null;
   if (!member || !mayWriteWorkClaims({ member: { ...member, id: memberId }, ownerId })) return null;
   const list = claims ?? claimBoardOf(store, roomId);
@@ -639,7 +640,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
     // Do not silently acknowledge a room whose authority/projection failed.
     const authority = store.roomAuthority(link.roomId);
-    const member = authority.members?.[link.memberId];
+    const member = ownMember(authority.members, link.memberId);
     if (!member || member.active === false) { roomAfter = link.roomId; continue; }
     // One summary per room this page walks (at most MAX_ROOMS), none dropped.
     // One claim-board read for the three work sections below; they used to

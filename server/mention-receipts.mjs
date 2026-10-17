@@ -9,6 +9,8 @@
 // acked are true once the state has moved to acknowledged or responded.
 // timed_out was delivered and was not read.
 
+import { ownMember } from "../src/events.js";
+
 const READ_STATES = new Set(["acknowledged", "responded"]);
 
 export function listMentionReceipts(store, token, roomId, expectedSessionBinding = null) {
@@ -31,7 +33,7 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
       receipts: rows.map(row => ({
         messageEventId: row.messageEventId,
         memberId: row.memberId,
-        displayName: members[row.memberId]?.displayName ?? row.memberId,
+        displayName: ownMember(members, row.memberId)?.displayName ?? row.memberId,
         delivered: true,
         state: row.state,
         read: READ_STATES.has(row.state),

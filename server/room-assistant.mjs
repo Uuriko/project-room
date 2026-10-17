@@ -1,5 +1,5 @@
 import { enforceAutonomyTierForAction, getTier } from './autonomy-tiers.mjs';
-import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
+import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS, ownMember } from '../src/events.js';
 import { conversationIndex } from '../src/conversation.js';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
@@ -98,7 +98,7 @@ export class RoomAssistant {
       if (!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get())
         return { contractVersion: 1, roomId, assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
       const state = this.store.room(roomId).state;
-      const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
+      const config = this.config(roomId), coordinator = ownMember(state.members, config.coordinatorMemberId);
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       // Keep unfinished requests discoverable by their host and controllers;
       // newer terminal history must not push pending work out of this window.
@@ -182,7 +182,7 @@ export class RoomAssistant {
         if (!isOwner) fail('assistant_denied', 'Only the room owner configures its assistant', 403);
         if (input.expectedRevision !== config.revision) fail('assistant_revision_conflict', 'Assistant settings changed; read them before retrying');
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64
-          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !state.members[input.coordinatorMemberId]?.active || !state.members[input.coordinatorMemberId]?.permissions.includes('accept_work')))
+          || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || ownMember(state.members, input.coordinatorMemberId)?.kind !== 'agent' || !ownMember(state.members, input.coordinatorMemberId)?.active || !ownMember(state.members, input.coordinatorMemberId)?.permissions.includes('accept_work')))
           fail('invalid_assistant_config', 'Choose a name and an active room agent, or disconnect', 422);
         result = { name: input.name.trim(), coordinatorMemberId: input.coordinatorMemberId, revision: config.revision + 1 };
         this.store.db.prepare('INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value').run(roomId, JSON.stringify(result));
@@ -207,7 +207,7 @@ export class RoomAssistant {
           // steer permission as proposing work. Posting a message stays open.
           if (!actor.permissions?.includes('steer')) fail('assistant_denied', 'Asking the room assistant needs the steer permission. Ask the room owner for access.', 403);
           source(input.sourceMessageId);
-          const coordinator = state.members[config.coordinatorMemberId];
+          const coordinator = ownMember(state.members, config.coordinatorMemberId);
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
           if (run || this.store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, input.sourceMessageId)) fail('assistant_run_exists', 'This message already has a shared request');
           run = { id: input.runId, sourceMessageId: input.sourceMessageId, initiatorId: actor.id,
@@ -243,7 +243,7 @@ export class RoomAssistant {
           } else if (input.action === 'resume') {
             if (!isHuman || (!isOwner && actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or owner resumes this request', 403);
             if (run.status !== 'paused') fail('assistant_not_paused', 'Wait for the host to confirm pausing before resuming');
-            const coordinator = state.members[config.coordinatorMemberId];
+            const coordinator = ownMember(state.members, config.coordinatorMemberId);
             if (!coordinator?.active || !coordinator.permissions.includes('accept_work') || run.coordinatorMemberId !== config.coordinatorMemberId
               || run.coordinatorMemberId !== state.room.ownerId && getTier(this.store.db, roomId, run.coordinatorMemberId)?.autonomyTier === 't1_readonly')
               fail('assistant_not_connected', 'Reconnect the original authorized assistant before resuming');

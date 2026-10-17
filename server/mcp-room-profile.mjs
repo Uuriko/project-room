@@ -26,7 +26,7 @@ import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
-import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS, ownMember } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
@@ -346,7 +346,7 @@ function listWork(store, secret, args) {
   const focus = args.focus ?? "all";
   const help = focus === "help_wanted";
   const snapshot = store.snapshot(secret, args.roomId, null, "work", help);
-  const member = snapshot.state.members[snapshot.viewerId];
+  const member = ownMember(snapshot.state.members, snapshot.viewerId);
   const now = help ? Date.parse(snapshot.evaluatedAt) : Date.now();
   const items = Object.values(snapshot.state.workItems);
   let candidates = items;

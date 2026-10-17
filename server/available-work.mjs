@@ -27,6 +27,7 @@
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { ownMember } from "../src/events.js";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
 
@@ -82,7 +83,7 @@ const publicTaskItem = packet => ({
 // no named viewer (public/internal reads) means no viewer narrowing.
 function viewerMayClaim(state, viewerId) {
   if (!viewerId) return true;
-  const member = state?.members?.[viewerId];
+  const member = ownMember(state?.members, viewerId);
   if (!member) return false;
   return mayWriteWorkClaims({ member: { ...member, id: viewerId }, ownerId: state?.room?.ownerId ?? null });
 }

@@ -24,7 +24,7 @@
 // throws for unparseable input — like the webhook fan-out, it must not fail
 // the command that triggered it.
 import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, ownMember } from "../src/events.js";
 import { ServiceError } from "./store.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
 
@@ -174,7 +174,7 @@ function applyActivityFanOut(store, roomId, state, senderId, command, incoming, 
   const db = store.db, now = store.now();
   const members = state?.members ?? {};
   const messages = state?.messages ?? [];
-  const actorName = members[senderId]?.displayName ?? senderId;
+  const actorName = ownMember(members, senderId)?.displayName ?? senderId;
   if (command.type === T.MESSAGE_POSTED) {
     const data = command.data ?? {};
     const messageId = data.messageId || incoming.id;
@@ -475,7 +475,7 @@ function savedView(store, roomId, row, memberId, floor = null) {
   const members = store.room(roomId).state.members;
   return {
     messageId: row.message_id, savedAt: row.saved_at,
-    authorId: message.authorId, authorName: members[message.authorId]?.displayName ?? message.authorId,
+    authorId: message.authorId, authorName: ownMember(members, message.authorId)?.displayName ?? message.authorId,
     body: message.deletedAt ? null : String(message.body ?? "").slice(0, 280),
     deleted: Boolean(message.deletedAt), createdAt: message.createdAt, replyToId: message.replyToId ?? null
   };

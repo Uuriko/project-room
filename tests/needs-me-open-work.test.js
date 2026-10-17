@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
-import { collectNeedsMe } from '../server/needs-me.mjs';
+import { collectNeedsMe, openWorkOf } from '../server/needs-me.mjs';
 import { wakeNamedReviewers } from '../server/work-claim-events.mjs';
 import { createWork, claimWork, updateWork, recordReview, recordCi, flagPremiseInvalid, clearPremiseFlag } from '../server/work-claims.mjs';
 
@@ -295,4 +295,21 @@ test("the three work sections share one claim-board read per room", t => {
   assert.equal(page.openWork[0].top[0].id, "open-1");
   assert.equal(page.reviewAsks?.length, 1);
   assert.equal(page.reviewAsks[0].top[0].id, "review-1");
+});
+
+test('openWorkOf: a prototype-named id is not a member, a real member still sees open work (#3224 slice 5)', () => {
+  const t0 = Date.parse('2026-10-01T00:00:00Z');
+  const item = createWork({ id: 'proto-task', title: 'Proto task' }, { now: t0, agentId: 'owner1' });
+  const claims = [item];
+  // Raw members["toString"] resolves Object.prototype.toString (truthy), and
+  // with ownerId set to that same name the phantom "member" also passed the
+  // owner match in mayWriteWorkClaims — open work leaked to a non-member.
+  assert.equal(openWorkOf(null, 'board', 'toString', { members: {}, ownerId: 'toString' }, claims, t0 + 60000), null,
+    'a prototype-named id must not be treated as a member');
+  assert.equal(openWorkOf(null, 'board', 'constructor', { members: {}, ownerId: 'constructor' }, claims, t0 + 60000), null,
+    'a prototype-named id must not be treated as a member');
+  const authority = { members: { ada: { kind: 'human', active: true, permissions: ['accept_work'] } }, ownerId: 'owner1' };
+  const open = openWorkOf(null, 'board', 'ada', authority, claims, t0 + 60000);
+  assert.equal(open?.count, 1, 'a real member still sees the open work');
+  assert.equal(open.top[0].id, 'proto-task');
 });

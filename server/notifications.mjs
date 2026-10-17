@@ -3,7 +3,7 @@
 // enqueues no wake. Human browser push is a separate path
 // (server/human-push.mjs) and does not read this feed. Every read re-authenticates, so a member
 // whose access ended gets 401/403 and never a stale list.
-import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
+import { EVENT_TYPES as T, defaultNotificationPreferences, ownMember } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
 import { ServiceError } from "./store.mjs";
 import { mutedEvent } from "./moderation.mjs";
@@ -230,7 +230,7 @@ export class Notifications {
       const fetched = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence DESC LIMIT ?").all(roomId, cursor, through, tail + 1);
       const truncated = fetched.length > tail;
       const rows = fetched.slice(0, tail).reverse().map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
-      const member = room.state.members[auth.member.id] ?? auth.member;
+      const member = ownMember(room.state.members, auth.member.id) ?? auth.member;
       const mutedThreadIds = this.store.threadMutes.mutedThreadIds(roomId, auth.member.id);
       // PRIV-2: a since_join reader's feed follows the same floor as every
       // other message read. A mention recorded before removal stays in the
