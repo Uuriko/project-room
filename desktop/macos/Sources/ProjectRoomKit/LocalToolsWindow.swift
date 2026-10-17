@@ -10,12 +10,13 @@ import CoreGraphics
     private let hostState = NSTextField(wrappingLabelWithString: "")
     private let hostToggle = NSButton(title: "Start agent", target: nil, action: nil)
     private let macConnect = NSButton(title: "Connect Mac tools…", target: nil, action: nil)
-    private let hostConnect = NSButton(title: "Connect agent…", target: nil, action: nil)
+    private let hostConnect = NSButton(title: "Set up agent…", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
     private let permissions = NSTextField(wrappingLabelWithString: "")
     private let toggle = NSButton(title: "Enable local tools", target: nil, action: nil)
     private var timer: Timer?
     private var hostIssue: String?
+    private var setupWindow: LocalRoomHostSetupWindow?
     public init(service: LocalTools? = nil) throws {
         let owned = try service ?? LocalTools()
         host = try LocalRoomHost()
@@ -32,12 +33,13 @@ import CoreGraphics
         let copy = NSButton(title:"Copy agent connection", target:self, action:#selector(copyConnection)); copy.bezelStyle = .rounded
         let controls = NSStackView(views:[toggle,setup,copy]); controls.orientation = .horizontal; controls.spacing = 8
         for view in [title,explanation,state,permissions,controls,scope] { stack.addArrangedSubview(view) }
-        hostConnect.target = self; hostConnect.action = #selector(connectHost); hostConnect.bezelStyle = .rounded
+        hostConnect.target = self; hostConnect.action = #selector(setupHost); hostConnect.bezelStyle = .rounded
         hostToggle.target = self; hostToggle.action = #selector(toggleHost); hostToggle.bezelStyle = .rounded
         macConnect.target = self; macConnect.action = #selector(connectMacTools); macConnect.bezelStyle = .rounded
         let hostControls = NSStackView(views: [hostConnect, macConnect, hostToggle]); hostControls.spacing = 8
         let hostNote = NSTextField(wrappingLabelWithString: "Keep Project Room open while your agent works."); hostNote.textColor = .secondaryLabelColor
-        for view in [hostState, hostControls, hostNote] { stack.addArrangedSubview(view) }
+        let importHost = NSButton(title: "Import existing host configuration…", target: self, action: #selector(connectHost)); importHost.bezelStyle = .rounded
+        for view in [hostState, hostControls, hostNote, importHost] { stack.addArrangedSubview(view) }
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:window.contentView!.topAnchor,constant:24)])
         refresh(); window.center()
@@ -50,6 +52,12 @@ import CoreGraphics
         service.setEnabled(!enabled)
         do { try connection.publish() } catch { service.setEnabled(false); state.stringValue = "Connection could not update. Tools paused."; return }
         refresh()
+    }
+    @objc private func setupHost() {
+        setupWindow = LocalRoomHostSetupWindow(host: host) { [weak self] in
+            self?.setupWindow = nil; self?.hostIssue = nil; self?.refresh()
+        }
+        setupWindow?.show(on: window)
     }
     @objc private func connectHost() {
         let picker = NSOpenPanel(); picker.canChooseDirectories = false; picker.allowsMultipleSelection = false
@@ -81,7 +89,7 @@ import CoreGraphics
         hostIssue = nil
         if host.snapshot()["running"] as? Bool == true { host.requestStop() }
         else { do { try host.start() } catch { hostIssue = (error as? LocalToolFailure)?.code == "room_connection_changed"
-            ? "The room connection changed. Choose Connect agent to review its setup before starting."
+            ? "The room connection changed. Choose Set up agent to review its setup before starting."
             : "Could not start. Check setup or another running host." } }
         refresh()
     }

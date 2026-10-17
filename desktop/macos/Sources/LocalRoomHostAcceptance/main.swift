@@ -66,6 +66,50 @@ func fixture(_ name: String) throws -> (LocalRoomHost, URL) {
     let host = try LocalRoomHost(directory:dir.appendingPathComponent("managed")); try host.configure(manifest)
     return (host,dir)
 }
+// Guided setup uses only disposable private folders and executables.
+let guided = root.appendingPathComponent("guided")
+let connectionFolder = guided.appendingPathComponent("connection")
+let workspace = guided.appendingPathComponent("workspace")
+let profile = guided.appendingPathComponent("profile")
+for folder in [connectionFolder, workspace, profile] {
+    try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+}
+let connectionFile = connectionFolder.appendingPathComponent("connection.json")
+try write(["version": 1, "origin": "https://fixture.invalid", "roomId": "fixture", "memberId": "agent", "token": "fixture-only"], connectionFile.path)
+let beforeConnection = try Data(contentsOf: connectionFile)
+func selection(_ profileURL: URL, writes: Bool = false) -> LocalRoomHostSetup.Selection {
+    .init(node: URL(fileURLWithPath: executable), script: connectionFile, codex: URL(fileURLWithPath: executable), workspace: workspace, profile: profileURL, connection: connectionFolder, allowWrites: writes)
+}
+let setups = guided.appendingPathComponent("setups")
+let generated = try LocalRoomHostSetup.save(selection(profile), directory: setups)
+let generatedManifest = try RoomHostManifest.read(generated)
+let generatedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: generatedManifest.runtimeConfig))) as! [String: Any]
+check((generatedRuntime["policy"] as? [String: String])?["sandbox"] == "read-only", "guided setup defaults to read-only")
+check(generatedRuntime["macTools"] == nil, "guided setup does not grant computer control")
+let afterConnection = try Data(contentsOf: connectionFile)
+check(beforeConnection == afterConnection, "guided setup preserves room credentials")
+check(generatedRuntime["codexHome"] as? String == profile.path, "guided setup uses chosen dedicated profile")
+let guidedHost = try LocalRoomHost(directory: guided.appendingPathComponent("host"))
+try guidedHost.configure(generated)
+let guidedRestored = try LocalRoomHost(directory: guided.appendingPathComponent("host"))
+check(guidedRestored.snapshot()["roomId"] as? String == "fixture" && guidedRestored.snapshot()["running"] as? Bool == false, "guided setup restores selected room without starting")
+for path in [generated.path, generatedManifest.runtimeConfig] {
+    let attributes = try fm.attributesOfItem(atPath: path)
+    check((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "guided configuration is private")
+}
+let writeManifest = try RoomHostManifest.read(LocalRoomHostSetup.save(selection(profile, writes: true), directory: setups))
+let writeRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: writeManifest.runtimeConfig))) as! [String: Any]
+check((writeRuntime["policy"] as? [String: String])?["sandbox"] == "workspace-write", "workspace writing requires explicit selection")
+let savedBeforeFailure = try Data(contentsOf: guided.appendingPathComponent("host/selected-host.json"))
+for invalid in [workspace, workspace.appendingPathComponent("profile"), fm.homeDirectoryForCurrentUser.appendingPathComponent(".codex/nested")] {
+    do { _ = try LocalRoomHostSetup.save(selection(invalid), directory: setups); check(false, "unsafe profile rejected") }
+    catch { check((error as? LocalToolFailure)?.code == "setup_dedicated_profile_required", "workspace and ordinary profile descendants refused") }
+}
+try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: profile.path)
+do { _ = try LocalRoomHostSetup.save(selection(profile), directory: setups); check(false, "public profile rejected") }
+catch { check((error as? LocalToolFailure)?.code == "setup_private_folder_required", "nonprivate profile refused") }
+let savedAfterFailure = try Data(contentsOf: guided.appendingPathComponent("host/selected-host.json"))
+check(savedBeforeFailure == savedAfterFailure, "failed setup leaves working configuration intact")
 let (setupHost, setupDir) = try fixture("setup")
 let sourceRuntime = setupDir.appendingPathComponent("runtime.json")
 let runtimeSettings: [String: Any] = ["command": executable, "cwd": setupDir.path,
