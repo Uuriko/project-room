@@ -1,14 +1,5 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { LEGACY_REACTIONS, foldedReactionMap } from "./emoji.js";
 // Conversation structure is derived from immutable reply links, including older logs.
-// Legacy names remain the input aliases. Pills render the Unicode key.
-export const REACTIONS = LEGACY_REACTIONS;
-
-export function reactionPills(reactions = {}) {
-  return Object.entries(foldedReactionMap(reactions)).map(([key, memberIds]) => (
-    { key, symbol: key, memberIds, count: memberIds.length, used: memberIds.length > 0 }
-  ));
-}
 
 // Composition, key repeat, and touch Return must never accidentally submit.
 export function sendsOnEnter(event, touchKeyboard = false) {
