@@ -201,6 +201,12 @@ function redactReplaySnapshot(db, roomId, ids, removedTexts) {
   };
   if (holdsRemovedText(state)) return discard();
   db.prepare("UPDATE messages_backfill_cursor SET state_json=?, parity_at_seq=NULL WHERE room_id=?").run(JSON.stringify(state), roomId);
+  // The kept snapshot supersedes any split-snapshot parts left from a large
+  // pre-redaction write (research r21): purge them the way discard() does, so
+  // no part can hold text this redaction just removed. Pre-r21 databases have
+  // no messages_backfill_state table.
+  try { db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId); }
+  catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
 }
 
 // Account deletion also clears dm.posted and any string body the per-message
