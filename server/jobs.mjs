@@ -3,7 +3,7 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
-import { syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { staleSweepDueAt, syncClaimPullRequests } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
@@ -277,10 +277,10 @@ export const JOBS = Object.freeze([
     enabled(_env, store) {
       if (!store) return true;
       const now = Date.now();
-      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null;
+      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null || staleSweepDueAt(store, now) != null;
     },
-    disabledReason: () => "No open pull request is waiting",
-    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now),
+    disabledReason: () => "No open pull request or stale board sweep is waiting",
+    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? staleSweepDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
@@ -321,6 +321,33 @@ export const JOBS = Object.freeze([
         const integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
+        // Isolated failures: the store contained one record's blast radius
+        // and returned the outstanding failures instead of throwing. The
+        // tick still fails — the verdict is unchanged — with the same
+        // sanitized detail shape as the throw path (stable codes and
+        // classes only; record ids stay in the operator log line).
+        const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
+        if (failures.length) {
+          const first = failures[0];
+          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+          // The operator line carries the allowlisted fields only —
+          // sub-check, record id, stable code, class, count. The stored
+          // failure message is a diagnostic for the record's owner, not
+          // log text: re-emitting it here every tick would republish
+          // whatever a record's error once contained.
+          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
+          const summary = {};
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept"]) {
+            if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
+          }
+          return {
+            ...summary,
+            errors: failures.length,
+            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+            failureDetail: failure
+          };
+        }
         return logIntegrity(integrity);
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);

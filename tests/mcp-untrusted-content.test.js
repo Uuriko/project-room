@@ -15,7 +15,8 @@ const READ_TOOLS = [
   "room_needs_me", "room_read_messages", "room_read_request", "room_request_history",
   "room_read_inbox", "room_read_work", "room_read_work_discussion", "room_read_board",
   "room_read_result", "room_list_work", "room_list_peer_dms", "room_list_events",
-  "room_activation_pack", "public_work_recommend", "public_work_read_task", "public_work_my_review"
+  "room_activation_pack", "get_room_context", "room_get_file", "inbox_get_attachment", "room_list_access_requests",
+  "public_work_recommend", "public_work_read_task", "public_work_my_review"
 ];
 
 async function serve(t) {
