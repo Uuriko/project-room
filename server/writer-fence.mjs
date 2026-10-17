@@ -403,6 +403,10 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_rooms",
   "public_directory_entries",
   "public_read_model_backfill",
+  // room_public_receipts_setting: the recorded per-room opt-in/out itself,
+  // mirrored by the public read model (#3594). Same class as the four tables
+  // above — older writers have no path to it.
+  "room_public_receipts_setting",
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
@@ -411,6 +415,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // The integrity cron writes it. Older writers have no path to it. A missing
   // row means that room has not been replayed. The parity check is the gate.
   "messages_backfill_cursor",
+  // messages_backfill_blocks (MSG-2): rooms the backfill parked on an
+  // un-replayable event, with the event's sequence, id and error. The
+  // integrity cron writes it; a row names what an operator must repair.
+  // Older writers have no path to it. A missing row means not parked.
+  "messages_backfill_blocks",
   // agent_wants_work (BOARD-WAKE-2): an agent's opt-in ready-work filter and
   // its last wake time. Older writers have no path to it. A missing row means
   // off, so a rollback only stops the ready_work wakes.

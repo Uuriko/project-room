@@ -63,6 +63,23 @@ CREATE TABLE IF NOT EXISTS messages_backfill_cursor (
 );
 `;
 
+// One row per room whose backfill is parked: replaying its stored log throws
+// (an event the current reducer rejects, or a head sequence the log no
+// longer reaches). The row names the exact event so the failure is an
+// operator-actionable record instead of an anonymous wedge that re-throws
+// every tick and blocks every other room. Written by the backfill, cleared
+// when the room's log is replaced or a fresh diagnosis replays cleanly.
+export const MESSAGES_BACKFILL_BLOCKS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS messages_backfill_blocks (
+  room_id TEXT PRIMARY KEY,
+  sequence INTEGER NOT NULL,
+  event_id TEXT,
+  error TEXT NOT NULL,
+  head_seq INTEGER NOT NULL DEFAULT 0,
+  blocked_at INTEGER NOT NULL DEFAULT 0
+);
+`;
+
 export const MESSAGES_BACKFILL_BATCH = 200;
 const BACKFILL_COMMIT = 25;
 const SWEEP_ID = "";
@@ -304,7 +321,73 @@ function resetRoom(store, roomId) {
   store.transaction(() => {
     store.db.prepare("DELETE FROM messages WHERE room_id=?").run(roomId);
     store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+    store.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
   });
+}
+
+// Replay the room's whole log from empty and report the first event the
+// current reducer rejects, or the tail gap when the log ends before the
+// room's head sequence. Returns null when the log replays cleanly and
+// reaches the head: the fillRoom throw is then not attributable to a stored
+// event (a cooperative interruption via yieldBetween, a storage error, a
+// corrupt cursor snapshot) and the caller rethrows it unchanged — parking
+// is only for failures the data itself guarantees will recur.
+function diagnoseBlock(db, roomId) {
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
+  if (maxSeq < head) {
+    return { sequence: maxSeq, eventId: null, error: `messages backfill stopped at ${maxSeq} before room ${roomId} reached sequence ${head}` };
+  }
+  let state = emptyRoomState();
+  for (const row of db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)) {
+    try {
+      state = compactState(applyEvent(state, JSON.parse(row.body)));
+    } catch (error) {
+      return { sequence: row.sequence, eventId: row.id, error: error.message };
+    }
+  }
+  return null;
+}
+
+// Record (or refresh) a room's block. Returns true when the block is new or
+// changed — the caller surfaces a fresh block once, loudly, instead of
+// re-throwing it every tick.
+function recordBlock(store, roomId, block) {
+  const db = store.db;
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const existing = db.prepare("SELECT sequence, event_id, error FROM messages_backfill_blocks WHERE room_id=?").get(roomId);
+  const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId || existing.error !== block.error;
+  store.transaction(() => {
+    db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
+        error=excluded.error, head_seq=excluded.head_seq, blocked_at=excluded.blocked_at`)
+      .run(roomId, block.sequence, block.eventId, block.error, head, Date.now());
+  });
+  return fresh;
+}
+
+function clearBlock(store, roomId) {
+  store.transaction(() => {
+    store.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+  });
+}
+
+// Parked rooms whose head moved since the block was recorded earn one fresh
+// diagnosis (the log may have been repaired or replaced underneath them);
+// a room that now replays cleanly has its block cleared and rejoins the
+// sweep. Runs before room selection; a still-blocked room stays parked. A
+// re-diagnosis that changes the block marks the room in `freshRooms`, so
+// the changed block is surfaced once like a new one.
+function refreshStaleBlocks(store, freshRooms = new Map()) {
+  for (const row of store.db.prepare("SELECT room_id, head_seq FROM messages_backfill_blocks").all()) {
+    const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
+    if (head === undefined) { clearBlock(store, row.room_id); continue; }
+    if (head === row.head_seq) continue;
+    const block = diagnoseBlock(store.db, row.room_id);
+    if (!block) clearBlock(store, row.room_id);
+    else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);
+  }
 }
 
 function loadState(db, roomId, cursor) {
@@ -338,6 +421,7 @@ function nextRoom(db, exclude = []) {
         SELECT 1 FROM events e
         WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
       )))${excluded}
+      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id = r.id)
     ORDER BY r.id
     LIMIT 1`).get(...exclude) ?? null;
 }
@@ -423,11 +507,19 @@ function isRoomDataError(error) {
 // after the log is caught up writes nothing. A replaced log (importEvents)
 // drops that room's rows and starts again.
 //
-// Per-room isolation: a room whose log cannot replay is recorded in the
-// result's `failed` list and skipped, so one poisoned room cannot stop
-// every other room's backfill (the deferred integrity batch wedged on
-// exactly this shape). The room is retried on the next call — the failure
-// is reported, never silently passed.
+// Per-room isolation: a room whose stored log no longer replays (an event
+// the current reducer rejects, or a head sequence the log does not reach)
+// must not wedge the sweep — the room is diagnosed to the exact event,
+// parked in messages_backfill_blocks, and named in the result's `failed`
+// list (this call's fresh failures) and its `blocked` list (the standing
+// parked set) while every other room proceeds. A parked room is skipped
+// on later calls until refreshStaleBlocks finds the block stale (the
+// underlying event repaired), so a poisoned room neither wedges the batch
+// nor re-runs forever; its failure stays recorded in the unified
+// integrity surface until the room backfills clean. Parking is deliberate
+// — skipping the event silently would corrupt the table the parity check
+// certifies against the projection; the block names what an operator must
+// repair.
 export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, deadline = Infinity, yieldBetween = () => {} } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not backfill messages");
   if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
@@ -444,17 +536,31 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     try { yieldBetween(); }
     catch (error) { yieldError = error; throw error; }
   };
-  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, failed };
+  // The result's `blocked` list is the full parked set (the durable table),
+  // with `fresh` marking blocks recorded or changed by this call — so a
+  // caller can surface a new block loudly once and keep the standing set
+  // visible on every later call without re-diagnosing it. The result's
+  // `failed` list carries this call's fresh failures for the unified
+  // integrity_failures surface.
+  const freshRooms = new Map();
+  const allBlocked = () => store.db.prepare(
+    "SELECT room_id, sequence, event_id, error FROM messages_backfill_blocks ORDER BY room_id"
+  ).all().map(row => ({
+    roomId: row.room_id, sequence: row.sequence, eventId: row.event_id, error: row.error,
+    fresh: freshRooms.get(row.room_id) ?? false
+  }));
+  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, blocked: allBlocked(), failed };
+  refreshStaleBlocks(store, freshRooms);
   let events = 0;
   let rooms = 0;
   let roomId = null;
   let appliedSeq = null;
   const seen = new Set();
   while (events < cap) {
-    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, failed };
+    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
     const room = nextRoom(store.db, failedIds);
-    if (!room) return { done: failed.length === 0, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
-    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
+    if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
+    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
     seen.add(room.id);
     rooms += 1;
     let wrote;
@@ -463,18 +569,24 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     } catch (error) {
       if (yieldError) throw yieldError;
       if (!isRoomDataError(error)) throw error;
+      const block = diagnoseBlock(store.db, room.id);
+      if (!block) throw error; // not a stored-event failure: propagate as before
+      // Park the room durably (later calls skip it until the block goes
+      // stale) and report it as this call's fresh failure for the unified
+      // integrity_failures surface.
+      freshRooms.set(room.id, recordBlock(store, room.id, block));
       failed.push({ roomId: room.id, error });
       failedIds.push(room.id);
       roomId = room.id;
-      appliedSeq = null;
+      appliedSeq = readCursor(store.db, room.id)?.applied_seq ?? null;
       continue;
     }
     events += wrote.events;
     roomId = room.id;
     appliedSeq = wrote.appliedSeq;
-    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, failed };
+    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
   }
-  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
+  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
 }
 
 function caughtUpSql(after) {

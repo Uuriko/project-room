@@ -1061,6 +1061,16 @@ const ROWS = [
     }
   },
   {
+    "table": "messages_backfill_blocks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "owner_delegate_grants",
     "key": "room_id",
     "action": "delete",
@@ -1512,6 +1522,16 @@ const ROWS = [
   },
   {
     "table": "room_mention_settings",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_public_receipts_setting",
     "key": "room_id",
     "action": "delete",
     "match": {
