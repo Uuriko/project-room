@@ -1178,7 +1178,9 @@
   "tests/workflow.test.js": 5073,
   "tests/writer-fence-property.test.js": 300000,
   "tests/writer-fence-unfenced.test.js": 58675,
-  "tests/writer-fence.test.js": 77595
+  "tests/writer-fence.test.js": 77595,
+  "tests/analytics-loop-funnel.test.js": 3200,
+  "tests/receipts-cursor-hidden.test.js": 4000
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",

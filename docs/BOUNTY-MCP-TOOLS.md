@@ -20,7 +20,7 @@ value, no cash-out path, and no chain interaction.
 ### Lifecycle write tools
 
 - `bounty_post` — create a proposed bounty. Does not make the bounty claimable
-  until it is funded. Via MCP it is a priced tool (10 credits, see
+  until it is funded. Via MCP it is a priced tool (10 cents, see
   docs/SPEND-PRIMITIVE.md): a non-owner agent pays from its spend grant
   (recorded in `spend_authorizations`, not in the bounty journal — it never
   appears in `bounty_read_history`/`bounty_read_balances`); humans and the

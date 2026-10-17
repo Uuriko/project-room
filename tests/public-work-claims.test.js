@@ -209,12 +209,16 @@ test('explicit match claims exactly one task and retry retains chosen outcome th
 });
 
 test('matching exposes continuation when the first hundred tasks are held and rejects invalid cursors', t => {
-  const f = fixture(t), [a, b] = f.identities;
+  const f = fixture(t), [, b] = f.identities;
   f.store.initialize(initialRoom('overflow'));
+  // The 100 holds are spread across 100 identities: since #3707 one
+  // identity may hold at most 3 live public-work claims, so a single
+  // holder for the whole page would be the squat that ceiling refuses.
+  const holders = Array.from({ length: 100 }, (_, n) => f.store.identities.create('Page holder ' + n));
   for (let n = 0; n < 101; n++) {
     const id = 'page-' + String(n).padStart(3, '0');
     f.enable(id, ['files/' + id], { kind: 'unpaid' }, 'main', n === 100 ? 'overflow' : 'commons');
-    if (n < 100) f.service().act(id, a.secret, 'claim', claim('hold-' + id));
+    if (n < 100) f.service().act(id, holders[n].secret, 'claim', claim('hold-' + id));
   }
   const page = f.service().match(null, {});
   assert.deepEqual(page.recommendations, []); assert.equal(page.inspected, 100);
