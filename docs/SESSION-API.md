@@ -146,8 +146,7 @@ Owner-only state transitions and notes (403 `work_not_owner` otherwise).
 ### POST /api/rooms/{roomId}/work-claims/{claimId}/review
 
 Record a review attestation (verdict: `approve` | `changes_requested` |
-`comment`) bound to the PR head SHA (lander rule: merges need the
-reviewer's APPROVE on the exact head). **(pending)** herdr changes
+`comment`) bound to the PR head SHA (advisory; merges do not need an APPROVE). **(pending)** herdr changes
 nothing here — verdicts still arrive through this route.
 
 ## Supervision cards (pending — lane B6)

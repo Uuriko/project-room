@@ -45,7 +45,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (55 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (56 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 
@@ -123,12 +123,14 @@ test("step0 fates: a maximally populated item's board row drops the named fields
     assert.equal(boardJson.includes(sentinel), false, `${sentinel} must not reach the board at Step 0`);
   }
   assert.equal(boardJson.includes(receipt.signedEvidence.signature), false, "the signed evidence object itself has no board home");
-  for (const key of ["definitionOfDone", "humanDecisionMakerId", "ownerDecisionRequired", "mode", "verifierMemberId", "accountableMemberId", "receipt", "verification", "handoff", "helpWanted", "publicTask"]) {
+  for (const key of ["definitionOfDone", "humanDecisionMakerId", "ownerDecisionRequired", "mode", "verifierMemberId", "accountableMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
     assert.equal(Object.hasOwn(row, key), false, `board row must not carry ${key} at Step 0`);
   }
-  // The verification's independenceConfirmed flag — the bit that makes a
-  // pass an *independent* approval in the item vocabulary — is not on the
-  // board row in any form: the review records only verdict + summary.
+  // #3547 kernel fact vs item vocabulary: the claim row now always carries
+  // the kernel's `verification` field (null here — the mirror ran no kernel
+  // verify), but the item's verification object stays off the board: its
+  // independenceConfirmed flag and summary have no board home.
+  assert.equal(row.verification?.independenceConfirmed, undefined, "the item's independence flag must not reach the board");
   assert.equal(Object.hasOwn(row.reviews[0], "independenceConfirmed"), false);
 });
 

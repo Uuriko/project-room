@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { checkSyntax } from "./syntax-check.mjs";
 
 // Fail fast with a clear message on old Node (task #42): package.json
 // declares engines >=24.19.0, and npm only warns without engine-strict.
@@ -17,10 +18,8 @@ function files(path) { return readdirSync(path, { withFileTypes: true }).flatMap
 const cloudflare = readdirSync("cloudflare", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("cloudflare", e.name));
 const relay = ["relay/src", "relay/checks"].filter(existsSync).flatMap(files);
-for (const path of ["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "server", "client", "scripts", "tests", "cli"].flatMap(files), ...cloudflare, ...relay]) {
-  const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
-  if (result.status !== 0) process.exit(result.status || 1);
-}
+const syntaxStatus = await checkSyntax(["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "server", "client", "scripts", "tests", "cli"].flatMap(files), ...cloudflare, ...relay]);
+if (syntaxStatus !== 0) process.exit(syntaxStatus);
 const uiStrings = spawnSync(process.execPath, ["scripts/build-ui-strings.mjs", "--check"], { stdio: "inherit" });
 if (uiStrings.status !== 0) process.exit(uiStrings.status || 1);
 const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], { stdio: "inherit" });

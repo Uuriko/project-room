@@ -136,6 +136,14 @@ const view = (row, now) => ({
   status: inviteStatus(row, now),
 });
 
+// #3883 (coordinator decision on the issue): the credential-less replay
+// rotation below is bounded to 30 days from the redemption receipt's
+// created_at. The R305-1 lost-response retry surfaces at redemption time,
+// not months later; a permanent rotation capability keyed on the burned
+// code + requestId would outlive its purpose. The boundary is inclusive:
+// a replay landing exactly 30 days after redemption still rotates.
+const REPLAY_ROTATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 // G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
 // redemption for an uncertain retry. No new identity, no new member event,
 // no second burn — the same membership, a fresh onboarding token,
@@ -154,7 +162,19 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   // credential is already fine and keeps today's shape. The fresh onboarding
   // token is issued AFTER the rotation, so the scoped-key revocation the
   // rotation carries cannot kill the token this response hands over.
-  const rotation = credentialPresented ? null : store.identities.rotateForReplay(receipt.identity_id);
+  let rotation = null;
+  if (!credentialPresented) {
+    // #3883 window gate, on the rotation path only: a receipt whose
+    // created_at is unusable fails closed here; credential-presenting
+    // replays never reach this gate and stay byte-identical.
+    const createdAt = receipt.created_at;
+    const usable = typeof createdAt === "number" && Number.isFinite(createdAt) && createdAt > 0;
+    if (!usable || store.now() - createdAt > REPLAY_ROTATION_WINDOW_MS) {
+      fail(410, "invite_replay_rotation_expired",
+        "This redemption's secret-rotation window has closed: a credential-less replay can rotate the identity secret only within 30 days of the original redemption. Ask the inviter who sponsored this invite to mint a fresh invite code — or to remove and re-invite this member — then redeem the new code to receive a new identity secret.");
+    }
+    rotation = store.identities.rotateForReplay(receipt.identity_id);
+  }
   const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
     identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
   });
