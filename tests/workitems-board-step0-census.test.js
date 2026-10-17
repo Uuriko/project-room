@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { WORK_ITEM_BOARD_SYNC_TYPES } from "../server/work-item-board.mjs";
+import { DIVERGENCE_REPAIR_NOTE, WORK_ITEM_BOARD_SYNC_TYPES } from "../server/work-item-board.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 // (a) Reference-site inventory: every file under server/ and src/ whose
@@ -45,7 +45,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (55 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (56 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 
@@ -123,12 +123,14 @@ test("step0 fates: a maximally populated item's board row drops the named fields
     assert.equal(boardJson.includes(sentinel), false, `${sentinel} must not reach the board at Step 0`);
   }
   assert.equal(boardJson.includes(receipt.signedEvidence.signature), false, "the signed evidence object itself has no board home");
-  for (const key of ["definitionOfDone", "humanDecisionMakerId", "ownerDecisionRequired", "mode", "verifierMemberId", "accountableMemberId", "receipt", "verification", "handoff", "helpWanted", "publicTask"]) {
+  for (const key of ["definitionOfDone", "humanDecisionMakerId", "ownerDecisionRequired", "mode", "verifierMemberId", "accountableMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
     assert.equal(Object.hasOwn(row, key), false, `board row must not carry ${key} at Step 0`);
   }
-  // The verification's independenceConfirmed flag — the bit that makes a
-  // pass an *independent* approval in the item vocabulary — is not on the
-  // board row in any form: the review records only verdict + summary.
+  // #3547 kernel fact vs item vocabulary: the claim row now always carries
+  // the kernel's `verification` field (null here — the mirror ran no kernel
+  // verify), but the item's verification object stays off the board: its
+  // independenceConfirmed flag and summary have no board home.
+  assert.equal(row.verification?.independenceConfirmed, undefined, "the item's independence flag must not reach the board");
   assert.equal(Object.hasOwn(row.reviews[0], "independenceConfirmed"), false);
 });
 
@@ -167,7 +169,7 @@ test("step0 fates: helpWanted and publicTask are live item state the board never
   assert.equal(f.board("fate-5"), null);
 });
 
-test("step0 divergence: rework (completed -> blocked) is live item state the board refuses to follow", async (t) => {
+test("step0 divergence: rework (completed -> blocked) reopens the board row — the D.2 repair reconciles it", async (t) => {
   const f = fixture(t);
   const signEvidence = f.signEvidence();
   f.send(f.ownerKey, "propose", "work.proposed", { workItemId: "fate-6", title: "Reworkable", definitionOfDone: "DOD-6", accountableMemberId: "worker", mode: "read" });
@@ -176,11 +178,27 @@ test("step0 divergence: rework (completed -> blocked) is live item state the boa
   f.mutate(f.workerKey, "complete", "work.completed", "fate-6", { summary: "done v1", producerId: "worker", nextAction: "verify", evidenceUrl: "https://example.com/v1", signedEvidence: signEvidence() });
   assert.equal(f.item("fate-6").state, "completed");
   assert.equal(f.board("fate-6").state, "done");
-  // The item vocabulary allows rework out of completed (the reducer
-  // retires the approval and re-blocks); the board vocabulary makes done
-  // terminal, the backfill planner flags the row diverged, and the sync
-  // leaves it alone. The two stores disagree, today, on live state.
+  // Step 0 pinned a refusal here: the item vocabulary allows rework out
+  // of completed (the reducer retires the approval and re-blocks), the
+  // board vocabulary makes done terminal, and the sync left diverged
+  // rows alone — the two stores disagreed on live state (§4.6).
+  // Appendix D §D.2 ruled that disagreement a live proof-layer defect
+  // ("tolerate" was not an available ruling) and ordered the
+  // transition-lite repair; B-4' Phase 0 slice 1 (#3607) landed it: a
+  // planner-classified rework row (board done, item provably completed
+  // before, item now mapped non-terminal) flows through the sync's
+  // write path and reconciles to the mapped row, the reopen stamped
+  // after state:done so receipts read it. Board-native divergences keep
+  // the refusal exactly — that half is pinned in
+  // tests/workitems-board-divergence.test.js. Per this suite's header
+  // rule, the pin moves with the fix.
   f.mutate(f.workerKey, "rework", "work.blocked", "fate-6", { reason: "rework needed", nextAction: "redo" });
   assert.equal(f.item("fate-6").state, "blocked");
-  assert.equal(f.board("fate-6").state, "done");
+  const row = f.board("fate-6");
+  assert.equal(row.state, "blocked");
+  const doneAt = row.history.findIndex(entry => entry.action === "state:done");
+  assert.ok(doneAt >= 0, "the state:done stamp stays — history is append-only");
+  const repair = row.history.slice(doneAt + 1).find(entry => entry.note === DIVERGENCE_REPAIR_NOTE);
+  assert.ok(repair, "a divergence-repair stamp follows the state:done stamp");
+  assert.equal(repair.action, "state:blocked");
 });

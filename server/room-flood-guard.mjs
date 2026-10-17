@@ -4,7 +4,7 @@
 // no settings, and no counter.
 //
 // Burst 30, refill 1 post per 2 seconds. Only message.posted (a reply is
-// that command with replyToId) and dm.posted spend a token. Reactions,
+// that command with replyToId) and dm.posted spend a token. Pins,
 // edits, deletes, reads, and work or claim commands do not. System writes,
 // importEvents, and projection replay never call consume. store.command
 // returns an idempotent replay before consume, so that command id is free.

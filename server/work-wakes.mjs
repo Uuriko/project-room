@@ -7,6 +7,7 @@ import { sessionRecord } from "../src/work-item-session.js";
 import { heldUntil } from "./attention.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { recordWakeEvent } from "./wake-metrics.mjs";
 
 export const workWakeSchema = `
   CREATE TABLE IF NOT EXISTS agent_work_wake_hosts (
@@ -64,18 +65,38 @@ export class WorkWakes {
     const id = incoming.data?.workItemId, item = state.workItems[id];
     if (!item || item.revision === before.workItems[id]?.revision) return;
     const at = this.store.now();
-    this.db.prepare(`UPDATE agent_work_wakes SET invalidated_at=? WHERE room_id=? AND work_item_id=?
-      AND work_revision<>? AND invalidated_at IS NULL AND delivered_at IS NULL`).run(at, roomId, id, item.revision);
+    const invalidated = this.db.prepare(`UPDATE agent_work_wakes SET invalidated_at=? WHERE room_id=? AND work_item_id=?
+      AND work_revision<>? AND invalidated_at IS NULL AND delivered_at IS NULL`).run(at, roomId, id, item.revision).changes;
+    // #3345: superseded-before-delivery is a designed outcome, counted so
+    // the work store's emitted vs acked reconciles instead of leaking.
+    if (invalidated > 0) recordWakeEvent(this.db, { at, roomId, store: "work",
+      event: "invalidated", kind: "work", n: invalidated });
     const next = nextWorkStep(item, at, state.room.ownerId), memberId = next.memberId;
-    if (!next.needsAttention || !memberId || memberId === incoming.actorId || !this.permitted(state, item, memberId, incoming.actorId)) return;
+    if (!next.needsAttention || !memberId || memberId === incoming.actorId) return;
+    // #3345: the consent/permission gates below are designed suppressions;
+    // count them so the work store's attempt denominator is complete
+    // (before this, a gated work wake vanished without a trace).
+    if (!this.permitted(state, item, memberId, incoming.actorId)) {
+      recordWakeEvent(this.db, { at, roomId, store: "work",
+        event: "suppressed_policy", kind: "work", subjectId: memberId });
+      return;
+    }
     const agentId = this.store.identities.identityIdForMember(roomId, memberId);
-    if (!agentId || !this.optedIn(agentId, roomId)) return;
+    if (!agentId || !this.optedIn(agentId, roomId)) {
+      recordWakeEvent(this.db, { at, roomId, store: "work",
+        event: "suppressed_policy", kind: "work", subjectId: agentId ?? memberId });
+      return;
+    }
     const pointer = { kind: "work", roomId, workItemId: id, workRevision: item.revision,
       action: next.action, completionEventId: next.completionEventId, evidenceVersion: next.evidenceVersion,
       eventId: incoming.id, nextRead: { tool: "room_read_work", arguments: { roomId, workItemId: id } } };
     const inserted = this.db.prepare(`INSERT OR IGNORE INTO agent_work_wakes
       VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)`)
       .run(`ww_${randomUUID()}`, agentId, roomId, memberId, id, item.revision, incoming.id, incoming.actorId, JSON.stringify(pointer), at);
+    // #3345: one audited outcome per work-wake attempt (insert = emitted;
+    // INSERT OR IGNORE on the (agent, room, event) key = coalesced).
+    recordWakeEvent(this.db, { at, roomId, store: "work",
+      event: inserted.changes > 0 ? "emitted" : "coalesced", kind: "work", subjectId: agentId });
     // #3262: a genuinely new work signal releases the room-hosted poll
     // waiter, mirroring enqueueWake — otherwise a host parked on the poll
     // door sleeps through the assignment until its wait expires.

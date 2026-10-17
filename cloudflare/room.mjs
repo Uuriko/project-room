@@ -27,6 +27,7 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
+import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-keeper.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
@@ -329,6 +330,14 @@ export class ProjectRoom extends DurableObject {
       deadline: cronDeadline(),
       yieldBetween: () => yieldToQueuedRequests()
     });
+  }
+  // Mechanical escrow keeper (#3693/#3844): closes due payout epochs —
+  // challenge-window approvals, approved sweeps, dispute timeouts, deadline
+  // refunds — so no bounty waits on a human remembering to close an epoch.
+  async progressEscrowEpochs() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runEscrowEpochs(this.store, { now: Date.now() });
   }
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.

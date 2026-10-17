@@ -120,6 +120,27 @@ test("owner lists and decides access requests over MCP", async t => {
   assert.equal(nowPending.value.requests.length, 0);
 });
 
+test("minted invite code stays out of the MCP text block and still redeems from structuredContent", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Noor Haddad");
+  const room = rooms.create(owner.secret, { roomId: "hygiene-den", title: "Hygiene den", purpose: "Invite text hygiene", kind: "personal", displayName: "Noor Haddad" });
+
+  const minted = await call(origin, "room_create_agent_invite", { roomId: room.roomId, profile: "chat", displayName: "Pia" }, owner.secret);
+  assert.equal(minted.isError, false, JSON.stringify(minted.body));
+  assert.equal(typeof minted.value.code, "string");
+  // The text block is what hosts display and log verbatim (issue #3750):
+  // the one-time code may not appear in it — not as the code field, and
+  // not inside the next-step descriptions that quote it.
+  const text = (minted.body.result.content ?? []).filter(block => block.type === "text").map(block => block.text).join("\n");
+  assert.ok(text.length > 0, "invite mint must carry a text block");
+  assert.equal(text.includes(minted.value.code), false, "invite code must not appear in the text block");
+  assert.ok(text.includes("structuredContent.code"), "text must say where the code lives");
+  // The machine flow is untouched: the code from structuredContent redeems.
+  const guest = store.identities.create("Pia Lind");
+  const redeemed = store.invites.redeem(minted.value.code, { displayName: "Pia Lind", identitySecret: guest.secret });
+  assert.equal(redeemed.roomId, room.roomId);
+});
+
 test("membership admin tools are in the hosted catalog with schemas", async t => {
   const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Cara Lind");
