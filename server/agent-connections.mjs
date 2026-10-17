@@ -299,8 +299,9 @@ export class AgentConnections {
   // requires the actor to be the owner), and each transfer hands
   // ownership to data.toMemberId. Operations whose receipt carries the
   // membership event's sequence resolve exactly by sequence; the rest
-  // resolve by time, where a transfer landing in the same millisecond
-  // leaves both neighbouring owners plausible and either may match.
+  // resolve by time. A time-only receipt cannot place a rotation between
+  // transfers in the same millisecond: every owner in that sequence-ordered
+  // window remains plausible, including intermediate owners in a cycle.
   ownerIdsAt(roomId, currentOwnerId, { sequence = null, at = null } = {}, cache = null) {
     let transfers = cache?.get(roomId);
     if (!transfers) {
@@ -320,13 +321,13 @@ export class AgentConnections {
       }
       return [owner];
     }
-    let before = initial, after = initial;
+    let owners = new Set([initial]);
     for (const transfer of transfers) {
-      if (transfer.at < at) { before = transfer.to; after = transfer.to; }
-      else if (transfer.at === at) after = transfer.to;
+      if (transfer.at < at) owners = new Set([transfer.to]);
+      else if (transfer.at === at) owners.add(transfer.to);
       else break;
     }
-    return before === after ? [before] : [before, after];
+    return [...owners];
   }
   verifyHistory() {
     const invalid = () => fail(503, "connection_integrity_error", "Agent connection history requires reconciliation");
