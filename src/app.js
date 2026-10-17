@@ -2674,6 +2674,15 @@ async function commitComposerFiles(messageId) {
   renderComposerFiles();
   await refreshRoomFiles();
 }
+// 12609 (a): a send whose response was lost can still land. Once its message
+// is in the room, mark that row Sent, so the person can see it posted before
+// they edit the kept draft. The draft and its exact-receipt retry stay as they
+// are: resending unchanged reuses the same id and posts once.
+function landedAfterLostResponse(m) {
+  if (busy || !pendingMessage || m.authorId !== session?.member?.id) return false;
+  const command = pendingMessage.command;
+  return command?.type === T.MESSAGE_POSTED && (command.data?.messageId || command.id) === m.id;
+}
 function messageContent(m, cluster = {}, unreadStart = false, members = Object.values(state.members)) {
   const author = state.members[m.authorId];
   const authorLabel = displayName(m.authorId);
@@ -2690,7 +2699,7 @@ function messageContent(m, cluster = {}, unreadStart = false, members = Object.v
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}${landedAfterLostResponse(m) ? `<span class="pinned-chip sent-chip" data-sent-mark>${esc(uiText("composer.sent.landed"))}</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";

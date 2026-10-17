@@ -177,6 +177,7 @@ export default {
   "connection.connecting": "Connecting to room service…",
   "room.session_ended": "Your session in that room ended. Open the room again from your room list to continue.",
   "profile.editing": "editing your profile",
+  "composer.sent.landed": "Sent",
   "file.attach.blockedType": "That file type isn’t allowed.",
   "file.attach.failed": "Couldn’t attach that file.",
   "file.download.action": "Download {filename}",
