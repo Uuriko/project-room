@@ -196,6 +196,12 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       secondsSinceSuccess: enabled ? ageSeconds : null,
       lastError: record.lastError ?? null,
       lastErrorAt: iso(record.lastErrorAt),
+      // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
+      // the text alone cannot say whether it is today's failure. On
+      // 2026-10-17 claim-prs read degraded (github_rate_limited) beside a
+      // lastError from 2026-10-15 and was triaged as a live validation
+      // failure. lastErrorCurrent is true only while the job is failing now.
+      lastErrorCurrent: record.lastError != null && (record.consecutiveFailures ?? 0) > 0,
       lastErrorCode: record.lastFailure?.code ?? null,
       lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
       lastErrorClass: record.lastFailure?.errorClass ?? null,
