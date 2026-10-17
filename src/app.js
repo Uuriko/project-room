@@ -5940,7 +5940,7 @@ for (const [formSelector, statusSelector] of [["#new-work-form", "#new-work-stat
     const field = event.target;
     const label = field.closest("label")?.textContent?.trim().replace(/\s+/g, " ").slice(0, 60)
       || field.getAttribute?.("aria-label") || field.name || "A required field";
-    const status = $(statusSelector); if (status) setFormStatus(status, `${label} is required — complete it before saving.`, true);
+    const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: label }), true);
     const details = field.closest("details"); if (details && !details.open) details.open = true;
   }, true);
 }

@@ -554,7 +554,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       const growthUrl = $("#growth-invite-url");
       if (growthUrl) growthUrl.value = inviteUrl;
       const growthStatus = $("#growth-kit-status");
-      if (growthStatus) growthStatus.textContent = `${result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest"} link created — copy this link to share it.`;
+      if (growthStatus) growthStatus.textContent = uiText("share.linkCreated", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" });
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
@@ -562,7 +562,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       updateCopyControls();
       // Unlock the dialog before clipboard. A hanging writeText (or a test
       // stub that waits for finish) must not keep Create disabled.
-      status(`${result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest"} link ready — the link shown above is the one to share.`);
+      status(uiText("share.linkReady", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" }));
       $("#share-link-copy").focus();
       creationBusy(false);
       list(version, generation).catch(() => {});
@@ -673,7 +673,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       // dialog into this name form with no word about what happened or
       // what remained. Name the step and its completion action.
       if (afterSignIn && account.authenticated && !returning) {
-        joinStatus("Account created — you're signed in. Step 2 of 2: confirm the name people in this room will see, then choose \u201cJoin room\u201d to finish.");
+        joinStatus(uiText("join.stepTwo"));
       }
       // Signed out: sign-in comes first, with "Continue as guest" below it.
       // Member and co-admin links need an account, so they offer no guest path.

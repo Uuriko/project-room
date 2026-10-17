@@ -79,7 +79,9 @@ test("B-2: New work has a visible labeled address in the Tasks navigation", () =
 
 test("B-1: invalid submits name their field; the password survives a mode switch", () => {
   const app = read("src/app.js");
-  assert.match(app, /is required — complete it before saving\./);
+  assert.match(app, /uiText\("human\.requiredField"/);
+  const catalog = JSON.parse(read("strings/en.json"));
+  assert.match(catalog["human.requiredField"], /is required — complete it before saving\./);
   const auth = read("src/auth-signin-ui.js");
   assert.match(auth, /preservedPassword/);
   assert.match(auth, /passwordInput\.value = preservedPassword/);
@@ -102,10 +104,12 @@ test("B-10: mailer-less signup copy states the signed-in truth", async () => {
 test("#3794: creating an invite link surfaces that link and its access level", () => {
   const links = read("src/share-links.js");
   assert.match(links, /growthUrl\.value = inviteUrl/);
-  assert.match(links, /link ready — the link shown above is the one to share/);
+  assert.match(links, /uiText\("share\.linkReady"/);
 });
 
 test("#3796: the post-signup join step is named, with its completion action", () => {
   const links = read("src/share-links.js");
-  assert.match(links, /Step 2 of 2: confirm the name people in this room will see, then choose/);
+  assert.match(links, /uiText\("join\.stepTwo"\)/);
+  const catalog = JSON.parse(read("strings/en.json"));
+  assert.match(catalog["join.stepTwo"], /Step 2 of 2: confirm the name people in this room will see/);
 });
