@@ -34,7 +34,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BountyEscrow } from "../server/bounty-escrow.mjs";
+import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "../server/bounty-escrow.mjs";
 import { createReceiptSigner, generateReceiptKeyPair } from "../server/bounty-receipts.mjs";
 import { publicReceiptById } from "../server/receipts-live.mjs";
 import { renderReceiptDetailHtml, receiptJson } from "../server/receipts-page.mjs";
@@ -440,6 +440,32 @@ test("the directory toggle and operator unpublish hide a lot receipt", () => {
   assert.equal(publicReceiptById(store, lotId), null, "operator unpublish hides the room's lots");
   db.prepare("DELETE FROM public_unpublish").run();
   assert.ok(publicReceiptById(store, lotId));
+});
+
+test("the lot-detail journal lookup plans SEARCH on the lot index, not SCAN (PERF-10X L13)", () => {
+  const { db } = makeEscrow();
+  // The exact query publicLotReceiptById composes a lot receipt from.
+  const LOT_QUERY = `SELECT entry_id, room_id, account_id, at, kind, bounty_id,
+    amount, lot_state, hash, prev_hash, memo, actor_kind, actor_id, receipt_id
+    FROM bounty_journal WHERE lot_id=? ORDER BY seq LIMIT 100`;
+  const plan = () => db.prepare(`EXPLAIN QUERY PLAN ${LOT_QUERY}`).all(`lot_${"0".repeat(16)}`)
+    .map(row => row.detail).join("\n");
+  const indexPresent = () => !!db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='index' AND name='bounty_journal_lot'").get();
+  assert.ok(indexPresent(), "a fresh escrow schema carries bounty_journal_lot");
+  assert.match(plan(), /SEARCH bounty_journal USING INDEX bounty_journal_lot/);
+  assert.doesNotMatch(plan(), /SCAN bounty_journal/);
+  // A pre-index database plans the full-journal SCAN Lane 3 measured;
+  // the boot convergence (and the schema exec) is what turns it SEARCH.
+  db.exec("DROP INDEX bounty_journal_lot");
+  assert.match(plan(), /SCAN bounty_journal/);
+  assert.doesNotMatch(plan(), /SEARCH bounty_journal USING INDEX bounty_journal_lot/);
+  convergeBountyDeployedSchema(db);
+  assert.ok(indexPresent(), "convergence recreates the lot index on a pre-index database");
+  assert.match(plan(), /SEARCH bounty_journal USING INDEX bounty_journal_lot/);
+  db.exec("DROP INDEX bounty_journal_lot");
+  db.exec(bountyEscrowSchema);
+  assert.match(plan(), /SEARCH bounty_journal USING INDEX bounty_journal_lot/);
 });
 
 test("the room's recorded public-receipts setting hides a lot receipt", () => {

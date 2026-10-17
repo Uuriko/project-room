@@ -236,6 +236,7 @@ export const bountyEscrowSchema = `
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
+  CREATE INDEX IF NOT EXISTS bounty_journal_lot ON bounty_journal(lot_id);
   CREATE TABLE IF NOT EXISTS bounty_records (
     bounty_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL,
@@ -1039,6 +1040,12 @@ export class BountyEscrow {
     for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags",
       "bounty_reputation_packets"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
+    // Lot-receipt detail reads compose from bounty_journal by lot_id
+    // (publicLotReceiptById); without this index that read is a full
+    // journal SCAN. Purely additive (IF NOT EXISTS): the RoomStore boot
+    // path creates it via bountyEscrowSchema / convergeBountyDeployedSchema,
+    // and this covers direct construction on a pre-index database.
+    for (const ddl of schemaChunks("bounty_journal_lot")) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
     if (!hadRubricCols) _backfillRubricPins(this.db);

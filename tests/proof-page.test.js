@@ -203,6 +203,22 @@ test("proof page paginates by cursor and rejects a foreign cursor", async t => {
   assert.equal(bad.status, 422);
 });
 
+test("proof counts stay exact on later pages (SQL counts, not page rows)", async t => {
+  const { origin, store } = await serve(t);
+  for (let i = 0; i < 25; i += 1) {
+    insertReceipt(store, {
+      id: `wir_${String(i).padStart(2, "0")}${"e".repeat(30)}`, title: `Counted item ${i}`, source: "work-item",
+      at: `2026-08-${String((i % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+    });
+  }
+  const first = JSON.parse((await raw(origin, "/r/commons/proof.json")).text);
+  assert.equal(first.counts.total, 28);
+  const second = JSON.parse((await raw(origin, `/r/commons/proof.json?cursor=${first.nextCursor}`)).text);
+  assert.equal(second.entries.length, 8);
+  assert.deepEqual(second.counts, first.counts, "counts describe the whole visible set on every page");
+  assert.deepEqual(second.counts, { total: 28, serverVerifiedMerges: 1, roomRecordedCompletions: 26, artifactHashRecorded: 1 });
+});
+
 test("room page links to the proof page and the sitemap lists it", async t => {
   const { origin } = await serve(t);
   const room = await raw(origin, "/r/commons");

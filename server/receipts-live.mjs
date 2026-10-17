@@ -24,6 +24,8 @@ import {
   listPublicReceiptSitemap as sitemapUnderlying,
   collectPublicReceipts as collectUnderlying,
   roomProofRows as proofRowsUnderlying,
+  roomProofCounts as proofCountsUnderlying,
+  roomProofCursor as proofCursorUnderlying,
 } from "./public-read-model.mjs";
 
 export { PUBLIC_RECEIPT_ID, LOT_RECEIPT_ID, projectPublicWorkReceipt };
@@ -138,9 +140,31 @@ export function collectPublicReceipts(store) {
   return receipts.filter(receipt => !hidden.has(receipt.id));
 }
 
-// One room's proof-page rows with the owner toggle applied, newest first.
-export function queryRoomProof(store, slug) {
-  const receipts = proofRowsUnderlying(store, slug);
-  const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
-  return receipts.filter(receipt => !hidden.has(receipt.id));
+// One page of a room's proof-page rows, newest first, with exact counts
+// over the room's whole visible set. Both hiding mechanisms (operator
+// unpublish and the owner toggle) are applied inside the read model's
+// SQL (see proofWhere in public-read-model.mjs — the owner predicate
+// resolves the same origin/task rooms hiddenReceiptIds resolves), so the
+// page query carries a real LIMIT and materializes at most limit+1 rows
+// instead of the room's every receipt. Returns { receipts, counts,
+// nextCursor }, or { error } for a cursor outside the visible set.
+export function queryRoomProof(store, slug, { cursor = null, limit = null } = {}) {
+  let after = null;
+  if (cursor != null) {
+    if (typeof cursor !== "string" || !cursor) {
+      return { error: { status: 422, code: "invalid_proof_query", message: "cursor is not a receipt from this page" } };
+    }
+    after = proofCursorUnderlying(store, slug, cursor);
+    if (!after) {
+      return { error: { status: 422, code: "invalid_proof_query", message: "cursor is not a receipt from this page" } };
+    }
+  }
+  const cap = Number.isInteger(limit) && limit > 0 ? limit : null;
+  const rows = proofRowsUnderlying(store, slug, { limit: cap ? cap + 1 : null, after });
+  const receipts = cap ? rows.slice(0, cap) : rows;
+  return {
+    receipts,
+    counts: proofCountsUnderlying(store, slug),
+    nextCursor: cap && rows.length > cap ? receipts.at(-1)?.id ?? null : null,
+  };
 }

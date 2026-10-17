@@ -7,11 +7,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { START_ROOM_URL } from "../server/room-entry.mjs";
-import { PUBLIC_START_URL, backfillPublicReadModel } from "../server/public-read-model.mjs";
+import {
+  PUBLIC_START_URL, backfillPublicReadModel,
+  listPublicRoomSitemap, roomProofRows, roomProofCounts, roomProofCursor,
+} from "../server/public-read-model.mjs";
 
 const SENTINEL = "SENTINEL-private-9f3a-not-public";
 
@@ -305,6 +309,102 @@ test("receipts, room pages, the directory, and the sitemap stay within 20 ms p95
     t.diagnostic(`${path} p95 ${p95.toFixed(2)} ms`);
     assert.ok(p95 <= 20, `${path} p95 ${p95.toFixed(2)} ms`);
   }
+});
+
+// --- PERF-10X L13: sitemap batching + proof-page SQL LIMIT ------------------
+
+// Minimal real table shapes the read-model queries run against, so the
+// batching/LIMIT assertions count actual prepared statements.
+function fakePublicDb() {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE public_receipts (
+    id TEXT PRIMARY KEY, title TEXT NOT NULL, source TEXT NOT NULL,
+    origin_room_id TEXT, room_id TEXT, room_title TEXT,
+    agents_json TEXT NOT NULL, humans_json TEXT NOT NULL,
+    pull_request TEXT, merged_at TEXT, verification_state TEXT, hashes_json TEXT NOT NULL,
+    at TEXT NOT NULL, start_href TEXT NOT NULL);
+  CREATE TABLE public_rooms (slug TEXT PRIMARY KEY, set_at TEXT, receipts_enabled INTEGER NOT NULL);
+  CREATE TABLE public_unpublish (kind TEXT NOT NULL, target TEXT NOT NULL, PRIMARY KEY (kind, target));
+  CREATE TABLE room_directory_settings (room_id TEXT PRIMARY KEY, public_receipts INTEGER NOT NULL DEFAULT 1);
+  CREATE TABLE public_work_receipts (receipt_id TEXT, offer_id TEXT);
+  CREATE TABLE public_work_tasks (offer_id TEXT, room_id TEXT);`);
+  return db;
+}
+
+const countPrepares = (db, needle) => {
+  const native = db.prepare.bind(db);
+  let count = 0;
+  db.prepare = (text, ...rest) => { if (String(text).includes(needle)) count += 1; return native(text, ...rest); };
+  return { get count() { return count; }, stop() { db.prepare = native; } };
+};
+
+test("sitemap rooms resolve operator takedowns in one batched query, not one per room", () => {
+  const db = fakePublicDb();
+  const insertRoom = db.prepare("INSERT INTO public_rooms (slug, set_at, receipts_enabled) VALUES (?, '2026-10-01T00:00:00.000Z', ?)");
+  for (let i = 0; i < 30; i += 1) insertRoom.run(`room-${String(i).padStart(2, "0")}`, i % 2);
+  const unpublish = db.prepare("INSERT INTO public_unpublish (kind, target) VALUES (?, ?)");
+  unpublish.run("room", "room-03");
+  unpublish.run("room", "room-17");
+  unpublish.run("receipt", "room-05"); // a receipt takedown must not hide a room
+  const watch = countPrepares(db, "public_unpublish");
+  const entries = listPublicRoomSitemap({ db });
+  watch.stop();
+  assert.equal(watch.count, 1, "one batched public_unpublish query for all rooms");
+  assert.equal(entries.length, 28);
+  assert.equal(entries.some(entry => entry.slug === "room-03" || entry.slug === "room-17"), false);
+  assert.ok(entries.some(entry => entry.slug === "room-05"));
+  assert.equal(entries.find(entry => entry.slug === "room-00").receiptsEnabled, false);
+  assert.equal(entries.find(entry => entry.slug === "room-01").receiptsEnabled, true);
+});
+
+test("proof rows page in SQL (LIMIT + keyset) while counts stay exact over the visible set", () => {
+  const db = fakePublicDb();
+  const insert = db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES (?, ?, ?, 'proof-room', 'proof-room', 'Proof Room', '[]', '[]', ?, ?, '[]', ?, 'https://room.trydemigod.com/?start=room')`);
+  const at = n => new Date(Date.UTC(2026, 0, 1, 0, 0, n)).toISOString();
+  let seq = 0;
+  const add = (source, extra = {}) => {
+    seq += 1;
+    const id = `${source === "work-claim" ? "wcr" : source === "work-item" ? "wir" : "pwr"}_${String(seq).padStart(32, "0")}`;
+    insert.run(id, `Proof ${seq}`, source, extra.pullRequest ?? null, extra.mergedAt ?? null, at(seq));
+    return id;
+  };
+  const verified = [];
+  for (let i = 0; i < 5; i += 1) verified.push(add("work-claim", { pullRequest: "https://github.com/Uuriko/project-room/pull/1", mergedAt: at(100 + i) }));
+  for (let i = 0; i < 5; i += 1) add("work-claim");
+  const completions = [];
+  for (let i = 0; i < 20; i += 1) completions.push(add("work-item"));
+  for (let i = 0; i < 15; i += 1) add("public-work");
+  // One operator-unpublished receipt: invisible to pages and counts alike.
+  db.prepare("INSERT INTO public_unpublish (kind, target) VALUES ('receipt', ?)").run(completions[0]);
+  // Another room's receipts never enter this room's proof set.
+  db.prepare(`INSERT INTO public_receipts
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
+    VALUES ('wir_${"9".repeat(32)}', 'Other room', 'work-item', 'other-room', 'other-room', 'Other', '[]', '[]', NULL, NULL, '[]', ?, 'x')`).run(at(500));
+
+  const store = { db };
+  assert.deepEqual(roomProofCounts(store, "proof-room"), {
+    total: 44, serverVerifiedMerges: 5, roomRecordedCompletions: 19, artifactHashRecorded: 15,
+  });
+  const watch = countPrepares(db, "LIMIT ?");
+  const page1 = roomProofRows(store, "proof-room", { limit: 20 });
+  watch.stop();
+  assert.ok(watch.count >= 1, "the page query carries its LIMIT in SQL");
+  assert.equal(page1.length, 20);
+  const last = page1.at(-1);
+  const page2 = roomProofRows(store, "proof-room", { limit: 20, after: { at: last.at, id: last.id } });
+  assert.equal(page2.length, 20);
+  const page3 = roomProofRows(store, "proof-room", { limit: 20, after: { at: page2.at(-1).at, id: page2.at(-1).id } });
+  assert.equal(page3.length, 4);
+  const seen = [...page1, ...page2, ...page3].map(row => row.id);
+  assert.equal(new Set(seen).size, 44, "pages partition the visible set without overlap");
+  assert.equal(seen.includes(completions[0]), false, "the unpublished receipt occupies no page slot");
+  // Cursor resolution is restricted to the visible set.
+  assert.deepEqual(roomProofCursor(store, "proof-room", verified[0]),
+    { at: roomProofCursor(store, "proof-room", verified[0]).at, id: verified[0] });
+  assert.equal(roomProofCursor(store, "proof-room", completions[0]), null, "a hidden receipt is not a cursor");
+  assert.equal(roomProofCursor(store, "proof-room", `wir_${"9".repeat(32)}`), null, "a foreign receipt is not a cursor");
 });
 
 test("public receipts JSON allows any origin and the public pages allow the analytics beacon", async t => {

@@ -123,33 +123,16 @@ function proofEntry(receipt) {
 export function roomProofView(store, slug, { cursor = null } = {}) {
   const room = loadPublicRoom(store, slug);
   if (!room || room.receiptsEnabled !== true) return null;
-  const visible = queryRoomProof(store, slug);
-  const counts = {
-    total: visible.length,
-    serverVerifiedMerges: 0,
-    roomRecordedCompletions: 0,
-    artifactHashRecorded: 0,
-  };
-  for (const receipt of visible) {
-    const level = proofLevelOf(receipt);
-    if (level === "server-verified-merge") counts.serverVerifiedMerges += 1;
-    else if (level === "room-recorded-completion") counts.roomRecordedCompletions += 1;
-    else if (level === "artifact-hash-recorded") counts.artifactHashRecorded += 1;
+  if (cursor != null && (typeof cursor !== "string" || !cursor)) {
+    return { error: { status: 422, code: "invalid_proof_query", message: "cursor is not a receipt from this page" } };
   }
-  let start = 0;
-  if (cursor != null) {
-    if (typeof cursor !== "string" || !cursor) {
-      return { error: { status: 422, code: "invalid_proof_query", message: "cursor is not a receipt from this page" } };
-    }
-    const index = visible.findIndex(receipt => receipt.id === cursor);
-    if (index < 0) {
-      return { error: { status: 422, code: "invalid_proof_query", message: "cursor is not a receipt from this page" } };
-    }
-    start = index + 1;
-  }
-  const pageRows = visible.slice(start, start + PROOF_PAGE_SIZE);
-  const entries = pageRows.map(proofEntry);
-  const nextCursor = start + PROOF_PAGE_SIZE < visible.length ? pageRows.at(-1)?.id ?? null : null;
+  // One SQL-limited page plus exact aggregate counts: the page no longer
+  // materializes every receipt the room has published to serve 20.
+  const proof = queryRoomProof(store, slug, { cursor, limit: PROOF_PAGE_SIZE });
+  if (proof.error) return { error: proof.error };
+  const counts = proof.counts;
+  const entries = proof.receipts.map(proofEntry);
+  const nextCursor = proof.nextCursor;
   const document = {
     schema: "project-room-public-room-proof/1",
     contentTrust: CONTENT_TRUST,
