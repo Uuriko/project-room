@@ -35,9 +35,6 @@ const post = (origin, path, body, secret) => fetch(`${origin}${path}`, {
   headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
   body: JSON.stringify(body),
 });
-const get = (origin, path, secret) => fetch(`${origin}${path}`, {
-  headers: secret ? { authorization: `Bearer ${secret}` } : {},
-});
 
 // Seat a trial-seat (guest) agent through the real mint -> redeem flow.
 // The member lands in guest_members only — never identity_links.
