@@ -63,49 +63,6 @@ async function seatGuest(f, origin, ownerKey, name) {
   return { identity, memberId: redeemed.member.id, token: redeemed.token };
 }
 
-test("a trial seat's reaction acks its mention wake — no phantom re-wake (#3764)", async t => {
-  const f = createAcceptanceFixture();
-  const origin = await startServer(t, f);
-  const ownerKey = f.store.issueAccessKey("commons", "owner");
-  const guest = await seatGuest(f, origin, ownerKey, "GuestAck");
-
-  // The guest registers a host (heartbeat) like any always-on agent.
-  const beat = await post(origin, "/api/agent-heartbeats", { hostId: "guest-ack-host" }, guest.identity.secret);
-  assert.equal(beat.status, 200);
-
-  // The owner mentions the trial seat: the wake queues for the guest
-  // identity (mention fan-out leg, decision #25).
-  f.store.command(ownerKey, "commons", {
-    id: randomUUID(), type: "message.posted",
-    data: { messageId: "guest-ack-1", body: "@GuestAck please look at this" },
-  });
-  const signal = () => f.store.db.prepare(
-    "SELECT delivered_at FROM agent_wake_signals WHERE agent_id=? AND message_id=?")
-    .get(guest.identity.identityId, "guest-ack-1");
-  assert.ok(signal(), "mention wake queued for the guest identity");
-  assert.equal(signal().delivered_at, null, "wake starts undelivered");
-
-  // The guest reacts 👍 — the ack the wake payload promises ("react 👍 to
-  // acknowledge"). Before the fix this silently no-oped for trial seats.
-  f.store.command(guest.token, "commons", {
-    id: randomUUID(), type: "message.reaction_set",
-    data: { messageId: "guest-ack-1", reaction: "👍", active: true },
-  });
-  assert.notEqual(signal().delivered_at, null, "guest reaction ack marks the wake delivered");
-
-  // No phantom re-wake: the guest's own poll no longer carries the signal.
-  const poll = await (await get(origin,
-    "/api/agent-wakes/poll?hostId=guest-ack-host&waitMs=0", guest.identity.secret)).json();
-  assert.deepEqual(poll.pendingWakes.map(w => w.messageId), [],
-    "acked wake does not re-appear on the guest's poll");
-
-  // Boundary (decision #25): resolving the ack leg must NOT leak trial
-  // seats into the work-wake path.
-  assert.equal(f.store.identities.identityIdForMember("commons", guest.memberId), null,
-    "work-wake resolver still does not resolve guests");
-  assert.deepEqual(f.store.workWakes.pending(guest.identity.identityId), [],
-    "guest still receives no work wakes");
-});
 
 test("a trial seat's webhook subscription receives room events; the DM fence binds the guest seat (#3777)", async t => {
   const f = createAcceptanceFixture();

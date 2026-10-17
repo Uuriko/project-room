@@ -61,13 +61,19 @@ const when = value => {
   return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : "";
 };
 
+// The verification tier a result-mode receipt carries (#3636), worded
+// exactly as the proof page's levels name them, so every surface that
+// shows the tier shows the same claim — and no surface upgrades it.
+const verificationLabel = state => state === "verified" ? "Member-verified completion"
+  : state === "self_attested" ? "Self-attested completion" : null;
+
 export function renderReceiptsHtml(page) {
   const receipts = Array.isArray(page?.receipts) ? page.receipts : [];
   const description = "Public receipts of work done in Project Room: merged pull requests and completed work from rooms that chose to publish them.";
-  const items = receipts.map(item => `<article class="card">
+  const items = receipts.map(item => { const tier = verificationLabel(item.verification?.state); return `<article class="card">
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
-<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}</p>
-</article>`).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
+<p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}</p>
+</article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts in room settings.</p>`;
   const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
 <body><header><p><a href="/">Project Room</a></p></header>
@@ -92,6 +98,8 @@ export function renderReceiptDetailHtml(receipt) {
     ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(receipt.pullRequest)}</a></dd></div>`
     : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
+  const tierLabel = verificationLabel(receipt.verification?.state);
+  const verification = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
   const hashes = receipt.hashes?.length
     ? `<div><dt>Hash evidence</dt><dd>${receipt.hashes.map(hash => `<code>${escapeHtml(hash)}</code>`).join("<br>")}</dd></div>`
     : "";
@@ -130,6 +138,9 @@ export function renderReceiptDetailHtml(receipt) {
   // work-claim receipt carries a server-verified merge (the server's own
   // poll wrote pr_merged + syncedAt; a member-supplied outcome "merged"
   // never qualifies — server/public-read-model.mjs serverVerifiedMerge).
+  // A result-mode work-claim receipt names its recorded verification tier
+  // instead (#3636): member-verified when a distinct member reviewed the
+  // delivery, self-attested when the worker's finish is the only record.
   // Names are room data (member display names, or a self-supplied name on
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
@@ -138,6 +149,10 @@ export function renderReceiptDetailHtml(receipt) {
     ? "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest
     ? "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : receipt.verification?.state === "verified"
+    ? "What this record proves: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    : receipt.verification?.state === "self_attested"
+    ? "What this record proves: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
@@ -147,7 +162,7 @@ export function renderReceiptDetailHtml(receipt) {
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${hashes}${lot}
+${pr}${merged}${verification}${hashes}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
@@ -168,6 +183,7 @@ const publicJson = receipt => ({
   humans: receipt.humans,
   pullRequest: receipt.pullRequest,
   mergedAt: receipt.mergedAt,
+  ...(receipt.verification ? { verification: receipt.verification } : {}),
   hashes: receipt.hashes,
   at: receipt.at,
   ...(receipt.lot ? { lot: receipt.lot } : {}),

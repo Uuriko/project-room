@@ -8,9 +8,10 @@
 // and the webhook fan-out (#3777) kept resolving identity_links only, so
 // guest reaction acks silently no-oped (the wake re-fired on every poll)
 // and guest webhook subscriptions silently received no room events. All
-// three legs now resolve through this module — identity_links first,
-// guest_members as the fallback — so a trial seat's mention wake,
-// reaction ack, and webhook deliveries all resolve the same identity.
+// wake legs now resolve through this module — identity_links first,
+// guest_members as the fallback — so a trial seat's mention wake and
+// webhook deliveries resolve the same identity. (The third leg, the
+// reaction ack, was later removed with reactions.)
 //
 // Deliberately NOT used by identityIdForMember (the work-wake resolver
 // in server/agent-identities.mjs): work wakes stay excluded for trial
