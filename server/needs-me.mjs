@@ -29,7 +29,7 @@ import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
-import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 
 const MAX_ROOMS = 40;
@@ -328,8 +328,23 @@ function mentionHorizon(store, roomId, memberId, after, through) {
 // to list (and JSON-decode) the whole board separately — 80-175ms per read
 // at 400 claims on muse-room scale. Returns null when the list fails, which
 // each section treats as "no data".
+//
+// The rows are derived through the kernel's own lease-liveness rule
+// (releaseExpired) before any section reads them (#3898): lease release is
+// persisted only as a side effect of other traffic (the board routes'
+// sweep, the claim-prs job), so on a quiet board the stored row can call a
+// claim "held" days after its lease lapsed — and needs-me served it as
+// held, with a forward next verb and a ci_failed action. Deriving here,
+// once, keeps every section in agreement with the domain: a lapsed claim
+// is unclaimed with no owner. The derivation is pure — stored rows change
+// only when a real sweep runs — and a derivation failure falls back to
+// the raw rows rather than blanking the inbox.
 function claimBoardOf(store, roomId) {
-  try { return store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  let list = null;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  if (!list) return null;
+  try { return releaseExpired(list, typeof store.now === "function" ? store.now() : Date.now()); }
+  catch { return list; }
 }
 
 // The cursor acknowledges discovery, not completion. Only advance through

@@ -628,6 +628,22 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
           : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
     };
   }
+  // #3880: the claim was refused because the work's dependsOn are not all
+  // done — the same gate the AvailableWork projection applies. The route
+  // message names each unmet dependency with its state; the recovery is
+  // to finish (or get reassigned) those, never to retry this claim.
+  if (reasonCode === "work_claim_dependencies_unmet") {
+    const text = String(message || "");
+    const deps = /dependencies not done: (.+?)\. Finish/.exec(text)?.[1] ?? null;
+    const boardPath = roomId ? `/api/rooms/${roomId}/work-claims` : listPath;
+    return {
+      status: "action_required", reason: "work_claim_dependencies_unmet",
+      hint: deps
+        ? `This work cannot be claimed yet — its dependencies are not done: ${deps}. It becomes claimable when every dependency is done; the board projection already excludes it until then.`
+        : "This work cannot be claimed yet — its dependencies are not done. It becomes claimable when every dependency is done.",
+      next: [path(boardPath), command(`Read the board (GET ${boardPath}) to see the dependencies' state; finish or claim the unfinished dependencies first, then claim this item.`)]
+    };
+  }
   // Recovery requires an actual current review, never an implied approval
   // from a note or a suggested automatic verdict.
   if (reasonCode === "work_review_rejected") {
