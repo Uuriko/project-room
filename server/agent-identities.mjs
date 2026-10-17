@@ -703,12 +703,18 @@ export class AgentIdentities {
         // The permissions the owner supplies now win; the stale record's
         // grants must not come back silently.
         const samePermissions = JSON.stringify([...roomMember.permissions].sort()) === JSON.stringify([...permissions].sort());
+        // The link row is written BEFORE the member command: reactions to
+        // the join (guide assignment, claim wakes) resolve the member's
+        // addressability through identity_links (#3266 made it the only
+        // source), so the binding must already exist while the command's
+        // events apply. The surrounding transaction keeps the pair atomic —
+        // a failed command rolls the row back with everything else.
+        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+          .run(roomId, identityId, resolvedMemberId, this.store.now());
         if (roomMember.active === false || !samePermissions) {
           this.store.command(token, roomId, { id: randomUUID(), type: "member.access_changed",
             data: { memberId: resolvedMemberId, expectedMemberRevision: roomMember.revision, permissions, active: true } }, expectedSessionBinding);
         }
-        this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-          .run(roomId, identityId, resolvedMemberId, this.store.now());
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
@@ -728,11 +734,13 @@ export class AgentIdentities {
       assertNotReservedRoleName(memberName); // Q3-D: and when the identity joins a room
       const checked = checkAgentDisplayName(memberName, { activeNames });
       if (!checked.safe) fail(422, "invalid_identity", "displayName is unsafe or already used in this room");
+      // Link row first, member command second — see the re-link branch
+      // above: join reactions resolve addressability through identity_links.
+      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
+        .run(roomId, identityId, resolvedMemberId, this.store.now());
       this.store.command(token, roomId, { id: randomUUID(), type: "member.added",
         data: { memberId: resolvedMemberId, displayName: memberName, kind: "agent", permissions, identityId,
           ...(referredBy ? { referredBy } : {}) } }, expectedSessionBinding);
-      this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
-        .run(roomId, identityId, resolvedMemberId, this.store.now());
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);

@@ -1,5 +1,5 @@
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
-import { publicPageCsp } from "../server/public-search.mjs";
+import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -17,6 +17,7 @@ import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
+import { channelDrainTickShape } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
@@ -27,12 +28,14 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
+import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-keeper.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
+import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
@@ -53,6 +56,11 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+// The drain RPC's decision table (channelDrainTickShape,
+// CHANNEL_DRAIN_STUCK_MS) lives in ./channel-drain-tick.mjs: this file is
+// the Worker entry module, so its export surface is the runtime's
+// handler/RPC surface and cannot carry test-only exports — workerd
+// rejects a non-function entry at startup.
 const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
@@ -256,21 +264,35 @@ export class ProjectRoom extends DurableObject {
   // on schedule); the inbox import itself still needs an owner session (B20
   // system import authority), so slices without one are honestly deferred,
   // never imported. Runs in the DO so no connection data leaves it.
+  //
+  // The drain itself runs in the background (waitUntil), so this RPC cannot
+  // report the drain it starts — it reports the last one that COMPLETED,
+  // whose outcome #drainChannelsInBackground stashes in channelDrainOutcome
+  // (the same summary the drainer keeps as lastTick). Each outcome is
+  // consumed exactly once, by the next call; a drain still inflight past
+  // CHANNEL_DRAIN_STUCK_MS is reported as a failed tick, not a success
+  // (bug sweep F-1: previously every return shape recorded success while
+  // the real drain's failures went to console only).
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
     const gate = drainer.configured();
     if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
-    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
-    const work = this.#drainChannelsInBackground(drainer);
-    this.ctx.waitUntil(work);
-    return { started: 1, background: 1, connections: gate.connections };
+    const completed = this.channelDrainOutcome ?? null;
+    this.channelDrainOutcome = null;
+    const { result, start } = channelDrainTickShape({
+      connections: gate.connections, inflight: this.channelDrainInflight === true,
+      inflightSince: this.channelDrainInflightSince, now: Date.now(), completed
+    });
+    if (start) this.ctx.waitUntil(this.#drainChannelsInBackground(drainer));
+    return result;
   }
   // Runs after the RPC returns. The first await opens the input gate before
   // any journal scan, and tick yields again between connections. Not an RPC.
   async #drainChannelsInBackground(drainer) {
     this.channelDrainInflight = true;
+    this.channelDrainInflightSince = Date.now();
     try {
       await yieldToQueuedRequests();
       const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
@@ -278,12 +300,15 @@ export class ProjectRoom extends DurableObject {
         event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
         errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
       }));
+      this.channelDrainOutcome = summary;
       return summary;
     } catch (error) {
       console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      this.channelDrainOutcome = { at: Date.now(), errors: 1 };
       return { errors: 1 };
     } finally {
       this.channelDrainInflight = false;
+      this.channelDrainInflightSince = null;
     }
   }
   // Changed rooms update the checksum. One room per tick is reread so a
@@ -294,6 +319,13 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
+  }
+  // ClueBot phase 1: tail new events and file invariant findings. The
+  // patrol is read-only (patrol_* tables only); a paused room skips.
+  async patrolTick() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runPatrolTick(this.store, { deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
@@ -329,6 +361,14 @@ export class ProjectRoom extends DurableObject {
       deadline: cronDeadline(),
       yieldBetween: () => yieldToQueuedRequests()
     });
+  }
+  // Mechanical escrow keeper (#3693/#3844): closes due payout epochs —
+  // challenge-window approvals, approved sweeps, dispute timeouts, deadline
+  // refunds — so no bounty waits on a human remembering to close an epoch.
+  async progressEscrowEpochs() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runEscrowEpochs(this.store, { now: Date.now() });
   }
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.
@@ -460,6 +500,7 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
     let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
       // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
@@ -469,6 +510,12 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
+        // /about carries its own path-pinned policy (see aboutPageCsp);
+        // header equality identifies it, so it rebases the same way.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserAboutPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       }
       // JDOT-PUBLIC-CSP-RUM end
@@ -500,6 +547,8 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     internalPublicPolicy = publicPageCsp(url.origin);
     browserPublicPolicy = publicPageCsp(browserOrigin);
+    internalAboutPolicy = aboutPageCsp(url.origin);
+    browserAboutPolicy = aboutPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
