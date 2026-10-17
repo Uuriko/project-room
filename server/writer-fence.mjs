@@ -247,6 +247,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // guest_invite_authority (F-5): per-invite issuing-authority provenance
+  // for the GX flow. Purely additive and intentionally NOT fenced, same
+  // reasoning as the invite tables it annotates.
+  "guest_invite_authority",
   // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
   // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
   // request-ID idempotency records. Purely additive and intentionally NOT
@@ -530,10 +534,17 @@ const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill
 // integrity job has no table, so it is allowed by the recovery audit but
 // never required.
 const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
+// patrol_* (ClueBot phase 1, server/patrol.mjs): the resident patrol's own
+// per-room cursor, claim/message shadows and findings journal. Purely
+// additive, created lazily by ensurePatrolSchema on the first patrol tick
+// — a store the patrol has never run against has none of them, so they are
+// allowed by the recovery audit but never required. The patrol writes only
+// these tables; older writers have no code path to them.
+const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

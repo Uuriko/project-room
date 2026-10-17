@@ -19,6 +19,7 @@
 //   revoked between the backup and the loss must be re-applied by the operator
 //   (docs/BACKUP-DR.md); there is no "current" store left to reconcile against.
 import { createHash, timingSafeEqual } from "node:crypto";
+import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
@@ -342,8 +343,10 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
       const batchRows = new Map(rows.map(row => [row[self.parentColumn], row]));
       const stored = new Set();
       const needed = [...new Set(rows.map(parentOf).filter(value => value != null))];
-      if (needed.length) {
-        for (const found of db.prepare(`SELECT ${quoteIdent(self.parentColumn)} AS key FROM ${quoteIdent(table)} WHERE ${quoteIdent(self.parentColumn)} IN (${needed.map(() => "?").join(", ")})`).all(...needed)) stored.add(found.key);
+      // A 500-row batch can name hundreds of parents (one access key per
+      // browser session); the Worker's SQL takes at most 100 binds.
+      for (const chunk of sqlChunks(needed)) {
+        for (const found of db.prepare(`SELECT ${quoteIdent(self.parentColumn)} AS key FROM ${quoteIdent(table)} WHERE ${quoteIdent(self.parentColumn)} IN (${sqlPlaceholders(chunk)})`).all(...chunk)) stored.add(found.key);
       }
       const status = new Map();
       const resolvable = value => {

@@ -292,6 +292,17 @@ test('snapshot labels update duplicates while preserving focus and selection, an
     const response = await route.fetch(); captured(); await unblock; await route.fulfill({ response }); delivered();
   });
   f.store.command(f.keys.owner, 'commons', { id: 'held-private-old', type: 'message.posted', data: { messageId: 'held-private-old', body: 'Old private message must not return' } });
+  // Delta era: the post applies locally with no snapshot fetch, so it is
+  // genuinely rendered in its own room before the switch — the private
+  // content is in the client's hands, and the trial below is whether any of
+  // it can cross into the next room.
+  await waitForState(page, 'the private post to render in its own room', async () => await page.locator('[data-message-record-id="held-private-old"]').isVisible().catch(() => false));
+  // A member admission still reads (it is not a covered delta type): the
+  // full snapshot it drives carries the private message, and that in-flight
+  // response — issued for the old room, delivered after the switch — is the
+  // late data on trial, exactly as the held post-driven read was before
+  // delta sync removed the post's own read.
+  admitHistoricalMember(f.store, 'commons', 'owner', { memberId: 'late-joiner', displayName: 'Late joiner', kind: 'human', permissions: [] });
   await awaitBounded(page, held, 'the held snapshot fetch to reach the route');
   await clickChrome(page, '#signout-button');
   const authPanel = page.locator('#auth-panel');

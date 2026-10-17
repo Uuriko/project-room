@@ -11,6 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -32,6 +33,10 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// Slow jobs ride the */30 safety-net cron, whose phase can land a few
+// seconds before the job's own anchor. Without slack the job waits a
+// whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
+export const SLOW_JOB_DUE_SLACK_MS = 60 * 1000;
 
 const oneLine = value => String(value ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
 
@@ -41,6 +46,17 @@ function read(store, sql, params = []) {
   catch { return null; }
 }
 
+// Status-blind on purpose (#3927, the narrowed R1 invariant): ANY
+// journal row — pending, imported or failed — keeps the channel-drain
+// job enabled. Outcome consumption depends on it: a completed drain's
+// outcome is reported by the NEXT drain tick, and journal rows leave
+// 'pending' only by UPDATE to a terminal status (they are never
+// deleted outside account deletion), so a fully drained queue still
+// gets its reporting tick. Do not make this status-aware, and do not
+// start deleting terminal rows, without also gating eligibility on
+// "an unconsumed drain outcome exists" — that combination strands a
+// completed outcome in Durable Object memory with no tick ever
+// reporting it (pinned by tests/job-heartbeat.test.js).
 function channelPending(store) {
   return Boolean(read(store, "SELECT 1 AS hit FROM pending_channel_updates LIMIT 1")?.hit);
 }
@@ -127,7 +143,7 @@ function backupConfigured(env) {
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "deferredSkips"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
@@ -183,6 +199,15 @@ export function classifyIntegrityError(error) {
   return { code, subcheck, errorClass, recordClass: INTEGRITY_RECORD_CLASS[subcheck] ?? "unknown" };
 }
 
+function integrityFailure(error) {
+  const failure = classifyIntegrityError(error);
+  return {
+    errors: 1,
+    scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+    failureDetail: failure
+  };
+}
+
 async function runNodeRetention(store, ctx) {
   const tableIndex = ctx.retentionIndex ?? 0;
   const receipt = runLiveStoreRetention({
@@ -206,10 +231,53 @@ function defineJob(job) {
     budgetMs: JOB_BUDGET_MS,
     redactErrors: false,
     slow: false,
+    required: false,
     singleRuntimeReason: null,
     disabledReason() { return "Not configured"; },
     ...job
   });
+}
+
+// #3895: aggregate growth gauges for the single-DO store. Every room,
+// account, session and job shares one SQLite store; before store-growth
+// no production-runtime job watched its aggregate size approach the
+// store's limits (growth-watch tracks product-growth events off a
+// process-local collector and is node-only for that reason). The gauges
+// are one aggregate read over the rooms table plus the SQLite page
+// count — cheap at any room count. The limits are the lines where an
+// operator must act, not the hard caps: the largest room projection is
+// escalated at 3.5 MB against the 4 MiB application cap, and the
+// database at 8 GB against the 10 GB Durable Object SQLite limit.
+export const STORE_GROWTH_LIMITS = Object.freeze({
+  maxProjectionBytes: 3_500_000,
+  dbBytes: 8_000_000_000
+});
+
+export function measureStoreGrowth(store) {
+  const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
+    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+  let dbBytes = 0;
+  try {
+    const pages = store.db.prepare("PRAGMA page_count").get();
+    const size = store.db.prepare("PRAGMA page_size").get();
+    const count = Number(pages?.page_count);
+    const bytes = Number(size?.page_size);
+    if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+  } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
+  return {
+    rooms: Number(row?.rooms) || 0,
+    events: Number(row?.events) || 0,
+    maxProjectionBytes: Number(row?.maxProjectionBytes) || 0,
+    dbBytes
+  };
+}
+
+// The name of the first gauge past its limit, or null. The projection
+// line is judged first: it is the nearer, per-room-actionable cap.
+export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
+  if (Number(gauges?.maxProjectionBytes) > limits.maxProjectionBytes) return "maxProjectionBytes";
+  if (Number(gauges?.dbBytes) > limits.dbBytes) return "dbBytes";
+  return null;
 }
 
 export const JOBS = Object.freeze([
@@ -318,15 +386,18 @@ export const JOBS = Object.freeze([
     enabled: () => true,
     disabledReason: () => null,
     async run(store, ctx) {
+      let integrity;
       try {
-        const integrity = ctx.room?.verifyRoomIntegrity
+        integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
         // tick still fails — the verdict is unchanged — with the same
         // sanitized detail shape as the throw path (stable codes and
-        // classes only; record ids stay in the operator log line).
+        // classes only; record ids stay in the operator log line). The
+        // result is assigned, not returned, so the parked-block count
+        // below observes this path too.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
           const first = failures[0];
@@ -339,29 +410,48 @@ export const JOBS = Object.freeze([
           // whatever a record's error once contained.
           console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
           const summary = {};
-          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept"]) {
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
-          return {
+          integrity = {
             ...summary,
             errors: failures.length,
             scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
             failureDetail: failure
           };
         }
-        return logIntegrity(integrity);
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
         // #3334: the failure detail survives reporting — the heartbeat turns
         // scanError into lastError and persists failureDetail, so the health
         // surface names the failing sub-check instead of "1 error(s) in tick".
-        const failure = classifyIntegrityError(error);
-        return {
-          errors: 1,
-          scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-          failureDetail: failure
-        };
+        integrity = integrityFailure(error);
       }
+      // A parked backfill does not throw again, and most rotation ticks do
+      // not visit it. Observe the durable set AFTER doing the normal work,
+      // even on a budget exit, so healthy rooms keep progressing while both
+      // runtimes retain an active, safe failure until every block clears.
+      try {
+        const blockedRooms = store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get()?.n;
+        if (!Number.isSafeInteger(blockedRooms) || blockedRooms < 0) {
+          throw new Error("Invalid database messages backfill block count");
+        }
+        integrity = { ...integrity, blockedRooms };
+        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({ integritySubcheck: "messages_backfill" }) };
+        }
+      } catch (error) {
+        // The general read() helper swallows SQL errors; using it here would
+        // turn an unreadable block table into a false recovery. Preserve an
+        // earlier failure, otherwise report this read failure without raw
+        // record identifiers or exception text on the public health surface.
+        if (!summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({
+            integritySubcheck: "messages_backfill", message: error?.message ?? error
+          }) };
+        }
+      }
+      return logIntegrity(integrity);
     }
   }),
   defineJob({
@@ -414,6 +504,13 @@ export const JOBS = Object.freeze([
     name: "room-backup",
     cadenceMs: DAY_MS,
     slow: true,
+    // #3894: a required job's disable is a configuration failure, not
+    // healthy idle. Work-gated jobs are disabled whenever nothing is
+    // waiting — that is their resting state. This job is config-gated:
+    // disabled means the deployment cannot take backups at all (a
+    // dropped binding looks exactly like an intentional disable), so
+    // the health rollup and the external probe grade it as failing.
+    required: true,
     runtimes: Object.freeze(["worker"]),
     singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket or the ROOM_BACKUPS_KV namespace. A Node process has neither binding.",
     enabled: env => backupConfigured(env),
@@ -428,6 +525,25 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "patrol",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // ClueBot phase 1: enabled only while some room has events the patrol
+    // has not tailed, so an idle room never wakes for it (the registry's
+    // standing rule). Read-only: the patrol files findings, it never acts.
+    enabled: (_env, store) => (store ? patrolPending(store) : true),
+    disabledReason: () => "No unpatrolled events are waiting",
+    // Due at the caller's `now`, never a live Date.now(): a fresh clock
+    // read lands a hair past the arming computation, slips past the
+    // registry's push-out-by-one-cadence rule, and arms the alarm
+    // immediately — an idle room would wake at once (jobs-alarm proof).
+    nextDueAt: (store, now) => (patrolPending(store) ? now : null),
+    async run(store, ctx) {
+      if (ctx.room?.patrolTick) return ctx.room.patrolTick();
+      return runPatrolTick(store, { deadline: ctx.deadline });
+    }
+  }),
+  defineJob({
     name: "growth-watch",
     cadenceMs: DEFAULT_INTERVAL_MS,
     runtimes: Object.freeze(["node"]),
@@ -437,6 +553,24 @@ export const JOBS = Object.freeze([
     async run(_store, ctx) {
       if (typeof ctx.growthTick !== "function") return { skipped: 1 };
       return ctx.growthTick();
+    }
+  }),
+  defineJob({
+    name: "store-growth",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled: () => true,
+    disabledReason: () => null,
+    // The summary is the watch: the gauges ride the heartbeat on every
+    // tick, and a crossed limit fails the tick by name so the probe
+    // pages before the store reaches the hard cap.
+    async run(store) {
+      const gauges = measureStoreGrowth(store);
+      const breach = storeGrowthBreach(gauges);
+      if (!breach) return gauges;
+      console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
+      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
     }
   })
 ]);
@@ -483,7 +617,10 @@ export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) 
     return next != null && next <= now;
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
-  return last + cadenceMs <= now;
+  // Only slow jobs get slack: they run from the safety-net cron, so a tick
+  // landing a few seconds before the anchor would otherwise skip a period.
+  const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
+  return last + cadenceMs - slack <= now;
 }
 
 export function lastRanFrom(stored) {

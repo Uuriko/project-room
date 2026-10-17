@@ -324,6 +324,7 @@ let referralBoardUI = null;
 let landQueueUI = null;
 let openQuestionsUI = null;
 let retentionUI = null;
+let bountyBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
@@ -341,6 +342,14 @@ let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+// A message deep link whose target is older than the first (windowed)
+// snapshot cannot reveal on arrival: revealMessage no-ops while the id is
+// not held. A pending hash reveal remembers such a target until a fill or
+// sync snapshot first holds it, then reveals it exactly once. It is
+// cancelled when the user takes over first — another hash, another room,
+// a thread/channel switch, or a reader scroll (the noteReaderScroll
+// gesture tracker below) — so the late reveal never steals the view.
+let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
@@ -445,6 +454,7 @@ const client = new RoomClient({
     landQueueUI?.sync();
     openQuestionsUI?.sync();
     retentionUI?.sync();
+    bountyBoardUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -479,6 +489,7 @@ const client = new RoomClient({
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
+    retryPendingHashReveal();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -503,6 +514,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
     // JDOT-COH-NAV end
@@ -538,6 +550,7 @@ const client = new RoomClient({
     landQueueUI?.reset();
     openQuestionsUI?.reset();
     retentionUI?.reset();
+    bountyBoardUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -710,6 +723,13 @@ retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
   load: () => import("./retention-ui.js"),
   install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
   onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
+// Bounties & credits (#3437): the in-room human money surface — list, post +
+// fund, review/accept/reject, own balances and receipts, all over the
+// existing bounty-escrow endpoints.
+bountyBoardUI = lazyDisclosure({ panel: $("#bounty-panel"),
+  load: () => import("./bounty-board.js"),
+  install: module => module.installBountyBoard({ client, getSession: () => session }),
+  onError: () => notice("Could not load bounties. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
@@ -3371,7 +3391,30 @@ function revealEvent(id, requireExisting = false) {
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
+// Remember a message deep-link target the held history does not contain
+// yet, with the navigation context at arm time, so the retry can tell a
+// still-waiting cold load apart from a user who has since gone elsewhere.
+function pendHashReveal(messageId) {
+  pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
+    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+}
+// Runs on every snapshot. The pending reveal fires only when this
+// snapshot first holds the target and nothing about the navigation
+// context changed since it was armed; any change cancels it for good.
+function retryPendingHashReveal() {
+  const pending = pendingHashReveal;
+  if (!pending) return;
+  if (!state || client.generation !== pending.generation
+    || (state.room?.id ?? session?.roomId) !== pending.roomId
+    || location.hash !== pending.hash
+    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId
+    || readerScrollAt !== pending.readerScrollAt) { pendingHashReveal = null; return; }
+  if (busy || !conversation?.byId.has(pending.messageId)) return;
+  pendingHashReveal = null;
+  revealMessage(pending.messageId);
+}
 function revealLocationHash() {
+  if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash) return;
   const hash = location.hash;
   // Account destinations also work before any room has been opened.
@@ -3413,7 +3456,15 @@ function revealLocationHash() {
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
-    if (id !== null) ({ message: revealMessage, work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
+    if (id !== null && current[1] === "message") {
+      // Held already: reveal now (and drop any pending twin). Not held
+      // yet — an older message still behind the background fill: pend it
+      // for the first snapshot that holds it instead of dropping it.
+      if (conversation.byId.has(id)) { pendingHashReveal = null; revealMessage(id); }
+      else pendHashReveal(id);
+      return;
+    }
+    if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
   const rawWorkId = decodeFragment(hash.slice(1));
@@ -3431,6 +3482,7 @@ function revealLocationHash() {
       : prefix === "#member-" ? Boolean(state.members[id])
       : state.eventLog.some(event => event.id === id);
     if (id !== null && exists) { reveal(id); return; }
+    if (id !== null && prefix === "#message-") pendHashReveal(id);
     break;
   }
 }
@@ -6512,6 +6564,13 @@ $("#action-form").addEventListener("submit", e => {
       }
       // A rationale can settle after the result changed. Never silently rebase
       // its verdict; uncertain decision retries still reconcile the original.
+      // The gate below reads current state, so re-read first: a send() whose
+      // receipt was applied as a local delta (delta sync) settles without the
+      // snapshot read that used to guarantee this freshness.
+      if (entry.publishRationale && !entry.decisionDispatched) {
+        await client.refresh();
+        if (!owns()) return;
+      }
       if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
         entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
       }

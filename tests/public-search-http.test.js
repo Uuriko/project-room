@@ -32,16 +32,32 @@ function assertPublicPolicy(response, origin) {
   });
 }
 
+// /about ships one first-party script (src/front-door.js) fed by one API
+// path (/api/public/front-door); both are path-pinned into its policy.
+// Everything else matches the shared public policy above.
+function assertAboutPolicy(response, origin) {
+  const policy = Object.fromEntries(response.headers.get("content-security-policy").split(";").map(part => {
+    const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(" ")];
+  }));
+  assert.deepEqual(policy, {
+    "default-src": "'none'", "script-src": `${origin}/src/front-door.js https://static.cloudflareinsights.com`,
+    "style-src": "'unsafe-inline'", "connect-src": `${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    "img-src": "'self'", "manifest-src": "'self'", "base-uri": "'none'",
+    "form-action": "'none'", "frame-ancestors": "'none'"
+  });
+}
+
 test("public doors are indexable while credentials and unknown pages keep private defaults", async t => {
   const origin = await serve(t);
   const about = await fetch(origin + "/about");
   assert.equal(about.status, 200); assert.match(about.headers.get("content-type"), /text\/html/);
   assert.equal(about.headers.get("x-robots-tag"), "all");
-  assertPublicPolicy(about, origin);
-  assert.match(about.headers.get("content-security-policy"), /script-src https:\/\/static\.cloudflareinsights\.com/);
-  assert.match(about.headers.get("content-security-policy"), /connect-src https:\/\/cloudflareinsights\.com/);
+  assertAboutPolicy(about, origin);
+  assert.match(about.headers.get("content-security-policy"), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
+  assert.match(about.headers.get("content-security-policy"), /connect-src \S+\/api\/public\/front-door https:\/\/cloudflareinsights\.com/);
   assert.match(about.headers.get("content-security-policy"), /style-src 'unsafe-inline'/);
-  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src 'self'/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /script-src[^;]*'self'/);
+  assert.doesNotMatch(about.headers.get("content-security-policy"), /connect-src[^;]*'self'/);
   assert.match(await about.text(), /rel="canonical" href="https:\/\/room.trydemigod.com\/about"/);
   const head = await fetch(origin + "/about", { method: "HEAD" });
   assert.equal(head.status, 200); assert.equal(head.headers.get("x-robots-tag"), "all"); assert.equal(await head.text(), "");

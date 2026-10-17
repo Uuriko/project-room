@@ -774,7 +774,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
     .all(...filter.params, ...afterParams, limit + 1);
-  const page = rows.slice(0, limit).map(rowToPublic);
+  const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
   const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
   return { receipts: page, nextCursor };
 }
@@ -783,7 +783,147 @@ export function publicReceiptById(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
-  return row ? rowToPublic(row) : null;
+  if (!row) return null;
+  const pub = receiptWithOutcome(store, row);
+  if (typeof id === "string" && id.startsWith("pwr_")) {
+    try {
+      const j = store.db.prepare("SELECT lot_id, amount, lot_state FROM bounty_journal WHERE receipt_id=? LIMIT 1").get(id);
+      if (j && j.lot_id) {
+        pub.lotId = j.lot_id;
+        pub.settlement = {
+          lotId: j.lot_id,
+          amountCredits: Math.abs(j.amount) / 1000,
+          lotState: j.lot_state
+        };
+      }
+    } catch { /* graceful fallback */ }
+  }
+  return pub;
+}
+
+// What one public-work receipt's own records say about its outcome (#3733).
+// Two records carry the truth, and neither is rewritten to serve this read.
+// The receipt record is the settlement train's: minted "submitted" at
+// finish with its verification tier (hash_only, or system_checked when a
+// platform-executed check passed), the worker-reported checks, and the
+// executed checks; an acceptance stamps it in place — state "verified",
+// executed checks merged, the verified{} block naming the deciding review
+// (#3546). The review record (public_work_reviews) is the separate later
+// fact: the designated reviewer's verdict and decision. Before this
+// composition the public projection dropped both records' outcome fields,
+// so an accepted receipt and a rejected one were indistinguishable to a
+// stranger. The composed state binds to the train's model: a rejection or
+// revision request (which never stamp the record) reads as the decision;
+// anything else reads the record's own state, so acceptance surfaces as
+// "verified" — the stamp's word — and this face never claims a verified
+// state the stamp did not write. Field discipline mirrors the lot
+// projection below: only facts already readable on the canonical receipt
+// or the contributor's own review read are projected — never the
+// reviewer's member id, the review reason (member free text), or the
+// review fingerprint.
+const WORK_DECISIONS = new Set(["rejected", "revision_requested"]);
+const REVIEW_STATES = new Set(["pending", "accepted", "rejected", "revision_requested"]);
+const outcomeWord = value => typeof value === "string" && /^[a-z][a-z_]{0,31}$/.test(value) ? value : null;
+const reportedChecks = value => Array.isArray(value)
+  ? value.map(entry => cleanText(entry, 1000)).filter(Boolean).slice(0, 20) : [];
+const executedChecksOf = value => {
+  if (!Array.isArray(value)) return [];
+  const checks = [];
+  for (const entry of value.slice(0, 20)) {
+    if (!entry || typeof entry !== "object") continue;
+    const name = cleanText(entry.name, 64);
+    const result = entry.result === "pass" || entry.result === "fail" ? entry.result : null;
+    if (name && result) checks.push({ name, result });
+  }
+  return checks;
+};
+
+export function publicWorkReceiptOutcome(store, receiptId) {
+  if (typeof receiptId !== "string" || !receiptId.startsWith("pwr_")) return null;
+  let record = null;
+  try {
+    const row = store.db.prepare("SELECT receipt_json FROM public_work_receipts WHERE receipt_id=?").get(receiptId);
+    if (row) record = parseJson(row.receipt_json, null);
+  } catch { record = null; }
+  if (!record || typeof record !== "object") return null;
+  let saved = null;
+  try {
+    const row = store.db.prepare("SELECT state_json FROM public_work_reviews WHERE receipt_id=?").get(receiptId);
+    if (row) saved = parseJson(row.state_json, null);
+  } catch { saved = null; } // a store predating the reviews table has no outcome to compose
+  const verification = saved?.verification && typeof saved.verification === "object" ? saved.verification : null;
+  const decision = saved?.decision && typeof saved.decision === "object" ? saved.decision : null;
+  // No review row, no review block: an unreviewed receipt's faces stay
+  // exactly its record's shape plus state/verification/checks.
+  const review = saved ? {
+    state: REVIEW_STATES.has(saved.state) ? saved.state : "pending",
+    verificationVerdict: verification && ["PASS", "FAIL"].includes(verification.verdict) ? verification.verdict : null,
+    verificationReviewerKind: verification && ["human", "agent"].includes(verification.reviewerKind) ? verification.reviewerKind : null,
+    verifiedAt: iso(verification?.at),
+    decidedAt: iso(decision?.at),
+  } : null;
+  const executed = executedChecksOf(record.executedChecks);
+  return {
+    state: review && WORK_DECISIONS.has(review.state) ? review.state : outcomeWord(record.state) ?? "submitted",
+    verification: outcomeWord(record.verification) ?? "hash_only",
+    checksReported: reportedChecks(record.checksReported),
+    ...(executed.length ? { executedChecks: executed } : {}),
+    review,
+  };
+}
+
+function receiptWithOutcome(store, row) {
+  const out = rowToPublic(row);
+  if (row.source !== "public-work") return out;
+  const outcome = publicWorkReceiptOutcome(store, row.id);
+  if (!outcome) return out;
+  const { review, ...fields } = outcome;
+  return { ...out, ...fields, ...(review ? { review } : {}) };
+}
+
+// Verify-at-read-time support (server/receipt-verify.mjs): rebuild the
+// record this id would project from its CURRENT source, so a checker can
+// compare it against the stored row. Returns { row, artifactHashOk } —
+// row in insertReceipt shape, null when the source no longer yields this
+// receipt; artifactHashOk only for public-work receipts (the stored
+// artifact still hashes to its recorded sha256), null otherwise. Lot
+// receipts return null: the journal is their source, read directly.
+export function rederivePublicReceipt(store, id) {
+  if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id) || LOT_RECEIPT_ID.test(id)) return null;
+  const stored = store.db.prepare("SELECT source, origin_room_id FROM public_receipts WHERE id=?").get(id);
+  if (!stored) return null;
+  if (stored.source === "public-work") {
+    let record;
+    try {
+      record = store.db.prepare("SELECT artifact_text, artifact_sha256, receipt_json FROM public_work_receipts WHERE receipt_id=?").get(id);
+    } catch { return null; }
+    if (!record) return null;
+    let body = null;
+    try { body = JSON.parse(record.receipt_json); } catch { body = null; }
+    if (!body || body.receiptId !== id) return null;
+    const artifactHashOk = HEX64.test(record.artifact_sha256 ?? "")
+      && createHash("sha256").update(record.artifact_text, "utf8").digest("hex") === record.artifact_sha256;
+    return {
+      artifactHashOk,
+      row: {
+        id, title: cleanName(body.title) ?? "Public work", source: "public-work",
+        agents: typeof body.agentName === "string" && body.agentName ? [body.agentName]
+          : typeof body.identityId === "string" && body.identityId ? [body.identityId] : [],
+        humans: [], pullRequest: null, mergedAt: null,
+        hashes: hashList([
+          HEX64.test(record.artifact_sha256 ?? "") ? `sha256:${record.artifact_sha256}` : null,
+          HEX64.test(body.artifact?.sha256 ?? "") ? `sha256:${body.artifact.sha256}` : null,
+        ].filter(Boolean)),
+        at: iso(body.createdAt) ?? new Date(0).toISOString(),
+      },
+    };
+  }
+  if (!stored.origin_room_id) return null;
+  let state;
+  try { state = store.room(stored.origin_room_id)?.state; } catch { return null; }
+  if (!state) return null;
+  const row = optedInRows(store, state).find(candidate => candidate.id === id) ?? null;
+  return { row, artifactHashOk: null };
 }
 
 const cleanText = (value, max) => {
@@ -907,6 +1047,7 @@ export function publicLotReceiptById(store, id) {
       })),
       entries: entries.map(entry => entry.entry_id),
       signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
+      workReceiptId: entries.map(entry => entry.receipt_id).find(id => typeof id === "string" && id.startsWith("pwr_")) ?? null,
       journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
       prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,
       bountyCreatedAt: iso(bounty.created_at),
@@ -915,7 +1056,8 @@ export function publicLotReceiptById(store, id) {
 }
 
 export function collectPublicReceipts(store) {
-  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all().map(rowToPublic);
+  return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all()
+    .map(row => receiptWithOutcome(store, row));
 }
 
 export function listPublicReceiptSitemap(store, limit = 1000) {
@@ -984,7 +1126,7 @@ export function proofLevelOf(receipt) {
 export function roomProofRows(store, slug) {
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
     WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
-    ORDER BY at DESC, id ASC`).all(slug, slug).map(rowToPublic);
+    ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
 }
 
 // Newest-first page of receipts that name this room. `after` is the last row

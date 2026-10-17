@@ -232,6 +232,14 @@ async function runChecks(origin, fetchImpl, limitMs) {
     if (!parsed || !Array.isArray(parsed.jobs) || parsed.jobs.length === 0) return fail("jobs", 200, "jobs_missing");
     const active = parsed.jobs.filter(job => job && typeof job === "object" && job.enabled !== false && job.status !== "disabled");
     const nameOf = job => (typeof job.name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(job.name) ? job.name : "job");
+    // #3894: a required job reporting disabled means the deployment lost
+    // the configuration the safety work needs (the room-backup binding).
+    // It is neither failing nor stale, so without this scan the probe
+    // ignored it exactly like a work-gated idle disable.
+    const requiredDisabled = parsed.jobs.filter(job => job && typeof job === "object" && job.status === "disabled" && job.required === true);
+    if (requiredDisabled.length) {
+      return fail("jobs", response.status, "job_required_disabled", requiredDisabled.slice(0, 3).map(nameOf).join(", "));
+    }
     const failing = active.filter(job => job.status === "failing" || Number(job.consecutiveFailures) > 0);
     if (failing.length) {
       const detail = failing.slice(0, 3).map(job => {

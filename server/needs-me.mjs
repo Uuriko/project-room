@@ -29,8 +29,10 @@ import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
-import { claimUpdatedAt, isHardWork, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
+import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
+import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
 
 const MAX_ROOMS = 40;
 const MAX_PER_KIND = 8;
@@ -52,6 +54,27 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const clip = text => {
   const value = String(text ?? "").replace(/\s+/g, " ").trim();
   return value.length > 140 ? `${value.slice(0, 139)}…` : value;
+};
+
+// B4 agent read-path: a one-line triage snippet for Board section entries,
+// which otherwise carry only the (80-char) title — an agent had to re-read
+// the whole Board to learn what a listed claim is about. Source order: the
+// first acceptance criterion (what "done" looks like), else the newest
+// history note (create / finish / review notes ride the claim's history).
+const claimSnippet = claim => {
+  const criteria = Array.isArray(claim?.acceptanceCriteria) ? claim.acceptanceCriteria : [];
+  const criterion = criteria.find(entry => typeof entry === "string" && entry.trim());
+  if (criterion) return clip(criterion);
+  const history = Array.isArray(claim?.history) ? claim.history : [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const note = history[index]?.note;
+    if (typeof note === "string" && note.trim()) return clip(note);
+  }
+  return null;
+};
+const snippetField = claim => {
+  const snippet = claimSnippet(claim);
+  return snippet ? { snippet } : {};
 };
 
 function integerMap(value) {
@@ -258,8 +281,9 @@ function bondRequestsOf(store, roomId, pending, after) {
   // the bondId extract, so each bond costs a full scan of the room's events.
   // GROUP BY returns the same latest (MAX) sequence per bondId.
   const seqByBond = new Map();
-  for (let i = 0; i < mine.length; i += 900) {
-    const chunk = mine.slice(i, i + 900);
+  // SQL_BIND_CHUNK, not 900: the Worker's SQL takes at most 100 binds.
+  for (let i = 0; i < mine.length; i += SQL_BIND_CHUNK) {
+    const chunk = mine.slice(i, i + SQL_BIND_CHUNK);
     const rows = store.db.prepare(
       `SELECT json_extract(body,'$.data.bondId') AS bondId, MAX(sequence) AS sequence FROM events
        WHERE room_id=? AND json_extract(body,'$.type')='bond.proposed'
@@ -328,8 +352,23 @@ function mentionHorizon(store, roomId, memberId, after, through) {
 // to list (and JSON-decode) the whole board separately — 80-175ms per read
 // at 400 claims on muse-room scale. Returns null when the list fails, which
 // each section treats as "no data".
+//
+// The rows are derived through the kernel's own lease-liveness rule
+// (releaseExpired) before any section reads them (#3898): lease release is
+// persisted only as a side effect of other traffic (the board routes'
+// sweep, the claim-prs job), so on a quiet board the stored row can call a
+// claim "held" days after its lease lapsed — and needs-me served it as
+// held, with a forward next verb and a ci_failed action. Deriving here,
+// once, keeps every section in agreement with the domain: a lapsed claim
+// is unclaimed with no owner. The derivation is pure — stored rows change
+// only when a real sweep runs — and a derivation failure falls back to
+// the raw rows rather than blanking the inbox.
 function claimBoardOf(store, roomId) {
-  try { return store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  let list = null;
+  try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
+  if (!list) return null;
+  try { return releaseExpired(list, typeof store.now === "function" ? store.now() : Date.now()); }
+  catch { return list; }
 }
 
 // The cursor acknowledges discovery, not completion. Only advance through
@@ -374,6 +413,7 @@ export function openWorkOf(store, roomId, memberId, authority, claims = null, no
       id: item.id,
       ...(hard ? { hard: true, reviewPolicy: item.reviewPolicy ?? "self_attested" } : {}),
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...snippetField(item),
       ...(idleMinutes !== null ? { idleMinutes } : {}),
       ...(released ? { released: true } : {}),
       ...(item.tags?.length ? { tags: item.tags.slice(0, 3) } : {})
@@ -402,6 +442,7 @@ export function reviewAsksOf(store, roomId, memberId, authority, claims = null) 
     top: asks.slice(0, OPEN_WORK_SHOWN).map(item => ({
       id: item.id,
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...snippetField(item),
       owner: item.owner,
       ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {}),
       ...(item.ci?.headSha ? { headSha: item.ci.headSha } : {}),
@@ -426,10 +467,10 @@ export function myWorkOf(store, roomId, memberId, claims = null, nowMs = Date.no
     if (item.owner === memberId) {
       const left = item.leaseExpiresAt ? Date.parse(item.leaseExpiresAt) - nowMs : NaN;
       if (left > 0 && left <= LEASE_SOON_MS) {
-        rows.push({ id: item.id, title: title(item), why: "lease_expiring", minutesLeft: Math.ceil(left / 60000) });
+        rows.push({ id: item.id, title: title(item), ...snippetField(item), why: "lease_expiring", minutesLeft: Math.ceil(left / 60000) });
       } else if (claimIdle(item, nowMs)) {
         const idleMinutes = Math.round((nowMs - Date.parse(claimUpdatedAt(item) || item.claimedAt)) / 60000);
-        rows.push({ id: item.id, title: title(item), why: "claim_idle", ...(Number.isFinite(idleMinutes) ? { idleMinutes } : {}) });
+        rows.push({ id: item.id, title: title(item), ...snippetField(item), why: "claim_idle", ...(Number.isFinite(idleMinutes) ? { idleMinutes } : {}) });
       }
     }
   }
@@ -496,6 +537,7 @@ export function myClaimsOf(store, roomId, memberId, claims = null) {
     top: mine.slice(0, MY_CLAIMS_SHOWN).map(item => ({
       id: item.id,
       title: String(item.title ?? "").slice(0, OPEN_WORK_TITLE),
+      ...snippetField(item),
       state: item.state,
       next: ownerNextAction(item),
       ...(item.leaseExpiresAt ? { leaseExpiresAt: item.leaseExpiresAt } : {}),
@@ -524,7 +566,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
     const at = claimUpdatedAt(item) ?? "";
     if (item.ci?.state === "failure") {
       rows.push({
-        id: item.id, title, why: "ci_failed", at,
+        id: item.id, title, ...snippetField(item), why: "ci_failed", at,
         ...(item.ci.url ? { ciUrl: item.ci.url } : {}),
         ...(item.ci.headSha ? { headSha: item.ci.headSha } : {}),
         ...(item.pullRequest?.url ? { pullRequest: item.pullRequest.url } : {})
@@ -565,12 +607,21 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
-  const links = store.db.prepare(
-    `SELECT l.room_id AS roomId, l.member_id AS memberId, r.archived_at AS archivedAt
-     FROM identity_links l JOIN rooms r ON r.id=l.room_id
-     WHERE l.identity_id=? AND l.room_id>?
-     ORDER BY l.room_id LIMIT ?`
-  ).all(identity.identityId, parsed.roomAfter ?? "", MAX_ROOMS + 1);
+  // Seats come from the shared resolver (#3882): identity_links plus
+  // guest_members trial seats — a guest seat's room belongs in the inbox
+  // with the same membership truth as everywhere else. archivedAt rides
+  // from the rooms row; a seat whose room row is gone reads as archived
+  // (the old INNER JOIN dropped it the same way).
+  const seats = identityRoomSeats(store.db, identity.identityId,
+    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1 });
+  const roomRows = seats.length ? store.db.prepare(
+    `SELECT id, archived_at AS archivedAt FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
+  ).all(...seats.map(seat => seat.roomId)) : [];
+  const archivedByRoom = new Map(roomRows.map(row => [row.id, row.archivedAt]));
+  const links = seats.map(seat => ({
+    ...seat,
+    archivedAt: archivedByRoom.has(seat.roomId) ? archivedByRoom.get(seat.roomId) : 1
+  }));
   const items = [];
   const rooms = { ...parsed.rooms };
   const land = { ...parsed.land };

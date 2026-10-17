@@ -571,8 +571,15 @@ export class RoomAgentClient {
   }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
-  agentInbox({ limit, signal } = {}) {
-    return this.#request(`/agent-inbox${limit === undefined ? "" : `?limit=${limit}`}`, undefined, signal);
+  // `after` is the previous response's cursor.after: the two event-log lists
+  // (DMs, direct @mentions) then return only newer entries instead of
+  // re-sending their heads; standing lists always ride in full.
+  agentInbox({ limit, after, signal } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (after !== undefined) params.set("after", String(after));
+    const query = params.toString();
+    return this.#request(`/agent-inbox${query ? `?${query}` : ""}`, undefined, signal);
   }
   // Room messages after a sequence, in order, as compact records. Other event
   // types are skipped; private messages appear only to their two parties

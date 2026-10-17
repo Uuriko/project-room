@@ -4,7 +4,7 @@ import { canonicalJson } from '../src/audit-receipts.mjs';
 import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
-import { projectPublicWorkReceipt } from './public-read-model.mjs';
+import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
@@ -632,7 +632,15 @@ export class PublicWorkClaims {
         // were inspected but none of them is claimable. Deliberately named
         // reasonCode, not reason/guidance — those are human-readable fields
         // used by other (stale) proposals for this same outcome object.
-        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)) outcome.reasonCode = 'no_claimable_tasks';
+        // The verdict is board-wide, so it is made only when this scan
+        // covered the whole board (#3899): it started at the beginning
+        // (no caller cursor) and reached the end (no continuation). A
+        // page-bounded scan — the caller-driven continuation protocol
+        // above, inspected/hasMore/nextCursor — makes no board-wide
+        // claim; neither does a scan where a claimable task was filtered
+        // out by the live path-overlap rule.
+        if (!candidates.length && outcome.inspected > 0 && page.tasks.every(task => !task.claimable)
+          && !(input.after ?? '') && page.nextCursor === null) outcome.reasonCode = 'no_claimable_tasks';
         if (input.autoClaim === true && candidates.length) {
           // #3271: an auto-claim is a claim — count it against the ceiling
           // here, where a claim actually happens (see the note above).
@@ -685,7 +693,22 @@ export class PublicWorkClaims {
   receipt(receiptId, viewer = {}) {
     const row = this._receiptRow(receiptId);
     this._requireReceiptVisible(row.roomId, viewer.memberId);
-    return JSON.parse(row.receiptJson);
+    const body = JSON.parse(row.receiptJson);
+    // #3733, reconciled with the settlement train: the stored record is
+    // the train's truth and this read never rewrites it — an acceptance
+    // already stamped it "verified" at decide time (#3546), and its tier
+    // and executed checks are the record's own. What the record cannot
+    // say is a rejection or a revision request (neither stamps, by
+    // design), so the canonical read composes the review outcome on top:
+    // the decision state for those two, plus the review summary whenever
+    // a review is recorded. Review binding and artifact checks keep
+    // reading the stored record itself.
+    const outcome = publicWorkReceiptOutcome(this.store, receiptId);
+    if (outcome) {
+      if (outcome.review && (outcome.review.state === "rejected" || outcome.review.state === "revision_requested")) body.state = outcome.state;
+      if (outcome.review) body.review = outcome.review;
+    }
+    return body;
   }
   artifact(receiptId, viewer = {}) {
     const row = this._receiptRow(receiptId);

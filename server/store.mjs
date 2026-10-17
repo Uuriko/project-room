@@ -48,6 +48,7 @@ import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native 
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
+import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
@@ -96,7 +97,7 @@ import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
+import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
@@ -652,7 +653,7 @@ const nodeStorage = {
   transaction(db, fn, readOnly, { isolated = false } = {}) {
     const run = () => {
       const result = fn();
-      if (isolated && result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
+      if (result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
       return result;
     };
     if (db.isTransaction) {
@@ -958,6 +959,31 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
 
+// B4 agent read-path: compact event shape for polling agents. Drops only
+// envelope fields a poller re-reads but never acts on: the write-path
+// idempotency key, the room id (constant across the whole page — the request
+// already names the room), a null causation id, and mention-chip display
+// names (the member id is the actionable part; names live on the roster).
+// Event content (type, actor, timestamp, data) is never touched.
+const compactEventForPoll = event => {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return event;
+  const out = {};
+  for (const [name, value] of Object.entries(event)) {
+    if (name === "idempotencyKey" || name === "roomId") continue;
+    if (name === "causationId" && value === null) continue;
+    if (name === "mentions" && Array.isArray(value)) {
+      out.mentions = value.map(chip => {
+        if (!chip || typeof chip !== "object") return chip;
+        const { displayName, ...rest } = chip;
+        return rest;
+      });
+      continue;
+    }
+    out[name] = value;
+  }
+  return out;
+};
+
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
 // them (DM via the message.posted command with toMemberId).
 const presenceNext = (roomId, memberIds) => {
@@ -1096,7 +1122,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
+    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1152,6 +1178,14 @@ const INTEGRITY_FAILURES_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_failures
   PRIMARY KEY (step, record_id)
 )`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+const INTEGRITY_DEFERRED_SKIPS_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN deferred_skips INTEGER NOT NULL DEFAULT 0";
+// #3896: consecutive verifyRoomIntegrity calls in which the deferred
+// batch may complete zero steps before the batch is run FIRST instead.
+// Two starved ticks are tolerated (a single heavy tick is ordinary);
+// the third call guarantees the batch progress before anything else
+// can eat the budget, so starvation is bounded and counted, never a
+// silent success forever.
+const DEFERRED_STARVATION_LIMIT = 2;
 // #3334: tag an integrity failure with the sub-check that threw, so the job
 // layer can report WHICH check failed on the public health surface. Only the
 // sub-check name (a fixed enum in server/jobs.mjs) is attached — never record
@@ -1257,6 +1291,7 @@ const LOOKUP_INDEXES = `
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -1336,6 +1371,14 @@ export class RoomStore {
     // the threshold and recovers on the next committed write.
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
+    // Delta sync: a per-room append stamp, bumped when an events INSERT
+    // commits (see _armProjectionWatch + transaction()). Stream pumps poll
+    // this in-memory counter instead of re-reading the store on a timer; a
+    // stamp is a counter, not a sequence, so a rolled-back append can never
+    // mask a later commit that reuses its sequence.
+    this._appendStamps = new Map();
+    this._pendingAppends = new Set();
+    this._appendListeners = new Set();
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly });
@@ -1461,6 +1504,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
+        this.guestInvites.verifyAuthoritySchema({ allowAbsent: true }); // F-5: guest-invite authority provenance, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
@@ -1758,6 +1802,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
       this.db.exec(guestSelfServeSchema);
+      // F-5: guest-invite issuing-authority provenance — purely additive
+      // side table (no events, no projection impact), same pattern.
+      this.db.exec(guestInviteAuthoritySchema);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -1955,6 +2002,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // MSG-2 blocks: rooms parked on an un-replayable event, named for the
       // operator. Unfenced and additive, like the cursor.
       this.db.exec(MESSAGES_BACKFILL_BLOCKS_SCHEMA);
+      // The re-diagnosis cadence stamp: existing block rows predate it and
+      // default to 0, which refreshStaleBlocks reads as "clock not
+      // started" — their cadence starts on first sight, like a fresh park.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='last_diagnosed_at'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
+      }
       if (version > 0 && version < 38) {
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
       }
@@ -2113,6 +2166,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   checkMessagesParity() {
     return verifyMessagesParity(this);
+  }
+  // ClueBot phase 1: the resident per-event invariant patrol. Read-only —
+  // it writes only patrol_* tables and files findings; see server/patrol.mjs.
+  patrolTick(options = {}) {
+    return runPatrolTick(this, options);
+  }
+  patrolFindings(options = {}) {
+    return listPatrolFindings(this, options);
   }
 
   ensureIntegrityFailures() {
@@ -2372,6 +2433,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.exec(INTEGRITY_ROOM_STATE_SCHEMA);
     const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_job_cursor)").all().map(column => column.name));
     if (!columns.has("sweep_after")) this.db.exec(INTEGRITY_SWEEP_COLUMN);
+    if (!columns.has("deferred_skips")) this.db.exec(INTEGRITY_DEFERRED_SKIPS_COLUMN);
+  }
+
+  // #3896: the durable streak of consecutive verifyRoomIntegrity calls
+  // in which the deferred batch completed zero steps (its budget was
+  // eaten by the incremental/full checks ahead of it, or the deadline
+  // had already passed). The streak rides every result as
+  // `deferredSkips`, so a starving store is visible on the job summary
+  // while the batch-first rule below bounds the starvation itself.
+  integrityDeferredSkips() {
+    this.ensureIntegrityRoomState();
+    const row = this.db.prepare("SELECT deferred_skips FROM integrity_job_cursor WHERE singleton=1").get();
+    return Number.isSafeInteger(row?.deferred_skips) && row.deferred_skips > 0 ? row.deferred_skips : 0;
+  }
+
+  noteDeferredOutcome(progressed) {
+    const current = this.integrityDeferredSkips();
+    const next = progressed ? 0 : current + 1;
+    if (next !== current) {
+      this.transaction(() => {
+        this.db.prepare(`INSERT INTO integrity_job_cursor (singleton, step, deferred_skips) VALUES (1, 0, ?)
+          ON CONFLICT(singleton) DO UPDATE SET deferred_skips=excluded.deferred_skips`).run(next);
+      });
+    }
+    return next;
   }
 
   // Remember each room's sequence and projection size after a full check so
@@ -2475,7 +2561,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() };
+    // #3896: every return carries deferredSkips — the durable streak of
+    // consecutive calls in which the deferred batch completed zero
+    // steps — and once the streak reaches the limit the batch runs
+    // FIRST, before the incremental/full checks can eat the budget
+    // again. A throwing call records nothing: it is a failure tick,
+    // not a silent success.
+    let deferredProgressed = false;
+    const finish = result => ({ ...result, deferredSkips: this.noteDeferredOutcome(deferredProgressed) });
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
+    if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
+      const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      deferredProgressed = (first?.ran ?? 0) > 0;
+    }
     let incremental;
     try {
       incremental = this.incrementalIntegrityCheck();
@@ -2484,19 +2582,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (incremental.ok) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-      return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred, failures: deferred.failures };
+      deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+      return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred, failures: deferred.failures });
     }
     const before = this.integrityChecksum();
     if (this.readIntegritySnapshot() === before.text) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures };
+      deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+      return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures });
     }
     await yieldBetween();
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
     // Per-record isolation for the full path's audits: one inconsistent
     // invitation or one room's help history is recorded durably and the
     // audit continues with every other record, instead of the first bad
@@ -2511,7 +2611,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
     for (const id of ids) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
       try {
         this.verifyInvitationRecord(id);
         this.clearIntegrityFailure("invitation_audit", id);
@@ -2531,7 +2631,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     }
     if (this.helpProjectionPresent()) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
       const helpFailures = [];
       const help = this.verifyHelpHistory({ collect: helpFailures });
       const failedRooms = new Set(helpFailures.map(failure => failure.roomId));
@@ -2550,7 +2650,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (row.step === "help_history") this.clearIntegrityFailure("help_history", row.recordId);
       }
     }
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
     // The snapshot certifies a clean full pass. With isolated failures
     // outstanding it is NOT advanced, so the next tick re-runs the full
     // path and re-audits the failed records until they verify — the
@@ -2578,9 +2678,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
     }
     const verified = outstanding.length ? 0 : 1;
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, failures: this.integrityFailures() };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-    return { matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, failures: this.integrityFailures() };
+    deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+    return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, failures: this.integrityFailures() });
   }
 
   // With `collect` (an array), a room whose help history does not reconcile
@@ -3124,7 +3225,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
-  close() { this._projectionCache?.clear(); this.db.close(); }
+  close() {
+    // Idempotent: a repeated or re-entrant close is a no-op, so a teardown
+    // that unwinds through close() twice cannot mask the real shutdown
+    // error with a raw "database is not open".
+    if (this._closed) return;
+    this._closed = true;
+    this._projectionCache?.clear();
+    this.db.close();
+  }
   // Invalidate both parsed reads and unpublished command candidates.
   _dropProjectionCache() {
     this._projectionCache?.clear();
@@ -3144,14 +3253,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
-        const run = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const result = run(...args);
-          invalidate();
-          return result;
-        };
-      }
+      if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      const roomsWrite = ROOMS_WRITE.test(sql), eventAppend = EVENT_APPEND.test(sql);
+      if (!roomsWrite && !eventAppend) return stmt;
+      const run = stmt.run.bind(stmt);
+      stmt.run = (...args) => {
+        const result = run(...args);
+        if (roomsWrite) invalidate();
+        // Every events insert in the codebase binds (roomId, sequence, ...)
+        // positionally; anything else is ignored rather than guessed at.
+        if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
+        return result;
+      };
       return stmt;
     };
     if (typeof this.db.exec === "function") {
@@ -3162,6 +3275,43 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return result;
       };
     }
+  }
+  // An events row was inserted for `roomId`. Inside a transaction the append
+  // is only pending: it becomes visible to stream pumps when the outermost
+  // transaction commits (_flushEventAppends, called from transaction()), and
+  // is dropped if that transaction rolls back. Outside a transaction the
+  // append has already committed by the time the statement returns.
+  _noteEventAppend(roomId) {
+    if (this.db.isTransaction) { this._pendingAppends.add(roomId); return; }
+    this._bumpAppendStamp(roomId);
+  }
+  _bumpAppendStamp(roomId) {
+    this._appendStamps.set(roomId, (this._appendStamps.get(roomId) ?? 0) + 1);
+    for (const listener of this._appendListeners) {
+      try { listener(roomId); } catch { /* a stream's wake must never fail a commit */ }
+    }
+  }
+  _flushEventAppends() {
+    if (!this._pendingAppends.size) return;
+    const rooms = [...this._pendingAppends];
+    this._pendingAppends.clear();
+    for (const roomId of rooms) this._bumpAppendStamp(roomId);
+  }
+  // The room's append stamp: a counter that changes whenever an event has
+  // committed to the room since the caller's last look. Purely in-memory.
+  eventStamp(roomId) { return this._appendStamps.get(roomId) ?? 0; }
+  // Subscribe to committed appends (the listener receives the roomId).
+  // Returns an unsubscribe function. Used by the SSE stream pump to wake on
+  // commit instead of polling the store.
+  onEventAppended(listener) {
+    this._appendListeners.add(listener);
+    return () => this._appendListeners.delete(listener);
+  }
+  // The room's committed head sequence in one primary-key read — the stream
+  // probe's change check, three orders of magnitude cheaper than a page read.
+  headSequence(roomId) {
+    const row = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    return row?.sequence ?? 0;
   }
   transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
@@ -3179,7 +3329,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
       this._dropProjectionCache();
-      if (boundary) frames.pop();
+      if (boundary) { frames.pop(); this._pendingAppends.clear(); }
       throw this.storageFailure(error, outermost);
     }
     if (boundary) {
@@ -3191,6 +3341,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const cache = this._projectionCache ??= new ProjectionCache();
         for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
       }
+      // Publish committed appends only after the cache promotion above, so
+      // streams woken by the flush observe the post-commit projection state.
+      // A rolled-back append never reaches here: the catch path clears
+      // _pendingAppends at the same boundary instead.
+      this._flushEventAppends();
     }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
@@ -5111,7 +5266,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const opts = bindingOrOptions && typeof bindingOrOptions === "object" && !Array.isArray(bindingOrOptions)
       ? bindingOrOptions : options;
     const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
-    const { actor = null, since = null, until = null } = opts;
+    const { actor = null, since = null, until = null, types = null, mentions = null, compact = false } = opts;
     // #658: mention timeouts are evaluated lazily on read. The flip needs a
     // write-capable transaction, so it runs before the query_only read
     // below; usually a no-op (one indexed UPDATE, zero rows touched).
@@ -5123,19 +5278,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const [name, value] of [["since", since], ["until", until]]) {
         if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
       }
+      // B4 agent read-path: type + mentions filters, same SQL-level audit
+      // filter family as actor/since/until — a filtered page still advances
+      // its cursor by what was scanned (see the note at `next` below).
+      if (types !== null && (!Array.isArray(types) || types.length < 1 || types.length > 16
+        || types.some(type => typeof type !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(type))))
+        fail(422, "invalid_cursor", "Invalid type filter");
+      let mentionsMemberId = null;
+      if (mentions !== null) {
+        if (typeof mentions !== "string" || !mentions || mentions.length > 128) fail(422, "invalid_cursor", "Invalid mentions filter");
+        mentionsMemberId = mentions === "me" ? auth.member.id : mentions;
+      }
+      // A database from before the #658 schema has no mention_states table
+      // and simply has no mentions (same stance as openDirectMentions).
+      const mentionsTableReady = mentionsMemberId === null ? false
+        : Boolean(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mention_states'").get());
       const authority = this.roomAuthority(roomId);
       const sequence = authority.sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
       // Round-2 #110: audit filters. The event log is the audit log —
       // every mutation records actorId + at, so "who did what when" is a
       // filtered read, not a new table.
+      const filterClauses = [
+        `AND (? IS NULL OR json_extract(body,'$.actorId')=?)`,
+        `AND (? IS NULL OR json_extract(body,'$.at')>=?)`,
+        `AND (? IS NULL OR json_extract(body,'$.at')<=?)`
+      ];
+      const filterArgs = [actor, actor, since, since, until, until];
+      if (types !== null) {
+        filterClauses.push(`AND json_extract(body,'$.type') IN (${types.map(() => "?").join(",")})`);
+        filterArgs.push(...types);
+      }
+      if (mentionsMemberId !== null) {
+        if (mentionsTableReady) {
+          filterClauses.push(`AND id IN (SELECT message_event_id FROM mention_states WHERE room_id=? AND mentioned_member_id=?)`);
+          filterArgs.push(roomId, mentionsMemberId);
+        } else {
+          filterClauses.push(`AND 1=0`);
+        }
+      }
       const events = this.db.prepare(
         `SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
-         AND (? IS NULL OR json_extract(body,'$.actorId')=?)
-         AND (? IS NULL OR json_extract(body,'$.at')>=?)
-         AND (? IS NULL OR json_extract(body,'$.at')<=?)
+         ${filterClauses.join("\n         ")}
          ORDER BY sequence LIMIT ?`
-      ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      ).all(roomId, after, ...filterArgs, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       // The cursor advances by what was SCANNED, not by what was returned.
       // A filter can match nothing in a stretch of the log: taking `next` from
       // the last returned row left it at the caller's own `after`, while
@@ -5174,7 +5360,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const { event } of visible) {
         if (event?.type === T.MESSAGE_POSTED && chips.has(event.id)) event.mentions = chips.get(event.id);
       }
-      return { events: visible, next, hasMore: next < sequence };
+      // B4 agent read-path: compact is opt-in per request; without it the
+      // page is byte-identical to the pre-filter read.
+      const shaped = compact === true
+        ? visible.map(row => ({ sequence: row.sequence, event: compactEventForPoll(row.event) }))
+        : visible;
+      return { events: shaped, next, hasMore: next < sequence };
     });
   }
   // RC-2026-09-18-012: agent-scoped unified inbox. An authenticated agent
@@ -5188,8 +5379,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Additive and room-scoped; the human /api/inbox/* account-session gate
   // is untouched. The HTTP layer additionally requires agent membership
   // and, for API-key callers, the inbox:read scope.
-  agentInbox(token, roomId, { limit = 50, expectedSessionBinding = null } = {}) {
+  agentInbox(token, roomId, { limit = 50, after = 0, expectedSessionBinding = null } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_inbox_limit", "Limit must be an integer 1..200");
+    // B4 agent read-path: `after` is a sequence cursor over the two
+    // event-log lists (directMessages, directMentions). A polling agent
+    // passes the previous response's cursor.after and stops re-reading the
+    // head of both lists; the standing lists (assignments, routed mentions,
+    // bond proposals, peer messages, DM requests) are current state, not a
+    // log, and always ride in full. after=0 keeps the legacy response.
+    if (!Number.isSafeInteger(after) || after < 0) fail(422, "invalid_inbox_cursor", "After must be a sequence number of 0 or more");
     // RC-2026-09-18-013: the first per-room collab access lazily replays the
     // persisted journal inside a WRITE transaction. That replay cannot run
     // inside the readTransaction below ("Cannot write inside a read-only
@@ -5205,10 +5403,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
-        `SELECT sequence, body FROM events WHERE room_id=?
+        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
          ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, T.MESSAGE_POSTED, memberId, limit)
+        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
         .map(row => {
           const parsed = JSON.parse(row.body);
           return {
@@ -5246,7 +5444,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit);
+      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
       // Bond proposals and peer DMs are sibling lists, same composition as
       // routing mentions (items plus a next action). Direct @mentions stay
       // their own list — friend traffic is not a mention.
@@ -5255,6 +5453,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
+      // The poll cursor: the highest sequence either event-log list
+      // returned, or the caller's own `after` when nothing was newer.
+      // Standing lists carry no sequence and never move it.
+      const cursorAfter = Math.max(after,
+        ...directMessages.map(row => row.sequence),
+        ...directMentions.map(row => row.sequence));
       const inbox = stampInbox({
         agentId: memberId,
         roomId,
@@ -5264,10 +5468,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         directMentions,
         bondProposals,
         peerMessages,
+        cursor: { after: cursorAfter },
         next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
         dmRequests,
       }, memberId);
-      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "next", "dmRequests"]) {
+      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "cursor", "next", "dmRequests"]) {
         inbox[key] = Object.freeze(inbox[key]);
       }
       return Object.freeze(inbox);
@@ -5902,6 +6107,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
+      // Delegation lifecycle (F-1): an ownership transfer lapses every
+      // delegation grant the outgoing owner issued in this room — the
+      // grants are their personal issuance, and the incoming owner must
+      // not silently inherit them. Runs inside the transfer's own
+      // transaction, after the event persists, so a failed transfer
+      // revokes nothing. Account deletion revokes the same way through
+      // its own executor; it appends its transfer event directly and
+      // never reaches this hook.
+      if (command.type === T.OWNERSHIP_TRANSFERRED) {
+        state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
+      }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
@@ -5915,6 +6131,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       throw error;
     }
+  }
+
+  // F-1: lapse the outgoing owner's delegation grants on an ownership
+  // transfer. Grant rows are revoked and journaled under the
+  // "ownership_transferred" lifecycle actor by the two delegation modules;
+  // a grant-conferred invite_member bit is stripped here through the event
+  // path, with the incoming owner as actor (their authority replaces the
+  // lapsed grant), following the in-command event-append pattern of
+  // resumeRoundLimitPauses. Runs inside the transfer command's transaction:
+  // if a strip cannot apply, the whole transfer fails rather than leaving
+  // the bit behind. Returns the post-strip room state.
+  lapseDelegationOnTransfer(roomId, state, outgoingOwnerId, sequence, transferEvent) {
+    const actorId = "ownership_transferred";
+    this.ownerDelegates.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    const { stripTargets } = this.delegation.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    let next = state;
+    let seq = sequence;
+    for (const target of stripTargets) {
+      if (seq >= PILOT_LIMITS.eventsPerRoom) break;
+      const member = next.members?.[target.memberId];
+      if (!member || member.active === false || !member.permissions.includes("invite_member")) continue;
+      const stripEvent = event({
+        type: T.MEMBER_ACCESS_CHANGED, roomId, actorId: next.room.ownerId, at: transferEvent.at,
+        id: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        idempotencyKey: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        causationId: transferEvent.id,
+        data: { memberId: member.id, expectedMemberRevision: member.revision,
+          permissions: member.permissions.filter(permission => permission !== "invite_member"),
+          active: member.active, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+      });
+      const applied = compact(applyEventWithGrowth(next, stripEvent, growthCollector).state);
+      const projection = this.storedProjection(roomId, applied);
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
+      seq += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
+        .run(seq, projection, archivedAtOf(applied), roomId);
+      // Parity with a command-issued member.access_changed (see command()).
+      this.agentConnections.revokeMember(roomId, member.id);
+      next = applied;
+    }
+    return next;
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
