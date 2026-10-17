@@ -66,9 +66,9 @@ function roomStub(overrides = {}) {
 test("every worker job has a heartbeat entry and its cadence", () => {
   assert.deepEqual(CRON_JOBS.map(job => job.name), [
     "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
-    "retention", "integrity", "public-read-model", "public-work-reseed", "room-backup"
+    "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol"
   ]);
-  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 86400]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {
@@ -175,6 +175,9 @@ test("gmail and channel drain stay disabled, not stale, when nothing is configur
   const store = new RoomStore(join(directory, "room.sqlite"));
   try {
     store.initialize(initialRoom("commons"));
+    // The genesis log starts tailed: the patrol is work-gated on untailed
+    // events, and this test grades the gmail/channel gates, not the patrol.
+    store.patrolTick();
     const now = Date.parse("2026-09-24T22:00:00Z");
     const alwaysOn = ["retention", "integrity", "public-read-model"];
     const fresh = applyOutcomes({}, alwaysOn.map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));
