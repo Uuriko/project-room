@@ -15,6 +15,11 @@
 //   - reads at most 32 candidate rows and refuses a body over 64 KiB
 //   - stops before the next lookup once `deadline` has passed, and aborts
 //     the in-flight request at the sooner of 5s and the time remaining
+//   - housekeeping (deployed closes, lease sweep, stale sweep) is bounded
+//     the same way: each phase SQL-selects its candidate rows instead of
+//     enumerating the registry, checks the deadline between chunks, and a
+//     tick whose housekeeping cannot finish reports an error rather than
+//     letting the poll starve behind a green-looking budgetExceeded (#3698)
 // The token (GITHUB_TOKEN or GH_TOKEN) is never logged or stored. Public
 // repositories still answer when it is absent.
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
@@ -764,13 +769,27 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   const skipSummary = () => skippedInvalid.length
     ? { skippedInvalid: skippedInvalid.length, skippedInvalidItems: skippedInvalid }
     : {};
-  closeDeployedClaims(store, nowMs, skippedInvalid);
+  // #3698: housekeeping runs before the poll (the ordering the phases rely
+  // on) but never past the deadline. Each phase is SQL-bounded to its
+  // candidate rows and reports whether it finished; a tick whose
+  // housekeeping cannot finish is a FAILED tick, not cooperative progress —
+  // otherwise the poll starves indefinitely behind budgetExceeded ticks the
+  // heartbeat counts as success while settlement silently stops.
+  const starved = () => ({
+    checked: 0, updated: 0, budgetExceeded: 1, errors: 1, housekeepingStarved: 1,
+    failureDetail: { code: "housekeeping_starved" }, ...skipSummary()
+  });
+  if (Date.now() > deadline) return starved();
+  if (!closeDeployedClaims(store, nowMs, skippedInvalid, deadline)) return starved();
   // #1526 B2: sweep lapsed leases before polling, exactly like the HTTP board
   // path (sweepRoom in server/work-claim-routes.mjs). A claim whose lease
   // lapsed is auto-released (lease_expired event, flake signal) so the tick
   // can never settle a dead round as done — the cron and HTTP paths agree.
-  sweepExpiredClaimLeases(store, nowMs, skippedInvalid);
-  sweepStaleUnclaimedClaims(store, nowMs, { skipped: skippedInvalid });
+  const leases = sweepExpiredClaimLeases(store, nowMs, skippedInvalid, deadline);
+  if (!leases.complete) return starved();
+  const staleProgress = {};
+  sweepStaleUnclaimedClaims(store, nowMs, { skipped: skippedInvalid, deadline, progress: staleProgress });
+  if (staleProgress.complete === false) return starved();
   const access = token === undefined ? githubToken(env ?? process.env) : token;
   if (Date.now() > deadline) return { checked: 0, updated: 0, budgetExceeded: 1, ...skipSummary() };
   // While the shared core budget is spent, the REST poll makes no call; the
@@ -826,29 +845,125 @@ export async function syncClaimPullRequests(store, { env = null, fetchImpl = fet
   return { checked, updated, ...(rateLimited ? { rateLimited: true } : {}), ...(batch.budgetExceeded ? { budgetExceeded: 1 } : {}), ...skipSummary() };
 }
 
-function closeDeployedClaims(store, nowMs, skipped = null) {
-  let roomIds = [];
+// #3698: housekeeping candidate selection. The phases below used to decode
+// every row of every room before the tick's first deadline check, so their
+// cost grew with total lifetime claim history and, past the 5s budget, the
+// poll never ran. Each phase now selects its candidate (room, claim) pairs
+// in SQL — the envelope/plain COALESCE shapes loadDueClaims already uses —
+// and decodes only those rows. SQL is a pre-filter: the per-item state
+// machine checks below remain the exact authority on every decoded row.
+const HOUSEKEEPING_CHUNK = 64;
+// The validation rotation (below) walks at most this many rows per tick, so
+// it can never eat the poll's budget; a full pass over a 20k-row registry
+// takes ~80 ticks.
+const VALIDATION_ROTATION_LIMIT = 256;
+const HOUSEKEEPING_ROOM = "_claim-pr-housekeeping";
+// Item fields live under $.data in enveloped rows, top-level in legacy rows.
+const fieldText = name => `COALESCE(json_extract(item_json, '$.data.${name}'), json_extract(item_json, '$.${name}'))`;
+
+function claimCandidatePairs(store, sql, params = []) {
   try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
+    return store.db.prepare(sql).all(...params);
   } catch (error) {
-    if (/no such table/i.test(error?.message ?? "")) return;
+    if (/no such table/i.test(error?.message ?? "")) return [];
     throw error;
   }
-  for (const roomId of roomIds) {
-    for (const item of store.workClaims.list(roomId)) {
-      // #3464: closeWhenLive re-validates the stored row; isolate per item
-      // so one invalid row cannot abort the phase for every other room.
-      try {
-        const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
-        if (!closed) continue;
-        store.workClaims.set(roomId, closed);
-        emitWorkClaimEvent(store, roomId, {
-          actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
-        });
-      } catch (error) {
-        noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
-      }
+}
+
+function readHousekeepingState(store) {
+  try {
+    const row = store.db.prepare("SELECT config_json FROM work_claim_config WHERE room_id=?").get(HOUSEKEEPING_ROOM);
+    const parsed = row ? JSON.parse(row.config_json) : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch { return {}; }
+}
+
+function writeHousekeepingState(store, state, nowMs) {
+  try {
+    store.db.prepare(`INSERT INTO work_claim_config(room_id, config_json, updated_at) VALUES(?,?,?)
+      ON CONFLICT(room_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`)
+      .run(HOUSEKEEPING_ROOM, JSON.stringify(state), nowMs);
+  } catch { /* the rotation cursor is best-effort: losing it restarts the walk */ }
+}
+
+// One deployed-close touch, shared by the candidate pass and the validation
+// rotation. #3464: closeWhenLive re-validates the stored row; isolate per
+// item so one invalid row cannot abort the phase for every other room.
+function applyDeployedClose(store, roomId, claimId, nowMs, skipped) {
+  let item;
+  try {
+    item = store.workClaims.get(roomId, claimId);
+  } catch (error) {
+    noteSkippedInvalidClaim(skipped, roomId, claimId, error);
+    return;
+  }
+  if (!item) return;
+  try {
+    const closed = closeWhenLive(item, SOURCE_REVISION, nowMs);
+    if (!closed) return;
+    store.workClaims.set(roomId, closed);
+    emitWorkClaimEvent(store, roomId, {
+      actorId: item.owner ?? "system", item: closed, action: "state_changed", atMs: nowMs
+    });
+  } catch (error) {
+    noteSkippedInvalidClaim(skipped, roomId, item?.id, error);
+  }
+}
+
+function closeDeployedClaims(store, nowMs, skipped = null, deadline = Infinity) {
+  // The closes themselves: land/deploy claims whose revision (or CI head)
+  // is the live revision. That set is small and self-draining — a closed
+  // claim is terminal and leaves the candidate set — so it is selected in
+  // full each tick and processed in deadline-checked chunks.
+  const pairs = claimCandidatePairs(store, `
+    SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+    WHERE COALESCE(${fieldText("kind")}, 'work') IN ('land', 'deploy')
+      AND COALESCE(${fieldText("state")}, 'unclaimed') NOT IN ('done', 'closed')
+      AND (${fieldText("revision")} = ? OR ${fieldText("ci.headSha")} = ?)
+    ORDER BY room_id, rowid`, [SOURCE_REVISION, SOURCE_REVISION]);
+  for (let start = 0; start < pairs.length; start += HOUSEKEEPING_CHUNK) {
+    if (Date.now() > deadline) return false;
+    for (const { roomId, claimId } of pairs.slice(start, start + HOUSEKEEPING_CHUNK)) {
+      applyDeployedClose(store, roomId, claimId, nowMs, skipped);
     }
+  }
+  validateRegistryRotation(store, nowMs, skipped, deadline);
+  return true;
+}
+
+// #3464's reporting contract — a malformed row is skipped and NAMED — was
+// built on this phase touching every row. The candidate pass above no
+// longer does, so the naming survives as a bounded rotation: a keyset walk
+// over the whole registry, a slice per tick, resuming from a persisted
+// cursor. Rows are named when the walk reaches them (within one pass of
+// the registry) instead of on the tick that first steps over them; the
+// walk never blocks the poll and never reports the tick incomplete.
+function validateRegistryRotation(store, nowMs, skipped, deadline) {
+  const state = readHousekeepingState(store);
+  const saved = state.validationCursor;
+  const cursor = saved && typeof saved.roomId === "string" && typeof saved.claimId === "string" ? saved : null;
+  const rows = claimCandidatePairs(store, cursor
+    ? `SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+       WHERE room_id > ? OR (room_id = ? AND claim_id > ?)
+       ORDER BY room_id, claim_id LIMIT ?`
+    : `SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+       ORDER BY room_id, claim_id LIMIT ?`,
+  cursor ? [cursor.roomId, cursor.roomId, cursor.claimId, VALIDATION_ROTATION_LIMIT] : [VALIDATION_ROTATION_LIMIT]);
+  let last = cursor;
+  let processed = 0;
+  for (let start = 0; start < rows.length; start += HOUSEKEEPING_CHUNK) {
+    if (Date.now() > deadline) break;
+    for (const { roomId, claimId } of rows.slice(start, start + HOUSEKEEPING_CHUNK)) {
+      applyDeployedClose(store, roomId, claimId, nowMs, skipped);
+      last = { roomId, claimId };
+      processed += 1;
+    }
+  }
+  // A fully walked short page reached the end of the registry: restart
+  // from the beginning next tick so newly written rows join the rotation.
+  const nextCursor = processed === rows.length && rows.length < VALIDATION_ROTATION_LIMIT ? null : last;
+  if (JSON.stringify(nextCursor) !== JSON.stringify(cursor)) {
+    writeHousekeepingState(store, { ...state, validationCursor: nextCursor }, nowMs);
   }
 }
 
@@ -858,49 +973,84 @@ function closeDeployedClaims(store, nowMs, skipped = null) {
 // the same facts on the HTTP path released it first (claim_flaked). Sweep
 // here with the same semantics — auto-release, lease_expired event, one
 // wake per expiry — so both settlement paths read the same world.
-function sweepExpiredClaimLeases(store, nowMs, skipped = null) {
-  let roomIds = [];
-  try {
-    roomIds = store.db.prepare("SELECT DISTINCT room_id AS roomId FROM work_claims").all().map(row => row.roomId);
-  } catch (error) {
-    if (/no such table/i.test(error?.message ?? "")) return 0;
-    throw error;
-  }
+function sweepExpiredClaimLeases(store, nowMs, skipped = null, deadline = Infinity) {
+  // #3698: candidates are selected in SQL — active claims carrying a lease
+  // expiry the JS predicate below could call expired. Stored expiries are
+  // written by isoOf (fixed-width UTC `...T??:??:??.???Z`), and for that
+  // exact shape lexicographic order IS chronological order, so the SQL
+  // `<=` is precise; any other shape (offsets, date-only, hand-written
+  // fixtures) falls through to the JS Date.parse predicate untouched.
+  const leaseText = fieldText("leaseExpiresAt");
+  const pairs = claimCandidatePairs(store, `
+    SELECT room_id AS roomId, claim_id AS claimId FROM work_claims
+    WHERE COALESCE(${fieldText("state")}, 'unclaimed') IN ('claimed', 'in_progress', 'blocked')
+      AND typeof(${leaseText}) = 'text'
+      AND (${leaseText} NOT GLOB '????-??-??T??:??:??.???Z' OR ${leaseText} <= ?)
+    ORDER BY room_id, rowid`, [new Date(nowMs).toISOString()]);
   let released = 0;
-  for (const roomId of roomIds) {
-    const expired = store.workClaims.list(roomId).filter(item =>
-      ACTIVE_CLAIM_STATES.includes(item.state)
-      && typeof item.leaseExpiresAt === "string"
-      && Number.isFinite(Date.parse(item.leaseExpiresAt))
-      && Date.parse(item.leaseExpiresAt) <= nowMs);
-    if (expired.length === 0) continue;
-    store.workClaims.transaction(() => {
-      for (const before of expired) {
-        // #3464: releaseExpired re-validates through the state machine;
-        // isolate per item so one invalid row cannot roll back the room.
-        let item;
-        try {
-          [item] = releaseExpired([before], nowMs);
-        } catch (error) {
-          noteSkippedInvalidClaim(skipped, roomId, before?.id, error);
-          continue;
-        }
-        if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
-        store.workClaims.set(roomId, item);
-        const receipt = emitWorkClaimEvent(store, roomId, {
-          actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
-          atMs: nowMs, paths: before.files ?? []
-        });
-        // One wake per expiry. The message id includes the lapsed lease time,
-        // so a later claim that expires again wakes again, and a repeat sweep
-        // of this lapse coalesces.
-        enqueueClaimWake(store, roomId, before.owner,
-          `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
-          { reason: "lease_expired", actorId: before.owner });
-        released += 1;
-      }
-    });
+  for (let start = 0; start < pairs.length; start += HOUSEKEEPING_CHUNK) {
+    if (Date.now() > deadline) return { complete: false, released };
+    // Pairs are room-ordered, so a chunk holds whole room groups except at
+    // its edges; each room group keeps its own transaction, as before.
+    const chunk = pairs.slice(start, start + HOUSEKEEPING_CHUNK);
+    for (let index = 0; index < chunk.length;) {
+      const roomId = chunk[index].roomId;
+      let end = index + 1;
+      while (end < chunk.length && chunk[end].roomId === roomId) end += 1;
+      released += releaseExpiredCandidates(store, roomId, chunk.slice(index, end).map(pair => pair.claimId), nowMs, skipped);
+      index = end;
+    }
   }
+  return { complete: true, released };
+}
+
+function releaseExpiredCandidates(store, roomId, claimIds, nowMs, skipped) {
+  const candidates = [];
+  for (const claimId of claimIds) {
+    let item;
+    try {
+      item = store.workClaims.get(roomId, claimId);
+    } catch (error) {
+      // #3464: isolate a row that cannot even decode, like the rows that
+      // fail validation below, instead of aborting the room's sweep.
+      noteSkippedInvalidClaim(skipped, roomId, claimId, error);
+      continue;
+    }
+    if (item) candidates.push(item);
+  }
+  const expired = candidates.filter(item =>
+    ACTIVE_CLAIM_STATES.includes(item.state)
+    && typeof item.leaseExpiresAt === "string"
+    && Number.isFinite(Date.parse(item.leaseExpiresAt))
+    && Date.parse(item.leaseExpiresAt) <= nowMs);
+  if (expired.length === 0) return 0;
+  let released = 0;
+  store.workClaims.transaction(() => {
+    for (const before of expired) {
+      // #3464: releaseExpired re-validates through the state machine;
+      // isolate per item so one invalid row cannot roll back the room.
+      let item;
+      try {
+        [item] = releaseExpired([before], nowMs);
+      } catch (error) {
+        noteSkippedInvalidClaim(skipped, roomId, before?.id, error);
+        continue;
+      }
+      if (!item || item.state !== "unclaimed" || before.state === "unclaimed") continue;
+      store.workClaims.set(roomId, item);
+      const receipt = emitWorkClaimEvent(store, roomId, {
+        actorId: before.owner, item, action: "lease_expired", previousOwnerId: before.owner,
+        atMs: nowMs, paths: before.files ?? []
+      });
+      // One wake per expiry. The message id includes the lapsed lease time,
+      // so a later claim that expires again wakes again, and a repeat sweep
+      // of this lapse coalesces.
+      enqueueClaimWake(store, roomId, before.owner,
+        `work-claim:${item.id}:lease_expired:${before.leaseExpiresAt ?? receipt?.sequence ?? nowMs}`,
+        { reason: "lease_expired", actorId: before.owner });
+      released += 1;
+    }
+  });
   return released;
 }
 
@@ -915,7 +1065,29 @@ function sweepExpiredClaimLeases(store, nowMs, skipped = null) {
 // history stamp, and no wake (nobody holds the item).
 export const STALE_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const lastStaleSweep = new WeakMap();
-export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped = null } = {}) {
+
+// #3698: the sweep only ever acts on unclaimed rows (closeStaleUnclaimed
+// requires the state), so fetch just those instead of decoding the room's
+// whole history. Same rows, same order (rowid, as registry list() reads).
+function unclaimedRoomItems(store, roomId, skipped) {
+  const pairs = claimCandidatePairs(store, `
+    SELECT claim_id AS claimId FROM work_claims
+    WHERE room_id = ? AND COALESCE(${fieldText("state")}, 'unclaimed') = 'unclaimed'
+    ORDER BY rowid`, [roomId]);
+  const items = [];
+  for (const { claimId } of pairs) {
+    let item;
+    try {
+      item = store.workClaims.get(roomId, claimId);
+    } catch (error) {
+      noteSkippedInvalidClaim(skipped, roomId, claimId, error);
+      continue;
+    }
+    if (item) items.push(item);
+  }
+  return items;
+}
+export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped = null, deadline = Infinity, progress = null } = {}) {
   if (!store?.db || !store.workClaims) return 0;
   const last = lastStaleSweep.get(store);
   if (!force && typeof last === "number" && nowMs - last >= 0 && nowMs - last < STALE_SWEEP_INTERVAL_MS) return 0;
@@ -923,7 +1095,7 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
   let roomIds = [];
   try {
     roomIds = store.db.prepare(`SELECT DISTINCT room_id AS roomId FROM work_claims
-      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) = 'unclaimed'`)
+      WHERE COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'), 'unclaimed') = 'unclaimed'`)
       .all().map(row => row.roomId);
   } catch (error) {
     if (/no such table/i.test(error?.message ?? "")) return 0;
@@ -931,8 +1103,15 @@ export function sweepStaleUnclaimedClaims(store, nowMs, { force = false, skipped
   }
   let closed = 0;
   for (const roomId of roomIds) {
+    // #3698: the pass is interval-gated and batch-capped, but it still
+    // yields to the tick deadline between rooms; rooms it cannot reach
+    // wait for the next pass, and the caller hears about it via progress.
+    if (Date.now() > deadline) {
+      if (progress) progress.complete = false;
+      return closed;
+    }
     if (typeof store.workClaims.configFor === "function" && store.workClaims.configFor(roomId).staleSweep !== true) continue;
-    const items = store.workClaims.list(roomId);
+    const items = unclaimedRoomItems(store, roomId, skipped);
     let pairs;
     try {
       pairs = closeStaleUnclaimed(items, nowMs);
