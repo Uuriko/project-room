@@ -166,11 +166,13 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   // must recover one run, while keeping the already-posted prompt in the transcript.
   await owner.route('**/api/rooms/commons/assistant', async route => {
     const payload = route.request().postDataJSON();
-    if (route.request().method() === 'POST' && payload?.action === 'invoke') {
+    if (route.request().method() === 'POST' && payload?.action === 'submit') {
       await route.fetch(); await route.abort(); await owner.unroute('**/api/rooms/commons/assistant');
     } else await route.continue();
   });
-  await owner.locator('#ask-room').click(); await send(owner,'Recover this request exactly once.');
+  await owner.locator('#ask-room').click();
+  await owner.locator('#message-input').fill('Recover this request exactly once.');
+  await owner.locator('#message-form button[type=submit]').click();
   await owner.locator('#assistant-retry').waitFor({state:'visible'});
   const beforeRetry = (await api('owner')).runs;
   assert.equal(beforeRetry.length,2);
@@ -184,7 +186,8 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   let recovery = (await api('producer')).runs.find(r=>r.id!==run.id);
   await peer.locator(`#assistant-face [data-contribute-run="${recovery.id}"]`).click(); // the newest open ask is on the card face
   recovery = (await api('producer',{action:'claim',runId:recovery.id,attemptId:'recovery-host',expectedRevision:recovery.revision})).result;
-  await send(peer,'Please include our latest constraint.');
+  await peer.locator('#message-input').fill('Please include our latest constraint.');
+  await peer.locator('#message-form button[type=submit]').click();
   await peer.locator('#assistant-review').waitFor({state:'visible'});
   assert.equal((await api('producer')).runs.find(r=>r.id===recovery.id).inputs.length,1);
   await peer.locator('#assistant-review').click(); await peer.locator('#assistant-retry').click();

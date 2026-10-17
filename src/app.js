@@ -4080,6 +4080,8 @@ $("#message-form").addEventListener("submit", e => {
   // Preserve the exact legacy payload, including an omitted default channel.
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+  const sharedRequest = Boolean(askRoom || humanExperience.hasSubmission(pendingMessage.command));
+  const stagedFileIds = composerFiles.filter(file => file.status === "staged").map(file => file.id);
   saveComposer();
   const generation = client.generation, draftKey = composerKey();
   submit(e.currentTarget, async () => {
@@ -4087,13 +4089,17 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
     try {
-      await client.send(pendingMessage.command);
+      if (sharedRequest) await humanExperience.submit(pendingMessage.command, askRoom, stagedFileIds);
+      else await client.send(pendingMessage.command);
     } catch (error) {
       if (generation !== client.generation || !state) return;
       throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
-    await commitComposerFiles(data.messageId);
+    if (sharedRequest) {
+      composerFiles = composerFiles.filter(file => !stagedFileIds.includes(file.id));
+      renderComposerFiles(); await refreshRoomFiles();
+    } else await commitComposerFiles(data.messageId);
     if (generation !== client.generation || !state) return;
     drafts.clear(draftKey);
     $("#message-input").value = ""; pendingMessage = null; clearReply(); autosizeComposer();
@@ -4103,7 +4109,6 @@ $("#message-form").addEventListener("submit", e => {
       assistantDraft = null; restoreComposer(drafts.get(composerKey()));
       updateReply(); syncRequestComposer(); persistDrafts();
     }
-    await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });

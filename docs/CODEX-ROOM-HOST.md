@@ -80,6 +80,20 @@ ROOM_AGENT_CONFIG=/absolute/room-connection \
   /absolute/private-room-journal.sqlite /absolute/runtime.json
 ```
 
+For normal shared conversation use, keep the host listening instead of copying
+each run ID:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/room-connection \
+  node scripts/run-codex-room.mjs --watch \
+  /absolute/private-room-journal.sqlite /absolute/runtime.json
+```
+
+The foreground host picks up queued requests and resumes one at a time in this
+workspace. Leave it running while the team works; Ctrl-C stops it. A failed or
+uncertain attempt is reported once for attention. Use its run ID and the same
+journal to reconcile it before restarting the watcher.
+
 The CLI checks the protocol **before claiming the run**. It streams answer deltas
 as JSON to stdout and prints the final Room status/result ID. It passes neither
 connection credentials nor private runtime reasoning into the room. The journal
