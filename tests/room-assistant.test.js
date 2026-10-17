@@ -586,3 +586,17 @@ test('demoted Stop acknowledgment is exact-attempt and cannot acknowledge inputs
   assert.equal(paused.result.inputs[0].status,'pending');
   await api('owner',{action:'resume',runId:'restricted-stop',expectedRevision:3},409);
 });
+
+test('R366-1: a coordinator the owner paused reads paused, not awaiting a host', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  assert.equal((await api('guest')).assistant.availability, 'awaiting_host');
+  f.store.wakeQueue.pause(f.keys.owner, 'commons', { requestId: randomUUID(), reason: 'away' }, null, { memberId: 'producer' });
+  message('guest', 'asked-while-paused');
+  assert.equal((await api('guest', { action: 'invoke', runId: 'while-paused', sourceMessageId: 'asked-while-paused' })).result.status, 'queued');
+  for (const actor of ['guest', 'owner']) assert.equal((await api(actor)).assistant.availability, 'paused', `${actor} sees the pause`);
+  const refused = await api('producer', { action: 'claim', runId: 'while-paused', attemptId: 'host-paused', expectedRevision: 0 }, 409);
+  assert.equal(refused.code ?? refused.error?.code ?? refused.error, 'assistant_host_paused');
+  f.store.wakeQueue.resume(f.keys.owner, 'commons', { requestId: randomUUID() }, null, { memberId: 'producer' });
+  assert.equal((await api('guest')).assistant.availability, 'awaiting_host', 'resume clears the paused reading');
+});

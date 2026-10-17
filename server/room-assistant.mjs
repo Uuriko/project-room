@@ -107,7 +107,11 @@ export class RoomAssistant {
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
-      return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
+      // R366-1: a coordinator under an owner (or self) pause cannot claim, so
+      // say paused instead of implying the host is offline.
+      const connected = coordinator?.active && coordinator.permissions.includes('accept_work');
+      const paused = connected && Boolean(this.store.wakeQueue?.pauseStatus?.(roomId, coordinator.id));
+      return { contractVersion: 1, roomId, assistant: { ...config, availability: !connected ? 'not_connected' : paused ? 'paused' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
   }
   // postToken is the caller's credential, threaded from the route or MCP.
