@@ -46,7 +46,7 @@ import CoreGraphics
         timer = Timer.scheduledTimer(withTimeInterval:1,repeats:true) { [weak self] _ in Task { @MainActor in if self?.window.isVisible == true { self?.refresh() } } }
     }
     public func show() { refresh(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true) }
-    public func stop() { timer?.invalidate(); host.stopAndWait(); connection.stop() }
+    public func stop() { setupWindow?.stop(); timer?.invalidate(); host.stopAndWait(); connection.stop() }
     @objc private func changeEnabled() {
         let enabled = service.status()["enabled"] as? Bool == true
         service.setEnabled(!enabled)

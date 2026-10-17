@@ -46,7 +46,7 @@ const signature = preview => JSON.stringify({ roomId: preview.roomId, permission
 
 // All mutation inputs are saved before the first request. Repeating this operation
 // resumes the same identity and admission; it never silently replaces a connection.
-export async function connectRoom({ target, directory, origin, name = "Room agent", accept = false, identityFrom, fetchImpl = globalThis.fetch }) {
+export async function connectRoom({ target, directory, origin, name = "Room agent", accept = false, expectedPreview, identityFrom, fetchImpl = globalThis.fetch }) {
   if (typeof name !== "string" || !name.trim() || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("Choose an agent name of 1–80 characters");
   const destination = setupTarget(target, origin), journal = openSetupJournal(directory);
   try {
@@ -83,6 +83,7 @@ export async function connectRoom({ target, directory, origin, name = "Room agen
       const preview = destination.sharedToken ? await previewSharedInvite(saved.origin, destination.sharedToken, options)
         : await previewAgentInvite(saved.origin, destination.code, options);
       if (!accept) return { status: "approval_required", preview, next: "Repeat with --accept to accept this invite's room and permissions" };
+      if (expectedPreview !== undefined && expectedPreview !== signature(preview)) throw new Error("Invitation changed; review its current permissions before accepting");
       step.approved = signature(preview); step.roomId = preview.roomId; journal.save(saved);
     }
     if (!saved.identityId) {

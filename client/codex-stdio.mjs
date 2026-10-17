@@ -46,7 +46,9 @@ export function validateCodexRuntimeConfig(config) {
 
 // A dedicated process, never the desktop daemon/proxy or the operator's HOME.
 // Runtime policy controls its model tools; clearing environment is not an OS sandbox.
-export function openCodexStdio(config, { allowedThreadIds = [], onAttention = () => {} } = {}) {
+export function openCodexStdio(config, { allowedThreadIds = [], onAttention = () => {}, authenticationOnly = false, onDisconnect = () => {} } = {}) {
+  const authMethods = new Set(["initialize", "account/read", "account/login/start", "account/login/cancel"]);
+  const loginIds = new Set();
   const settings = validateCodexRuntimeConfig(config);
   if (process.platform === "win32") throw new Error("This process transport currently requires macOS or Linux");
   const privateHome = join(settings.codexHome, "host-home");
@@ -86,6 +88,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   const fail = error => {
     if (closed) return;
     closed = true;
+    onDisconnect();
     for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); }
     pending.clear(); settle().catch(() => {});
   };
@@ -122,6 +125,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
           if (message.error) { const error = new Error("Runtime rejected request; reconcile original attempt"); error.code = message.error.code; entry.reject(error); }
           else {
             if (entry.method === "thread/start" && typeof message.result?.thread?.id === "string") threads.add(message.result.thread.id);
+            if (entry.method === "account/login/start" && typeof message.result?.loginId === "string") loginIds.add(message.result.loginId);
             entry.resolve(message.result);
           }
         } else if (message.method) for (const listener of listeners) listener(message);
@@ -133,10 +137,14 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   return {
     request(method, params = {}) {
       if (method === "initialize" && initialization) return initialization;
-      if (!METHODS.has(method)) return Promise.reject(new Error("Runtime method is outside the Room protocol"));
+      if (!(authenticationOnly ? authMethods : METHODS).has(method)) return Promise.reject(new Error("Runtime method is outside the Room protocol"));
       if (method === "account/read" && (params.refreshToken !== false || Object.keys(params).some(key => key !== "refreshToken")))
         return Promise.reject(new Error("Account preflight requires refreshToken false"));
-      if (!["initialize", "account/read", "thread/start"].includes(method) && !threads.has(params.threadId))
+      if (method === "account/login/start" && (params.type !== "chatgpt" || Object.keys(params).length !== 1))
+        return Promise.reject(new Error("Only explicit browser login is supported"));
+      if (method === "account/login/cancel" && (!loginIds.has(params.loginId) || Object.keys(params).length !== 1))
+        return Promise.reject(new Error("Login is outside this setup session"));
+      if (!authenticationOnly && !["initialize", "account/read", "thread/start"].includes(method) && !threads.has(params.threadId))
         return Promise.reject(new Error("Runtime thread is outside this Room journal"));
       if (pending.size >= 128) return Promise.reject(new Error("Too many pending runtime requests"));
       const result = new Promise((resolve, reject) => {
