@@ -71,8 +71,27 @@ export function operatorStatus(store, options = {}) {
     partial: tables.partial,
     ...(tables.skipped ? { skippedTables: tables.skipped } : {}),
     retention: null,
-    operatorActions: listOperatorActions(store, 10)
+    operatorActions: listOperatorActions(store, 10),
+    // Rooms the messages backfill parked (r35): the exact stored event the
+    // current reducer rejected (or the tail gap) and the reducer's own
+    // words. The integrity failure row keeps only an allowlisted line, so
+    // without this an operator sees which room is red but not which event
+    // to repair. Operator-token gated; capped; a store without the table
+    // reports [].
+    messagesBackfillBlocks: messagesBackfillBlocks(store)
   };
+}
+
+function messagesBackfillBlocks(store, limit = 25) {
+  try {
+    return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, error, head_seq AS headSeq, blocked_at AS blockedAt
+      FROM messages_backfill_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
+      ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
+    }));
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
 }
 
 export function operatorDrift(main) {

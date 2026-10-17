@@ -213,7 +213,14 @@ async function checkDispatchTarget(target, dnsResolvers) {
     // carry webhook_url_not_public so the delivery journal can name the
     // reason without a retry.
     const ssrf = error?.code === "webhook_url_not_public" || /private or reserved|metadata hostname/.test(message);
-    const hostile = ssrf || /valid https/.test(message);
+    // invalid_webhook is permanent except the transient DNS failure ("does
+    // not resolve"): a malformed target (bad scheme, userinfo, control
+    // chars, over length) can never succeed, so dead-letter it instead of
+    // burning retries. This replaces the narrower /valid https/ match, which
+    // missed the userinfo rejection (#2549) and the other string-shape
+    // failures.
+    const permanentInvalid = error?.code === "invalid_webhook" && !/does not resolve/.test(message);
+    const hostile = ssrf || permanentInvalid;
     const prefix = ssrf ? "webhook_url_not_public: " : "";
     return { ok: false, result: { ok: false, status: 0,
       error: `${prefix}webhook target rejected: ${message}`.slice(0, 500),

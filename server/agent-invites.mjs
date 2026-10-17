@@ -19,7 +19,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, validId } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -62,7 +62,9 @@ const randomSymbols = (length, alphabet) => {
 // as bare unsalted sha256 (~40 bits, offline-invertible by anyone with DB read
 // access); the sha256 fallback is removed, so those rows no longer redeem.
 const codeHash = code => scryptSync(code, CODE_HASH_SALT, 32, CODE_HASH_PARAMS).toString("hex");
-const NEVER_GRANT = ["manage_members", "decide", "invite_member"];
+// NEVER_GRANT is defined once in src/events.js and shared with the
+// share-link grant (server/share-links.mjs) so every invitation door
+// enforces the same ceiling (#3549).
 
 // Human descriptions for the standing invite profiles, surfaced by
 // vocabulary() so a minting agent never has to guess what a profile grants.
@@ -134,26 +136,65 @@ const view = (row, now) => ({
   status: inviteStatus(row, now),
 });
 
+// #3883 (coordinator decision on the issue): the credential-less replay
+// rotation below is bounded to 30 days from the redemption receipt's
+// created_at. The R305-1 lost-response retry surfaces at redemption time,
+// not months later; a permanent rotation capability keyed on the burned
+// code + requestId would outlive its purpose. The boundary is inclusive:
+// a replay landing exactly 30 days after redemption still rotates.
+const REPLAY_ROTATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 // G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
 // redemption for an uncertain retry. No new identity, no new member event,
 // no second burn — the same membership, a fresh onboarding token,
 // duplicate:true. Mirrors the duplicate-identity path's active-membership
 // check so a removed member's receipt cannot resurrect the grant.
-const replayRedeemReceipt = (invites, receipt) => {
+const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } = {}) => {
   const store = invites.store;
   const linked = invites.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
     .get(receipt.room_id, receipt.identity_id);
   const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
+  // R305-1: a credential-less replay is the client that lost the 201 — the
+  // original secret died in that lost response, so retiring it strands
+  // nobody. Rotate a fresh one and show it in this response, authorized by
+  // the one-time code + requestId receipt. A replay that presents its
+  // credential is already fine and keeps today's shape. The fresh onboarding
+  // token is issued AFTER the rotation, so the scoped-key revocation the
+  // rotation carries cannot kill the token this response hands over.
+  let rotation = null;
+  if (!credentialPresented) {
+    // #3883 window gate, on the rotation path only: a receipt whose
+    // created_at is unusable fails closed here; credential-presenting
+    // replays never reach this gate and stay byte-identical.
+    const createdAt = receipt.created_at;
+    const usable = typeof createdAt === "number" && Number.isFinite(createdAt) && createdAt > 0;
+    if (!usable || store.now() - createdAt > REPLAY_ROTATION_WINDOW_MS) {
+      fail(410, "invite_replay_rotation_expired",
+        "This redemption's secret-rotation window has closed: a credential-less replay can rotate the identity secret only within 30 days of the original redemption. Ask the inviter who sponsored this invite to mint a fresh invite code — or to remove and re-invite this member — then redeem the new code to receive a new identity secret.");
+    }
+    rotation = store.identities.rotateForReplay(receipt.identity_id);
+  }
   const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
     identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
   });
-  return withConnect(store, receipt.room_id, linked.member_id, {
+  const base = {
     identityId: receipt.identity_id, roomId: receipt.room_id, memberId: linked.member_id,
     displayName: member.displayName, permissions: JSON.parse(receipt.permissions_json),
     duplicate: true, mcpToken,
-    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id)
-  });
+  };
+  if (rotation) {
+    const freshNext = Object.freeze([
+      Object.freeze({ action: "save-identity-secret",
+        description: "A fresh identity secret was issued in THIS response because the earlier one was never received. Save it immediately; it is shown once and cannot be recovered again." }),
+      ...redeemNext(receipt.room_id, member.displayName),
+    ]);
+    return withConnect(store, receipt.room_id, linked.member_id, { ...base,
+      identitySecret: rotation.secret, rotatedAt: rotation.rotatedAt, next: freshNext,
+      nextActions: nextActionsForInviteRedeem(receipt.room_id) });
+  }
+  return withConnect(store, receipt.room_id, linked.member_id, { ...base,
+    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id) });
 };
 
 export class AgentInvites {
@@ -295,7 +336,7 @@ export class AgentInvites {
           // that redeemed: the replay mints a fresh onboarding token for it.
           if (existingIdentity && existingIdentity.identityId !== receipt.identity_id)
             fail(403, "invite_redeem_identity_mismatch", "This request id belongs to a different identity.");
-          return replayRedeemReceipt(this, receipt);
+          return replayRedeemReceipt(this, receipt, { credentialPresented: Boolean(existingIdentity) });
         }
       }
       if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {

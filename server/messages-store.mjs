@@ -13,7 +13,7 @@ export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
   "message.edited",
   "message.deleted",
-  "message.reaction_set",
+  "poll.voted",
   "message.pinned",
   "message.unpinned",
   "message.redacted"
@@ -63,6 +63,39 @@ CREATE TABLE IF NOT EXISTS messages_backfill_cursor (
 );
 `;
 
+// One row per room whose backfill is parked: replaying its stored log throws
+// (an event the current reducer rejects, or a head sequence the log no
+// longer reaches). The row names the exact event so the failure is an
+// operator-actionable record instead of an anonymous wedge that re-throws
+// every tick and blocks every other room. Written by the backfill, cleared
+// when the room's log is replaced or a fresh diagnosis replays cleanly.
+// last_diagnosed_at stamps the most recent diagnosis attempt (the park
+// itself, a head-moved refresh, or a periodic re-diagnosis) and drives the
+// periodic re-diagnosis cadence in refreshStaleBlocks.
+export const MESSAGES_BACKFILL_BLOCKS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS messages_backfill_blocks (
+  room_id TEXT PRIMARY KEY,
+  sequence INTEGER NOT NULL,
+  event_id TEXT,
+  error TEXT NOT NULL,
+  head_seq INTEGER NOT NULL DEFAULT 0,
+  blocked_at INTEGER NOT NULL DEFAULT 0,
+  last_diagnosed_at INTEGER NOT NULL DEFAULT 0
+);
+`;
+
+// How long a parked room whose head never moves waits between re-diagnoses.
+// The repair this serves is invisible to the head: an operator fixing the
+// named event in place, or a deploy fixing the reducer that rejects it —
+// neither appends an event, so head movement alone would leave a quiet
+// room parked forever. Six hours bounds the replay cost of a still-poisoned
+// room to a handful of full-log replays a day while a repaired room clears
+// the same day it was fixed.
+export const MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Periodic re-diagnoses per backfill call: a fleet of parked rooms becoming
+// due at once must not turn one tick into an unbounded replay session.
+const BLOCK_REDIAGNOSIS_PER_CALL = 1;
+
 export const MESSAGES_BACKFILL_BATCH = 200;
 const BACKFILL_COMMIT = 25;
 const SWEEP_ID = "";
@@ -91,7 +124,9 @@ export function threadRootId(messages, message) {
   return current?.id && current.id !== message.id ? current.id : null;
 }
 
-function affectedMessageIds(event) {
+// Exported for the resident patrol (server/patrol.mjs), which folds the
+// same affected-id set per message event into its shadow records.
+export function affectedMessageIds(event) {
   const data = event?.data ?? {};
   if (event?.type === "message.redacted" && typeof data.messageId === "string") {
     return data.messageId.endsWith(":channel") ? [data.messageId] : [data.messageId, `${data.messageId}:channel`];
@@ -200,6 +235,61 @@ export function syncMessageRows(db, { roomId, sequence, event, state }) {
   return written;
 }
 
+// Re-derive a room's existing messages rows from a rebuilt projection
+// state (account deletion's rebuildRoom, after redaction rewrote the log).
+// Per-row redaction nulls a row's record for already-archived rooms; the
+// rebuild makes the projection the redacted truth, and without this resync
+// the rows keep the NULL records parity then mismatches forever — the room
+// is caught up, so the backfill never re-selects it. Every field written
+// here derives from the same rebuilt message parity certifies against, and
+// each row keeps the sequence it already carries (parity compares it
+// against the original posting event). Messages with no row yet are the
+// backfill's to create; messages archived out of the projection are not in
+// the state and keep their rows untouched (parity compares those by count
+// only). Returns the number of rows rewritten.
+export function resyncRoomMessageRows(db, roomId, state) {
+  const messages = state?.messages ?? [];
+  if (!messages.length) return 0;
+  const rowSeq = new Map(db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?")
+    .all(roomId).map(row => [row.message_id, row.seq]));
+  if (!rowSeq.size) return 0;
+  const archive = archiveMarker(db, roomId);
+  const archivedRows = archive.throughSeq
+    ? db.prepare("SELECT message_id, reply_to_id FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))").all(roomId, archive.throughSeq, archive.retainedJson) : [];
+  // The same thread map certifyMessagesParity certifies against: archived
+  // parents stay reachable as stubs for the thread-root comparison.
+  const byId = new Map([...archivedRows.map(row => [row.message_id, { id: row.message_id, replyToId: row.reply_to_id }]),
+    ...messages.map(message => [message.id, message])]);
+  const pinned = new Set((state?.pins ?? []).map(pin => pin.messageId));
+  const upsert = statementFor(db);
+  let written = 0;
+  for (const message of messages) {
+    const seq = rowSeq.get(message?.id);
+    if (seq === undefined) continue;
+    if (typeof message.authorId !== "string" || typeof message.createdAt !== "string") continue;
+    const reactions = message.reactions && typeof message.reactions === "object" && Object.keys(message.reactions).length
+      ? JSON.stringify(message.reactions) : null;
+    upsert.run(
+      roomId, message.id, seq,
+      textOrNull(message.channelId),
+      threadRootId(byId, message),
+      textOrNull(message.replyToId),
+      textOrNull(message.toMemberId),
+      textOrNull(message.workItemId),
+      message.authorId,
+      storedBody(message),
+      message.createdAt,
+      textOrNull(message.editedAt),
+      textOrNull(message.deletedAt),
+      reactions,
+      pinned.has(message.id) ? 1 : 0,
+      JSON.stringify(currentRecord(message))
+    );
+    written += 1;
+  }
+  return written;
+}
+
 function compactState(state) {
   return { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
 }
@@ -232,6 +322,14 @@ function saveCursor(db, roomId, appliedSeq, eventId, state) {
 // Messages at or below projection.messagesArchive.throughSeq were moved out of
 // the projection and live only in this table; they are not stale rows.
 export function archiveMarker(db, roomId) {
+  // WRITE-PATH-WINS win 5: this runs on message paths (a post whose id is
+  // not in the projection probes for an archived row), and json_extract
+  // must tokenize the whole multi-megabyte projection to prove the marker
+  // absent — the common case. A raw substring probe answers "absent" at
+  // memchr speed; it can only false-positive (a body quoting the key),
+  // never false-negative, because our serializer writes the key verbatim.
+  const probe = db.prepare("SELECT instr(projection, '\"messagesArchive\"') AS found FROM rooms WHERE id=?").get(roomId);
+  if (!probe?.found) return { throughSeq: 0, count: 0, retainedIds: [], retainedJson: "[]" };
   const row = db.prepare(`SELECT json_extract(projection, '$.messagesArchive.throughSeq') AS throughSeq,
     json_extract(projection, '$.messagesArchive.count') AS count,
     json_extract(projection, '$.messagesArchive.retainedIds') AS retained FROM rooms WHERE id=?`).get(roomId);
@@ -304,7 +402,120 @@ function resetRoom(store, roomId) {
   store.transaction(() => {
     store.db.prepare("DELETE FROM messages WHERE room_id=?").run(roomId);
     store.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+    store.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
   });
+}
+
+// Replay the room's whole log from empty and report the first event the
+// current reducer rejects, or the tail gap when the log ends before the
+// room's head sequence. Returns null when the log replays cleanly and
+// reaches the head: the fillRoom throw is then not attributable to a stored
+// event (a cooperative interruption via yieldBetween, a storage error, a
+// corrupt cursor snapshot) and the caller rethrows it unchanged — parking
+// is only for failures the data itself guarantees will recur.
+function diagnoseBlock(db, roomId) {
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
+  if (maxSeq < head) {
+    return { sequence: maxSeq, eventId: null, error: `messages backfill stopped at ${maxSeq} before room ${roomId} reached sequence ${head}` };
+  }
+  let state = emptyRoomState();
+  for (const row of db.prepare("SELECT sequence, id, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)) {
+    try {
+      state = compactState(applyEvent(state, JSON.parse(row.body)));
+    } catch (error) {
+      return { sequence: row.sequence, eventId: row.id, error: error.message };
+    }
+  }
+  return null;
+}
+
+// Record (or refresh) a room's block. Returns true when the block is new or
+// changed — the caller surfaces a fresh block once, loudly, instead of
+// re-throwing it every tick.
+function recordBlock(store, roomId, block) {
+  const db = store.db;
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const existing = db.prepare("SELECT sequence, event_id, error FROM messages_backfill_blocks WHERE room_id=?").get(roomId);
+  const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId || existing.error !== block.error;
+  const now = Date.now();
+  store.transaction(() => {
+    db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at, last_diagnosed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
+        error=excluded.error, head_seq=excluded.head_seq, blocked_at=excluded.blocked_at,
+        last_diagnosed_at=excluded.last_diagnosed_at`)
+      .run(roomId, block.sequence, block.eventId, block.error, head, now, now);
+  });
+  return fresh;
+}
+
+// Stamp a re-diagnosis attempt that changed nothing: the block's content
+// (and blocked_at — when the standing accusation was recorded) stays as it
+// was; only the cadence clock moves, so the room is not re-diagnosed again
+// until the interval elapses.
+function noteDiagnosisAttempt(store, roomId, at) {
+  store.transaction(() => {
+    store.db.prepare("UPDATE messages_backfill_blocks SET last_diagnosed_at=? WHERE room_id=?").run(at, roomId);
+  });
+}
+
+function clearBlock(store, roomId) {
+  store.transaction(() => {
+    store.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+  });
+}
+
+// Parked rooms whose head moved since the block was recorded earn one fresh
+// diagnosis (the log may have been repaired or replaced underneath them);
+// a room that now replays cleanly has its block cleared and rejoins the
+// sweep. Runs before room selection; a still-blocked room stays parked. A
+// re-diagnosis that changes the block marks the room in `freshRooms`, so
+// the changed block is surfaced once like a new one.
+//
+// A parked room whose head never moves is not abandoned either: the repair
+// it waits for (an operator fixing the named event in place, a deploy
+// fixing the reducer) appends no event, so on a slow cadence — at most
+// BLOCK_REDIAGNOSIS_PER_CALL rooms per call, each at most once per
+// MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS — the room earns a periodic
+// re-diagnosis through the same diagnoseBlock path. A clean replay clears
+// the park and the room rejoins this call's sweep; a still-failing log
+// keeps its park, with only the attempt stamp moving when the diagnosis is
+// unchanged. Periodic attempts honor the caller's deadline; head-moved
+// diagnoses keep their existing unconditional pass.
+function refreshStaleBlocks(store, freshRooms = new Map(), { deadline = Infinity } = {}) {
+  const rows = store.db.prepare(
+    "SELECT room_id, sequence, event_id, error, head_seq, last_diagnosed_at FROM messages_backfill_blocks ORDER BY room_id"
+  ).all();
+  let periodicLeft = BLOCK_REDIAGNOSIS_PER_CALL;
+  for (const row of rows) {
+    const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(row.room_id)?.sequence;
+    if (head === undefined) { clearBlock(store, row.room_id); continue; }
+    if (head !== row.head_seq) {
+      const block = diagnoseBlock(store.db, row.room_id);
+      if (!block) clearBlock(store, row.room_id);
+      else if (recordBlock(store, row.room_id, block)) freshRooms.set(row.room_id, true);
+      continue;
+    }
+    if (periodicLeft <= 0) continue;
+    // A row with no stamp predates the cadence (written before the column
+    // existed, or inserted directly): start its clock on first sight
+    // rather than diagnosing on the spot, so the cadence means the same
+    // thing for every parked room.
+    if (!row.last_diagnosed_at) { noteDiagnosisAttempt(store, row.room_id, Date.now()); continue; }
+    if (Date.now() - row.last_diagnosed_at < MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS) continue;
+    if (Date.now() > deadline) break;
+    periodicLeft -= 1;
+    const block = diagnoseBlock(store.db, row.room_id);
+    if (!block) { clearBlock(store, row.room_id); continue; }
+    const changed = row.sequence !== block.sequence || row.event_id !== block.eventId || row.error !== block.error;
+    if (changed) {
+      recordBlock(store, row.room_id, block);
+      freshRooms.set(row.room_id, true);
+    } else {
+      noteDiagnosisAttempt(store, row.room_id, Date.now());
+    }
+  }
 }
 
 function loadState(db, roomId, cursor) {
@@ -327,8 +538,11 @@ function loadState(db, roomId, cursor) {
   return { state: replayFrom(0, emptyRoomState()), seq: cursor.applied_seq };
 }
 
-function nextRoom(db, exclude = []) {
-  const excluded = exclude.length ? ` AND r.id NOT IN (${exclude.map(() => "?").join(",")})` : "";
+// Parked rooms are excluded by the messages_backfill_blocks clause below, so
+// no per-call NOT IN list is needed: binding one value per room parked in
+// this call broke past 100 (the Worker's Durable Object SQL limit) exactly
+// when many rooms stop replaying at once.
+function nextRoom(db) {
   return db.prepare(`SELECT r.id AS id, r.sequence AS sequence
     FROM rooms r
     LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id
@@ -337,9 +551,10 @@ function nextRoom(db, exclude = []) {
       OR (c.applied_seq > 0 AND NOT EXISTS (
         SELECT 1 FROM events e
         WHERE e.room_id = r.id AND e.sequence = c.applied_seq AND e.id = c.applied_event_id
-      )))${excluded}
+      )))
+      AND NOT EXISTS (SELECT 1 FROM messages_backfill_blocks b WHERE b.room_id = r.id)
     ORDER BY r.id
-    LIMIT 1`).get(...exclude) ?? null;
+    LIMIT 1`).get() ?? null;
 }
 
 // True when a room's messages table has replayed to the room's current
@@ -423,17 +638,25 @@ function isRoomDataError(error) {
 // after the log is caught up writes nothing. A replaced log (importEvents)
 // drops that room's rows and starts again.
 //
-// Per-room isolation: a room whose log cannot replay is recorded in the
-// result's `failed` list and skipped, so one poisoned room cannot stop
-// every other room's backfill (the deferred integrity batch wedged on
-// exactly this shape). The room is retried on the next call — the failure
-// is reported, never silently passed.
+// Per-room isolation: a room whose stored log no longer replays (an event
+// the current reducer rejects, or a head sequence the log does not reach)
+// must not wedge the sweep — the room is diagnosed to the exact event,
+// parked in messages_backfill_blocks, and named in the result's `failed`
+// list (this call's fresh failures) and its `blocked` list (the standing
+// parked set) while every other room proceeds. A parked room is skipped
+// on later calls until refreshStaleBlocks finds the block stale — the
+// room's head moved, or the periodic re-diagnosis cadence came due and
+// the underlying event proves repaired — so a poisoned room neither
+// wedges the batch nor re-runs forever; its failure stays recorded in the unified
+// integrity surface until the room backfills clean. Parking is deliberate
+// — skipping the event silently would corrupt the table the parity check
+// certifies against the projection; the block names what an operator must
+// repair.
 export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, deadline = Infinity, yieldBetween = () => {} } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not backfill messages");
   if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : MESSAGES_BACKFILL_BATCH;
   const failed = [];
-  const failedIds = [];
   // The caller's yield hook is control flow, not room data: tag anything it
   // throws so the per-room isolation below always lets it propagate. An
   // interruption mid-batch keeps the committed prefix on the cursor and the
@@ -444,17 +667,31 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     try { yieldBetween(); }
     catch (error) { yieldError = error; throw error; }
   };
-  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, failed };
+  // The result's `blocked` list is the full parked set (the durable table),
+  // with `fresh` marking blocks recorded or changed by this call — so a
+  // caller can surface a new block loudly once and keep the standing set
+  // visible on every later call without re-diagnosing it. The result's
+  // `failed` list carries this call's fresh failures for the unified
+  // integrity_failures surface.
+  const freshRooms = new Map();
+  const allBlocked = () => store.db.prepare(
+    "SELECT room_id, sequence, event_id, error FROM messages_backfill_blocks ORDER BY room_id"
+  ).all().map(row => ({
+    roomId: row.room_id, sequence: row.sequence, eventId: row.event_id, error: row.error,
+    fresh: freshRooms.get(row.room_id) ?? false
+  }));
+  if (Date.now() > deadline) return { done: false, events: 0, rooms: 0, budgetExceeded: true, blocked: allBlocked(), failed };
+  refreshStaleBlocks(store, freshRooms, { deadline });
   let events = 0;
   let rooms = 0;
   let roomId = null;
   let appliedSeq = null;
   const seen = new Set();
   while (events < cap) {
-    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, failed };
-    const room = nextRoom(store.db, failedIds);
-    if (!room) return { done: failed.length === 0, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
-    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
+    if (Date.now() > deadline) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
+    const room = nextRoom(store.db);
+    if (!room) return { done: true, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
+    if (seen.has(room.id)) return { done: false, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
     seen.add(room.id);
     rooms += 1;
     let wrote;
@@ -463,18 +700,23 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     } catch (error) {
       if (yieldError) throw yieldError;
       if (!isRoomDataError(error)) throw error;
+      const block = diagnoseBlock(store.db, room.id);
+      if (!block) throw error; // not a stored-event failure: propagate as before
+      // Park the room durably (later calls skip it until the block goes
+      // stale) and report it as this call's fresh failure for the unified
+      // integrity_failures surface.
+      freshRooms.set(room.id, recordBlock(store, room.id, block));
       failed.push({ roomId: room.id, error });
-      failedIds.push(room.id);
       roomId = room.id;
-      appliedSeq = null;
+      appliedSeq = readCursor(store.db, room.id)?.applied_seq ?? null;
       continue;
     }
     events += wrote.events;
     roomId = room.id;
     appliedSeq = wrote.appliedSeq;
-    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, failed };
+    if (wrote.stopped) return { done: false, events, rooms, budgetExceeded: true, roomId, appliedSeq, blocked: allBlocked(), failed };
   }
-  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, failed };
+  return { done: nextRoom(store.db) == null, events, rooms, budgetExceeded: false, roomId, appliedSeq, blocked: allBlocked(), failed };
 }
 
 function caughtUpSql(after) {
@@ -586,7 +828,7 @@ function certifyMessagesParity(store) {
   if (numbers.projectionCount !== numbers.tableCount || numbers.projectionLastSeq !== numbers.tableLastSeq) {
     throw new Error(`messages parity failed for ${roomId}: projection count ${numbers.projectionCount}, table count ${numbers.tableCount}, projection last seq ${numbers.projectionLastSeq}, table last seq ${numbers.tableLastSeq}`);
   }
-  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection));
+  const hydration = hydrateProjection(store.db, roomId, JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection), { verifyBodyHashes: true });
   if (hydration.missing.length) throw new Error(`messages parity failed for ${roomId}: stored message body missing`);
   const state = hydration.state;
   const messages = new Map((state.messages ?? []).map(message => [message.id, message]));

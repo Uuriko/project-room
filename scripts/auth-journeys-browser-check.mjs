@@ -163,7 +163,7 @@ for (const theme of ["dark", "light"]) for (const kind of [DESK, PHONE]) test(`f
   await form.waitFor({ state: "visible" });
   await page.waitForLoadState("networkidle");
   assert.equal(requests.includes("/src/app.js"), false, "workspace stays unloaded at first paint and idle");
-  for (const path of ["/src/client.js", "/src/events.js", "/src/emoji-catalog.js", "/src/inbox-ui.js", "/src/request-access.js"])
+  for (const path of ["/src/client.js", "/src/events.js", "/src/legacy-reaction-aliases.js", "/src/inbox-ui.js", "/src/request-access.js"])
     assert.equal(requests.includes(path), false, path);
   // Agent sign-in is the standalone /agent-signin page on current main
   // (decision #37): the wall button is a link there, and the page's own

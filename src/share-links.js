@@ -86,6 +86,13 @@ export const canRetryInvitation = error => interrupted(error) || error?.status =
 export function requestFailureMessage(error) {
   return interrupted(error) || error instanceof SyntaxError ? "The connection was interrupted and the result could not be confirmed" : error.message;
 }
+// Join a failure message and a recovery hint into one sentence. The base may
+// already end with a period (service messages do; the interrupted text above
+// does not), so strip before joining — never "Try again in a moment.. Draft
+// kept." (#3597).
+export function failureTextWithHint(error, hint) {
+  return `${requestFailureMessage(error).replace(/[.\s]+$/, "")}. ${hint}`;
+}
 export function invitationFailureMessage(error) {
   if (interrupted(error)) {
     return "The connection was interrupted. We could not confirm the result. Your entries are kept; try again here to check or finish the same request.";
@@ -537,7 +544,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       $("#share-link-url").value = inviteUrl;
       $("#share-purpose-note").hidden = !purposeItem;
       if (purposeItem) $("#share-purpose-note").textContent = `Opens "${purposeItem.title}" after they join. Guests can read the room and its history, post messages, and react.`;
-      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full permissions. Share it only with people and agents you trust."; }
+      if (result.link.access === "co_admin") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "Anyone who joins with this link gets full working permissions (not membership administration). Share it only with people and agents you trust."; }
       else if (result.link.access === "member") { $("#share-purpose-note").hidden = false; $("#share-purpose-note").textContent = "People and agents who join can take, complete and verify work."; }
       $("#share-link-url").dataset.linkId = result.link.id;
       $("#share-link-result").hidden = false;

@@ -57,6 +57,26 @@ export function isGitHubConfigured(env = {}) {
     && typeof env.GITHUB_OAUTH_CLIENT_SECRET === "string" && env.GITHUB_OAUTH_CLIENT_SECRET.length > 0;
 }
 
+// Boot-path config builder mirroring googleConfig (server/google-oauth.mjs):
+// both env vars unset means GitHub sign-in is simply off (null, and the
+// routes keep their designed 503); a partial or invalid pair is a
+// configuration error and throws, so boot paths can fail loud (Node) or
+// disable the provider with a warning (Cloudflare). The origin rules match
+// what the HTTP layer's github() factory accepts for the redirect URI:
+// https anywhere, or http only on 127.0.0.1 for local dev.
+export function githubConfig(env = {}, origin) {
+  const clientId = env.GITHUB_OAUTH_CLIENT_ID;
+  const clientSecret = env.GITHUB_OAUTH_CLIENT_SECRET;
+  if ([clientId, clientSecret].every(value => value === undefined)) return null;
+  const invalid = () => { throw new Error("Invalid GitHub authentication configuration"); };
+  if (!opaque(clientId) || clientId.length > 256 || !opaque(clientSecret) || clientSecret.length > 256) invalid();
+  let appUrl;
+  try { appUrl = new URL(origin); } catch { invalid(); }
+  if (appUrl.origin !== origin || !["http:", "https:"].includes(appUrl.protocol)) invalid();
+  if (appUrl.protocol !== "https:" && appUrl.hostname !== "127.0.0.1") invalid();
+  return { clientId, clientSecret, redirectUri: origin + GITHUB_CALLBACK_PATH };
+}
+
 // PKCE S256: codeChallenge = base64url(sha256(codeVerifier)).
 // The verifier is 256 bits of randomness (43 base64url chars), inside the
 // RFC 7636 43-128 character window.

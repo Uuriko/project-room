@@ -57,7 +57,12 @@ export function createArbiters() {
   // lanes: [{ lane, trust_level?, runtime?, credentialChain?, delegatedChain? }]
   // Returns a seated decider, or { unavailable: "no-arbitrator", reason } —
   // an honest-unavailable fall-through, never a silent drop.
-  const resolveTier1 = ({ verifierId, executor = {}, lanes = [] } = {}) => {
+  // The challenger (the party who raised the dispute) is an independence
+  // input exactly as the executor is: a designee who raised the dispute
+  // can never sit on it (party-as-judge), and neither can a designee who
+  // shares an identity domain with the challenger. Callers that do not
+  // pass a challenger keep the executor-only behavior.
+  const resolveTier1 = ({ verifierId, executor = {}, challenger = {}, lanes = [] } = {}) => {
     if (!norm(verifierId)) fail("invalid_arbiter", "verifierId must be a non-empty string");
     if (!Array.isArray(lanes)) fail("invalid_arbiter", "lanes must be an array");
     const card = lanes.find(l => l && l.lane === verifierId);
@@ -66,6 +71,11 @@ export function createArbiters() {
     const check = isIndependent(card, executor);
     if (!check.independent)
       return { unavailable: "no-arbitrator", reason: `verifier "${verifierId}" is not independent: ${check.reason}` };
+    if (norm(challenger.lane) && norm(challenger.lane) === card.lane)
+      return { unavailable: "no-arbitrator", reason: `verifier "${verifierId}" is the challenger` };
+    const challengerCheck = isIndependent(card, challenger);
+    if (!challengerCheck.independent)
+      return { unavailable: "no-arbitrator", reason: `verifier "${verifierId}" is not independent of the challenger: ${challengerCheck.reason}` };
     return { tier: 1, decider: Object.freeze({ tier: 1, lane: card.lane, verifierId }) };
   };
 
