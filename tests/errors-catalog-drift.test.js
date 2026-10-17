@@ -335,7 +335,7 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
   assert.deepEqual(migrated.sort(), ["agent_not_registered", "guest_invite_account_session_required", "guest_scope_denied", "invalid_wake_poll", "proof_required",
-    "public_work_already_submitted", "public_work_claim_conflict", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
+    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
     const shipped = agentErrorAx({ code, ...ctx });

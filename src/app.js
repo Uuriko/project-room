@@ -8,6 +8,7 @@ import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
+import { workArrivalAnnouncements } from "./work-announcements.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
@@ -323,11 +324,13 @@ let referralBoardUI = null;
 let landQueueUI = null;
 let openQuestionsUI = null;
 let retentionUI = null;
+let bountyBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
+let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
+const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 let navigationBoardEpoch = 0;
@@ -339,6 +342,14 @@ let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+// A message deep link whose target is older than the first (windowed)
+// snapshot cannot reveal on arrival: revealMessage no-ops while the id is
+// not held. A pending hash reveal remembers such a target until a fill or
+// sync snapshot first holds it, then reveals it exactly once. It is
+// cancelled when the user takes over first — another hash, another room,
+// a thread/channel switch, or a reader scroll (the noteReaderScroll
+// gesture tracker below) — so the late reveal never steals the view.
+let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
@@ -405,6 +416,7 @@ const client = new RoomClient({
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
+    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
@@ -442,6 +454,7 @@ const client = new RoomClient({
     landQueueUI?.sync();
     openQuestionsUI?.sync();
     retentionUI?.sync();
+    bountyBoardUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -476,6 +489,7 @@ const client = new RoomClient({
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
+    retryPendingHashReveal();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -500,6 +514,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
     // JDOT-COH-NAV end
@@ -535,6 +550,7 @@ const client = new RoomClient({
     landQueueUI?.reset();
     openQuestionsUI?.reset();
     retentionUI?.reset();
+    bountyBoardUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -707,6 +723,13 @@ retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
   load: () => import("./retention-ui.js"),
   install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
   onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
+// Bounties & credits (#3437): the in-room human money surface — list, post +
+// fund, review/accept/reject, own balances and receipts, all over the
+// existing bounty-escrow endpoints.
+bountyBoardUI = lazyDisclosure({ panel: $("#bounty-panel"),
+  load: () => import("./bounty-board.js"),
+  install: module => module.installBountyBoard({ client, getSession: () => session }),
+  onError: () => notice("Could not load bounties. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
@@ -1955,7 +1978,8 @@ function render() {
   ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
-  selectOptions("#message-to-select", active, "Everyone");
+  // R350-n1: a seat whose identity signed out for good can't read a direct message.
+  selectOptions("#message-to-select", active.filter(m => m.identityRevoked !== true), "Everyone");
   syncWorkForm();
   syncActionForm();
   syncRecipeStrip();
@@ -1977,7 +2001,8 @@ function render() {
   const memberActions = m => {
     if (!ownerView || m.kind !== "agent" || m.active === false) return "";
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
-    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+    // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {
@@ -2634,7 +2659,17 @@ async function refreshRoomFiles() {
 }
 async function attachComposerFiles(fileList) {
   if (!state || !client.session || isRoomArchived(state)) return;
+  // Bind the batch before any await: room changes must stop later files,
+  // and removed entries must not receive late success or error updates.
+  const authSession = client.session, generation = client.generation, roomId = state.room.id;
+  const draftOwner = drafts, key = composerKey(), draft = drafts.get(key);
+  const uploadPath = client.path("/files");
+  const owns = () => Boolean(state && session === authSession && client.session === authSession
+    && client.generation === generation && state.room?.id === roomId && authSession.roomId === roomId
+    && client.ownsAccountSession()
+    && drafts === draftOwner && drafts.entries.get(key) === draft && composerKey() === key);
   for (const file of [...(fileList ?? [])]) {
+    if (!owns()) return;
     if (file.size > COMPOSER_FILE_BYTES) {
       setComposerError("That file is larger than 1 MB.");
       continue;
@@ -2643,15 +2678,17 @@ async function attachComposerFiles(fileList) {
     const entry = { id, filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "uploading" };
     composerFiles = [...composerFiles, entry];
     renderComposerFiles();
+    const ownsEntry = () => owns() && composerFiles.includes(entry);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!ownsEntry()) continue;
       const payload = attachmentFromBytes({ id, filename: entry.filename, mediaType: entry.mediaType, bytes });
-      await client.request(client.path("/files"), { method: "POST", data: payload });
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "staged";
+      await client.request(uploadPath, { method: "POST", data: payload, authSession, authMode: authSession.authMode });
+      if (!ownsEntry()) continue;
+      entry.status = "staged";
     } catch (error) {
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "error";
+      if (!ownsEntry()) continue;
+      entry.status = "error";
       setComposerError(attachFailureCopy(error));
     }
     renderComposerFiles();
@@ -2728,6 +2765,33 @@ function saveComposer() {
   drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
     assistantDraft, ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
+}
+// A receipt owns only its original draft, even when Retry was clicked after
+// editing, navigating away, or restoring the tab after a lost response.
+function confirmSharedSubmission({ command, fileIds }, result) {
+  saveComposer();
+  const activeKey = composerKey(), acceptedFiles = new Set(fileIds);
+  let activeChanged = false;
+  for (const [key, draft] of drafts.entries) {
+    if (draft.pending?.command.id !== command.id) continue;
+    const files = (draft.files ?? []).filter(file => !acceptedFiles.has(file.id));
+    const unchanged = draft.body.trim() === command.data.body
+      && (draft.toMemberId || null) === (command.data.toMemberId || null)
+      && draft.replyToId === command.data.replyToId && !files.length;
+    if (unchanged) drafts.clear(key);
+    else drafts.save(key, { pending: null, error: "", files,
+      ...(draft.assistantDraft?.runId === result.id ? { assistantDraft: { ...draft.assistantDraft, expectedRevision: result.revision } } : {}) });
+    if (key === activeKey) activeChanged = true;
+  }
+  if (activeChanged) {
+    const cleared = !drafts.entries.has(activeKey);
+    if (cleared && assistantDraft) assistantDraft = null;
+    restoreComposer(drafts.get(cleared ? composerKey() : activeKey));
+    if (cleared) $("#also-send-to-channel").checked = false;
+    updateReply(); syncRequestComposer(); renderComposerError();
+  }
+  persistDrafts();
+  if (acceptedFiles.size) void refreshRoomFiles();
 }
 function restoreComposer(draft) {
   assistantDraft = draft.assistantDraft ?? null;
@@ -3002,6 +3066,11 @@ function revealWorkTimeline(id) {
 }
 // JDOT-COH-NAV begin
 function revealWork(id) {
+  // #3795: a record id the legacy workItems projection does not hold may be
+  // a board claim — its record lives on the board. Reveal it there instead
+  // of reporting the record missing; deep links, reloads and the
+  // needs-attention Review anchor all arrive through this path.
+  if (state && !Object.hasOwn(state.workItems ?? {}, id)) { void revealClaimRecord(id); return; }
   if (activeWorkNavigationId && activeWorkNavigationId !== id) {
     const previous = workRecord(activeWorkNavigationId)?.querySelector(".work-details");
     if (previous) previous.open = false;
@@ -3081,10 +3150,23 @@ function showWorkDestination(kind, id, presentation = "details") {
   else if (kind === "work") revealWork(id); else revealMessage(id);
   syncWorkReturnControl();
 }
+// #3795: open the board on one claim's record — the destination behind
+// revealWork's claim fallback (deep links and reloads carry no origin, so
+// the return control falls back to "Back to room" like a work deep link).
+async function revealClaimRecord(id) {
+  if (!workNavigationContext() || busy) return;
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || !workNavigationContext()) return;
+  await navigationBoardRevealClaim?.(id);
+  syncWorkReturnControl();
+}
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
   if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
-    notice("That source is no longer available in this room.", true); return false;
+    notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "details";
   const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
@@ -3117,6 +3199,52 @@ function navigateWorkRecord(kind, id, extra = {}) {
   showWorkDestination(kind, id, presentation);
   return true;
 }
+// #3795: navigate to a board claim's record. The destination is the board
+// itself — the claim's card with its record disclosure open — so this
+// mirrors navigateWorkRecord's origin/ticket bookkeeping without a
+// workItems destination: the origin is captured before the board opens,
+// the claim's presence is proven by revealing it, and only then is the
+// record URL pushed, so a claim the board cannot show never becomes a
+// history entry whose Back leads nowhere.
+async function navigateClaimRecord(id) {
+  if (!workNavigationContext() || busy) return false;
+  const target = recordHref("work", id);
+  const origin = { ...captureWorkOrigin(), targetClaimId: id };
+  const current = currentWorkOrigin();
+  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+    // Same record, new surface: refresh the return context, keep the entry.
+    if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
+      { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
+    workHistoryReplayKey = null;
+    if (!$("#board-dialog").open) $("#tasks-board-open").click();
+    if (await navigationBoardReady?.()) await navigationBoardRevealClaim?.(id);
+    syncWorkReturnControl();
+    return true;
+  }
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  if (!await navigationBoardRevealClaim?.(id)) {
+    notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    return false;
+  }
+  if (opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  const ticket = crypto.randomUUID();
+  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
+  workNavigationOrigins.set(ticket, origin);
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
+  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
+  activeWorkNavigation = ticket;
+  // Pre-seed the replay key exactly like navigateWorkRecord, so the pushed
+  // entry's own hashchange/popstate echo dedupes instead of reprocessing.
+  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
+  syncWorkReturnControl();
+  return true;
+}
 async function restoreWorkOrigin(ticket) {
   const origin = currentWorkOrigin(ticket);
   if (!origin || busy) { returnToCurrentRoom(); return; }
@@ -3124,6 +3252,10 @@ async function restoreWorkOrigin(ticket) {
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
   inboxUI?.showRooms();
+  // #3795: a claim record's destination is the board itself; returning to an
+  // origin that was not the board closes it again (a work record's
+  // destination never had it open).
+  if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
   if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
   if (origin.mode) setRequestMode(origin.mode);
@@ -3194,7 +3326,9 @@ function replayWorkNavigation() {
   if (returning) { void restoreWorkOrigin(back); return true; }
   if (targetOrigin && targetOrigin.targetUrl === location.href) {
     activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
-    if ($("#board-dialog").open) $("#board-dialog").close();
+    // A claim record's destination keeps the board open; every other
+    // record destination starts with it closed.
+    if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
     if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
     else revealLocationHash();
@@ -3259,7 +3393,30 @@ function revealEvent(id, requireExisting = false) {
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
+// Remember a message deep-link target the held history does not contain
+// yet, with the navigation context at arm time, so the retry can tell a
+// still-waiting cold load apart from a user who has since gone elsewhere.
+function pendHashReveal(messageId) {
+  pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
+    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+}
+// Runs on every snapshot. The pending reveal fires only when this
+// snapshot first holds the target and nothing about the navigation
+// context changed since it was armed; any change cancels it for good.
+function retryPendingHashReveal() {
+  const pending = pendingHashReveal;
+  if (!pending) return;
+  if (!state || client.generation !== pending.generation
+    || (state.room?.id ?? session?.roomId) !== pending.roomId
+    || location.hash !== pending.hash
+    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId
+    || readerScrollAt !== pending.readerScrollAt) { pendingHashReveal = null; return; }
+  if (busy || !conversation?.byId.has(pending.messageId)) return;
+  pendingHashReveal = null;
+  revealMessage(pending.messageId);
+}
 function revealLocationHash() {
+  if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash) return;
   const hash = location.hash;
   // Account destinations also work before any room has been opened.
@@ -3301,7 +3458,15 @@ function revealLocationHash() {
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
-    if (id !== null) ({ message: revealMessage, work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
+    if (id !== null && current[1] === "message") {
+      // Held already: reveal now (and drop any pending twin). Not held
+      // yet — an older message still behind the background fill: pend it
+      // for the first snapshot that holds it instead of dropping it.
+      if (conversation.byId.has(id)) { pendingHashReveal = null; revealMessage(id); }
+      else pendHashReveal(id);
+      return;
+    }
+    if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
   const rawWorkId = decodeFragment(hash.slice(1));
@@ -3319,6 +3484,7 @@ function revealLocationHash() {
       : prefix === "#member-" ? Boolean(ownMember(state.members, id))
       : state.eventLog.some(event => event.id === id);
     if (id !== null && exists) { reveal(id); return; }
+    if (id !== null && prefix === "#message-") pendHashReveal(id);
     break;
   }
 }
@@ -3502,7 +3668,7 @@ function workCard(i, now, drafts, messages = []) {
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
-`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
+`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...(draft.body ?? "")].slice(0, 100).join(""))}${[...(draft.body ?? "")].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const staleBasis = latestDraft?.proposal && latestDraft.proposal.basisRevision < i.revision ? latestDraft.proposal.basisRevision : null;
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
@@ -3537,6 +3703,10 @@ function timelineWorkEntries() {
   for (let index = state.messages.length - 1; index >= 0; index--) {
     const message = state.messages[index];
     if (!message.workItemId || !message.proposal) continue;
+    // A deleted or redacted draft keeps its proposal context but its body is
+    // tombstoned to null: it is not a draft anymore, so it must neither count
+    // toward "Drafts (n)" nor be rendered (mirrors pinnedMessages' filter).
+    if (message.deletedAt || message.body == null) continue;
     if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
     draftsByWork.get(message.workItemId).push(message);
   }
@@ -3812,7 +3982,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
-  openWork: id => revealWork(id), openMessage: id => revealMessage(id),
+  openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
   getContribution: () => assistantDraft, endContribution: () => switchThread(currentThreadId),
   startContribution: (sourceMessageId, intent) => {
     const source = conversation?.byId.get(sourceMessageId);
@@ -3995,6 +4165,9 @@ $("#message-form").addEventListener("submit", e => {
   // Preserve the exact legacy payload, including an omitted default channel.
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+  const sendingCommand = pendingMessage.command;
+  const sharedRequest = Boolean(askRoom || humanExperience.hasSubmission(sendingCommand));
+  const stagedFileIds = composerFiles.filter(file => file.status === "staged").map(file => file.id);
   saveComposer();
   const generation = client.generation, draftKey = composerKey();
   submit(e.currentTarget, async () => {
@@ -4002,10 +4175,15 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
     try {
-      await client.send(pendingMessage.command);
+      if (sharedRequest) {
+        await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
+        if (generation === client.generation && state) maybeShowGuestUpgradeHint();
+        return;
+      }
+      await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
+      throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
     await commitComposerFiles(data.messageId);
@@ -4018,7 +4196,6 @@ $("#message-form").addEventListener("submit", e => {
       assistantDraft = null; restoreComposer(drafts.get(composerKey()));
       updateReply(); syncRequestComposer(); persistDrafts();
     }
-    await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
@@ -4939,7 +5116,11 @@ $("#main").addEventListener("click", e => {
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
-    navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
+    // #3795: a claim record link (marked data-open-claim), and any record id
+    // the legacy workItems projection does not hold, resolves to the board
+    // claim's record instead of the work timeline.
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork]) void navigateClaimRecord(link.dataset.openWork);
+    else navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
     // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
@@ -6385,6 +6566,13 @@ $("#action-form").addEventListener("submit", e => {
       }
       // A rationale can settle after the result changed. Never silently rebase
       // its verdict; uncertain decision retries still reconcile the original.
+      // The gate below reads current state, so re-read first: a send() whose
+      // receipt was applied as a local delta (delta sync) settles without the
+      // snapshot read that used to guarantee this freshness.
+      if (entry.publishRationale && !entry.decisionDispatched) {
+        await client.refresh();
+        if (!owns()) return;
+      }
       if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
         entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
       }
@@ -7338,6 +7526,28 @@ $("#contribution-open").addEventListener("click", () => {
   if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
   else revealWork(step.id);
 });
+// #3687: arrivals used to surface only as the generic catch-up ping in
+// #rb-status, which names nothing and, being unchanged by a second arrival,
+// announces nothing at all. Diff each incoming log against the event ids this
+// session has already seen and speak every fresh claim, completion, review
+// and decision by another member in the dedicated polite region. A presence
+// boundary (first snapshot, room or generation change) only seeds the seen
+// set: history is not news, and the region restarts empty for the new room.
+let seenLogEventIds = new Set();
+function announceWorkArrivals(eventLog, boundary) {
+  const previous = seenLogEventIds;
+  seenLogEventIds = new Set(eventLog.map(event => event.id));
+  const region = $("#work-announcement");
+  if (boundary) { region.textContent = ""; return; }
+  const fresh = eventLog.filter(event => !previous.has(event.id));
+  if (!fresh.length) return;
+  const text = workArrivalAnnouncements(fresh, {
+    selfId: session?.member?.id,
+    actorName: id => displayName(id),
+    titleFor: id => state.workItems[id]?.title ?? null,
+  });
+  if (text) region.textContent = text;
+}
 function renderReturnBrief({ timelineRendered = false } = {}) {
   clearTimeout(returnClock); returnClock = null;
   const now = Date.now();
@@ -7798,6 +8008,7 @@ const ready = (async () => {
       import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
         .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
       navigationBoardReady = () => controller.whenReady();
+      navigationBoardRevealClaim = id => controller.revealClaim(id);
       return controller;
     },
     // JDOT-COH-NAV end
@@ -7805,12 +8016,25 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
   // JDOT-COH-NAV end
-  const openBoard = () => {
+  // #3688: the native <dialog> close returns focus to whatever was focused
+  // before showModal() — for the board that chain can bottom out at <body>
+  // (palette opened from body focus, or the recorded element removed while
+  // the board was open), stranding keyboard users at the top of the page.
+  // Remember the opener at open time like closeInvitation/closeWorkForm do,
+  // and restore it on close with a stable fallback anchor.
+  let boardOpener = null;
+  const boardAnchorUsable = node => node?.isConnected && node !== document.body && !node.disabled
+    && !node.closest("[hidden]") && !node.closest("dialog") && node.getClientRects().length > 0;
+  const openBoard = (openerHint = null) => {
     // JDOT-COH-NAV begin
     navigationBoardEpoch++;
     // JDOT-COH-NAV end
     const dialog = $("#board-dialog");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      const hinted = openerHint instanceof Element ? openerHint : null;
+      boardOpener = [hinted, document.activeElement].find(boardAnchorUsable) ?? null;
+      dialog.showModal();
+    }
     $("#board-panel").open = true;
     board.sync();
   };
@@ -7818,6 +8042,24 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
   $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
+  $("#board-dialog").addEventListener("close", () => {
+    const opener = boardOpener; boardOpener = null;
+    const closingEpoch = navigationBoardEpoch;
+    setTimeout(() => {
+      // A reopen or a navigation epoch change owns focus now.
+      if ($("#board-dialog").open || closingEpoch !== navigationBoardEpoch) return;
+      // The close event is delivered after the closing flow has run, so by
+      // now a flow that closed the board to show something (work navigation
+      // focuses the record it reveals, a room switch focuses its anchor)
+      // has already placed focus deliberately. Only stranded focus is ours
+      // to repair: the body, or an element left inside the closed dialog.
+      // Anything focused outside the dialog is owned by that flow.
+      const active = document.activeElement;
+      if (active && active !== document.body && !$("#board-dialog").contains(active)) return;
+      const target = [opener, $("#tasks-board-open"), $("#conversation-title")].find(boardAnchorUsable);
+      target?.focus({ preventScroll: true });
+    }, 0);
+  });
   $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
   // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
@@ -7826,7 +8068,7 @@ const ready = (async () => {
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
-  chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
+  chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;

@@ -17,6 +17,7 @@ import { ownMember } from "../src/events.js";
 import { getTier } from "./autonomy-tiers.mjs";
 import { claimUpdatedAt } from "./work-claims.mjs";
 import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
+import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 export const FLEET_STATES = Object.freeze(["removed", "halted", "read_only", "over_budget", "paused", "waiting_for_you", "stuck", "working", "idle"]);
 const ACTIVE_CLAIM_STATES = new Set(["claimed", "in_progress", "blocked"]);
@@ -46,8 +47,13 @@ function lastEventsByActor(db, roomId, actorIds) {
   const latest = db.prepare(`SELECT json_extract(body,'$.actorId') AS actor, max(sequence) AS seq FROM events
     WHERE room_id=? GROUP BY actor`).all(roomId).filter(row => actorIds.includes(row.actor));
   if (!latest.length) return new Map();
-  const rows = db.prepare(`SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.at') AS at
-    FROM events WHERE room_id=? AND sequence IN (${latest.map(() => "?").join(",")})`).all(roomId, ...latest.map(row => row.seq));
+  // One sequence per agent that has acted: chunked, because the Worker's SQL
+  // takes at most 100 binds and a long-lived room passes 99 agents.
+  const rows = [];
+  for (const chunk of sqlChunks(latest.map(row => row.seq))) {
+    rows.push(...db.prepare(`SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.at') AS at
+      FROM events WHERE room_id=? AND sequence IN (${sqlPlaceholders(chunk)})`).all(roomId, ...chunk));
+  }
   const bySeq = new Map(rows.map(row => [row.seq, row]));
   return new Map(latest.map(row => [row.actor, bySeq.get(row.seq) ?? null]));
 }
