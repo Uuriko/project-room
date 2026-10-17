@@ -77,17 +77,32 @@ function composedPath(value) {
   catch { return value; }
 }
 
+// Index of known paths by composed spelling, so an NFD specifier resolves to
+// the NFC known path. Built once per `known` Set and cached: callers must not
+// mutate `known` after the first call (buildReverseGraph never does). Without
+// the cache every resolveSpecifier call re-scans all of `known`, which turned
+// the real-repo graph build from ~8s into ~33s.
+const composedIndexCache = new WeakMap();
+function composedIndex(known) {
+  let index = composedIndexCache.get(known);
+  if (!index) {
+    index = new Map();
+    for (const file of known) {
+      const key = composedPath(file);
+      if (!index.has(key)) index.set(key, file);
+    }
+    composedIndexCache.set(known, index);
+  }
+  return index;
+}
+
 // Resolve a relative specifier from a repo-relative file to a repo-relative
 // path in `known` (a Set). Bare and node: specifiers return null.
 export function resolveSpecifier(fromFile, spec, known) {
   if (!spec.startsWith("./") && !spec.startsWith("../")) return null;
   const base = posix.normalize(posix.join(posix.dirname(fromFile), spec.split(/[?#]/)[0]));
   if (base.startsWith("../")) return null;
-  const byComposed = new Map();
-  for (const file of known) {
-    const key = composedPath(file);
-    if (!byComposed.has(key)) byComposed.set(key, file);
-  }
+  const byComposed = composedIndex(known);
   for (const ext of RESOLVE_EXT) {
     const candidate = base + ext;
     if (known.has(candidate)) return candidate;
@@ -117,17 +132,6 @@ export function buildReverseGraph(files, read, known = new Set(files)) {
 }
 
 // BFS from changed files over reverse edges; returns Map<test, {distance, via}>.
-function importersOf(reverse, node) {
-  const found = new Set(reverse.get(node) ?? []);
-  const want = composedPath(node);
-  if (found.size && want === node) return found;
-  for (const [key, importers] of reverse ?? []) {
-    if (key === node || composedPath(key) !== want) continue;
-    for (const importer of importers) found.add(importer);
-  }
-  return found;
-}
-
 export function relatedTests({ changed, tests, reverse, read }) {
   const testSet = new Set(tests);
   const testByComposed = new Map();
@@ -136,6 +140,21 @@ export function relatedTests({ changed, tests, reverse, read }) {
     if (!testByComposed.has(key)) testByComposed.set(key, test);
   }
   const listedTest = file => testSet.has(file) ? file : testByComposed.get(composedPath(file));
+  // Reverse edges keyed by composed path: an NFC changed path finds importers
+  // recorded under an NFD spelling and vice versa. Built once here instead of
+  // scanning the whole graph per BFS node.
+  const reverseByComposed = new Map();
+  for (const [key, importers] of reverse ?? []) {
+    const composed = composedPath(key);
+    let set = reverseByComposed.get(composed);
+    if (!set) reverseByComposed.set(composed, (set = new Set()));
+    for (const importer of importers) set.add(importer);
+  }
+  const importersOf = (node) => {
+    const found = new Set(reverse.get(node) ?? []);
+    for (const importer of reverseByComposed.get(composedPath(node)) ?? []) found.add(importer);
+    return found;
+  };
   const hit = new Map();
   const note = (test, distance, via) => {
     const prev = hit.get(test);
@@ -149,7 +168,7 @@ export function relatedTests({ changed, tests, reverse, read }) {
     for (let depth = 1; frontier.length; depth++) {
       const next = [];
       for (const node of frontier) {
-        for (const importer of importersOf(reverse, node)) {
+        for (const importer of importersOf(node)) {
           if (seen.has(importer)) continue;
           seen.add(importer);
           const listed = listedTest(importer);
