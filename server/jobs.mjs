@@ -42,6 +42,17 @@ function read(store, sql, params = []) {
   catch { return null; }
 }
 
+// Status-blind on purpose (#3927, the narrowed R1 invariant): ANY
+// journal row — pending, imported or failed — keeps the channel-drain
+// job enabled. Outcome consumption depends on it: a completed drain's
+// outcome is reported by the NEXT drain tick, and journal rows leave
+// 'pending' only by UPDATE to a terminal status (they are never
+// deleted outside account deletion), so a fully drained queue still
+// gets its reporting tick. Do not make this status-aware, and do not
+// start deleting terminal rows, without also gating eligibility on
+// "an unconsumed drain outcome exists" — that combination strands a
+// completed outcome in Durable Object memory with no tick ever
+// reporting it (pinned by tests/job-heartbeat.test.js).
 function channelPending(store) {
   return Boolean(read(store, "SELECT 1 AS hit FROM pending_channel_updates LIMIT 1")?.hit);
 }

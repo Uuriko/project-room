@@ -1,6 +1,8 @@
 // Local probe. Workerd decides when ProjectRoom.alarm runs and whether a
 // thrown alarm is still armed afterwards.
 import worker, { ProjectRoom } from "./room.mjs";
+import { CHANNEL_DRAIN_INFLIGHT_KEY } from "./channel-drain-tick.mjs";
+import { runCronJobs } from "./job-heartbeat.mjs";
 
 export class JobsProbe extends ProjectRoom {
   constructor(ctx, env) {
@@ -82,6 +84,43 @@ export class JobsProbe extends ProjectRoom {
   async runAlarm() {
     await this.alarm();
   }
+  // #3927: seed one channel connection + journal row so the drain gate
+  // opens. The account goes through the store API because the journal's
+  // foreign keys are enforced in DO SQLite (PRAGMA cannot relax them).
+  seedChannelDrain() {
+    this.store.createAccount("acct_drain_probe");
+    this.store.db.prepare("INSERT INTO private_email_connections (account_id, id, provider, mailbox_id, data_json) VALUES (?, ?, ?, ?, ?)")
+      .run("acct_drain_probe", "conn_drain_probe", "telegram-bot", "chat_drain_probe", "{}");
+    this.store.db.prepare("INSERT INTO pending_channel_updates (account_id, connection_id, update_id, received_at, payload, status, attempts, last_error, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run("acct_drain_probe", "conn_drain_probe", 1, Date.now(), "{}", "pending", 0, null, Date.now());
+    return { seeded: true };
+  }
+  // #3927 R3: an evicted instance's residue — a durable inflight stamp
+  // with cold in-memory fields. Miniflare cannot evict on demand, so the
+  // probe writes the stamp and clears the fields directly.
+  async seedOrphanDrainStamp(ageMs) {
+    const stamp = Date.now() - ageMs;
+    await this.ctx.storage.put(CHANNEL_DRAIN_INFLIGHT_KEY, stamp);
+    this.channelDrainInflight = false;
+    this.channelDrainInflightSince = null;
+    return { stamp };
+  }
+  runDrainTick() { return this.drainChannelBacklog(); }
+  // One drain cron tick composed exactly as #runDueJobs composes it:
+  // run the job, then record the outcomes.
+  async runDrainTickAndRecord() {
+    const outcomes = await runCronJobs({ "channel-drain": () => this.drainChannelBacklog() }, { log: () => {} });
+    await this.recordCronTick(outcomes);
+    return outcomes.map(outcome => ({ job: outcome.job, ok: outcome.ok, unobserved: outcome.unobserved === true }));
+  }
+  async readDrainState() {
+    return {
+      outcomeAt: this.channelDrainOutcome?.at ?? null,
+      heldAt: this.channelDrainOutcomeHeld?.at ?? null,
+      inflight: this.channelDrainInflight === true,
+      stamp: await this.ctx.storage.get(CHANNEL_DRAIN_INFLIGHT_KEY) ?? null
+    };
+  }
 }
 
 function room(env, request) {
@@ -116,6 +155,21 @@ export default {
     }
     if (url.pathname === "/probe/delivery") {
       return Response.json(await room(env, request).readDelivery(url.searchParams.get("id")));
+    }
+    if (url.pathname === "/probe/seed-drain") {
+      return Response.json(await room(env, request).seedChannelDrain());
+    }
+    if (url.pathname === "/probe/seed-orphan") {
+      return Response.json(await room(env, request).seedOrphanDrainStamp(Number(url.searchParams.get("ageMs") || "0")));
+    }
+    if (url.pathname === "/probe/drain-tick") {
+      return Response.json(await room(env, request).runDrainTick());
+    }
+    if (url.pathname === "/probe/drain-tick-record") {
+      return Response.json(await room(env, request).runDrainTickAndRecord());
+    }
+    if (url.pathname === "/probe/drain-state") {
+      return Response.json(await room(env, request).readDrainState());
     }
     if (url.pathname === "/probe/alarm") {
       const target = room(env, request);

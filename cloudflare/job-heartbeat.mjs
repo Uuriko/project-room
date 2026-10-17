@@ -122,7 +122,14 @@ export async function runCronJobs(runners, {
       const durationMs = now() - startedAt;
       console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: !failure, durationMs }));
       if (failure) log(`[${name}] cron tick reported failure: ${failure}`);
-      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result), failure: failure ? sanitizeFailureDetail(result?.failureDetail) : null });
+      // A result may declare itself unobserved (#3927 R2): the tick ran
+      // but saw nothing that grades the job's health — the channel drain
+      // starting a background drain, or finding one still inflight, with
+      // no completed outcome consumed. Only the drain declares it today;
+      // no other job's result carries the field.
+      const unobserved = !failure && (result?.unobserved === 1 || result?.unobserved === true);
+      outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result), failure: failure ? sanitizeFailureDetail(result?.failureDetail) : null,
+        ...(unobserved ? { unobserved: true } : {}) });
     } catch (error) {
       const message = errorText(job, error);
       const durationMs = now() - startedAt;
@@ -141,8 +148,16 @@ export function applyOutcomes(previous, outcomes) {
     if (!outcome || !JOBS.has(outcome.job)) continue;
     const prior = next[outcome.job] ?? {};
     const at = Number.isFinite(outcome.at) ? outcome.at : Date.now();
+    // An unobserved success (#3927 R2) records the run — lastRunAt, the
+    // summary, the duration — and nothing else: it carries no evidence
+    // about the job's health, so it must neither erase a recorded
+    // failure (consecutiveFailures, lastError, lastFailure all stand)
+    // nor advance the success clock (lastSuccessAt). Only an outcome
+    // that observed the work itself may do either.
     next[outcome.job] = outcome.ok
-      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
+      ? outcome.unobserved
+        ? { ...prior, lastRunAt: at, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at }
+        : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
         lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure) };
   }
