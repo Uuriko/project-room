@@ -188,6 +188,17 @@ import {
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
+// The Worker's room database (Durable Object SQL) rejects a statement with
+// more than 100 bound values ("too many SQL variables"); Node's SQLite
+// allows 32766, so a list that grows with input passes the Node suite and
+// fails on prod (the r38 patrol, the r39 restore look-up). Set
+// ROOM_SQL_BIND_LIMIT=100 to make a Node store enforce the Worker's limit.
+// Read per open, so a test can set it before constructing a store.
+export function nodeSqlLimits(env = globalThis.process?.env ?? {}) {
+  const limit = Number(env.ROOM_SQL_BIND_LIMIT);
+  return Number.isInteger(limit) && limit > 0 ? { limits: { variableNumber: limit } } : {};
+}
+
 // ServiceError is defined in server/service-error.mjs and re-exported by
 // store.mjs; see the import at the top of this file.
 // Exhausted or unwritable storage (disk full, quota, read-only file or
@@ -1381,7 +1392,7 @@ export class RoomStore {
     this._appendListeners = new Set();
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
-    this.db = database ?? new DatabaseSync(filename, { readOnly });
+    this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
     this.storagePlatform = storagePlatform;
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
