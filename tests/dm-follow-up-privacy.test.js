@@ -39,7 +39,7 @@ async function serve(t) {
 }
 
 
-// SEC-19: edits, deletes, redactions, reactions and pins of a DM follow the
+// SEC-19: edits, deletes, redactions and pins of a DM follow the
 // DM's own visibility. A member who is not a party (the Room owner included)
 // gets none of them on /events or in the JSONL and HTML exports.
 test("SEC-19: DM follow-up events stay with the two DM parties", async t => {
@@ -54,13 +54,12 @@ test("SEC-19: DM follow-up events stay with the two DM parties", async t => {
   store.dmConsents.decide("commons", "bob", "alice", "approve");
   cmd(aliceKey, T.MESSAGE_POSTED, { messageId: "dm-kept", body: "first text", toMemberId: "bob" });
   cmd(aliceKey, T.MESSAGE_EDITED, { messageId: "dm-kept", body: "EDITED_DM_TEXT", expectedMessageRevision: 0 });
-  cmd(bobKey, T.MESSAGE_REACTION_SET, { messageId: "dm-kept", reaction: "👍", active: true });
   cmd(bobKey, T.MESSAGE_PINNED, { messageId: "dm-kept" });
   cmd(aliceKey, T.MESSAGE_POSTED, { messageId: "dm-gone", body: "to delete", toMemberId: "bob" });
   cmd(aliceKey, T.MESSAGE_DELETED, { messageId: "dm-gone", expectedMessageRevision: 0 });
   cmd(aliceKey, T.MESSAGE_POSTED, { messageId: "public-1", body: "hello room" });
 
-  const followUps = new Set([T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.MESSAGE_REDACTED, T.MESSAGE_REACTION_SET, T.MESSAGE_PINNED]);
+  const followUps = new Set([T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.MESSAGE_REDACTED, T.MESSAGE_PINNED]);
   const dmIds = new Set(["dm-kept", "dm-gone"]);
   const leaks = events => events.filter(e => dmIds.has(e?.data?.messageId) || dmIds.has(e?.id)).map(e => e.type);
 

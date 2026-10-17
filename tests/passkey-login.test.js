@@ -311,6 +311,32 @@ test("cborDecode handles the types WebAuthn needs", () => {
   assert.throws(() => cborDecode(Buffer.from([0x42, 0x01])), TypeError); // truncated
 });
 
+test("cborDecode rejects truncated length prefixes with TypeError", () => {
+  // A single-byte length prefix (info 24) cut off at the end of input must
+  // throw — it previously decoded to `undefined` (uint) or an empty buffer
+  // (byte/text string), silently producing garbage instead of failing.
+  assert.throws(() => cborDecode(Buffer.from([0x18])), TypeError); // uint, 1-byte len, truncated
+  assert.throws(() => cborDecode(Buffer.from([0x58])), TypeError); // byte string, 1-byte len, truncated
+  assert.throws(() => cborDecode(Buffer.from([0x78])), TypeError); // text string, 1-byte len, truncated
+  assert.throws(() => cborDecode(Buffer.from([0x98])), TypeError); // array, 1-byte len, truncated
+  assert.throws(() => cborDecode(Buffer.from([0xb8])), TypeError); // map, 1-byte len, truncated
+  // Multi-byte length prefixes cut off mid-length must also throw TypeError
+  // (not RangeError from the Buffer read) per the documented contract.
+  assert.throws(() => cborDecode(Buffer.from([0x19])), TypeError);
+  assert.throws(() => cborDecode(Buffer.from([0x19, 0x01])), TypeError);
+  assert.throws(() => cborDecode(Buffer.from([0x1a, 0x00, 0x00])), TypeError);
+  assert.throws(() => cborDecode(Buffer.from([0x1b, 0x00, 0x00, 0x00, 0x00])), TypeError);
+  // Truncated length nested inside a structure: the map value must throw,
+  // not decode to undefined.
+  const nestedUint = Buffer.concat([Buffer.from([0xa1]), cborEncode("n"), Buffer.from([0x18])]);
+  assert.throws(() => cborDecode(nestedUint), TypeError);
+  const nestedBytes = Buffer.concat([Buffer.from([0xa1]), cborEncode("b"), Buffer.from([0x58])]);
+  assert.throws(() => cborDecode(nestedBytes), TypeError);
+  // Valid inputs with explicit length prefixes still decode.
+  assert.equal(cborDecode(Buffer.from([0x18, 0x2a])), 42);
+  assert.deepEqual(cborDecode(Buffer.from([0x58, 0x02, 0x01, 0x02])), Buffer.from([1, 2]));
+});
+
 test("parseAuthData parses flags, counter, and attested data", () => {
   const credId = randomBytes(16);
   const key = makeKey();
