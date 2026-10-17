@@ -1,5 +1,6 @@
 // AX next-step for agents. Existing { error.code, error.message } stays.
 import { createHash, randomBytes } from "node:crypto";
+import { uiText } from "./strings.js";
 export const AGENT_ERRORS = "code/message + status/reason/hint/next";
 
 const tool = (name, args) => args ? { tool: name, arguments: args } : { tool: name };
@@ -324,6 +325,7 @@ const AX_NAMED_RECOVERIES = {
   magic_account_mismatch: ["This browser is signed in to a different account. Sign out before using a magic link for another email.", "Sign out, then use the magic link."],
   managed_agent: ["Replace this agent's key through its room connection, not here.", "Rotate the key through the agent's room connection."],
   member_inactive: ["This member's access has ended; its pause row is inert. Nothing to change here.", "Treat it as done; the member's access has ended."],
+  member_paused: [uiText("agentError.memberPaused.hint"), uiText("agentError.memberPaused.next")],
   membership_conflict: ["That Room member already exists. Use the existing membership; do not create a duplicate.", "Use the existing membership; do not create a duplicate."],
   message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],

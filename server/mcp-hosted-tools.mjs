@@ -275,7 +275,7 @@ export const hostedWakeTools = [
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },
     reason: { type: ["string", "null"], maxLength: 200, description: "Optional pause note. Omit or send null." }
   }, ["roomId"]), false),
-  tool("wake_resume", "Resume this member's queued wakes. Same call as POST /api/rooms/:roomId/agent-pause with action resume. requestId is optional and is minted by the server when omitted. memberId defaults to this identity. reason is accepted and optional. An identity secret resumes its own member row.", schema({
+  tool("wake_resume", "Resume this member's queued wakes. Same call as POST /api/rooms/:roomId/agent-pause with action resume. requestId is optional and is minted by the server when omitted. memberId defaults to this identity. reason is accepted and optional. An identity secret resumes its own member row. A pause set by the room owner or manage members is lifted only by them (403 wake_pause_held_by_owner otherwise); a pause the member set itself stays self-resumable.", schema({
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id. Defaults to this identity. An identity secret can resume only its own member row." },
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },

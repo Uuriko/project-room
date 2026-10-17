@@ -433,6 +433,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
   "operator_actions",
+  // wake_queue_pause_by (R327-1: who set a member's wake pause) is purely
+  // additive and intentionally NOT fenced, same as wake_queue_pause's sibling
+  // registries: the patch ships it as a separate schema string (the
+  // guest_selfserve pattern) so stores from the pre-pause-by window verify
+  // all-or-nothing under allowAbsent without forcing operator reconciliation,
+  // and WakeQueue.verifySchema() on open is the integrity gate.
+  "wake_queue_pause_by",
   // squads (plan-squads): named groups with goal, roster, and thread channel.
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the

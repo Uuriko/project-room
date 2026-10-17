@@ -61,7 +61,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
-import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
+import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
@@ -1090,6 +1090,7 @@ function roomSchemaStamp() {
     referralInviteSchema, referralSchema,
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
+    wakeQueuePauseBySchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
@@ -1324,6 +1325,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.wakeQueue.verifySchema({ allowAbsent: true });
         this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
+        this.wakeQueue.verifyPauseBySchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
@@ -1570,6 +1572,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(wakeQueueSchema);
       // The pause surface (W4-48) is purely additive as well.
       this.db.exec(wakeQueuePauseSchema);
+      // R327-1: who set each pause, as a separate additive side table (the
+      // guest_selfserve all-or-nothing pattern; legacy stores keep verifying).
+      this.db.exec(wakeQueuePauseBySchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
@@ -1864,6 +1869,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
+      this.wakeQueue.verifyPauseBySchema();
       this.attention.verifySchema();
       this.moderation.verifySchema();
       this.bountyEscrow.verifySchema(); // Escrowed bounties: additive at v36, verified like the other journals.
