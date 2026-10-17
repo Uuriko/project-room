@@ -29,6 +29,21 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 const check = (condition, message) => { if (!condition) fail(422, 'invalid_public_work', message); };
 const identifier = value => validId(value);
 const hash = text => createHash('sha256').update(text).digest('hex');
+// #3606: a claimable-first browse walk carries a versioned cursor,
+// `w1:<version>:<lastTaskId>`, where <version> fingerprints the visible
+// board — every task's id and claimability, in offer_id order — as the
+// walk began. A later page resumes only when the fingerprint still
+// matches, which proves the claimable-first ordering is identical to the
+// walk's own; otherwise the walk restarts explicitly (see list()). A task
+// id that literally matches this shape is read as a walk cursor, never as
+// a bare resume position.
+const WALK_CURSOR = /^w1:([0-9a-f]{32}):(.+)$/;
+const parseWalkCursor = value => {
+  if (typeof value !== 'string') return null;
+  const match = WALK_CURSOR.exec(value);
+  return match && identifier(match[2]) ? { version: match[1], lastTaskId: match[2] } : null;
+};
+const walkVersionOf = tasks => hash(tasks.map(task => `${task.taskId}:${task.claimable ? 1 : 0}`).join('\n')).slice(0, 32);
 const normalize = sql => sql?.trim().replace(/;$/, '').replace(/IF NOT EXISTS /g, '').replace(/\s+/g, ' ');
 const shape = (input, required, optional = []) => {
   check(input && typeof input === 'object' && !Array.isArray(input)
@@ -255,12 +270,17 @@ export class PublicWorkClaims {
     });
   }
   // claimableFirst defaults to claimable-first for browse callers (#2988).
+  // Browse walks paginate with the versioned walk cursor (#3606, below).
   // match() opts out: its `after` cursor is an offer_id-order scan position
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
   list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
-    check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
+    const walk = parseWalkCursor(after);
+    check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after) || walk), 'Invalid page');
     check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    // A walk cursor names its last returned task in every mode; only the
+    // claimable-first browse walk also verifies the cursor's version.
+    const resumeAfter = walk ? walk.lastTaskId : after;
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
@@ -274,21 +294,51 @@ export class PublicWorkClaims {
         .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
       if (claimable) tasks = tasks.filter(task => task.claimable);
+      if (claimableFirst && !claimable) {
+        // Versioned browse walk (#3606). The claimable-first ordering is a
+        // function of the board's claim states, which are exactly what
+        // changes between pages on a live board — resuming a bare offer_id
+        // in the recomputed ordering repeats tasks and can end the walk
+        // while claimable tasks were never returned. So the walk's cursor
+        // carries the board fingerprint from walk start: a page resumes
+        // only when the fingerprint still matches (the ordering is then
+        // identical to the walk's own, and the resume is exactly-once);
+        // on any mismatch — or a foreign/bare cursor, which carries no
+        // fingerprint — the walk restarts from the first page with
+        // `restarted: true`, so the caller discards its earlier pages
+        // instead of silently skipping or repeating work. A task that
+        // stayed visible for a whole (re)started walk is returned exactly
+        // once; claimableCount is always the live count.
+        const version = walkVersionOf(tasks);
+        const ordered = [...tasks.filter(task => task.claimable), ...tasks.filter(task => !task.claimable)];
+        let start = 0, restarted = false;
+        if (after !== '') {
+          const index = walk && walk.version === version
+            ? ordered.findIndex(task => task.taskId === walk.lastTaskId) : -1;
+          if (index >= 0) start = index + 1;
+          else restarted = true;
+        }
+        const page = ordered.slice(start, start + limit);
+        return { tasks: page, claimableCount, ...(restarted ? { restarted: true } : {}),
+          nextCursor: start + limit < ordered.length ? `w1:${version}:${page.at(-1).taskId}` : null };
+      }
       if (claimableFirst) {
         // Stable claimable-first order; rows arrive in offer_id order, which
         // is the deterministic tiebreak inside each claimability group.
         tasks = [...tasks.filter(task => task.claimable), ...tasks.filter(task => !task.claimable)];
       }
-      // The cursor is the last returned task's offer_id; resuming finds that
-      // id in the (recomputed) ordering, so a page walk over a stable set
-      // visits each task exactly once, claimable tasks first. An unknown
-      // cursor falls back to the old offer_id boundary.
+      // The remaining modes order by offer_id alone (the claimable filter's
+      // single group, or match()'s scan), which claim flips cannot reorder:
+      // the cursor is the last returned task's offer_id, resuming finds that
+      // id in the ordering, and an unknown cursor falls back to the old
+      // offer_id boundary — a page walk visits each task that stays in the
+      // set exactly once.
       let start = 0;
-      if (after !== '') {
-        const index = tasks.findIndex(task => task.taskId === after);
+      if (resumeAfter !== '') {
+        const index = tasks.findIndex(task => task.taskId === resumeAfter);
         if (index >= 0) start = index + 1;
         else {
-          const fallback = tasks.findIndex(task => task.taskId > after);
+          const fallback = tasks.findIndex(task => task.taskId > resumeAfter);
           start = fallback < 0 ? tasks.length : fallback;
         }
       }

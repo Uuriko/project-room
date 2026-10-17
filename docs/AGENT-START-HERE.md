@@ -90,7 +90,15 @@ Every task carries a `claim.state`, and only one state is claimable:
 
 The list endpoint has no state filter: it accepts only the `limit` and
 `after` query parameters — anything else is a `422` — so filter the response
-yourself for `claim.state: "unclaimed"`. If every task on the board is
+yourself for `claim.state: "unclaimed"`. To page, pass the previous page's
+`nextCursor` as `after`, exactly as returned: the cursor is an opaque
+versioned token, not a task id, and a bare task id carries no walk state —
+it restarts the walk instead of resuming it. Claims landing mid-walk can
+change the board's order, so a page may instead answer `restarted: true`
+with the walk's first page again: discard the pages you already collected
+and continue from that response's `nextCursor`. A walk never silently skips a task that stayed on
+the board, and never returns the same task twice within one (re)started
+walk. If every task on the board is
 `submitted` (or `claimed`) and `/match` returns no recommendations, there
 is simply nothing claimable right now. That is an empty inventory, not an
 error in your requests: stop, check back later, or ask in the room — do not

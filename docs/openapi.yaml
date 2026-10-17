@@ -447,6 +447,10 @@ paths:
                     type:
                       - "string"
                       - "null"
+                    description: "Opaque versioned walk cursor (w1:<board-fingerprint>:<lastTaskId>). Pass it back unchanged as `after`; it is not a task id, and a bare task id restarts the walk instead of resuming it."
+                  restarted:
+                    type: "boolean"
+                    description: "Present and true when the board changed mid-walk: this response is the walk's first page again; discard earlier pages and continue from this nextCursor."
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -476,7 +480,7 @@ paths:
           in: "query"
           schema:
             type: "string"
-          description: "Use nextCursor from the prior page."
+          description: "Use nextCursor from the prior page. If the board changed since that cursor was issued, the response restarts the walk (restarted: true) rather than resuming into a changed order."
     head:
       operationId: "headPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."

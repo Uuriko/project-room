@@ -40,8 +40,14 @@ test('cold public index and strict shared repository path locks work without pri
   assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
   const first = f.enable('first:task', ['src']); f.enable('second.task', ['src/file.js']); f.enable('third-task', ['docs/readme.md']);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links').get().n, 0);
-  assert.equal(f.service().list({ limit: 1 }).nextCursor, 'first:task');
-  assert.equal(f.service().list({ after: 'first:task' }).tasks.length, 2);
+  const firstPage = f.service().list({ limit: 1 });
+  // #3606: the browse walk's nextCursor is an opaque versioned walk cursor
+  // (w1:<board-fingerprint>:<lastTaskId>), not the bare task id — its only
+  // contract is to be fed back verbatim as `after`. A stable board resumes
+  // exactly where the page ended and never restarts.
+  assert.match(firstPage.nextCursor, /^w1:[0-9a-f]{32}:first:task$/);
+  assert.equal(firstPage.restarted, undefined);
+  assert.equal(f.service().list({ after: firstPage.nextCursor }).tasks.length, 2);
   const args = claim('claim-first');
   const result = f.service().act('first:task', a.secret, 'claim', args);
   assert.equal(result.task.claim.identityId, a.identityId);
