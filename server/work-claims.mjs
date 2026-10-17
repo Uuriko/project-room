@@ -1181,19 +1181,6 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
   check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
-  // #3545 fencing: a caller presenting the generation it read must still be
-  // in that round — owner identity alone cannot tell a stale round from the
-  // current one when the same agent re-claimed. Runs after the requestId
-  // replay above, so an already-landed update's retry still replays.
-  checkClaimGeneration(item, expectedClaimGeneration);
-  // #3545 lease enforcement: the machine refuses non-release verbs on a
-  // lapsed lease itself, not only when a sweep happened to run first.
-  // Release (state -> unclaimed) stays allowed — it is how a lapsed claim
-  // is given up — and releaseWork's internal pause step (pauseForRelease,
-  // never set by route layers) precedes exactly such a release.
-  if (state !== "unclaimed" && pauseForRelease !== true && isLeaseExpired(item, atMs)) {
-    fail("claim_lease_lapsed", "The current claim lease has lapsed — claim it again instead");
-  }
   // The effective review policy for this transition: the caller (route)
   // resolves the room default and passes it in; the item's own policy is
   // what the digest of record says when no override is supplied.
@@ -1250,6 +1237,21 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
     evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
   };
+  // #3545 fencing, checked after every field validation above (invalid
+  // input keeps its precedence — invariant failed-updatework-no-mutation)
+  // and after the requestId replay, so an already-landed update's retry
+  // still replays: a caller presenting the generation it read must still
+  // be in that round — owner identity alone cannot tell a stale round
+  // from the current one when the same agent re-claimed.
+  checkClaimGeneration(item, expectedClaimGeneration);
+  // #3545 lease enforcement: the machine refuses non-release verbs on a
+  // lapsed lease itself, not only when a sweep happened to run first.
+  // Release (state -> unclaimed) stays allowed — it is how a lapsed claim
+  // is given up — and releaseWork's internal pause step (pauseForRelease,
+  // never set by route layers) precedes exactly such a release.
+  if (state !== "unclaimed" && pauseForRelease !== true && isLeaseExpired(item, atMs)) {
+    fail("claim_lease_lapsed", "The current claim lease has lapsed — claim it again instead");
+  }
   // Finish step: validate the bundle against the item's contract and freeze
   // it (with its digest) onto the item. A fresh delivery clears any earlier
   // verification fact — the new bundle awaits a new verdict.
