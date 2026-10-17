@@ -53,6 +53,10 @@ if (secretScan.status !== 0) process.exit(secretScan.status || 1);
 // is named in docs/ROUTE-AUTH-TABLE.md and docs/INVITE-ONLY-CHECKLIST.md §1.
 const openRoutes = spawnSync(process.execPath, ["scripts/open-routes.mjs", "--check"], { stdio: "inherit" });
 if (openRoutes.status !== 0) process.exit(openRoutes.status || 1);
+// Registry-closure census (T-5 / OPP-015): no new unverified registries
+// beyond the shrink-only baseline pinned in the census script.
+const registryCensus = spawnSync(process.execPath, ["scripts/registry-closure-census.mjs"], { stdio: "inherit" });
+if (registryCensus.status !== 0) process.exit(registryCensus.status || 1);
 // Room Wiki gate (D2): the experience-compiler planes stay schema-valid and ordered.
 const wiki = spawnSync(process.execPath, ["scripts/check-wiki.mjs"], { stdio: "inherit" });
 if (wiki.status !== 0) process.exit(wiki.status || 1);
