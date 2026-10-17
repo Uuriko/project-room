@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   escapeHtml,
   columnOf,
+  placeClaims,
   claimUpdateText,
   collapseClaimUpdates,
   boardToolNames,
@@ -43,10 +44,17 @@ test("columnOf drops a null item and unknown states instead of guessing", () => 
 });
 
 test("columnOf lands only completions from the last week", () => {
-  const fresh = claim("fresh", { state: "done", updatedAt: iso(NOW - DAY) });
-  const stale = claim("stale", { state: "done", updatedAt: iso(NOW - 8 * DAY) });
-  assert.equal(columnOf(fresh, byId([fresh]), NOW), "landed");
-  assert.equal(columnOf(stale, byId([stale]), NOW), null);
+  for (const [updatedAt, expected] of [
+    [iso(NOW - DAY), "landed"],
+    [iso(NOW - 7 * DAY), "landed"],
+    [iso(NOW - 7 * DAY - 1), null],
+    [iso(NOW + DAY), "landed"],
+    [undefined, null],
+    ["invalid", null],
+  ]) {
+    const item = claim("done", { state: "done", updatedAt });
+    assert.equal(columnOf(item, byId([item]), NOW), expected, String(updatedAt));
+  }
 });
 
 test("columnOf prefers the newest history stamp over updatedAt", () => {
@@ -92,6 +100,30 @@ test("columnOf maps blocked/claimed/in_progress to their columns", () => {
   const progress = claim("p", { state: "in_progress", owner: "w" });
   assert.equal(columnOf(blocked, byId([blocked]), NOW), "blocked");
   assert.equal(columnOf(progress, byId([progress]), NOW), "claimed");
+});
+
+// Delivery awaits review even when no open pull request can place the card.
+// Only done claims age out of the board; lease and update dates must not hide
+// delivered evidence while its review is still pending.
+for (const [label, pullRequest] of [
+  ["no linked PR", undefined],
+  ["an open PR", { url: "https://github.com/o/r/pull/12" }],
+  ["a closed PR", { url: "https://github.com/o/r/pull/12", outcome: "closed" }],
+  ["a merged PR", { url: "https://github.com/o/r/pull/12", outcome: "merged" }],
+]) test(`placeClaims keeps delivered work in review with ${label}`, () => {
+  for (const extra of [
+    {},
+    { leaseExpiresAt: iso(NOW - DAY) },
+    { updatedAt: iso(NOW - 8 * DAY) },
+    { updatedAt: iso(NOW + DAY) },
+    { updatedAt: "invalid" },
+  ]) {
+    const item = claim("delivered", { state: "delivered", owner: "w", pullRequest, ...extra });
+    const before = structuredClone(item);
+    const columns = placeClaims([item], NOW);
+    assert.deepEqual(columns, { ready: [], claimed: [], blocked: [], review: [item], landed: [] }, JSON.stringify(extra));
+    assert.deepEqual(item, before, "placing a claim must not mutate it");
+  }
 });
 
 // --- claimUpdateText: activity feed copy ---
