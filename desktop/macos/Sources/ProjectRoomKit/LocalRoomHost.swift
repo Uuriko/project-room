@@ -64,6 +64,42 @@ public final class LocalRoomHost {
         journalURL = directory.appendingPathComponent("room-\(key).sqlite")
         lastMessage = "Ready to start · \(roomId)"
     }
+    // Save a private managed copy: selecting Mac tools must never rewrite an
+    // imported runtime shared with a terminal host or another application.
+    public func connectMacTools(executable: URL, connection: URL, allowInput: Bool) throws {
+        lock.lock(); let selected = manifest, active = pid != 0 || stopping; lock.unlock()
+        guard !active else { throw LocalToolFailure("host_already_running") }
+        guard let selected else { throw LocalToolFailure("host_not_configured") }
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw LocalToolFailure("mac_tools_unavailable") }
+        let attributes = try FileManager.default.attributesOfItem(atPath: connection.path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+            (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+            ((attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0o777) & 0o077 == 0
+        else { throw LocalToolFailure("invalid_mac_connection") }
+        let source = URL(fileURLWithPath: selected.runtimeConfig)
+        let data = try Data(contentsOf: source)
+        guard data.count <= 65536, var runtime = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LocalToolFailure("invalid_runtime_configuration")
+        }
+        runtime["macTools"] = ["command": executable.path, "connection": connection.path,
+            "inputApproval": allowInput ? "approve" : "prompt"]
+        let managed = directory.appendingPathComponent("mac-runtime-\(UUID().uuidString).json")
+        let temporary = directory.appendingPathComponent("mac-host-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        do {
+            try JSONSerialization.data(withJSONObject: runtime, options: [.sortedKeys]).write(to: managed, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: managed.path)
+            let updated = RoomHostManifest(version: 1, node: selected.node, script: selected.script,
+                runtimeConfig: managed.path, roomConnection: selected.roomConnection)
+            try JSONEncoder().encode(updated).write(to: temporary, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
+            try configure(temporary)
+        } catch { try? FileManager.default.removeItem(at: managed); throw error }
+        // Replacing this app's own generated copy does not accumulate old profiles.
+        if source.deletingLastPathComponent().standardizedFileURL.path == directory.standardizedFileURL.path && source.lastPathComponent.hasPrefix("mac-runtime-") {
+            try? FileManager.default.removeItem(at: source)
+        }
+    }
     private func spawn(_ manifest: RoomHostManifest, arguments: [String]) throws -> pid_t {
         var actions: posix_spawn_file_actions_t?, attributes: posix_spawnattr_t?
         posix_spawn_file_actions_init(&actions); posix_spawnattr_init(&attributes)
@@ -159,7 +195,7 @@ public final class LocalRoomHost {
         return value
     }
     public func snapshot() -> [String: Any] {
-        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping; lock.unlock()
+        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope; lock.unlock()
         var text = message
         if child != 0 && !isStopping {
             if let value = readStatus(child: child) {
@@ -177,6 +213,6 @@ public final class LocalRoomHost {
                 }
             } else { text = "Connecting · current status unavailable" }
         }
-        return ["configured": configured, "running": child != 0, "stopping": isStopping, "message": text]
+        return ["configured": configured, "running": child != 0, "stopping": isStopping, "message": text, "roomId": selectedScope["roomId"] ?? "", "origin": selectedScope["origin"] ?? ""]
     }
 }

@@ -138,3 +138,9 @@ attachment is created automatically. The native owner can pause tools at any tim
 
 See [the shared host setup](../../docs/CODEX-ROOM-HOST.md#native-computer-use-with-the-shared-host)
 for explicit computer-tool delegation to a dedicated Room runtime.
+
+### Connect Mac tools without editing runtime JSON
+
+After choosing an existing host configuration, stop the agent and choose **Connect Mac tools…** in My Mac. The dialog identifies the room and origin. Choose observation only or explicitly allow app control. The app writes a private managed runtime copy, preserving the dedicated profile and leaving the imported runtime unchanged. Repeated configuration replaces the previous generated copy. Enable local tools and grant the relevant macOS permissions, then start the agent.
+
+For an approval-blocked request, choose app control only if you intend to authorize it, restart the host, then resolve and resume the original request in the room. The app does not silently resume work or change global model policy. Initial host enrollment and provider sign-in still require the existing setup; this removes the separate manual Mac-tools JSON edit.

@@ -9,6 +9,7 @@ import CoreGraphics
     private let host: LocalRoomHost
     private let hostState = NSTextField(wrappingLabelWithString: "")
     private let hostToggle = NSButton(title: "Start agent", target: nil, action: nil)
+    private let macConnect = NSButton(title: "Connect Mac tools…", target: nil, action: nil)
     private let hostConnect = NSButton(title: "Connect agent…", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
     private let permissions = NSTextField(wrappingLabelWithString: "")
@@ -25,7 +26,7 @@ import CoreGraphics
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let title = NSTextField(labelWithString: "Let agents work on this Mac"); title.font = .systemFont(ofSize: 21, weight: .semibold)
         let explanation = NSTextField(wrappingLabelWithString: "Local tools can read and write files, run programs, and control apps as you. Enable them for this app session, then connect your agent. Pause stops new operations and running process groups.")
-        let scope = NSTextField(wrappingLabelWithString: "This connects local agents. Web and shared-room device access are still being built."); scope.textColor = .secondaryLabelColor
+        let scope = NSTextField(wrappingLabelWithString: "A connected room agent can use this Mac while Project Room is open. Only enable access for a room you trust."); scope.textColor = .secondaryLabelColor
         toggle.target = self; toggle.action = #selector(changeEnabled); toggle.bezelStyle = .rounded
         let setup = NSButton(title: "macOS permissions…", target:self, action:#selector(openPermissions)); setup.bezelStyle = .rounded
         let copy = NSButton(title:"Copy agent connection", target:self, action:#selector(copyConnection)); copy.bezelStyle = .rounded
@@ -33,7 +34,8 @@ import CoreGraphics
         for view in [title,explanation,state,permissions,controls,scope] { stack.addArrangedSubview(view) }
         hostConnect.target = self; hostConnect.action = #selector(connectHost); hostConnect.bezelStyle = .rounded
         hostToggle.target = self; hostToggle.action = #selector(toggleHost); hostToggle.bezelStyle = .rounded
-        let hostControls = NSStackView(views: [hostConnect, hostToggle]); hostControls.spacing = 8
+        macConnect.target = self; macConnect.action = #selector(connectMacTools); macConnect.bezelStyle = .rounded
+        let hostControls = NSStackView(views: [hostConnect, macConnect, hostToggle]); hostControls.spacing = 8
         let hostNote = NSTextField(wrappingLabelWithString: "Keep Project Room open while your agent works."); hostNote.textColor = .secondaryLabelColor
         for view in [hostState, hostControls, hostNote] { stack.addArrangedSubview(view) }
         window.contentView!.addSubview(stack)
@@ -59,6 +61,22 @@ import CoreGraphics
             self.refresh()
         }
     }
+    @objc private func connectMacTools() {
+        let selected = host.snapshot()
+        let alert = NSAlert(); alert.messageText = "Connect this Mac to your room agent"
+        alert.informativeText = "Room: \(selected["roomId"] as? String ?? "")\n\(selected["origin"] as? String ?? "")\n\nObservation lets the agent read app state and screenshots. App control also lets it type, click and scroll as you. Local tools must be enabled and macOS permissions granted. Other room members may contribute requests to this agent."
+        alert.addButton(withTitle: "Observation only"); alert.addButton(withTitle: "Allow app control"); alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .alertFirstButtonReturn || response == .alertSecondButtonReturn else { return }
+            let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")
+            do {
+                try self.host.connectMacTools(executable: executable, connection: self.connection.connectionURL,
+                    allowInput: response == .alertSecondButtonReturn)
+                self.hostIssue = "Mac tools connected. Enable local tools, then start the agent."
+            } catch { self.hostIssue = "Could not connect Mac tools. Stop the agent and check its setup, then try again." }
+            self.refresh()
+        }
+    }
     @objc private func toggleHost() {
         hostIssue = nil
         if host.snapshot()["running"] as? Bool == true { host.requestStop() }
@@ -71,6 +89,7 @@ import CoreGraphics
         hostToggle.title = stopping ? "Stopping…" : running ? "Stop agent" : "Start agent"
         hostToggle.isEnabled = agent["configured"] as? Bool == true && !stopping
         hostConnect.isEnabled = !running
+        macConnect.isEnabled = agent["configured"] as? Bool == true && !running && !stopping
 
         let snapshot = service.status(), enabled = snapshot["enabled"] as? Bool == true
         state.stringValue = enabled ? "Autonomous local tools enabled · \(snapshot["runningProcesses"]!) running" : "Local tools paused"

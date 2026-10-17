@@ -64,6 +64,37 @@ func fixture(_ name: String) throws -> (LocalRoomHost, URL) {
     let host = try LocalRoomHost(directory:dir.appendingPathComponent("managed")); try host.configure(manifest)
     return (host,dir)
 }
+let (setupHost, setupDir) = try fixture("setup")
+let sourceRuntime = setupDir.appendingPathComponent("runtime.json")
+let runtimeSettings: [String: Any] = ["command": executable, "cwd": setupDir.path,
+    "codexHome": root.appendingPathComponent("dedicated-profile").path,
+    "policy": ["approvalPolicy": "never", "sandbox": "workspace-write"]]
+try write(runtimeSettings, sourceRuntime.path)
+let originalRuntime = try Data(contentsOf: sourceRuntime)
+let nativeConnection = setupDir.appendingPathComponent("native-connection.json")
+try write(["fixture": true], nativeConnection.path)
+try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: false)
+let setupSaved = setupDir.appendingPathComponent("managed/selected-host.json")
+let observedManifest = try RoomHostManifest.read(setupSaved)
+let observedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: observedManifest.runtimeConfig))) as! [String: Any]
+check((observedRuntime["macTools"] as? [String: Any])?["inputApproval"] as? String == "prompt", "observation setup does not approve input")
+check(observedRuntime["codexHome"] as? String == runtimeSettings["codexHome"] as? String, "dedicated provider profile preserved")
+let unchangedRuntime = try Data(contentsOf: sourceRuntime)
+check(unchangedRuntime == originalRuntime, "imported runtime remains unchanged")
+let managedAttributes = try fm.attributesOfItem(atPath: observedManifest.runtimeConfig)
+check((managedAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "generated runtime private")
+try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true)
+let approvedManifest = try RoomHostManifest.read(setupSaved)
+let approvedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: approvedManifest.runtimeConfig))) as! [String: Any]
+check((approvedRuntime["macTools"] as? [String: Any])?["inputApproval"] as? String == "approve", "explicit owner choice connects input")
+check(!fm.fileExists(atPath: observedManifest.runtimeConfig), "replaced generated runtime removed")
+let setupRestored = try LocalRoomHost(directory: setupDir.appendingPathComponent("managed"))
+check(setupRestored.snapshot()["roomId"] as? String == "fixture" && setupRestored.snapshot()["running"] as? Bool == false, "restored setup shows room without starting execution")
+try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: nativeConnection.path)
+do { try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true); check(false, "public connection refused") }
+catch { print("PASS: nonprivate native connection refused") }
+let retainedManifest = try RoomHostManifest.read(setupSaved)
+check(retainedManifest.runtimeConfig == approvedManifest.runtimeConfig, "failed setup preserves working configuration")
 let (host,dir) = try fixture("normal")
 let saved = dir.appendingPathComponent("managed/selected-host.json")
 let savedAttributes = try fm.attributesOfItem(atPath:saved.path)
@@ -71,6 +102,8 @@ check((savedAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "sav
 let restored = try LocalRoomHost(directory:dir.appendingPathComponent("managed"))
 check(restored.snapshot()["configured"] as? Bool == true && restored.snapshot()["running"] as? Bool == false, "restores setup without automatic execution")
 try host.start()
+do { try host.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true); check(false, "active configuration refused") }
+catch { print("PASS: active host configuration cannot change") }
 check(until { (host.snapshot()["message"] as? String)?.hasPrefix("Listening") == true }, "owned fresh status reaches listening without claiming model ready")
 do { try restored.start(); check(false,"duplicate refused") } catch { print("PASS: duplicate desktop host refused") }
 check(host.stopAndWait(), "graceful stop waits for child")
