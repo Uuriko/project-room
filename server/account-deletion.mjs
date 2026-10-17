@@ -18,6 +18,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
 import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
+import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
 import { ServiceError } from "./store.mjs";
 import {
@@ -324,6 +325,13 @@ function rebuildRoom(store, roomId) {
   store.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
   const rebuilt = store.rebuildProjection(roomId);
   saveRoomProjection(store, roomId, rebuilt.sequence, rebuilt.state);
+  // The redaction above rewrote the stored log and — for an already-archived
+  // room — nulled the messages rows' records (the erasure). The rebuilt
+  // projection is the redacted truth; re-derive the room's rows from it so
+  // the table certifies against the projection again. Without this, parity
+  // mismatches the NULL records forever and no automatic path ever rewrites
+  // them (the room is caught up, so the backfill never re-selects it).
+  store.transaction(() => resyncRoomMessageRows(store.db, roomId, rebuilt.state));
 }
 
 // Archive a solely owned personal room and strip message and file bytes.
