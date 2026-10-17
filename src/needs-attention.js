@@ -9,6 +9,7 @@ const KIND_LABEL = {
   access_request: "Join request",
   verification: "Verify",
   decision: "Decision",
+  board_review: "Board review",
   spend: "Spend",
   claim_lease: "Claim lease",
   jev_escalation: "Shadow diagnostic",

@@ -54,8 +54,24 @@ export async function closeClaim(origin, roomId, secret, claimId, { blobs, tags,
     state: "done", requestId: `${requestId}-done`,
     deliveryMode: "result", tags, blobs, note,
   });
+  if (done.ok && done.value?.state === "done") return { ok: true, status: done.status, awaitingReview: false };
+  // #3546: under a reviewed policy the claim cannot jump to done — the
+  // holder delivers it with the receipt bundle and the reviewer verifies.
+  // Deliver from the staged receipt blobs; if the platform refuses the
+  // bundle (e.g. the claim carries acceptance criteria the bot cannot map),
+  // the claim stays in_progress and the result still awaits review.
+  if (done.value?.error?.code === "work_not_delivered" && blobs.length) {
+    const bundle = { artifact: { kind: "receipt", ref: blobs[0], sha256: blobs[0].replace(/^sha256:/, "") },
+      checks: [{ name: "machine_receipt", result: "pass" }], criteria: [] };
+    const delivered = await updateClaim(origin, roomId, secret, claimId, {
+      state: "delivered", requestId: `${requestId}-delivered`,
+      deliveryMode: "result", tags, blobs, note, delivery: bundle,
+    });
+    return { ok: false, status: done.status, awaitingReview: true,
+      delivered: Boolean(delivered.ok && delivered.value?.state === "delivered") };
+  }
   return {
-    ok: done.ok && done.value?.state === "done", status: done.status,
+    ok: false, status: done.status,
     awaitingReview: done.status === 403 && done.value?.error?.code === "work_review_rejected",
   };
 }
