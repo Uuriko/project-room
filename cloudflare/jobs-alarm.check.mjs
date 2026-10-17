@@ -112,7 +112,11 @@ test("a thrown alarm is rescheduled", async () => {
     const webhook = fired.body.health.jobs.find(job => job.name === "webhook-dispatch");
     assert.ok(webhook.consecutiveFailures >= 1);
     assert.notEqual(webhook.status, "ok");
-    assert.match(webhook.lastError, /JSON/);
+    // The throw is armed by the fixture, not planted as a malformed
+    // delivery row: #3893 made the drain isolate such rows (dead-letter,
+    // job stays healthy), so a JSON.parse error can no longer be this
+    // check's throw vehicle. The subject is the alarm machinery.
+    assert.match(webhook.lastError, /seeded webhook drain failure/);
   } finally {
     await mf.dispose();
   }

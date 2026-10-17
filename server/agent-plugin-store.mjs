@@ -36,6 +36,7 @@ import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
   backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, fenceRoomEventData,
+  WebhookDispatchError,
 } from "./webhook-dispatch.mjs"; // RC-2026-09-19-064: signed dispatch engine.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
@@ -156,6 +157,29 @@ export const WEBHOOK_DELIVERY_CLAIM_LEASE_MS = 5 * 60 * 1000;
 export const WEBHOOK_DELIVERY_KEEP = 100;
 export const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const WEBHOOK_DELIVERY_PRUNE_BATCH = 500;
+
+// Bug sweep 2026-10-16 lane 11 F1 (#3893): per-row isolation for the
+// webhook drain, mirroring the claim-prs registry isolation (#3464). A
+// stored delivery row that throws during its attempt — a payload_json
+// that no longer parses, a stored secret that fails signDelivery's
+// checks — used to abort the whole drain batch at the same position on
+// every tick: the row was claimed, the throw landed before any outcome
+// write, and next_attempt_at never advanced, so the row could never
+// dead-letter and the webhook-dispatch job failed forever. The drain now
+// isolates the row instead: count it, name it in the operator log, and
+// keep its detail on the drain's return value. The numeric count is the
+// part that survives into the job heartbeat summary (compactSummary
+// keeps numbers only); repairing the row itself is operator work — a
+// dead-lettered row can be redriven once its stored data is fixed.
+function noteIsolatedWebhookDelivery(isolated, deliveryId, error) {
+  const entry = { deliveryId: deliveryId ?? null, error: String(error?.message ?? error).slice(0, 200) };
+  if (Array.isArray(isolated)) {
+    if (isolated.some(prior => prior.deliveryId === entry.deliveryId)) return entry;
+    isolated.push(entry);
+  }
+  console.warn(`[webhook-dispatch] isolated throwing delivery row ${entry.deliveryId}: ${entry.error}`);
+  return entry;
+}
 
 // Indexed per subscription. ORDER BY created_at matches the previous
 // "newest 100" selection when timestamps differ; rowid breaks ties without
@@ -1357,13 +1381,77 @@ export class AgentPluginStore {
 
   // Attempt one stored delivery: recompute the signature with a fresh
   // issuedAt (replay resistance), POST, and advance the lifecycle.
-  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers }) {
+  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers, isolated = null }) {
     // #3251: claim the row before the first await. A concurrent drain —
     // on this store, or on another instance sharing the database — that
     // selected the same row loses this race and skips it instead of
     // POSTing a second copy.
     const claimExpiresAt = this.claimWebhookDelivery(row, now);
     if (claimExpiresAt === null) return "skipped";
+    try {
+      return await this.#attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt });
+    } catch (error) {
+      // #3893: a throw after the claim — the stored payload no longer
+      // parses, the subscription's stored secret fails signDelivery's
+      // checks, the stored row fails the dispatch module's validation —
+      // must not escape. Uncaught, it aborted the whole drain batch
+      // before any outcome was written, so next_attempt_at never
+      // advanced and every later drain re-claimed the same row and
+      // aborted again; the row could never dead-letter and the
+      // webhook-dispatch job reported failure forever. Isolate the row
+      // instead: record its outcome, name it, and let the batch move on.
+      // (The drain loop keeps a last-resort guard for throws that happen
+      // before this layer can record anything.)
+      return this.#isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated });
+    }
+  }
+
+  // #3893: write the outcome for a claimed delivery whose attempt threw
+  // before it could record one, claim-guarded like every other outcome
+  // write (#3251). A throw from the stored row's own data — a JSON.parse
+  // SyntaxError or a WebhookDispatchError from the dispatch module's
+  // validation of the stored payload, secret, or target — is permanent
+  // as stored: the bytes cannot change between attempts, so the row
+  // dead-letters immediately, with redriveDeadLetter as the operator
+  // repair path once the stored data is fixed. Any other throw is
+  // recorded as a failed attempt under the usual backoff and attempt
+  // cap, so a transient fault still gets its retries.
+  #isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated }) {
+    noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+    const message = String(error?.message ?? error).slice(0, 500);
+    const permanent = error instanceof SyntaxError || error instanceof WebhookDispatchError;
+    return this.mutate(() => {
+      const fresh = this.db.prepare(
+        "SELECT state, attempts, claim_expires_at FROM agent_webhook_deliveries WHERE delivery_id=?")
+        .get(row.delivery_id);
+      if (!fresh || (fresh.state !== "pending" && fresh.state !== "failed")
+        || fresh.claim_expires_at !== claimExpiresAt) {
+        return "skipped";
+      }
+      try {
+        this.webhooks.recordAttempt(row.delivery_id, {
+          ok: false, error: message, terminal: permanent,
+        });
+      } catch { /* cache may lag; the table is authoritative */ }
+      const attempts = fresh.attempts + 1;
+      if (permanent || attempts >= MAX_DELIVERY_ATTEMPTS) {
+        const reason = permanent
+          ? `stored delivery cannot be attempted: ${message}`
+          : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${message}`;
+        const changed = this.markDeadLetter(row.delivery_id, reason, now, attempts, claimExpiresAt);
+        return changed ? "deadLettered" : "skipped";
+      }
+      const changed = this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
+            claim_expires_at=NULL, updated_at=?
+        WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(attempts, `delivery attempt failed before dispatch: ${message}`,
+          now + backoffDelayMs(attempts), now, row.delivery_id, claimExpiresAt).changes;
+      return changed ? "retried" : "skipped";
+    });
+  }
+
+  async #attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt }) {
     const sub = this.subs.get(row.subscription_id);
     if (!sub) {
       const changed = this.mutate(() =>
@@ -1393,10 +1481,14 @@ export class AgentPluginStore {
     if (!link && row.room_id) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
+    // payload?.data: a stored payload that parses to a non-object (or an
+    // object without an object data) reaches signDelivery's own check
+    // and throws its WebhookDispatchError, which the isolation layer
+    // classifies as permanent-as-stored (#3893) — not a bare TypeError.
     const signature = signDelivery(sub.secret,
-      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload.data });
+      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload?.data });
     const envelope = deliveryEnvelope({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
-      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload.data });
+      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload?.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
     const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
@@ -1513,7 +1605,10 @@ export class AgentPluginStore {
   // Called by the Cloudflare cron tick and by the agent-triggered process
   // endpoint (agentId scopes it to one identity's deliveries). Each
   // delivery mutates in its own transaction so one poison row cannot roll
-  // back the rest of the sweep. dnsResolvers ({ resolve4, resolve6 }) is
+  // back the rest of the sweep, and a row whose attempt throws is
+  // isolated the same way (#3893): its outcome is recorded, it is named
+  // in the summary's isolated items, and the sweep continues.
+  // dnsResolvers ({ resolve4, resolve6 }) is
   // injectable so tests never touch the network; omitted it defaults to the
   // real resolver (dns.lookup on Node; skipped on Workers) and every target
   // is re-validated before its POST (dispatch-time SSRF guard). An injected
@@ -1556,10 +1651,27 @@ export class AgentPluginStore {
          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+    const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {
       summary.processed++;
-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers })]++;
+      try {
+        summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated })]++;
+      } catch (error) {
+        // #3893 last-resort guard: attemptStoredDelivery records an
+        // outcome for every throw after its claim; a throw that still
+        // escapes (the claim transaction itself, a failed outcome
+        // write) is isolated here so one row can never abort the batch.
+        // The row keeps its queue position and is retried next drain.
+        noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+      }
+    }
+    // #3893: the isolated count is numeric, so it survives compactSummary
+    // into the job heartbeat; the item detail rides this return value
+    // and the operator log — the claim-prs convention (#3464).
+    if (isolated.length) {
+      summary.isolated = isolated.length;
+      summary.isolatedItems = isolated;
     }
     return Object.freeze(summary);
   }
