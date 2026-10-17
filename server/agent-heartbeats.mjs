@@ -22,6 +22,7 @@
 import { randomBytes } from "node:crypto";
 import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
+import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
 const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
@@ -224,8 +225,9 @@ const hostView = (row, cadenceSeconds = null) => Object.freeze({
   agentId: row.agent_id, hostId: row.host_id, mode: row.mode,
   wakeUrl: row.wake_url, lastSeenAt: row.last_seen_at,
   createdAt: row.created_at, updatedAt: row.updated_at,
-  // RC-2026-09-24-203: the host's declared poll cadence (null when the host
-  // never declared one); drives the per-host reachability window.
+  // RC-2026-09-24-203: the host's declared poll cadence (null when none
+  // is in effect — never declared, or cleared by an explicit null);
+  // drives the per-host reachability window.
   cadenceSeconds,
 });
 // work-claim:{id}:{reason}:… is the claim wake id. Poll and heartbeat
@@ -244,9 +246,7 @@ const signalView = row => {
     roomId: row.room_id, messageId: row.message_id,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
-    // Tag acknowledgment (2026-09-23): the one-tap ack copy rides the journaled
-    // pending-wake signal too, so an agent reading its heartbeat queue learns a
-    // bare 👍 react counts as a response. Additive — every existing field stands.
+    // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
   });
 };
@@ -501,7 +501,16 @@ export class AgentHeartbeats {
   // counters, which re-arms a suspended subscription); a body without it
   // leaves the existing subscription untouched, so old heartbeat bodies
   // keep working unchanged.
-  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = null, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null }) {
+  //
+  // Cadence is sticky (rotation review P5-F2): cadenceSeconds defaults to
+  // undefined, and omission is distinct from an explicit null. Omitting
+  // the field preserves the stored declaration; a number replaces it;
+  // only an explicit null clears it (back to the 180s default window).
+  // The old shape defaulted to null, so any bare heartbeat silently
+  // erased a declared cadence — collapsing the presence window, and
+  // with #3592 the wakeability window too — for a host that had
+  // declared its cadence once and then heartbeated bare.
+  heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
     checkAgentId(agentId);
     checkHostId(hostId);
     check(workWakes === undefined || typeof workWakes === "boolean", 422, "invalid_heartbeat", "workWakes must be a boolean");
@@ -541,12 +550,19 @@ export class AgentHeartbeats {
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
+    // Cadence is sticky (see the heartbeat() header): an omitted
+    // cadenceSeconds resolves to the stored declaration before the
+    // upsert, so the upsert itself always writes the effective value.
+    const cadence = cadenceSeconds === undefined
+      ? this.db.prepare("SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+          .get(agentId, hostId)?.cadenceSeconds ?? null
+      : cadenceSeconds;
     this.db.prepare(`INSERT INTO agent_push_configs
       (agent_id, host_id, cadence_seconds, updated_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(agent_id, host_id) DO UPDATE SET
         cadence_seconds=excluded.cadence_seconds, updated_at=excluded.updated_at`)
-      .run(agentId, hostId, cadenceSeconds ?? null, at);
+      .run(agentId, hostId, cadence, at);
     if (push) {
       this.db.prepare(`UPDATE agent_push_configs
         SET push_url=?, push_token=?, push_auth_json=?, push_failures=0, push_suspended=0, updated_at=?
@@ -554,7 +570,6 @@ export class AgentHeartbeats {
         .run(push.url, push.token, push.authJson, at, agentId, hostId);
     }
     if (workWakes !== undefined) this.store.workWakes.setHost(agentId, hostId, workWakes, workScopeRoomId);
-    const cadence = cadenceSeconds ?? null;
     const host = hostView(this.db.prepare(
       "SELECT * FROM agent_hosts WHERE agent_id=? AND host_id=?").get(agentId, hostId), cadence);
     const pushRow = this.db.prepare(
@@ -572,7 +587,7 @@ export class AgentHeartbeats {
         : (effectiveMode === "wakeable" && pushConfigured && !pushSuspended ? "push" : "poller"),
       reachableUntil,
     });
-    const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId });
+    const page = this.pendingWakePage(agentId, { hostId, roomId: workScopeRoomId, door });
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
       pendingWakes: page.signals, more: page.more,
@@ -706,6 +721,14 @@ export class AgentHeartbeats {
       result = { ok: false, error: String(error?.message ?? error).slice(0, 500) };
     }
     const at = this.now();
+    // #3345: the doorbell is not delivery, but its failures used to exist
+    // only as a per-host counter nobody aggregated — count every outcome
+    // and journal the failures (reason code only, never the error text).
+    const pushKind = { "message.posted": "mention", "dm.posted": "dm", "bond.proposed": "bond",
+      "assignment.created": "assignment", "land.updated": "land" }[eventType] ?? "";
+    recordWakeEvent(this.db, { at, roomId, store: "signals",
+      event: result.ok ? "doorbell_delivered" : "doorbell_failed", door: "push", kind: pushKind,
+      subjectId: agentId, ...(result.ok ? {} : { reason: "push_delivery_failed" }) });
     if (result.ok) {
       this.db.prepare("UPDATE agent_push_configs SET push_failures=0, updated_at=? WHERE agent_id=? AND host_id=?")
         .run(at, agentId, hostId);
@@ -732,13 +755,31 @@ export class AgentHeartbeats {
   // run under one write lock (a savepoint when the caller already holds a
   // transaction, else BEGIN IMMEDIATE), so a lease expiring or changing
   // hands between the check and the UPDATE cannot let a stale ack through.
-  ackWakes({ agentId, signalIds, roomId = null, fencingToken = null }) {
+  ackWakes({ agentId, signalIds, roomId = null, fencingToken = null, door = "rest" }) {
     checkAgentId(agentId);
     check(Array.isArray(signalIds) && signalIds.length > 0
       && signalIds.every(id => typeof id === "string" && id.length > 0),
       422, "invalid_heartbeat_ack", "signalIds must be a non-empty string array");
     check(fencingToken === null || (typeof fencingToken === "string" && fencingToken.length > 0),
       422, "invalid_heartbeat_ack", "fencingToken must be a non-empty string or null");
+    // #3266: the registration gate poll enforces applies at ack too — an
+    // identity no host has ever reported for has no queue to drain, on
+    // either door (both REST and MCP funnel through here). Before this,
+    // poll said "not registered / nothing to wait on" while ack happily
+    // drained the same identity's queue, so the contract contradicted
+    // itself by door.
+    let known = null;
+    try {
+      known = this.db.prepare("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1").get(agentId);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+    }
+    if (!known) {
+      recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+        event: "ack_unregistered", door, subjectId: agentId });
+      fail(404, "agent_not_registered",
+        "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll.");
+    }
     const at = this.now();
     this.ensureListenerSchema();
     const placeholders = signalIds.map(() => "?").join(",");
@@ -781,7 +822,25 @@ export class AgentHeartbeats {
       for (const signalId of signalIds) {
         if (stmt.run(at, agentId, signalId, roomId, roomId).changes > 0) acknowledged.push(signalId);
       }
-      acknowledged.push(...(this.store.workWakes?.ack(agentId, signalIds, roomId) ?? []));
+      // #3345: acks are the delivery completion — count them per door,
+      // with each signal's own kind/room (an ack may span rooms).
+      if (acknowledged.length > 0) {
+        const marks = acknowledged.map(() => "?").join(",");
+        const kinds = new Map(this.db.prepare(
+          `SELECT signal_id AS signalId, kind, room_id AS roomId FROM agent_wake_signals WHERE signal_id IN (${marks})`)
+          .all(...acknowledged).map(row => [row.signalId, row]));
+        for (const signalId of acknowledged) {
+          const row = kinds.get(signalId);
+          recordWakeEvent(this.db, { at, roomId: row?.roomId ?? roomId, store: "signals",
+            event: "acked", door, kind: row?.kind ?? "", subjectId: agentId });
+        }
+      }
+      const workAcked = this.store.workWakes?.ack(agentId, signalIds, roomId) ?? [];
+      for (const signalId of workAcked) {
+        recordWakeEvent(this.db, { at, roomId, store: "work",
+          event: "acked", door, kind: "work", subjectId: agentId });
+        acknowledged.push(signalId);
+      }
       return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
     });
   }
@@ -871,6 +930,11 @@ export class AgentHeartbeats {
     const views = this.db.prepare("SELECT * FROM agent_wake_signals WHERE signal_id=?");
     const signals = claimed.map(({ signal_id, redelivered }) =>
       Object.freeze({ ...signalView(views.get(signal_id)), redelivered: redelivered === 1 }));
+    // #3345: a claimed batch is a delivery on the listener door.
+    for (const signal of signals) {
+      recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
+        event: "delivered", door: "listener", kind: signal.kind, subjectId: agentId });
+    }
     return Object.freeze({ signals: Object.freeze(signals) });
   }
 
@@ -909,6 +973,9 @@ export class AgentHeartbeats {
     const applied = this.db.prepare(`INSERT OR IGNORE INTO agent_wake_signals
       (signal_id, agent_id, kind, room_id, message_id, created_at, delivered_at)
       VALUES (?, ?, ?, ?, ?, ?, NULL)`).run(signalId, agentId, kind, roomId, messageId, at);
+    // #3345: every emission attempt resolves to exactly one audited outcome.
+    recordWakeEvent(this.db, { at, roomId, store: "signals",
+      event: applied.changes > 0 ? "emitted" : "coalesced", kind, subjectId: agentId });
     const row = this.db.prepare(
       "SELECT * FROM agent_wake_signals WHERE agent_id=? AND room_id IS ? AND message_id=?").get(agentId, roomId, messageId);
     // RC-2026-09-28-3602: a genuinely new signal releases the room-hosted
@@ -926,7 +993,7 @@ export class AgentHeartbeats {
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
   // rows from either source.
-  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null } = {}) {
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat" } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
@@ -936,8 +1003,25 @@ export class AgentHeartbeats {
       .all(agentId, roomId, roomId, probe).map(signalView);
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
     const combined = [...messages, ...work].sort((a, b) => a.createdAt - b.createdAt);
+    const page = combined.slice(0, limit);
+    // #3345: a served page is a delivery on this door. Count presentations
+    // per store/kind (batched) so emitted vs delivered vs acked reconciles.
+    if (page.length > 0) {
+      const workIds = new Set(work.map(entry => entry.signalId));
+      const batches = new Map();
+      for (const signal of page) {
+        const isWork = workIds.has(signal.signalId);
+        const key = `${isWork ? "work" : "signals"}\0${isWork ? "work" : signal.kind}\0${signal.roomId ?? ""}`;
+        batches.set(key, (batches.get(key) ?? 0) + 1);
+      }
+      for (const [key, n] of batches) {
+        const [store, kind, room] = key.split("\0");
+        recordWakeEvent(this.db, { at: this.now(), roomId: room === "" ? null : room,
+          store, event: "delivered", door, kind, n });
+      }
+    }
     return Object.freeze({
-      signals: Object.freeze(combined.slice(0, limit)),
+      signals: Object.freeze(page),
       more: combined.length > limit,
     });
   }
@@ -961,7 +1045,7 @@ export class AgentHeartbeats {
       // Pre-heartbeat DB without agent_hosts (read-only opens never
       // migrate): no host ever reported, so the agent is unregistered.
     }
-    if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]) });
+    if (!known) return Object.freeze({ agentId, registered: false, pendingWakes: Object.freeze([]), more: false });
     // plan-wake-live: the poll itself is listener evidence — best-effort on
     // pre-migration DBs without agent_wake_polls (read-only never migrates).
     // The pending-wake read below still serves; only the stamp is skipped.
@@ -975,8 +1059,12 @@ export class AgentHeartbeats {
     // passes the hostId it required so WorkWakes.pending can apply that
     // host's opt-in consent, exactly as heartbeat() does. Omitting hostId
     // keeps the legacy hostless contract (no work signals).
+    // #3265: the poll door carries the same truncation flag as heartbeat —
+    // the page object used to be discarded here, so a poll-only agent
+    // could not distinguish "exactly 50 pending" from a longer queue.
+    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll" });
     return Object.freeze({
-      agentId, registered: true, pendingWakes: this.pendingWakes(agentId, { roomId, hostId }),
+      agentId, registered: true, pendingWakes: page.signals, more: page.more,
     });
   }
 
@@ -1077,10 +1165,22 @@ export class AgentHeartbeats {
   // deliver the signal. Coalescing stays on agent plus room plus message.
   wakeIfOffline({ agentId, kind, roomId = null, messageId }) {
     checkAgentId(agentId);
-    if (this.statusOf(agentId).hosts.length === 0)
+    if (this.statusOf(agentId).hosts.length === 0) {
+      // #3345: the no-host suppression is the documented contract, but it
+      // used to be invisible — count it so "agent never registered" is
+      // distinguishable from a lost wake.
+      recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+        event: "suppressed_no_host", kind, subjectId: agentId });
       return Object.freeze({ woken: false, signal: null });
+    }
     const { enqueued, signal } = this.enqueueWake({ agentId, kind, roomId, messageId });
     return Object.freeze({ woken: true, enqueued, signal });
+  }
+
+  // #3345: the wake-reliability accounting view over this fabric (see
+  // server/wake-metrics.mjs for the denominator this number stands on).
+  accounting({ roomId = null } = {}) {
+    return wakeAccounting(this.db, { now: this.now(), roomId });
   }
 }
 export { MODES, WAKE_KINDS, STATUSES, HOST_ID_PATTERN };

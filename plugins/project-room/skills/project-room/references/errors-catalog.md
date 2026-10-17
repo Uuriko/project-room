@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-904 rows (863 distinct codes).
+909 rows (868 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -127,6 +127,7 @@ response's own `hint`/`next` when it names something more specific.
 | `approval_invalid` | 422 | Invalid approval input (the message names the field). | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
 | `approval_not_found` | 404 | No such approval proposal. | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: collab STATUS_BY_CODE.) |
 | `approval_transition` | 409 | A ${proposal.status} proposal cannot move to ${status}. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
+| `artifact_integrity_failed` | 409 | Stored artifact bytes no longer match the submitted hash — verification cannot pass | no | Do not retry the PASS. Report the receipt id and this code to the room owner — the stored artifact itself is in question. |
 | `assign_conflict` | 409 | Thread is already assigned to ${current.assignee.id}; release it or force the takeover. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
 | `assign_not_assigned` | 404 | Thread has no live assignment to release. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
 | `assistant_archived` | 409 | This room is archived | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -241,6 +242,8 @@ response's own `hint`/`next` when it names something more specific.
 | `demigod_offer_ref_missing` | 422 | offerRef must reference an existing project offer in this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `desktop_auth_rejected` | 401 | Native sign-in could not be confirmed | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `desktop_session_exists` | 409 | Use a fresh native authentication session | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `delivery_check_failed` | 422 | executed check "${failed.name}" failed for "${item.id}" — ${failed.detail ?? "the delivery does not pass system verification"} | fix+resend | Fix the delivery or CI state named in the message, re-deliver, then verify again. |
+| `delivery_incomplete` | 422 | finishing "${item.id}" requires a delivery bundle { artifact, checks, criteria } — none was supplied | fix+resend | Resend the finish with the complete delivery bundle the message names (artifact, checks, or the criteria mapping). |
 | `direct_send_idempotency_conflict` | 409 | This request id already recorded a different direct send. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `direct_send_not_found` | 404 | Send attempt not found. | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `direct_send_settled` | 409 | This send attempt already settled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -908,6 +911,11 @@ response's own `hint`/`next` when it names something more specific.
 | `session_binding_required` | 422 | Current account session binding required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `session_claimed` | 409 | fail(409, "session_claimed", conflict); } let type; try { type = sessionCommandType(item, request.action, request.status); } catch (error) { fail(422, | wait | Another member holds the claim. Wait for release or lease expiry, or pick another item. |
 | `session_not_found` | 404 | No such active session | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `settlement_already_attached` | 409 | This task already has a settled submission | no | This action already happened — do not retry it. Read the current state to confirm. |
+| `settlement_failed` | 422 | Escrow failure translated at the public-work settlement boundary (the message is the escrow error's own) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `settlement_lane_unlinked` | 422 | Paid public work settles to a room-member ledger lane: link this identity to a member of the task room before claiming | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `settlement_not_submitted` | 409 | Paid task has no attached submission to settle | no | The paid task has no attached submission, so there is nothing to settle. Settlement fires only on a review verdict after the claimant's finish step attaches the submission; read the task's settlement view and attach the submission first. |
+| `settlement_unavailable` | 500 | Bounty escrow is not available in this store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `sign_in_required` | 401 | Sign in or create an account, then open this link again. | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `signing_unavailable` | 500 | The room's invite signer is unavailable | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `signoff_exists` | 409 | Sign-off loop ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -1029,6 +1037,7 @@ response's own `hint`/`next` when it names something more specific.
 | `work_claim_terminal` | 409 | Cannot ${verb} "${item.id}": it is already ${item.state} | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: work-claim-routes map.) |
 | `work_claims_not_permitted` | 0 | error: { code: "work_claims_not_permitted", message }, hint, next: [{ command: hint }] }; throw error; } const refuseAttest = () => refuseBoardAction( | follow hint | Follow this error's hint and next steps. |
 | `work_claims_not_permitted` | 403 | throw new ServiceError(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap."); } const cap = rest.maxMemberOpenCla | follow hint | Follow this error's hint and next steps. |
+| `work_not_delivered` | 422 | Review policy "${policy}" not satisfied for "${item.id}": finish it to "delivered" first — its reviewer then verifies it to "done" | follow hint | Follow this error's hint and next steps. |
 | `work_not_found` | 404 | Work no longer exists | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `work_not_owner` | 403 | Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it | follow hint | Follow this error's hint and next steps. |
 | `work_reassign_unknown_member` | 422 | newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

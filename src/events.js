@@ -1,5 +1,4 @@
-import { canonicalReaction, foldedReactionMap, MAX_REACTIONS_PER_MESSAGE } from "./emoji.js";
-import { normalizePoll, pollOptionEmojis } from "./polls.js";
+import { normalizePoll } from "./polls.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
 import { proposalContext, nativeTextEvidence, reportedProducer, validateResultSegments } from "./work-packet.js";
 import { CHARTER_TYPE, charterFromEvent } from "./room-charter.js";
@@ -51,7 +50,7 @@ export const EVENT_TYPES = Object.freeze({
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
-  MESSAGE_REACTION_SET: "message.reaction_set",
+  POLL_VOTED: "poll.voted",
   MESSAGE_PINNED: "message.pinned",
   MESSAGE_UNPINNED: "message.unpinned",
   CHANNEL_CREATED: "channel.created",
@@ -614,7 +613,10 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
-    [EVENT_TYPES.MESSAGE_REACTION_SET]: setMessageReaction,
+    // Reactions were removed (2026-10). Old logs still carry
+    // message.reaction_set; replay skips them.
+    "message.reaction_set": () => {},
+    [EVENT_TYPES.POLL_VOTED]: votePoll,
     [EVENT_TYPES.MESSAGE_PINNED]: pinMessage,
     [EVENT_TYPES.MESSAGE_UNPINNED]: unpinMessage,
     [EVENT_TYPES.CHANNEL_CREATED]: createChannel,
@@ -1534,42 +1536,26 @@ function recordEvidenceWithdrawn(state, incoming) {
 }
 // --- end PRIV-1 message redaction ---
 
-function setMessageReaction(state, incoming) {
+// Polls: poll.voted { messageId, option, active } records one member's vote
+// on option index `option`. Votes live on the message as pollVotes, an array
+// of sorted member-id lists aligned with poll.options. Single-choice polls
+// move the vote; allowMultiple polls keep the others.
+function votePoll(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  requireFields(incoming.data, ["messageId", "reaction", "active"]);
-  const { messageId, reaction, active } = incoming.data;
+  requireFields(incoming.data, ["messageId", "option", "active"]);
+  const { messageId, option, active } = incoming.data;
   const message = state.messages.find(m => m.id === messageId);
-  if (!message) throw new Error("Reaction must reference a message in this Room");
+  if (!message) throw new Error("Vote must reference a message in this Room");
   if (message.deletedAt) throw new Error("Message was deleted");
-  const key = canonicalReaction(reaction);
-  if (!key || typeof active !== "boolean") throw new Error("Invalid reaction choice");
-  // Replay and checkpoints may still carry like/heart/celebrate/thinking.
-  // Fold those into the Unicode key before applying this choice.
-  message.reactions = foldedReactionMap(message.reactions);
-  const members = new Set(message.reactions[key] || []);
-  if (active) {
-    if (!message.reactions[key] && Object.keys(message.reactions).length >= MAX_REACTIONS_PER_MESSAGE) {
-      throw new Error("Too many reactions on this message");
-    }
-    members.add(actor.id);
-  } else members.delete(actor.id);
-  if (members.size) message.reactions[key] = [...members].sort();
-  else delete message.reactions[key];
-  // Polls: one vote per member on single-choice polls. Setting a vote moves it
-  // off the other options; unvoting and allowMultiple polls leave the rest.
-  if (active && message.kind === "poll" && message.poll?.allowMultiple !== true) {
-    const optionEmojis = pollOptionEmojis(message);
-    if (optionEmojis.includes(key)) {
-      for (const other of optionEmojis) {
-        if (other === key) continue;
-        const voters = message.reactions[other];
-        if (!Array.isArray(voters) || !voters.includes(actor.id)) continue;
-        const rest = voters.filter(id => id !== actor.id);
-        if (rest.length) message.reactions[other] = rest;
-        else delete message.reactions[other];
-      }
-    }
-  }
+  if (message.kind !== "poll" || !Array.isArray(message.poll?.options)) throw new Error("Vote must reference a poll");
+  if (!Number.isInteger(option) || option < 0 || option >= message.poll.options.length || typeof active !== "boolean") throw new Error("Invalid poll vote");
+  const votes = message.poll.options.map((_, i) => Array.isArray(message.pollVotes?.[i]) ? message.pollVotes[i] : []);
+  message.pollVotes = votes.map((voters, i) => {
+    const set = new Set(voters);
+    if (i === option) { if (active) set.add(actor.id); else set.delete(actor.id); }
+    else if (active && message.poll.allowMultiple !== true) set.delete(actor.id);
+    return [...set].sort();
+  });
 }
 
 function proposeWork(state, incoming) {
@@ -1830,7 +1816,7 @@ function recordLandUpdate(state, incoming) {
 }
 
 export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
-const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done", "closed"];
+const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 
 // Thin receipt: validated, never copied into the projection.
 function recordStarterSeeded(state, incoming) {

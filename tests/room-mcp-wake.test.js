@@ -149,7 +149,11 @@ test("an enrolled identity registers, reads, and clears an HTTPS wakeUrl", async
   const cleared = await call(origin, "wake.clear", { hostId: "host-1" }, owner.secret);
   assert.equal(cleared.value.host.mode, "pull-only");
   assert.equal(cleared.value.host.wakeUrl, null);
+  // wake.clear clears the cadence too — via an explicit cadenceSeconds
+  // null (the documented clear), not as a side effect of omission.
+  assert.equal(cleared.value.host.cadenceSeconds, null);
   assert.equal(store.db.prepare("SELECT mode, wake_url FROM agent_hosts WHERE agent_id=?").get(owner.identityId).wake_url, null);
+  assert.equal(store.db.prepare("SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=?").get(owner.identityId).cadenceSeconds, null);
   assert.equal(cleared.raw.includes(owner.secret), false);
 });
 
@@ -345,4 +349,31 @@ test("wake.register and heartbeat.set reject cadenceSeconds above the 7-day boun
   assert.equal(max.body.error, undefined);
   assert.equal(max.value.host.cadenceSeconds, 604800);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_hosts").get().n, 1, "only the in-bound registration landed");
+});
+
+test("cadenceSeconds is sticky over MCP: omit preserves, explicit null clears", async t => {
+  // Rotation review P5-F2: a host that declared its cadence once and
+  // then heartbeated bare used to lose the declaration (the MCP layer
+  // turned omission into a stored null). Omission now preserves it on
+  // both wake tools; only an explicit null clears it.
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Sticky cadence owner");
+  roomFor(store, rooms, owner);
+  const storedCadence = () => store.db.prepare(
+    "SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+    .get(owner.identityId, "host-1")?.cadenceSeconds ?? null;
+  const registered = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL, cadenceSeconds: 120 }, owner.secret);
+  assert.equal(registered.value.host.cadenceSeconds, 120);
+  const bareSet = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL }, owner.secret);
+  assert.equal(bareSet.body.error, undefined);
+  assert.equal(bareSet.value.host.cadenceSeconds, 120, "heartbeat.set without cadenceSeconds preserves the declaration");
+  assert.equal(storedCadence(), 120);
+  const bareRegister = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL }, owner.secret);
+  assert.equal(bareRegister.value.host.cadenceSeconds, 120, "wake.register without cadenceSeconds preserves the declaration");
+  const replaced = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: 300 }, owner.secret);
+  assert.equal(replaced.value.host.cadenceSeconds, 300, "an explicit value replaces the declaration");
+  const cleared = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: null }, owner.secret);
+  assert.equal(cleared.body.error, undefined);
+  assert.equal(cleared.value.host.cadenceSeconds, null, "an explicit null clears the declaration");
+  assert.equal(storedCadence(), null);
 });
