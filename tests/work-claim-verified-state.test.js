@@ -251,19 +251,75 @@ test("round clearing: the lease sweep drops the lapsed round — files, reviews,
   assert.equal(released.ci, null);
 });
 
-test("round clearing: reassign drops the previous owner's delivery and verification", () => {
-  // Kills WC-21/WC-22 (delivery / verification kept by reassignWork's
-  // reset). A reassigned claim starts a new round: the incoming owner
-  // must not inherit the outgoing owner's frozen bundle or verdict.
+test("reassign: a delivered claim reopens in_progress — delivery retained, no verdict stands", () => {
+  // Adjudication (MUTATION-CI-FIX): WC-21/WC-22's pin asserted the
+  // pre-#3867 contract — reassignWork cleared delivery + verification on
+  // every reassign. #3867 (claims bundle lifecycle, findings-05 F2)
+  // replaced that reset with branch-specific round handling, so the old
+  // assertion now contradicts the landed contract and is retired; the
+  // three tests here pin the new contract branch by branch instead.
+  // This branch is the F2 fix itself: a delivered claim used to keep its
+  // delivered state with the bundle nulled, stranding it for a zero-check
+  // verify; now it reopens to in_progress with the bundle intact, so the
+  // delivery must go through review again under the new owner.
   const active = start(createWork({ id: "w-mut-7", reviewPolicy: "distinct_member" }, { agentId: "quill" }));
+  const delivered = updateWork(active, "quill", { state: "delivered", delivery: bundle() });
+  const reopened = reassignWork(delivered, "lead", "instinct", { authority: true });
+  assert.equal(reopened.owner, "instinct");
+  assert.equal(reopened.state, "in_progress");
+  assert.equal(reopened.delivery.digest, delivered.delivery.digest);
+  assert.equal(reopened.verification, null);
+  assert.equal(reopened.deliveryGeneration, 1);
+  // A stored delivered row can carry a verification fact from another
+  // writer (the natural flow stamps none on a delivered claim); the
+  // reopen must clear it — no verdict recorded against the previous
+  // owner stands over the new owner's round. Constructed directly, the
+  // same idiom as the canCloseWork pin below.
+  const sentBack = recordReview(delivered, "sage", { verdict: "changes_requested", summary: "redo" });
+  const back = updateWork(sentBack, "sage", { state: "in_progress", authority: true });
+  const stored = { ...delivered, verification: back.verification };
+  assert.equal(reassignWork(stored, "lead", "instinct", { authority: true }).verification, null);
+});
+
+test("reassign: a fresh assignment clears a dirty row's whole round", () => {
+  // The surviving descendant of WC-21/WC-22's clearing concern: on the
+  // fresh-assignment branch, clearing IS the contract — an unclaimed row
+  // still carrying a previous round's state (legacy rows predate the
+  // clearing writers) starts the incoming owner's round from zero.
+  const active = start(createWork({ id: "w-mut-7b", reviewPolicy: "distinct_member" }, { agentId: "quill" }));
+  const delivered = updateWork(active, "quill", { state: "delivered", delivery: bundle() });
+  const settled = recordCi(delivered, { state: "success", headSha: HEAD }, Date.now()).item;
+  const sentBack = recordReview(settled, "sage", { verdict: "changes_requested", summary: "redo" });
+  const back = updateWork(sentBack, "sage", { state: "in_progress", authority: true });
+  const dirty = { ...back, state: "unclaimed", owner: null };
+  assert.ok(dirty.delivery && dirty.verification && dirty.ci && dirty.deliveryGeneration === 1);
+  const assigned = reassignWork(dirty, "lead", "instinct", { authority: true });
+  assert.equal(assigned.owner, "instinct");
+  assert.equal(assigned.state, "claimed");
+  assert.equal(assigned.delivery, null);
+  assert.equal(assigned.verification, null);
+  assert.equal(assigned.ci, null);
+  assert.equal(assigned.deliveryGeneration, 0);
+});
+
+test("reassign: a live round keeps its round across a mid-round handover", () => {
+  // The third branch of the #3867 contract: reassigning a claim mid-round
+  // (in_progress, e.g. after a send-back) hands the round itself over —
+  // the delivery and its send-back fact stand, bound to the same digest
+  // and generation, so the incoming owner answers the same review. If
+  // this ever starts clearing, that is a deliberate contract change,
+  // not a silent drift.
+  const active = start(createWork({ id: "w-mut-7c", reviewPolicy: "distinct_member" }, { agentId: "quill" }));
   const delivered = updateWork(active, "quill", { state: "delivered", delivery: bundle() });
   const sentBack = recordReview(delivered, "sage", { verdict: "changes_requested", summary: "redo" });
   const back = updateWork(sentBack, "sage", { state: "in_progress", authority: true });
   assert.ok(back.delivery && back.verification);
   const reassigned = reassignWork(back, "lead", "instinct", { authority: true });
   assert.equal(reassigned.owner, "instinct");
-  assert.equal(reassigned.delivery, null);
-  assert.equal(reassigned.verification, null);
+  assert.equal(reassigned.state, "in_progress");
+  assert.equal(reassigned.delivery.digest, delivered.delivery.digest);
+  assert.deepEqual(reassigned.verification, back.verification);
+  assert.equal(reassigned.deliveryGeneration, back.deliveryGeneration);
 });
 
 test("round clearing: a fresh claim restarts the round — no inherited CI, generation zeroed", () => {
