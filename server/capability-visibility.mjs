@@ -48,12 +48,12 @@ import { resolveGrants } from "./grants.mjs"; // UFO-steal slice 1: live grant e
 // Write tools a guest agent may still invoke. The store.command guest
 // gate (server/store.mjs) admits MESSAGE_POSTED chat posts — but drafts
 // carrying a workItemId need the contributor tier — and
-// MESSAGE_REACTION_SET; every other command type is 403
+// POLL_VOTED; every other command type is 403
 // guest_scope_denied, and #1166 extended the same denial to attachment
 // staging, moderation reports, and wake-queue intents. Draft posts
 // stay call-time-gated for observer-tier guests: the check remains as
 // defense in depth.
-export const GUEST_WRITABLE_TOOLS = Object.freeze(new Set(["room_post_message", "room_react"]));
+export const GUEST_WRITABLE_TOOLS = Object.freeze(new Set(["room_post_message"]));
 
 // Write tools a t1_readonly agent may still invoke. The tier contract
 // (server/autonomy-tiers.mjs T1_READONLY_ALLOWED_COMMANDS) keeps

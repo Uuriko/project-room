@@ -94,12 +94,12 @@ function notLimited(error) {
   return true;
 }
 
-test("only chat posts and replies count; reactions, edits, deletes, reads, work, and claims do not", t => {
+test("only chat posts and replies count; pins, edits, deletes, reads, work, and claims do not", t => {
   const clock = { now: Date.parse("2026-09-24T12:00:00.000Z") };
   const f = openStore(t, () => clock.now);
   post(f, "owner", 0);
   f.send("owner", T.MESSAGE_EDITED, { messageId: "m-owner-0", body: "edited", expectedMessageRevision: 0 }, "edit-1");
-  f.send("owner", T.MESSAGE_REACTION_SET, { messageId: "m-owner-0", reaction: "like", active: true }, "react-1");
+  f.send("owner", T.MESSAGE_PINNED, { messageId: "m-owner-0" }, "pin-1");
   f.send("owner", T.MESSAGE_DELETED, { messageId: "m-owner-0", expectedMessageRevision: 1, reason: "cleanup" }, "delete-1");
   for (let i = 1; i < 29; i++) post(f, "owner", i);
   try {

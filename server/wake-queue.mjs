@@ -54,6 +54,20 @@ export const wakeQueuePauseSchema = `
   );
 `;
 
+// R327-1: who set a pause. Kept as a SEPARATE schema string from
+// wakeQueuePauseSchema (the guest_selfserve pattern): a store from the
+// pre-pause-by window still verifies all-or-nothing under allowAbsent, so
+// no operator reconciliation is forced on it. Legacy rows (no setter
+// record) fail closed: only the owner or manage_members lifts them.
+export const wakeQueuePauseBySchema = `
+  CREATE TABLE IF NOT EXISTS wake_queue_pause_by (
+    room_id TEXT NOT NULL REFERENCES rooms(id), member_id TEXT NOT NULL,
+    paused_by TEXT NOT NULL,
+    paused_role TEXT NOT NULL CHECK(paused_role IN ('self','governor')),
+    PRIMARY KEY(room_id,member_id)
+  );
+`;
+
 const view = row => ({ queueKey: row.queue_key, intent: JSON.parse(row.intent), state: row.state, dueAt: row.due_at,
   attempts: row.attempts, maxAttempts: row.max_attempts, leaseOwner: row.lease_owner, leaseExpiresAt: row.lease_expires_at,
   lastError: row.last_error, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -84,9 +98,30 @@ export class WakeQueue {
     }
     return true;
   }
+  verifyPauseBySchema({ allowAbsent = false } = {}) {
+    const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+    const expected = wakeQueuePauseBySchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
+      .map(sql => ({ sql, actual: this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/^CREATE (?:TABLE|INDEX|TRIGGER) (?:IF NOT EXISTS )?([a-z_]+)/.exec(sql.trim())[1])?.sql }));
+    if (allowAbsent && expected.every(({ actual }) => actual === undefined)) return false;
+    for (const { sql, actual } of expected) {
+      if (normalize(actual) !== normalize(sql)) throw new Error("Wake queue pause-by schema requires operator reconciliation");
+    }
+    return true;
+  }
   pauseStatus(roomId, memberId) {
     const row = this.db.prepare("SELECT * FROM wake_queue_pause WHERE room_id=? AND member_id=?").get(roomId, memberId);
-    return row ? { pausedAt: row.paused_at, reason: row.reason } : null;
+    return row ? { pausedAt: row.paused_at, reason: row.reason, pausedBy: this.pausedBy(roomId, memberId), heldBy: this.heldByOf(roomId, memberId) } : null;
+  }
+  // R327-1: who holds the pause, in the caller-facing vocabulary: "self" when
+  // the member set it itself, "owner" when the room owner or a manage-members
+  // member set it, or when the row predates holder recording (fail closed).
+  heldByOf(roomId, memberId) {
+    const row = this.db.prepare("SELECT paused_role FROM wake_queue_pause_by WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    return row && row.paused_role === "self" ? "self" : "owner";
+  }
+  pausedBy(roomId, memberId) {
+    const row = this.db.prepare("SELECT paused_by FROM wake_queue_pause_by WHERE room_id=? AND member_id=?").get(roomId, memberId);
+    return row ? row.paused_by : null;
   }
   // A member always acts on its own pause row. Pausing or resuming another
   // member requires the room owner or manage_members, on a session or a
@@ -108,8 +143,9 @@ export class WakeQueue {
     return memberId;
   }
   pausedMembers(roomId) {
-    return this.db.prepare("SELECT member_id,paused_at,reason FROM wake_queue_pause WHERE room_id=? ORDER BY member_id").all(roomId)
-      .map(row => ({ memberId: row.member_id, pausedAt: row.paused_at, reason: row.reason }));
+    return this.db.prepare("SELECT p.member_id AS member_id, p.paused_at AS paused_at, p.reason AS reason, s.paused_by AS paused_by, s.paused_role AS paused_role FROM wake_queue_pause p LEFT JOIN wake_queue_pause_by s ON s.room_id=p.room_id AND s.member_id=p.member_id WHERE p.room_id=? ORDER BY p.member_id").all(roomId)
+      .map(row => ({ memberId: row.member_id, pausedAt: row.paused_at, reason: row.reason, pausedBy: row.paused_by,
+        heldBy: row.paused_role === "self" ? "self" : "owner" }));
   }
   // The one stop surface: pause state, pending wakes (won't start while
   // paused), already-running attempts (left to finish), and readable recent
@@ -241,11 +277,41 @@ export class WakeQueue {
       // one receipt per breach, because the matching resume stays capped and
       // a no-op re-pause of an already-paused member is refused.
       if (existing) this.receiptCapacity(roomId, subject);
-      if (!existing) this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, subject, now, request.reason);
-      const receipt = { requestId: request.requestId, state: "paused", pausedAt: existing ? existing.pausedAt : now, alreadyPaused: Boolean(existing) };
+      // R327-1: record who holds the pause and at what role. The role
+      // follows the ACT, not the actor's powers: a member pausing itself
+      // (governor included) sets a self-held pause that stays self-resumable
+      // even if its powers are later revoked. A governor pausing another
+      // member hardens the pause to governor-held (subject() already gates
+      // that on owner / manage_members), and an existing self-pause stays
+      // hardened once a governor has taken it over.
+      const role = subject === auth.member.id ? "self" : this.mayGovernWakes(auth, roomId) ? "governor" : "self";
+      let hardened = false;
+      if (!existing) {
+        this.db.prepare("INSERT INTO wake_queue_pause VALUES(?,?,?,?)").run(roomId, subject, now, request.reason);
+        this.db.prepare("INSERT INTO wake_queue_pause_by VALUES(?,?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET paused_by=excluded.paused_by, paused_role=excluded.paused_role").run(roomId, subject, auth.member.id, role);
+      } else if (role === "governor") {
+        const prior = this.db.prepare("SELECT paused_role FROM wake_queue_pause_by WHERE room_id=? AND member_id=?").get(roomId, subject);
+        hardened = !prior || prior.paused_role !== "governor";
+        this.db.prepare("INSERT INTO wake_queue_pause_by VALUES(?,?,?,?) ON CONFLICT(room_id,member_id) DO UPDATE SET paused_by=excluded.paused_by, paused_role=excluded.paused_role").run(roomId, subject, auth.member.id, role);
+      }
+      const receipt = { requestId: request.requestId, state: "paused", pausedAt: existing ? existing.pausedAt : now, alreadyPaused: Boolean(existing), heldBy: this.heldByOf(roomId, subject) };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
+      // Research r7: a pause (or a hardening of one) changes what the member's
+      // held wake poll should report, so release its waiters at once.
+      if (!existing || hardened) this.releasePauseWaiters(roomId, subject);
       return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
     });
+  }
+  // Research r7: a pause or resume changes what the member's held wake poll
+  // should report (a pause must be heard at once; a resume brings held wakes
+  // back), so release that identity's waiters for the room. Best effort: the
+  // waiter only resolves a promise, so the HTTP reply is written after this
+  // transaction commits.
+  releasePauseWaiters(roomId, memberId) {
+    try {
+      const link = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
+      if (link) this.store.agentHeartbeats?._releaseWakeWaiter(link.identityId, roomId);
+    } catch { /* waiters are best-effort; the durable queue is the contract */ }
   }
   resume(token, roomId, request, binding = null, { memberId = null } = {}) {
     return this.store.transaction(() => {
@@ -262,9 +328,18 @@ export class WakeQueue {
       if (prior) return this.outcome(auth, roomId, subject, { receipt: prior, duplicate: true });
       this.receiptCapacity(roomId, subject);
       const existing = this.pauseStatus(roomId, subject);
+      // R327-1: the member's own stop control ends where someone else's
+      // begins. A pause set by another member (or a legacy row with no
+      // recorded setter) is lifted only by the room owner or manage members;
+      // a member always lifts a pause it set itself.
+      if (existing && this.heldByOf(roomId, subject) !== "self" && !this.mayGovernWakes(auth, roomId)) {
+        fail(403, "wake_pause_held_by_owner", "The room owner paused this member's wakes. Only the room owner or a member manager can resume them.");
+      }
+      if (existing) this.db.prepare("DELETE FROM wake_queue_pause_by WHERE room_id=? AND member_id=?").run(roomId, subject);
       this.db.prepare("DELETE FROM wake_queue_pause WHERE room_id=? AND member_id=?").run(roomId, subject);
       const receipt = { requestId: request.requestId, state: "active", wasPaused: Boolean(existing) };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, subject, request.requestId, fingerprint, JSON.stringify(receipt));
+      if (existing) this.releasePauseWaiters(roomId, subject);
       return this.outcome(auth, roomId, subject, { receipt, duplicate: false });
     });
   }
