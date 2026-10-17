@@ -1,5 +1,5 @@
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
-import { publicPageCsp } from "../server/public-search.mjs";
+import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -27,12 +27,14 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
+import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-keeper.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
+import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
@@ -349,6 +351,13 @@ export class ProjectRoom extends DurableObject {
     await yieldToQueuedRequests();
     return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
   }
+  // ClueBot phase 1: tail new events and file invariant findings. The
+  // patrol is read-only (patrol_* tables only); a paused room skips.
+  async patrolTick() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runPatrolTick(this.store, { deadline: cronDeadline() });
+  }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
   // now), POSTs each with a fresh timestamped HMAC signature, and advances
@@ -383,6 +392,14 @@ export class ProjectRoom extends DurableObject {
       deadline: cronDeadline(),
       yieldBetween: () => yieldToQueuedRequests()
     });
+  }
+  // Mechanical escrow keeper (#3693/#3844): closes due payout epochs —
+  // challenge-window approvals, approved sweeps, dispute timeouts, deadline
+  // refunds — so no bounty waits on a human remembering to close an epoch.
+  async progressEscrowEpochs() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runEscrowEpochs(this.store, { now: Date.now() });
   }
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.
@@ -514,6 +531,7 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
     let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
       // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
@@ -523,6 +541,12 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
+        // /about carries its own path-pinned policy (see aboutPageCsp);
+        // header equality identifies it, so it rebases the same way.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserAboutPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       }
       // JDOT-PUBLIC-CSP-RUM end
@@ -554,6 +578,8 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     internalPublicPolicy = publicPageCsp(url.origin);
     browserPublicPolicy = publicPageCsp(browserOrigin);
+    internalAboutPolicy = aboutPageCsp(url.origin);
+    browserAboutPolicy = aboutPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy

@@ -42,6 +42,9 @@ const EMPTY_UNTIL_CRON = new Set([
   "spend_room_reservations",
   // GA-2 link exchange records exist only after a guest joins via a single-use link.
   "guest_link_exchanges",
+  // Invite authority provenance is recorded when an invite is minted; the
+  // fixture seeds its invite rows directly. Same exception as the recovery audit.
+  "guest_invite_authority",
   // Settlement links exist only once a paid public task is enabled
   // (First Shift settlement rail).
   "public_work_settlements"

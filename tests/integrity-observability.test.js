@@ -114,15 +114,23 @@ test("the integrity job result no longer collapses to a bare error count", async
   assert.doesNotMatch(summaryFailure(result), /^1 error\(s\) in tick$/);
 });
 
-test("deferred batch tags the throwing step on the error itself", async t => {
+test("deferred batch isolates a throwing step: reported, recorded durably, cursor advances past it", async t => {
   const store = await settle(t);
   store.db.prepare("UPDATE rooms SET archived_at='2026-10-01T00:00:00.000Z' WHERE id='alpha'").run();
-  let thrown = null;
-  for (let i = 0; i < 12 && !thrown; i++) {
-    try { await tickStore(store); } catch (error) { thrown = error; }
+  let reported = null;
+  for (let i = 0; i < 12 && !reported; i++) {
+    const result = await tickStore(store);
+    reported = result.failures.find(failure => failure.step === "room_lifecycle") ?? null;
   }
-  assert.ok(thrown, "lifecycle poison throws");
-  assert.equal(thrown.integritySubcheck, "room_lifecycle");
+  assert.ok(reported, "lifecycle poison is reported as an isolated failure, not a throw");
+  assert.equal(reported.recordId, "");
+  const row = store.db.prepare("SELECT failures FROM integrity_failures WHERE step='room_lifecycle'").get();
+  assert.ok(row && row.failures >= 1, "the failure is recorded durably");
+  // The cursor is not frozen on the poisoned pair: the next tick rotates on.
+  const before = store.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get().step;
+  await tickStore(store);
+  const after = store.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get().step;
+  assert.notEqual(after, before, "the deferred cursor keeps advancing");
 });
 
 test("full-path help-history failure is tagged help_history", async t => {
