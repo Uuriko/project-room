@@ -121,3 +121,72 @@ test("a thrown alarm is rescheduled", async () => {
     await mf.dispose();
   }
 });
+
+async function pollDrainState(mf, name, predicate) {
+  let state;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    state = await call(mf, `/probe/drain-state?name=${name}`);
+    assert.equal(state.status, 200, JSON.stringify(state.body));
+    if (predicate(state.body)) return state.body;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return state.body;
+}
+
+test("channel drain: an outcome is consumed only after its tick is recorded (#3927 R4)", async () => {
+  const mf = await start();
+  try {
+    await call(mf, "/probe/seed-drain?name=drain-consume");
+    const started = await call(mf, "/probe/drain-tick?name=drain-consume");
+    assert.equal(started.status, 200, JSON.stringify(started.body));
+    assert.equal(started.body.started, 1);
+    // The background drain finishes: outcome stashed, inflight stamp gone.
+    const stashed = await pollDrainState(mf, "drain-consume", state => state.outcomeAt !== null);
+    assert.ok(stashed.outcomeAt !== null, "background drain stashed its outcome");
+    assert.equal(stashed.stamp, null, "the inflight stamp is deleted when the drain ends");
+    // A bare reporting tick carries the outcome but must not consume it:
+    // consumption waits for the durable heartbeat record (recordCronTick).
+    const reported = await call(mf, "/probe/drain-tick?name=drain-consume");
+    assert.equal(reported.status, 200, JSON.stringify(reported.body));
+    assert.ok("screened" in reported.body, "the tick reported the completed drain's outcome");
+    const afterReport = await call(mf, "/probe/drain-state?name=drain-consume");
+    assert.equal(afterReport.body.outcomeAt, stashed.outcomeAt, "reporting alone does not consume the outcome");
+    // The recording tick consumes exactly that outcome: afterwards the
+    // stash holds a different (queued or later) outcome, or none.
+    const recorded = await call(mf, "/probe/drain-tick-record?name=drain-consume");
+    assert.equal(recorded.status, 200, JSON.stringify(recorded.body));
+    assert.equal(recorded.body[0].ok, true);
+    const afterRecord = await call(mf, "/probe/drain-state?name=drain-consume");
+    assert.notEqual(afterRecord.body.outcomeAt, stashed.outcomeAt, "the recorded outcome was consumed exactly once");
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test("channel drain: an orphaned inflight stamp keeps the stuck clock (#3927 R3)", async () => {
+  const mf = await start();
+  try {
+    await call(mf, "/probe/seed-drain?name=drain-orphan");
+    // A successor instance finding a 30s-old stamp treats the drain as
+    // still inflight — no restart, no stuck report yet.
+    await call(mf, "/probe/seed-orphan?name=drain-orphan&ageMs=30000");
+    const recent = await call(mf, "/probe/drain-tick?name=drain-orphan");
+    assert.equal(recent.status, 200, JSON.stringify(recent.body));
+    assert.equal(recent.body.started, 0);
+    assert.equal(recent.body.inflight, 1);
+    assert.equal(recent.body.stuck, undefined);
+    // Past the 120s bound the wedge is reported as a failure AND a
+    // replacement drain starts (the orphaned one will never complete);
+    // the replacement finishing clears the stamp.
+    await call(mf, "/probe/seed-orphan?name=drain-orphan&ageMs=121000");
+    const wedged = await call(mf, "/probe/drain-tick?name=drain-orphan");
+    assert.equal(wedged.status, 200, JSON.stringify(wedged.body));
+    assert.equal(wedged.body.stuck, 1);
+    assert.equal(wedged.body.scanError, "channel_drain_stuck");
+    const settled = await pollDrainState(mf, "drain-orphan", state => state.outcomeAt !== null && state.stamp === null);
+    assert.ok(settled.outcomeAt !== null, "the replacement drain completed");
+    assert.equal(settled.stamp, null, "the replacement drain cleared the stamp");
+  } finally {
+    await mf.dispose();
+  }
+});
