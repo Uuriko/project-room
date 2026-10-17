@@ -300,13 +300,26 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(await linked.getAttribute("href"), canonicalHash);
     assert.equal(await linked.getAttribute("data-open-work"), workId);
     const boardUrl = page.url();
+    // #3795: a claim without a resolvable work item is not a fabricated WORK
+    // link — its title links to its own claim record instead. The journey
+    // stays on the Board (the record is the card, disclosure open, return
+    // control naming the Board), and going back restores the Board URL with
+    // the dialog still open and focus on the title link.
     for (const id of ["board-null", "board-dangling", "board-coincidence"]) {
-      const heading = page.locator(`article[data-claim-id='${id}'] h4`);
-      assert.equal(await heading.count(), 1);
-      assert.equal(await heading.locator("a, [data-open-work]").count(), 0, `${id} is not a fabricated work link`);
-      await heading.click();
-      assert.equal(page.url(), boardUrl);
+      const titleLink = page.locator(`article[data-claim-id='${id}'] h4 a[data-open-claim]`);
+      assert.equal(await titleLink.count(), 1, `${id} links to its own claim record`);
+      assert.equal(await titleLink.getAttribute("data-open-work"), id);
+      assert.equal(await titleLink.getAttribute("href"), `#pr-record/work/${id}`,
+        `${id} never links to a missing or coincidentally equal work item`);
+      await titleLink.click();
+      await page.waitForFunction(claimId => location.hash === `#pr-record/work/${claimId}`
+        && document.querySelector(`article[data-claim-id='${claimId}'] details[data-claim-record]`)?.open === true, id);
+      assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
+      assert.equal(await dialog.evaluate(node => node.open), true, "the claim record is the Board card itself");
+      await page.goBack();
+      await page.waitForFunction(expected => location.href === expected, boardUrl);
       assert.equal(await dialog.evaluate(node => node.open), true);
+      assert.equal(await titleLink.evaluate(node => node === document.activeElement), true, "return restores the title link");
     }
     await page.locator("#board-close").focus();
     for (let step = 0; step < 100; step += 1) {
@@ -557,7 +570,10 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     assert.match(await dependent.innerText(), /Prepare the handoff.*Unclaimed; needs an owner/);
     assert.equal(await dependent.locator("[data-claim-action='claim']").count(), 0);
     assert.match(await unknown.innerText(), /Not loaded or unavailable; status unknown/);
-    assert.equal(await unknown.locator("a, [data-claim-action='claim']").count(), 0);
+    // The missing prerequisite itself is never linked (its reference stays
+    // plain text) and the card offers no claim action; the card's own title
+    // record link (#3795) is the one anchor the card legitimately carries.
+    assert.equal(await unknown.locator(".claim-deps a, [data-claim-action='claim']").count(), 0);
     assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
     assert.equal(await link.getAttribute("href"), `#pr-record/work/${encodeURIComponent(workId)}`);
     assert.equal(await dependent.locator(".claim-chain [data-open-work]").getAttribute("href"), await link.getAttribute("href"));
