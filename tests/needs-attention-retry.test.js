@@ -515,3 +515,48 @@ for (const first of ["rollup", "queue"]) {
     assert.equal(section._elements["#attention-list"].innerHTML, "");
   });
 }
+
+test("updates during an attention read coalesce into one trailing read", async t => {
+  const { section } = attentionEnvironment(t);
+  const held = deferredAttentionRead();
+  let reads = 0;
+  const { client, calls } = attentionClient({ queue: () => ++reads === 1 ? held.promise : Promise.resolve(accessQueue("New arrival")) });
+  const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+  card.sync();
+  for (let sequence = 2; sequence <= 5; sequence++) { client.sequence = sequence; card.sync(); }
+  assert.equal(calls.queue.length, 1, "events must not start overlapping refreshes");
+  held.resolve(accessQueue("Old snapshot"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.queue.length, 2, "latest change must be read after the in-flight snapshot");
+  assert.match(section._elements["#attention-list"].innerHTML, /New arrival/);
+  card.sync();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.queue.length, 2, "no polling or repeated read without another change");
+});
+
+test("coalesced attention changes retain bounded retry after a failed read", async t => {
+  const { section, timers } = attentionEnvironment(t);
+  const held = deferredAttentionRead();
+  const { client, calls } = attentionClient({ queue: () => held.promise });
+  const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+  card.sync(); client.sequence++; card.sync();
+  held.reject(new Error("Temporary outage"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.queue.length, 1, "pending changes must not create an immediate failure loop");
+  assert.equal(timers.size, 1);
+  assert.match(section._elements["#attention-status"].textContent, /Temporary outage/);
+});
+
+test("revocation discards a queued attention refresh", async t => {
+  const { section, timers } = attentionEnvironment(t);
+  const held = deferredAttentionRead(), state = attentionState();
+  const { client, calls } = attentionClient({ queue: () => held.promise });
+  const card = createNeedsAttentionCard({ client, section, getState: () => state });
+  card.sync(); client.sequence++; card.sync();
+  state.members["admin-1"].permissions = []; card.sync();
+  held.resolve(accessQueue("Revoked data"));
+  await new Promise(resolve => setImmediate(resolve));
+  assertAttentionCleared(section);
+  assert.equal(calls.queue.length, 1);
+  assert.equal(timers.size, 0);
+});

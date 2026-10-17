@@ -104,7 +104,7 @@
     "src/land-queue-board.js": "sha256:3212e8947fab8748f8162d7e547fb85fef5c825de5362cbffdee204f37310a2b",
     "src/login-polish.css": "sha256:56b341b1ea86c474004bb29b152f9a06e5e5971dc001c0cba91daa6f3fe98f6a",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
-    "src/needs-attention.js": "sha256:18756d9a22d0c3d504d8961500aefcd3c8e9ac8e60ecafb27b94956e4ff66f95",
+    "src/needs-attention.js": "sha256:1e3bfb38c34bfc0768edc9311d8d467653428ce60dee737f398c59f17c7fbfb9",
     "src/open-questions-ui.js": "sha256:743343e5ffd7e705b37b0c0d5d469bdbaac88c404e0c6e0cd32e2f2022dc87a9",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
