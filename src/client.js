@@ -86,6 +86,13 @@ function mergeRecentMessages(held, read) {
 // reads the newest window first and fills the rest in the background; `partial`
 // marks held history that is only that window.
 const FILL_DELAY_MS = 250;
+// Session liveness under delta sync: a covered event applies locally with no
+// read, so the snapshot read's second job — noticing a dead room credential
+// (401/403) — needs its own cadence while connected. The probe in
+// probeSession() re-reads on this interval whenever no snapshot read has just
+// done it. Worst case, a credential that dies just after a successful read is
+// detected one interval plus one probe round trip later.
+const LIVENESS_INTERVAL_MS = 10000;
 function firstWindow(read) {
   const window = read?.messagesWindow;
   if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(read?.state?.messages)) return null;
@@ -112,6 +119,12 @@ export class RoomClient {
     this.windowOmitted = null;
     this.backfilling = false;
     this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
+    // Liveness: when the last snapshot-path read proved the credential, and
+    // the pending probe timer (see scheduleLiveness). The interval is an
+    // instance field so tests can shorten it.
+    this.lastReadAt = 0;
+    this.livenessTimer = null;
+    this.livenessInterval = LIVENESS_INTERVAL_MS;
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -305,6 +318,7 @@ export class RoomClient {
           const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
+          this.lastReadAt = Date.now();
           // A mode change during this read must not display a partial Record.
           if (auditView !== this.auditView) { flight.revisit = true; continue; }
           if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
@@ -375,6 +389,45 @@ export class RoomClient {
         this.scheduleFill(next + Math.random() * next / 4);
       });
     }, delay);
+  }
+  // Session liveness while connected (see LIVENESS_INTERVAL_MS): covered
+  // stream events apply locally, so a room credential can die without any
+  // read ever noticing — the room would stay open on it indefinitely. This
+  // loop revalidates the credential on the interval whenever no snapshot
+  // read has just done it; it runs only while a stream is held, because
+  // manual-refresh mode has no live deltas to protect and reads on demand.
+  scheduleLiveness(delay = this.livenessInterval) {
+    if (this.livenessTimer) return;
+    const generation = this.generation, session = this.session;
+    this.livenessTimer = setTimeout(() => {
+      this.livenessTimer = null;
+      if (generation !== this.generation || this.session !== session || !this.stream) return;
+      const sinceRead = Date.now() - this.lastReadAt;
+      if (sinceRead < this.livenessInterval) { this.scheduleLiveness(this.livenessInterval - sinceRead); return; }
+      this.probeSession().then(() => this.scheduleLiveness(), () => this.scheduleLiveness());
+    }, delay);
+  }
+  // One liveness probe: a work-view read on the snapshot path. It carries
+  // the path's authentication and the viewer binding ownsResponse() checks
+  // on every snapshot, at a fraction of a message window's bytes; the
+  // payload itself is discarded — only the binding verdict is used. An
+  // authentication verdict (401/403, or a changed account-session binding)
+  // ends access through handleFailure, exactly as a failed refresh read
+  // does. Any other failure is inconclusive — the credential may be fine
+  // and the network down — so access stands and the next interval retries.
+  async probeSession() {
+    const generation = this.generation, session = this.session;
+    if (!session) return;
+    if (session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
+    try {
+      const read = await this.request(this.path("?view=work"));
+      if (generation !== this.generation || this.session !== session) return;
+      if (!this.ownsResponse(read, session)) { this.endAccess(); return; }
+      this.lastReadAt = Date.now();
+    } catch (error) {
+      if (generation !== this.generation || this.session !== session) return;
+      if ([401, 403].includes(error.status) || (session.authMode === "account" && error.code === "session_binding_changed")) this.handleFailure(error);
+    }
   }
   // Paged history backfill over /conversation: walk the cursor chain from
   // the newest page down to the floor and merge the older segment in front
@@ -877,6 +930,7 @@ export class RoomClient {
   connect() {
     clearTimeout(this.streamRetry); this.streamRetry = null;
     clearTimeout(this.refreshRetry); this.refreshRetry = null;
+    clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
@@ -889,6 +943,7 @@ export class RoomClient {
     const resumeAfter = heldNow && !heldNow.partial ? heldNow.fullSequence : this.sequence;
     const stream = new this.events(`${this.path("/stream")}?after=${resumeAfter}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
+    this.scheduleLiveness();
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
     const markRecovered = () => {
       if (!ownsStream() || !this.refreshInterrupted) return;
@@ -971,6 +1026,7 @@ export class RoomClient {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
     clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
+    clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;
   }

@@ -220,6 +220,52 @@ test("a paged fill that cannot prove the segment falls back to the legacy full r
   assert.deepEqual(f.reads, [RECENT, FULL], "the short segment was rejected and the full read completed history");
 });
 
+test("the liveness probe ends access when the credential dies under live deltas", async t => {
+  const dead = Object.assign(new Error("Session or key expired or revoked"), { status: 401, code: "unauthenticated" });
+  const f = fixture(t, { read: url => { if (url.includes("view=work")) throw dead; return full(9, history()); }, page: () => assert.fail("no paging") });
+  f.client.livenessInterval = 40;
+  await f.warm();
+  // A covered event applies as a delta: no read happens, so without the
+  // probe the dead credential would never be noticed.
+  f.notify(receipt(10, envelope(T.MESSAGE_POSTED, 10, { body: "fresh", channelId: "general" }))); await f.settle();
+  assert.equal(f.client.deltaStats.applied, 1);
+  assert.deepEqual(f.reads, [], "the delta replaced the refetch");
+  assert.ok(f.client.session, "session still held before the probe");
+  // Age the last successful read past the interval; the probe must revalidate.
+  f.client.lastReadAt = Date.now() - 1000;
+  for (let i = 0; i < 50 && f.client.session; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(f.client.session, null, "the probe's 401 ended access");
+  assert.deepEqual(f.reads, ["/api/rooms/commons?view=work"], "the probe is a work-view read on the snapshot path");
+});
+
+test("the liveness probe leaves a live credential alone; a transient failure is inconclusive", async t => {
+  let down = false;
+  const f = fixture(t, { read: url => { if (down && url.includes("view=work")) throw Object.assign(new Error("temporary"), { status: 503, code: "temporary" }); return full(9, history()); }, page: () => assert.fail("no paging") });
+  f.client.livenessInterval = 40;
+  await f.warm();
+  f.client.lastReadAt = Date.now() - 1000;
+  for (let i = 0; i < 50 && !f.reads.some(url => url.includes("view=work")); i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(f.reads.some(url => url.includes("view=work")), "the probe fired on the interval");
+  assert.ok(f.client.session, "a 200 probe leaves the session alone");
+  assert.equal(f.client.lastReadAt > Date.now() - 1000, true, "the probe's success refreshed the liveness clock");
+  // A 503 is not an authentication verdict: access stands, deltas still apply.
+  down = true; f.client.lastReadAt = Date.now() - 1000;
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.ok(f.client.session, "a transient probe failure does not end access");
+  f.notify(receipt(10, envelope(T.MESSAGE_POSTED, 10, { body: "fresh", channelId: "general" }))); await f.settle();
+  assert.equal(f.client.deltaStats.applied, 1, "deltas still apply after an inconclusive probe");
+});
+
+test("no liveness probe fires inside the interval", async t => {
+  const f = fixture(t, { read: () => full(9, history()), page: () => assert.fail("no paging") });
+  f.client.livenessInterval = 60000;
+  await f.warm();
+  f.notify(receipt(10, envelope(T.MESSAGE_POSTED, 10, { body: "fresh", channelId: "general" }))); await f.settle();
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.deepEqual(f.reads, [], "no probe read inside the interval");
+  assert.ok(f.client.session);
+});
+
 // End to end: the real store, HTTP server, login sessions and stream. A
 // second member's post and edit must reach the viewing client as deltas —
 // its snapshot-read count stays at zero — and the locally advanced state

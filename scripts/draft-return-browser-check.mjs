@@ -137,25 +137,34 @@ test("uncommitted return retry unlocks only after stale rejection, preserving me
   assert.equal(messages.length, 1); assert.equal(messages[0].proposal.submittedAtRevision, 1);
 });
 
-test("confirmed draft with failed snapshot remains saved, then becomes findable on refresh", { timeout: 60000 }, async t => {
+test("confirmed draft applies locally with failed snapshot, remains saved, and stays findable on refresh", { timeout: 60000 }, async t => {
   const f = await setup(t), { page } = f; let failSnapshot = false, command;
   await page.route(/\/api\/rooms\/commons(\?.*)?$/, route => failSnapshot ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic snapshot unavailable" } } }) : route.continue());
   await page.route("**/commands", async route => { command = route.request().postDataJSON(); failSnapshot = true; const response = await route.fetch(); return route.fulfill({ response }); });
   await f.open(); await f.input.fill(f.answer()); await f.submit.click();
   await waitForState(page, "the draft dialog to close after submit", async () => await f.dialog.isHidden().catch(() => false));
-  const postedNotice = page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true });
+  // CONTRACT CHANGE (delta sync, stated for sign-off in PR #3854): the
+  // committed receipt now applies locally at once, so the draft is visible
+  // immediately even though every snapshot read is failing — the notice is
+  // the visible-draft one, not "Refresh to view it", and the work card's
+  // draft link is present without any refresh. Before delta sync the same
+  // choreography pinned the opposite: not visible, no link, refresh owed.
+  const postedNotice = page.getByText("Draft posted. Work status is unchanged.", { exact: true });
   await waitForState(page, "the posted-draft notice to appear", async () => (await postedNotice.count().catch(() => 0)) > 0);
-  assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1);
-  assert.equal(await f.card.getByRole("link", { name: "View latest draft", exact: true }).count(), 0);
+  assert.equal(await page.getByText("Draft posted. Refresh to view it. Work status is unchanged.", { exact: true }).count(), 0);
+  assert.equal(f.snapshot().state.messages.filter(message => message.proposal).length, 1, "the draft is saved server-side");
+  const draftLink = f.card.getByRole("link", { name: "View latest draft", exact: true });
+  assert.equal(await draftLink.count(), 1, "the draft is findable immediately, with snapshot reads still failing");
+  await draftLink.click({ timeout: 30000 });
+  await waitForState(page, "focus to land on the posted draft record", async () => await page.evaluate(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId).catch(() => false));
   await page.locator("#session-menu-button").click();
   failSnapshot = false; await clickChrome(page, "#refresh-button");
   // Findability after a refresh is a full snapshot round trip + re-render: the
   // leg is ~1s unloaded but blew the 8s default in three straight hosted
   // attempts (pure locator timeouts, no assertion failures). Poll the state.
-  const draftLink = f.card.getByRole("link", { name: "View latest draft", exact: true });
-  await waitForState(page, "the posted draft to become findable after refresh", async () => await draftLink.isVisible().catch(() => false));
+  await waitForState(page, "the posted draft to remain findable after refresh", async () => await draftLink.isVisible().catch(() => false));
   await draftLink.click({ timeout: 30000 });
-  await waitForState(page, "focus to land on the posted draft record", async () => await page.evaluate(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId).catch(() => false));
+  await waitForState(page, "focus to land on the posted draft record after refresh", async () => await page.evaluate(id => document.activeElement?.dataset.messageRecordId === id, command.data.messageId).catch(() => false));
   await f.open(); assert.equal(await f.input.inputValue(), "");
 });
 
