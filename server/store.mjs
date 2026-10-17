@@ -4,6 +4,7 @@ import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
+import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
 import { DemigodOffers, demigodOffersSchema } from "./demigod-offers.mjs";
 import { DemigodContracts, demigodContractsSchema } from "./demigod-contracts.mjs";
@@ -60,7 +61,7 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
-import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
+import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
@@ -147,6 +148,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
+import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -691,7 +693,7 @@ const work = "workItemId expectedRevision";
 // Commands that name an existing message, and which field names it.
 const ARCHIVED_REF_FIELDS = Object.freeze({
   [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
-  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
+  [T.POLL_VOTED]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
   [T.MESSAGE_POSTED]: "replyToId"
 });
 
@@ -722,7 +724,7 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
-  [T.MESSAGE_REACTION_SET]: "messageId reaction active",
+  [T.POLL_VOTED]: "messageId option active",
   ...PIN_COMMAND_SHAPES,
   [T.CHANNEL_CREATED]: "channelId name",
   [T.CHANNEL_RENAMED]: "channelId name",
@@ -763,7 +765,7 @@ const shapes = {
 export const COMMAND_TYPES = Object.freeze(Object.keys(shapes));
 
 // An unknown type names the closest real types, so "message.post" or
-// "message.reacted" points at message.posted / message.reaction_set
+// "message.edit" points at message.edited
 // instead of a bare "invalid type".
 function unknownCommandTypeMessage(type) {
   const given = typeof type === "string" ? type.slice(0, 64) : "";
@@ -781,7 +783,7 @@ function unknownCommandTypeMessage(type) {
   };
   const types = Object.keys(shapes);
   const sameFamily = family ? types.filter(t => t.split(".")[0] === family) : [];
-  // Prefer a same-family type sharing the verb's stem (reacted -> reaction_set).
+  // Prefer a same-family type sharing the verb's stem (edit -> edited).
   const stem = (given.split(".")[1] ?? "").slice(0, 5);
   const stemmed = stem.length >= 4 ? sameFamily.find(t => t.split(".")[1].startsWith(stem)) : undefined;
   const closest = stemmed ?? (given ? [...types].sort((a, b) => distance(given, a) - distance(given, b))[0] : null);
@@ -804,7 +806,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1071,7 +1073,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
-  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@2"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
@@ -1088,6 +1090,7 @@ function roomSchemaStamp() {
     referralInviteSchema, referralSchema,
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
+    wakeQueuePauseBySchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
@@ -1097,7 +1100,7 @@ function roomSchemaStamp() {
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
-    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
@@ -1374,6 +1377,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
+    this.publicWorkSettlement = new PublicWorkSettlement(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -1400,11 +1404,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.wakeQueue.verifySchema({ allowAbsent: true });
         this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
+        this.wakeQueue.verifyPauseBySchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
         this.publicWorkReviews.verifySchema({ allowAbsent: true });
         this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
+        this.publicWorkSettlement.verifySchema({ allowAbsent: true });
         verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
         this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
@@ -1645,6 +1651,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(wakeQueueSchema);
       // The pause surface (W4-48) is purely additive as well.
       this.db.exec(wakeQueuePauseSchema);
+      // R327-1: who set each pause, as a separate additive side table (the
+      // guest_selfserve all-or-nothing pattern; legacy stores keep verifying).
+      this.db.exec(wakeQueuePauseBySchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
@@ -1833,6 +1842,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkSuccessorsSchema);
       this.publicWorkSuccessors.verifySchema();
+      this.publicWorkSettlement.verifySchema({ allowAbsent: true });
+      this.db.exec(publicWorkSettlementSchema);
+      this.publicWorkSettlement.verifySchema();
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
@@ -1936,6 +1948,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
+      this.wakeQueue.verifyPauseBySchema();
       this.attention.verifySchema();
       this.moderation.verifySchema();
       this.bountyEscrow.verifySchema(); // Escrowed bounties: additive at v36, verified like the other journals.
@@ -5289,8 +5302,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
-      // GX-invite design). Guest members may post chat messages and set
-      // reactions; drafts (message.posted carrying a workItemId) need the
+      // GX-invite design). Guest members may post chat messages and vote in
+      // polls; drafts (message.posted carrying a workItemId) need the
       // contributor tier recorded at redemption. Every other command type
       // is refused outright — a guest can never hold a scope outside
       // guest:*, even if some other path granted permission bits.
@@ -5304,7 +5317,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // prepareReplyPost scopes responses to requests addressed to the
         // guest itself.
         const opensReplyRequest = command.type === T.MESSAGE_POSTED && command.data?.requestKind != null;
-        const allowed = command.type === T.MESSAGE_REACTION_SET
+        const allowed = command.type === T.POLL_VOTED
           || (command.type === T.MESSAGE_POSTED && !opensReplyRequest && (!isDraft || tier === "contributor"));
         if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
@@ -5436,23 +5449,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(409, "command_rejected", "Message already exists");
         }
       }
-      // A reaction on a DM is shown to its parties and the answer would
+      // A vote on a DM poll is shown to its parties and the answer would
       // confirm the private id, so a non-party is told "no such message".
-      // Live admission only; reactions already in a log keep replaying.
-      if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
+      if (command.type === T.POLL_VOTED && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
-        // Reply requests are directed but room-threaded: members may react to them.
+        // Reply requests are directed but room-threaded.
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
             && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
-          fail(422, "command_rejected", "Reaction must reference a message in this Room");
+          fail(422, "command_rejected", "Vote must reference a message in this Room");
         }
       }
       // r233: after a block, the blocked member's edit of its own DM (a new
-      // body in the blocker's view) or reaction to the blocker's DM (a new
-      // activity event for her) is new contact in the denied direction, so it
-      // gets the same consent check as a fresh DM. Retracting a reaction and
-      // deleting stay open; reply requests are room-threaded and exempt.
-      if ((command.type === T.MESSAGE_EDITED || (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true))
+      // body in the blocker's view) or vote on the blocker's DM poll is new
+      // contact in the denied direction, so it gets the same consent check as
+      // a fresh DM. Retracting a vote and deleting stay open; reply requests are room-threaded and exempt.
+      if ((command.type === T.MESSAGE_EDITED || (command.type === T.POLL_VOTED && command.data?.active === true))
           && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)) {
@@ -5570,7 +5581,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (error?.code === CHANNEL_ARCHIVED_CODE) fail(409, CHANNEL_ARCHIVED_CODE, error.message);
         if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
-        if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
+        if (command.type === T.POLL_VOTED && (/^Event data missing /.test(error.message) || error.message === "Invalid poll vote" || error.message === "Vote must reference a poll")) {
           fail(422, "invalid_arguments", error.message);
         }
         // The reducer's generic "Invalid title" also covers values longer
@@ -5660,17 +5671,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
-      // RC-2026-10-07: reaction-as-ack. The agent.wake payload's one-tap ack
-      // copy (WAKE_ACK_HINT) says "react 👍 to acknowledge", so an active
-      // reaction by a member marks THEIR OWN pending wake signals for that
-      // message delivered. Without this the same signal re-appears on every
-      // heartbeat poll after the member reacted (the phantom re-wake loop).
-      // Runs in the same transaction as the reaction event; never throws —
-      // an ack is best-effort and must not fail the reaction.
-      if (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true
-        && typeof command.data.messageId === "string") {
-        try { this.ackWakesOnReaction(roomId, auth.member.id, command.data.messageId); } catch {}
-      }
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
@@ -5722,8 +5722,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (@handles whose target is ambiguous or unknown); they ride the response below.
       let mentionWarnings = null;
       if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
-      // Attention: write-time activity fan-out (mention/reply/thread_reply/
-      // reaction). Runs in the same transaction as the triggering event.
+      // Attention: write-time activity fan-out (mention/reply/thread_reply).
+      // Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
       // #3261: but it is no longer silent either. The fan-out is atomic
       // per recipient set (see activity.mjs), the failure is logged and
@@ -5878,26 +5878,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
-  // RC-2026-10-07: reaction-as-ack. The agent.wake payload carries the
-  // one-tap ack hint "react 👍 to acknowledge" — honor it: an active
-  // reaction marks the REACTING member's own undelivered wake signals for
-  // that message delivered. Only their own signals are touched (a reaction
-  // is personal acknowledgment, never someone else's), and a member with
-  // no identity link or no pending signals for the message is a no-op.
-  // Defensive against pre-schema databases; never throws.
-  ackWakesOnReaction(roomId, memberId, messageId) {
-    let link = null;
-    try {
-      link = this.db.prepare(
-        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-    } catch { return; }
-    if (!link?.identityId) return;
-    try {
-      this.db.prepare(
-        "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=? AND delivered_at IS NULL"
-      ).run(this.now(), link.identityId, roomId, messageId);
-    } catch { /* pre agent_wake_signals schema: nothing to ack */ }
-  }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
@@ -5914,7 +5894,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
       const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
-      if (!link) continue;
+      // #3345: a mention target with no identity link on either table can
+      // never be woken — that used to be a silent `continue`; it is now a
+      // counted, journaled loss (the member exists; the fabric cannot
+      // address them).
+      if (!link) {
+        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+          event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+        continue;
+      }
       const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
         agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {

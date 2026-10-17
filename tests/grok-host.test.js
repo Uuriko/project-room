@@ -42,7 +42,7 @@ test("wake ping prefers signal.messageId over signalId", () => {
   const ping = parseWakePing({
     event: "agent.wake", agentId: "ai_x",
     signal: { signalId: "sig-9", messageId: "msg-1", roomId: "den", kind: "mention", seq: 4 },
-    ackHint: "react 👍 to acknowledge"
+    ackHint: "ack with heartbeat_ack (POST /api/agent-heartbeats/ack { signalIds })"
   });
   const item = wakeToAttentionItem(ping);
   assert.equal(item.id, "msg-1");
