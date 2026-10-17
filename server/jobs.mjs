@@ -10,6 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -359,6 +360,23 @@ export const JOBS = Object.freeze([
     async run(store, ctx) {
       if (ctx.room?.reseedPublicWorkStarters) return ctx.room.reseedPublicWorkStarters();
       return store.publicWorkClaims.reseedStarterPool();
+    }
+  }),
+  defineJob({
+    name: "escrow-epochs",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #3693/#3844: payout epochs progress on their own. The keeper is due
+    // whenever any bounty is waiting on time — an accepted bounty past its
+    // challenge window, an approved one awaiting its sweep, a dispute past
+    // its timeout, a deadline refund. One closeEpoch per room per tick:
+    // the two-step close (approve, then sweep) is never collapsed.
+    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
+    disabledReason: () => "No bounty is waiting on an epoch close",
+    nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
+    async run(store, ctx) {
+      if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
+      return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });
     }
   }),
   defineJob({
