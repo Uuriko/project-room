@@ -321,9 +321,9 @@ export class AgentConnections {
       }
       return [owner];
     }
-    let owners = new Set([initial]);
+    const owners = new Set([initial]);
     for (const transfer of transfers) {
-      if (transfer.at < at) owners = new Set([transfer.to]);
+      if (transfer.at < at) { owners.clear(); owners.add(transfer.to); }
       else if (transfer.at === at) owners.add(transfer.to);
       else break;
     }
