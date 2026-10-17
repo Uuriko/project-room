@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonStream } from "../server/room-export.mjs";
+import { exportNdjsonStream, exportNdjsonText } from "../server/room-export.mjs";
 import {
   operatorRestoreResponse, operatorRestoreFromBackupResponse, RESTORE_MAX_BYTES,
 } from "../server/restore-ndjson.mjs";
@@ -207,4 +207,34 @@ test("restore-from-backup defaults to today's backup key", async t => {
   const response = await operatorRestoreFromBackupResponse(fakeRequest({}), OPERATOR_TOKEN, target, kv);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).key, todayKey);
+});
+
+test("restore-from-backup refuses a backup whose credentials were tampered before the manifest was written (#3325)", async t => {
+  const seeded = seedStore(t);
+  let done = false;
+  const tampered = exportNdjsonText(seeded.db).split("\n").map(line => {
+    if (done || !line.includes('"table":"credentials"')) return line;
+    const record = JSON.parse(line);
+    if (typeof record.row.expires_at !== "number") return line;
+    record.row.expires_at += 315576000000;
+    done = true;
+    return JSON.stringify(record);
+  }).join("\n");
+  assert.ok(done, "fixture export has a credentials row with a numeric expires_at");
+  // The manifest honestly describes the tampered bytes (corruption at the
+  // source, or a manifest written over them): every part hash and the
+  // whole-file hash pass, so only the export trailer's own per-table
+  // digests can catch the edit.
+  const kv = fakeKv();
+  await writeKvBackup(kv, KEY, tampered, { partBytes: 2048 });
+  const target = openStore(t, "restore-kv-digest-");
+  const response = await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY }), OPERATOR_TOKEN, target, kv);
+  assert.equal(response.status, 422);
+  assert.equal((await response.json()).error.code, "restore_verification_failed");
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0, "no partial restore remains");
+  // The intact backup restores and reports the full verification level.
+  const { kv: goodKv } = await backupToKv(t, seeded);
+  const ok = await operatorRestoreFromBackupResponse(fakeRequest({ key: KEY }), OPERATOR_TOKEN, target, goodKv);
+  assert.equal(ok.status, 200);
+  assert.equal((await ok.json()).contentVerification, "full");
 });

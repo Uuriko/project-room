@@ -13,7 +13,7 @@ function packet(value, taskId) {
     || typeof value.repositoryRef !== 'string' || typeof value.title !== 'string'
     || !Array.isArray(value.acceptanceCriteria) || !value.acceptanceCriteria.every(item => typeof item === 'string')
     || !Array.isArray(value.files) || !value.files.every(item => typeof item === 'string') || !object(value.claim)
-    || !['unclaimed', 'claimed', 'submitted'].includes(value.claim.state)
+    || !['unclaimed', 'claimed', 'submitted', 'verified'].includes(value.claim.state)
     || !Number.isSafeInteger(value.claim.generation) || value.claim.generation < 0
     || value.claim.identityId !== null && !validId(value.claim.identityId)
     || value.claim.leaseExpiresAt !== null && !date(value.claim.leaseExpiresAt)
@@ -24,7 +24,7 @@ function receipt(value, receiptId) {
   if (!object(value) || value.schema !== 'public-work-receipt/1' || !validId(value.receiptId)
     || receiptId !== undefined && value.receiptId !== receiptId || !validId(value.taskId) || !validId(value.namespaceId)
     || !positive(value.termsVersion) || !positive(value.generation) || !validId(value.identityId)
-    || value.state !== 'submitted' || value.verification !== 'hash_only' || !date(value.createdAt)
+    || !['submitted', 'verified'].includes(value.state) || !['hash_only', 'system_checked'].includes(value.verification) || !date(value.createdAt)
     || !object(value.artifact) || !/^[a-f0-9]{64}$/.test(value.artifact.sha256)
     || !Number.isSafeInteger(value.artifact.bytes) || value.artifact.bytes < 0 || value.artifact.bytes > 65536
     || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')) throw invalid();

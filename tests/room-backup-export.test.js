@@ -546,3 +546,22 @@ test("export pages never read a whole large table at once", t => {
   for (const _line of exportNdjsonLines(spy)) { /* drain */ }
   assert.ok(biggest <= 100, `events were read ${biggest} rows at once`);
 });
+
+test("replayNdjson refuses a tampered non-event row and reports the verification level (#3325)", t => {
+  const { directory, store } = openFixture(t);
+  const ndjson = exportNdjsonText(store.db);
+  const clean = replayNdjson(ndjson, join(directory, "clean", "room.sqlite"));
+  assert.equal(clean.verified, true);
+  assert.equal(clean.contentVerification, "full", "a version 2 trailer pins every loadable table");
+  let done = false;
+  const tampered = ndjson.split("\n").map(line => {
+    if (done || !line.includes('"table":"account_credentials"')) return line;
+    const record = JSON.parse(line);
+    if (typeof record.row.expires_at !== "number") return line;
+    record.row.expires_at += 315576000000;
+    done = true;
+    return JSON.stringify(record);
+  }).join("\n");
+  assert.ok(done, "fixture export has an account_credentials row to tamper");
+  assert.throws(() => replayNdjson(tampered, join(directory, "tampered", "room.sqlite")), /table digest does not match for account_credentials/);
+});

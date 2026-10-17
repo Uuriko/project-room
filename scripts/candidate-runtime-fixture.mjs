@@ -162,10 +162,11 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/web-fetch.mjs'); // RC-2026-09-23-102: room-side web fetch (imported by server/http.mjs + server/store.mjs)
   paths.add('server/web-research.mjs'); // RC-2026-09-24-310: knowledge router (imported by server/store.mjs)
   paths.add('server/owner-attention.mjs'); // #662: owner "needs your attention" rollup (imported by server/http.mjs)
+  paths.add('server/owner-overview.mjs'); // #3342: cross-room owner overview read model (imported by server/http.mjs)
   paths.add('server/open-questions.mjs'); // F1: open-questions radar read (imported by server/http.mjs)
   paths.add('src/room-layout.js');
   paths.add('src/needs-attention.js'); // #662: owner attention card (imported by src/app.js)
-  paths.add('src/emoji.js'); paths.add('src/emoji-catalog.js'); // Unicode emoji + reaction identity (imported by src/app.js, src/conversation.js, src/events.js)
+  paths.add('src/owner-cockpit.js'); // #3342: Owner Cockpit account-home shell (imported by src/app.js)
   paths.add('src/display-name-guard.js'); // Member display-name admission (imported by src/events.js)
   paths.add('server/mention-lifecycle.mjs'); // #658: mention lifecycle state machine + schema (imported by server/store.mjs)
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
