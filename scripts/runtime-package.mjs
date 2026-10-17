@@ -338,6 +338,8 @@ optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code 
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
+optional.push("server/routes/front-door.mjs"); // EXP-7 Variant B: /about front-door live facts RT route (imported by server/routes/table.mjs)
+optional.push("src/front-door.js"); // EXP-7 Variant B: /about live-facts script (loaded by about.html, registered in server/public-assets.mjs)
 optional.push("server/routes/squads.mjs"); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
 optional.push("server/spend-pricing.mjs", "server/routes/spend-pricing.mjs"); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/routes/table.mjs and server/spend-grants.mjs)
 optional.push("server/room-flood-guard.mjs"); // per (room, member) chat post budget (imported by server/store.mjs)
