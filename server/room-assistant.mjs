@@ -199,6 +199,9 @@ export class RoomAssistant {
         let run = row && JSON.parse(row.value);
         if (input.action === 'invoke') {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
+          // Asking dispatches work to the room's agent, so it takes the same
+          // steer permission as proposing work. Posting a message stays open.
+          if (!actor.permissions?.includes('steer')) fail('assistant_denied', 'Asking the room assistant needs the steer permission. Ask the room owner for access.', 403);
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
