@@ -2644,7 +2644,7 @@ async function attachComposerFiles(fileList) {
   const uploadPath = client.path("/files");
   const owns = () => Boolean(state && session === authSession && client.session === authSession
     && client.generation === generation && state.room?.id === roomId && authSession.roomId === roomId
-    && client.ownsAccountSession() && !isRoomArchived(state)
+    && client.ownsAccountSession()
     && drafts === draftOwner && drafts.entries.get(key) === draft && composerKey() === key);
   for (const file of [...(fileList ?? [])]) {
     if (!owns()) return;
