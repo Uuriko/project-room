@@ -801,3 +801,36 @@ test("llms packets describe /openapi.json as the curated machine surface, not ev
     assert.match(text, /curated machine[ -]surface/, `${name}: states the actual coverage rule`);
   }
 });
+
+// AEO Lane 3 (2026-10-17): the money truth after the settlement rail landed.
+// The packets and card once said volunteer/reputation-only; funded work now
+// settles in ledger credits through escrow. Pin the new truth and the
+// llms-full superset so the stale lines cannot return silently.
+test("packets and card state the funded-work truth, never the stale volunteer-only line", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!text.includes("Only volunteer work is executable here"), `${name}: stale volunteer-only line`);
+    assert.ok(text.includes("locked in escrow"), `${name}: escrow funding stated`);
+    assert.ok(text.includes("not cash"), `${name}: credits-not-cash stated`);
+  }
+  const card = agentCard();
+  assert.ok(!card.description.includes("reputation receipts only"), "card: stale reputation-only line");
+  assert.ok(card.description.includes("ledger credits"), "card: ledger credits stated");
+  assert.ok(card.description.includes("not cash"), "card: credits-not-cash stated");
+});
+
+test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
+  const text = llmsTxt(), full = llmsFullTxt();
+  const headings = packet => [...packet.matchAll(/^## .+$/gm)].map(match => match[0]);
+  for (const heading of headings(text)) {
+    assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
+  }
+  assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+});
+
+test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {
+  const origin = await serve(t);
+  const robots = await (await fetch(`${origin}/robots.txt`)).text();
+  for (const bot of ["Google-Extended", "CCBot", "Applebot-Extended"]) {
+    assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /`), `robots.txt must explicitly allow ${bot}`);
+  }
+});
