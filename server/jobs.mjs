@@ -103,10 +103,14 @@ function probeColumnsReady(store) {
 
 function claimDueAt(store, now) {
   if (probeColumnsReady(store)) {
+    // P0-1-RESHAPE: the predicate must imply the partial index's WHERE
+    // clause verbatim (claim_pr_url IS NOT NULL AND claim_pr_outcome IS
+    // NULL) or the planner falls back to a scan — the earlier
+    // typeof(claim_pr_url) = 'text' form did exactly that.
     const row = read(store, `SELECT MIN(claim_next_poll_at) AS due, COUNT(*) AS n
       FROM work_claims
       WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
-        AND typeof(claim_pr_url) = 'text'
+        AND claim_pr_url IS NOT NULL
         AND claim_pr_outcome IS NULL`);
     if (row) {
       if (!row.n) return null;

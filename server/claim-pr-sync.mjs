@@ -483,12 +483,45 @@ function holdDue(registry, roomId, items, until, nowMs) {
   }
 }
 
+// P0-1-RESHAPE: the polls below read the generated probe columns
+// (work-claim-sqlite.mjs ensureWorkClaimProbeColumns) with the partial
+// index's exact predicate shape, so they are index SEARCHes instead of
+// the OR'd dual-path json_extract scans the STORAGE lane measured at
+// 30.5 ms per evaluation. Column presence is probed once per store; a
+// store whose schema predates the columns (a read-only open never
+// migrates) falls back to the legacy form, which is kept verbatim.
+const probeReadyStores = new WeakMap();
+function probeColumnsReady(store) {
+  if (!store?.db?.prepare) return false;
+  let ready = probeReadyStores.get(store);
+  if (ready === undefined) {
+    try {
+      store.db.prepare("SELECT claim_state, claim_pr_url, claim_pr_outcome, claim_next_poll_at, claim_pr_rate_limited_until, claim_delivery_mode FROM work_claims LIMIT 0").get();
+      ready = true;
+    } catch { ready = false; }
+    probeReadyStores.set(store, ready);
+  }
+  return ready;
+}
+
 // Live claims with an unsettled pull. SQL keeps the tick off the rest of the
 // registry. The cap is the CPU bound: at most 32 rows are decoded.
 function loadDueClaims(store, nowMs) {
   let rows = [];
   try {
-    rows = store.db.prepare(`
+    rows = probeColumnsReady(store)
+      ? store.db.prepare(`
+      SELECT room_id AS roomId, claim_id AS claimId
+      FROM work_claims
+      WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+        AND claim_pr_url IS NOT NULL
+        AND claim_pr_outcome IS NULL
+        AND (claim_next_poll_at IS NULL OR claim_next_poll_at <= ?)
+        AND (claim_pr_rate_limited_until IS NULL OR claim_pr_rate_limited_until <= ?)
+      ORDER BY claim_next_poll_at ASC
+      LIMIT ?
+    `).all(nowMs, nowMs, PULL_CANDIDATE_CAP)
+      : store.db.prepare(`
       SELECT room_id AS roomId, claim_id AS claimId
       FROM work_claims
       WHERE (
@@ -538,7 +571,20 @@ function loadVerificationClaims(store, nowMs, limit) {
   if (!(limit > 0)) return [];
   let rows = [];
   try {
-    rows = store.db.prepare(`
+    rows = probeColumnsReady(store)
+      ? store.db.prepare(`
+      SELECT room_id AS roomId, claim_id AS claimId
+      FROM work_claims
+      WHERE claim_state = 'done'
+        AND claim_delivery_mode = 'merged'
+        AND claim_pr_url IS NOT NULL
+        AND claim_pr_outcome IS NULL
+        AND (claim_next_poll_at IS NULL OR claim_next_poll_at <= ?)
+        AND (claim_pr_rate_limited_until IS NULL OR claim_pr_rate_limited_until <= ?)
+      ORDER BY claim_next_poll_at ASC
+      LIMIT ?
+    `).all(nowMs, nowMs, limit)
+      : store.db.prepare(`
       SELECT room_id AS roomId, claim_id AS claimId
       FROM work_claims
       WHERE (
@@ -620,7 +666,14 @@ function writeSearchState(store, state, nowMs) {
 function heldPullIndex(store) {
   let rows = [];
   try {
-    rows = store.db.prepare(`
+    rows = store.db.prepare(probeColumnsReady(store) ? `
+      SELECT room_id AS roomId, claim_id AS claimId,
+        claim_state AS state,
+        COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'), '[]') AS links,
+        claim_pr_url AS url
+      FROM work_claims
+      WHERE claim_state IN ('claimed', 'in_progress', 'blocked')
+    ` : `
       SELECT room_id AS roomId, claim_id AS claimId,
         COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state')) AS state,
         COALESCE(json_extract(item_json, '$.data.pullRequests'), json_extract(item_json, '$.pullRequests'), '[]') AS links,
