@@ -552,6 +552,10 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #connection-details > summary { cursor: pointer; min-height: 28px; padding-block: .3rem; font-size: .75rem; }
 #connection-explanation { position: absolute; z-index: 15; top: 100%; right: 1rem; margin: .25rem 0 0; width: min(26rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--panel-raised); box-shadow: var(--shadow); line-height: 1.5; overflow-wrap: anywhere; }
 #people-hint:empty { display: none; }
+/* #3340: account-home Needs Attention badge sits in the cockpit heading
+   (the .count-chip rules carry its shape); per-room deep-link lines are
+   compact rows above the Decisions queue. */
+.cockpit-room-line { margin: .25rem 0; }
 /* #662: owner "needs your attention" card. */
 .needs-attention { margin: 0 1rem .5rem; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: .65rem; background: rgb(255 255 255 / 4%); }
 .needs-attention[hidden] { display: none; }
