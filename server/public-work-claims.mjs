@@ -153,6 +153,33 @@ export class PublicWorkClaims {
     if (entry.n > PUBLIC_WORK_IDENTITY_RATE_LIMIT) throw new ServiceError(429, 'rate_limited', 'Too many requests; retry after a minute',
       { 'X-RateLimit-Limit': PUBLIC_WORK_IDENTITY_RATE_LIMIT, 'X-RateLimit-Remaining': 0, 'X-RateLimit-Reset': Math.ceil(entry.until / 1000), 'X-RateLimit-Bucket': 'public-work-identity' });
   }
+  // #3924: the REST write door splits the ceiling into a peek and a
+  // charge so a refusal from either of its two budgets (this one, or
+  // the per-IP admissions backstop) charges neither. assert throws the
+  // enforce shape WITHOUT counting the attempt; charge counts an
+  // attempt that both budgets admitted. enforceIdentityRateLimit
+  // above keeps its combined semantics for the MCP door and match's
+  // claim site.
+  assertIdentityRateBudget(identityId) {
+    const now = this.store.now();
+    const entry = this.identityRateBuckets.get(identityId);
+    if (entry && entry.until > now && entry.n >= PUBLIC_WORK_IDENTITY_RATE_LIMIT)
+      throw new ServiceError(429, 'rate_limited', 'Too many requests; retry after a minute',
+        { 'X-RateLimit-Limit': PUBLIC_WORK_IDENTITY_RATE_LIMIT, 'X-RateLimit-Remaining': 0, 'X-RateLimit-Reset': Math.ceil(entry.until / 1000), 'X-RateLimit-Bucket': 'public-work-identity' });
+  }
+  chargeIdentityRate(identityId) {
+    const now = this.store.now();
+    for (const [key, entry] of this.identityRateBuckets) if (entry.until <= now) this.identityRateBuckets.delete(key);
+    let entry = this.identityRateBuckets.get(identityId);
+    if (entry) this.identityRateBuckets.delete(identityId);
+    else {
+      if (this.identityRateBuckets.size >= PUBLIC_WORK_IDENTITY_RATE_KEYS)
+        this.identityRateBuckets.delete(this.identityRateBuckets.keys().next().value);
+      entry = { n: 0, until: now + PUBLIC_WORK_IDENTITY_RATE_WINDOW_MS };
+    }
+    entry.n++;
+    this.identityRateBuckets.set(identityId, entry);
+  }
   // #3707: live claims one identity holds across the whole public board —
   // held (owner set), unexpired, and not yet submitted. Same liveness
   // derivation packet() serves, counted board-wide because the ceiling is
