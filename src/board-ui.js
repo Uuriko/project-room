@@ -865,10 +865,13 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
 
 function newItemForm(draft = null) {
   // D4: the unsent title/note ride through repaints like the card forms.
+  // B4-CORRECTIVE: the files text rides too — it is a text field, and
+  // the capture listener no longer excludes it.
   const title = draftValue(draft, "title");
   const note = draftValue(draft, "note");
+  const files = draftValue(draft, "files");
   const value = text => (text !== undefined ? ` value="${escapeHtml(text)}"` : "");
-  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off"${value(title)}></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"${value(note)}></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
+  return `<form id="board-new-item" class="board-new"><h3>New item</h3><label>Title <input name="title" data-focus-key="board-new-title" maxlength="200" required autocomplete="off"${value(title)}></label><label>Note <input name="note" data-focus-key="board-new-note" maxlength="4000" autocomplete="off" placeholder="Optional, context for whoever picks this up"${value(note)}></label><label>Files <input name="files" data-focus-key="board-new-files" maxlength="4000" autocomplete="off" placeholder="Optional, comma-separated"${value(files)}></label><button type="submit" class="button primary" data-focus-key="board-new-submit">Add item</button></form>`;
 }
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
@@ -1246,15 +1249,20 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
     // B4-HARDENING/D4: capture unsent data from the board's own forms as
     // it is typed; paint() hands it back to the render, so a background
-    // work_claim.updated repaint stops wiping it. The files field is
-    // excluded — its value is a browser-owned path, not user data.
+    // work_claim.updated repaint stops wiping it. Every field counts,
+    // including the new-item form's "files" field: the board has no
+    // <input type="file"> — that field is a text input of comma-separated
+    // references, i.e. user data like any other. (B4-CORRECTIVE: an
+    // earlier exclusion of it rested on a browser-owned-path rationale
+    // that does not apply to a text field, and silently dropped the
+    // typed references on every repaint.)
     const field = event.target;
     const host = field?.closest?.("form");
     if (!host || !root.contains(host)) return;
     const kind = host.dataset.claimReview ? "review" : host.dataset.claimDeliver ? "deliver" : host.id === "board-new-item" ? "new" : null;
     const name = field.name;
-    if (!kind || typeof name !== "string" || !name || name === "files") return;
-    const siblings = host.querySelectorAll("[name]").filter(candidate => candidate.name === name);
+    if (!kind || typeof name !== "string" || !name) return;
+    const siblings = [...host.querySelectorAll("[name]")].filter(candidate => candidate.name === name);
     const index = siblings.indexOf(field);
     if (index < 0) return;
     const id = kind === "review" ? host.dataset.claimReview : host.dataset.claimDeliver;

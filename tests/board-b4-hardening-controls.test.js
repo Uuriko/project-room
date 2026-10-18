@@ -93,6 +93,25 @@ function matchesSelector(node, selector) {
   return attrs.every(([name, value]) => Object.hasOwn(node.attrs, name) && (value === undefined || node.attrs[name] === value));
 }
 
+// B4-CORRECTIVE: a real querySelectorAll returns a NodeList — array-like
+// with forEach and iterators but NO filter/map/indexOf/find. This fake
+// used to hand back a plain Array, which hid a real-browser throw in
+// production code (the D4 draft listener called .filter on the result).
+// The harness now mirrors the browser shape exactly.
+class FakeNodeList {
+  constructor(items) {
+    this._items = [...items];
+    this.length = this._items.length;
+    this._items.forEach((node, index) => { this[index] = node; });
+  }
+  item(index) { return this._items[index] ?? null; }
+  forEach(callback, thisArg) { this._items.forEach(callback, thisArg); }
+  entries() { return this._items.entries(); }
+  keys() { return this._items.keys(); }
+  values() { return this._items.values(); }
+  [Symbol.iterator]() { return this._items[Symbol.iterator](); }
+}
+
 function makeDom(t) {
   let nodes = [];
   const body = { tag: "body", attrs: {}, parent: null, children: [], closest: () => null };
@@ -120,7 +139,7 @@ function makeDom(t) {
       },
       closest(selector) { for (let up = this; up; up = up.parent) if (up.tag && matchesSelector(up, selector)) return up; return null; },
       querySelector(selector) { return queryWithin(this, selector, false); },
-      querySelectorAll(selector) { return queryWithin(this, selector, true); },
+      querySelectorAll(selector) { return new FakeNodeList(queryWithin(this, selector, true)); },
       setAttribute(name, value) { this.attrs[name] = String(value); },
       removeAttribute(name) { delete this.attrs[name]; },
       focus() { active = this; },
@@ -171,15 +190,15 @@ function makeDom(t) {
     addEventListener(type, listener) { listeners[type].push(listener); },
     contains: node => nodes.includes(node),
     querySelector: selector => queryWithin(null, selector, false),
-    querySelectorAll: selector => queryWithin(null, selector, true),
+    querySelectorAll: selector => new FakeNodeList(queryWithin(null, selector, true)),
     set innerHTML(html) { parseInto(html); },
     replaceChildren() { parseInto(""); },
   };
   class FakeFormData {
     constructor(form) { this.form = form; }
     fields() { return this.form.querySelectorAll("[name]"); }
-    get(name) { const field = this.fields().find(entry => entry.attrs.name === name); return field ? field.value : null; }
-    getAll(name) { return this.fields().filter(entry => entry.attrs.name === name).map(entry => entry.value); }
+    get(name) { const field = [...this.fields()].find(entry => entry.attrs.name === name); return field ? field.value : null; }
+    getAll(name) { return [...this.fields()].filter(entry => entry.attrs.name === name).map(entry => entry.value); }
   }
   globalThis.document = { body, get activeElement() { return active; },
     querySelector: selector => (selector === "#work-board" ? root : null) };
@@ -317,4 +336,57 @@ test("D4: a background repaint preserves the new-item draft", async t => {
     "the unsent title survives the background repaint");
   assert.equal(form().querySelector('[name="note"]').value, "Cover the restore drill",
     "the unsent note survives the background repaint");
+});
+
+// ------------------------------------------- B4-CORRECTIVE (A) ----------
+// The draft-capture listener indexed same-name fields through
+// host.querySelectorAll("[name]").filter(...) — a plain-Array-only call
+// that throws on a real browser's NodeList. The harness above now returns
+// a NodeList shape, so every D4 test is a regression for the class; this
+// one additionally pins the sibling indexing the .filter existed for:
+// with two checkName rows, typing in the second must restore into the
+// second, not the first.
+
+test("A: repeated-name fields keep their own drafts through capture and repaint (sibling indexing)", async t => {
+  const claim = { id: "wc_idx", title: "Title wc_idx", state: "in_progress", owner: "agent-1", kind: "task",
+    files: [], dependsOn: [], tags: [], reviews: [], attestations: [],
+    history: [{ action: "created" }, { action: "claimed" }, { action: "state:delivered" }, { action: "state:in_progress" }],
+    claimedAt: T0, deliveryGeneration: 1, claimRound: 1, acceptanceCriteria: ["case A handled"],
+    delivery: { artifact: { kind: "report", ref: "https://example.com/r", sha256: SHA },
+      checks: [{ name: "unit", result: "pass" }, { name: "browser", result: "pass" }],
+      criteria: [], digest: DIGEST, deliveredBy: "agent-1", deliveredAt: T0 } };
+  const { dom, settle, backgroundRepaint } = installBoard(t, { memberId: "agent-1", claims: [claim] });
+  await settle();
+  const form = () => dom.query('form[data-claim-deliver="wc_idx"]');
+  assert.ok(form(), "the sent-back holder gets the deliver form with both check rows");
+  const names = () => [...form().querySelectorAll('[name="checkName"]')];
+  assert.equal(names().length, 2, "two checkName rows render");
+  assert.equal(names()[0].value, "unit");
+  assert.equal(names()[1].value, "browser");
+  names()[1].value = "e2e suite";
+  dom.fire("input", names()[1]);
+  await backgroundRepaint();
+  assert.equal(names()[0].value, "unit", "the first row keeps its own value");
+  assert.equal(names()[1].value, "e2e suite", "the typed value restores into the SECOND row, not the first");
+});
+
+// ------------------------------------------- B4-CORRECTIVE (C) ----------
+// The board has no <input type="file">; its one "files" field is the
+// new-item form's comma-separated TEXT input. The D4 capture listener
+// excluded it on a "browser-owned path" rationale that does not apply
+// to a text field, so the typed references vanished on every repaint
+// while title and note survived.
+
+test("C: a background repaint preserves the new-item files text", async t => {
+  const claim = deliveredClaim("wc_f1");
+  const { dom, settle, backgroundRepaint } = installBoard(t, { memberId: "rev-1", claims: [claim] });
+  await settle();
+  const form = () => dom.query("#board-new-item");
+  assert.ok(form(), "a writer gets the new-item form");
+  const files = form().querySelector('[name="files"]');
+  files.value = "spec.md, runbook.md";
+  dom.fire("input", files);
+  await backgroundRepaint();
+  assert.equal(form().querySelector('[name="files"]').value, "spec.md, runbook.md",
+    "the unsent files text survives the background repaint like title and note");
 });
