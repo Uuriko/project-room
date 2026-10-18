@@ -267,6 +267,11 @@
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
+      "template": "/receipts/{}/og.png",
+      "class": "web-asset",
+      "reason": "Per-receipt Open Graph share card: a PNG rendered from the receipt's own public fields for link unfurlers and crawlers; browser furniture like the sitemap, not an API contract."
+    },
+    {
       "template": "/robots.txt",
       "class": "web-asset",
       "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."
