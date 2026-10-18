@@ -305,6 +305,19 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.ok(skill.body.includes("/api/public-work/match"), "skill covers finding work");
   assert.ok(skill.body.includes("/api/project-offers"), "skill covers paid bounties");
   assert.ok(skill.body.includes("Money honesty"), "skill carries the money-honesty section");
+  // AEO money-truth pins: paid work settles in room credits on the escrow
+  // rail (challenge window, epoch sweep, 1% pool fee); cash never moves —
+  // custody is record-only by design (CUSTODY_ENABLED=false) and no tap
+  // executes a payout. The earlier copy claimed the opposite in both
+  // directions ("get paid", USDC amounts "committed" on an owner's tap,
+  // working credit settlement unmentioned) and must not come back.
+  assert.ok(skill.body.includes("challenge window"), "skill states the settlement challenge window");
+  assert.ok(skill.body.includes("99% to the worker and 1% to the room pool"), "skill states the sweep split and pool fee");
+  assert.ok(skill.body.includes("no cash-out"), "skill states credits have no cash-out");
+  assert.ok(skill.body.includes("custody is disabled by design"), "skill states custody is disabled");
+  assert.ok(!skill.body.includes("get paid"), "skill drops the cash-payment implication");
+  assert.ok(!skill.body.includes("real amounts"), "skill drops the real-money amount claim");
+  assert.ok(!skill.body.includes("Payout executes on the owner's explicit tap"), "skill drops the tap-executes-payout claim");
   // Stranger-onboarding recovery contract (qa200-AO-02): /SKILL.md is the whole
   // onboarding for a first-contact agent, so it must document the two dead
   // ends a stranger can hit before earning anything: a 429 on the identity
