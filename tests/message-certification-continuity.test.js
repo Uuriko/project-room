@@ -136,3 +136,63 @@ test('same-head imported history never inherits the old certificate in candidate
  assert.equal(f.read({messageId:'imported'}).messages[0].body,'Replacement history.');
  f.certify();f.compare();
 });
+
+test('digest, attention and updates preserve current archived DM content across cutover and reopen', async t=>{
+ const { roomAttention } = await import('../server/needs-me.mjs');
+ const { projectRoomUpdates } = await import('../server/updates.mjs');
+ const { messageRepository } = await import('../server/message-repository.mjs');
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ const reader=f.store.issueAccessKey('commons','reader');
+ f.post('dm-old','Original private wording.',{toMemberId:'reader'});
+ f.command('message.edited',{messageId:'dm-old',body:'Current private wording.',expectedMessageRevision:0});
+ for(let i=0;i<12;i++)f.post(`tail-${i}`,'Settled public record.');
+ f.certify();
+ const snapshot=()=>({digest:f.store.roomDigest(reader,'commons'),attention:roomAttention(f.store,'commons','reader',null,0),updates:projectRoomUpdates(f.store,'commons','reader'),notifications:f.store.notifications.list(reader,'commons')});
+ // Freeze the clock so time-derived context versions are comparable.
+ const now=f.store.now();f.store.now=()=>now;
+ const before=snapshot();
+ assert.equal(before.attention.find(x=>x.id==='dm-old').summary,'Current private wording.');
+ assert.equal(f.store.archiveMessages('commons',{keepNewest:2,dryRun:false}).ok,true);
+ assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='dm-old'),false);
+ assert.deepEqual(snapshot(),before);
+ const repo=messageRepository(f.store,'commons');
+ assert.equal(repo.get('dm-old').body,'Current private wording.');
+ const many=repo.getMany([...Array.from({length:520},(_,i)=>`absent-${i}`),'dm-old','tail-11','dm-old']);
+ assert.deepEqual([...many.keys()].sort(),['dm-old','tail-11']);
+ assert.equal(many.get('dm-old').body,'Current private wording.');
+ assert.equal(repo.receivedBy('reader').filter(m=>m.id==='dm-old').length,1);
+ assert.equal(repo.receivedBy('owner').some(m=>m.id==='dm-old'),false);
+ f.reopen();f.store.now=()=>now;assert.deepEqual(snapshot(),before);
+ // A non-message command makes certification stale; archived records remain
+ // authoritative while the newly changed working set still wins.
+ f.command('member.added',{memberId:'third',displayName:'Third',kind:'human',permissions:[]});
+ assert.equal(roomAttention(f.store,'commons','reader',null,0).find(x=>x.id==='dm-old').summary,'Current private wording.');
+ assert.equal(f.store.roomDigest(f.owner,'commons').messages.some(x=>x.id==='dm-old'),false);
+});
+
+test('repository ignores uncertified non-archived rows and refuses corrupt archive records', async t=>{
+ const { messageRepository } = await import('../server/message-repository.mjs');
+ const f=setup(t);f.post('original','Correct current body.');f.certify();
+ f.store.db.prepare('UPDATE messages SET body=? WHERE message_id=?').run('stale table body','original');
+ assert.equal(messageRepository(f.store,'commons').get('original').body,'Correct current body.');
+ f.store.db.prepare('UPDATE messages SET body=? WHERE message_id=?').run('Correct current body.','original');
+ f.post('tail','Settled tail.');f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});
+ f.store.db.prepare('UPDATE messages SET record_json=? WHERE message_id=?').run('{invalid','original');
+ assert.throws(()=>messageRepository(f.store,'commons').get('original'));
+});
+
+test('selected work discussion survives unrelated archived history without widening its scope',t=>{
+ const f=setup(t);f.store.roomFlood={consume(){}};
+ f.post('source','Work source.');
+ f.command('work.proposed',{workItemId:'selected',title:'Selected work',definitionOfDone:'A useful answer',accountableMemberId:'owner',mode:'read',independentVerificationRequired:false,ownerDecisionRequired:true,humanDecisionMakerId:'owner',sourceMessageId:'source'});
+ for(let i=0;i<12;i++)f.post(`unrelated-${i}`,'Unrelated settled text.');
+ f.certify();const now=f.store.now();f.store.now=()=>now;
+ const before=f.store.workDiscussion(f.owner,'commons','selected');
+ const context=f.store.workContext(f.owner,'commons','selected',{includeSource:true});
+ assert.equal(f.store.archiveMessages('commons',{keepNewest:2,dryRun:false}).ok,true);
+ assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='unrelated-0'),false);
+ assert.deepEqual(f.store.workDiscussion(f.owner,'commons','selected'),before);
+ assert.deepEqual(f.store.workContext(f.owner,'commons','selected',{includeSource:true}),context);
+ assert.equal(JSON.stringify(before).includes('Unrelated settled text.'),false);
+});

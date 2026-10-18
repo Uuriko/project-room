@@ -2,6 +2,7 @@
 import entry, { HttpTestRoom } from './http-worker.test-fixture.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { readConversation } from '../server/conversation-sync.mjs';
+import { messageRepository } from '../server/message-repository.mjs';
 export class MessageContinuityTestRoom extends HttpTestRoom {
   async fetch(request) {
     if (new URL(request.url).pathname !== '/__test-message-continuity') return super.fetch(request);
@@ -15,7 +16,7 @@ export class MessageContinuityTestRoom extends HttpTestRoom {
     const selected=readConversation(s,token,'commons',{messageId:'fixture-0'});
     const certificate=s.db.prepare('SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id=?').get('commons');
     return Response.json({head:s.headSequence('commons'),certified:certificate.parity_at_seq,
-      tail:s.room('commons').state.messages.length,body:selected.messages[0].body,parity:s.checkMessagesParity().ok});
+      tail:s.room('commons').state.messages.length,body:selected.messages[0].body,archivedBody:messageRepository(s,'commons').get('fixture-1').body,parity:s.checkMessagesParity().ok});
   }
 }
 export default entry;

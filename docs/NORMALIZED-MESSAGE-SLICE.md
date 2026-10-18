@@ -72,3 +72,33 @@ constructor option off alone does not restore already archived records.
 
 The roadmap is not complete merely because a latency benchmark improves. Each
 stage needs correctness, migration/reversal and workload evidence before rollout.
+
+## Reader repository checkpoint
+
+`server/message-repository.mjs` now owns current-record lookup across the
+working set and archived rows. The working set wins; uncertified table records
+outside the archive marker are never treated as authoritative. It supports
+point and batched lookup, received-message selection and reply existence. Batches
+use one JSON binding per 256 IDs to respect Workers parameter limits. Reply
+sets are derived once per author per repository instance, avoiding a history
+scan per inbox item. Repository instances are request-scoped, never stored on a
+RoomStore or reused after a mutation. It is an internal data API, not an
+authorization boundary: callers still enforce audience, membership and history.
+
+Migrated consumers include digest, needs-me, updates, notifications, history-floor
+checks, selected work context/discussion/result reads, native-result inbox
+lookup, moderation, activity, attachment visibility/commit, pin checks, search
+response filtering and claim-renewal evidence lookup. Pure work/notification
+functions retain injectable records and projection defaults for standalone use.
+Tests compare complete digest, attention, updates and notifications before/after
+compaction and reopen, including an edited archived DM. Work discussion is tested
+with unrelated archived messages, which previously caused a history-reset error.
+
+This is still not the all-reader cutover. Snapshot/export contracts, assistant
+and outside-agent consumers, guide/growth/orient scans, reply-context graph
+traversal, recovery/redaction audits and aggregate writers require individual
+migration or a documented retention invariant. Do not replace `room().state`
+with an implicit full-history hydration: that would recreate the original blob
+in memory and hide which operations remain unbounded. The writer and placement
+stages above remain outstanding; this checkpoint does not enable rolling mode
+by default.

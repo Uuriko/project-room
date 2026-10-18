@@ -1,4 +1,4 @@
-import { messageReadIndex } from "./message-read-index.mjs";
+import { messageRepository } from "./message-repository.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -168,8 +168,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const now = store.now();
   const items = [];
   const requests = state.replyRequests ?? {};
-  const messages = state.messages ?? [];
-  const byId = messageReadIndex(messages);
+  const byId = messageRepository(store, roomId, state);
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;

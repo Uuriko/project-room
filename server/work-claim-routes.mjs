@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
 //
 // Room-scoped handlers mounted by server/http.mjs inside the authenticated
@@ -1464,8 +1465,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     const progressId = data.progressMessageId;
     if (progressId !== undefined && (typeof progressId !== "string" || !progressId.trim())) invalidInput(reject, "progressMessageId as a message id when citing evidence");
-    const messages = progressId ? (store.room(roomId).state.messages ?? []) : [];
-    const message = progressId ? messages.find(entry => entry.id === progressId) : null;
+    const message = progressId ? messageRepository(store, roomId).get(progressId) : null;
     if (progressId) {
       if (!message || message.deletedAt) {
         reject(422, "claim_renewal_source_required",

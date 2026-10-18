@@ -1,4 +1,4 @@
-import { messageReadIndex } from "./message-read-index.mjs";
+import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
@@ -50,7 +50,7 @@ import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from ".
 import { captureMessageCertification, advanceMessageCertification, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
-import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -5306,7 +5306,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type') IN ('decision.recorded','owner.decision_recorded')
          ORDER BY sequence DESC LIMIT 10`
       ).all(roomId, effectiveSince, through);
-      const currentById = messageReadIndex(room.state.messages);
+      const messageRecords = messageRepository(this, roomId, room.state);
       const messageRows = this.db.prepare(
         `SELECT sequence AS seq, json_extract(body,'$.id') AS eventId, json_extract(body,'$.data.messageId') AS messageId,
                 json_extract(body,'$.data.body') AS body, json_extract(body,'$.data.toMemberId') AS toMemberId,
@@ -5314,6 +5314,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='message.posted'
          ORDER BY sequence DESC LIMIT 50`
       ).all(roomId, effectiveSince, through);
+      const currentById = messageRecords.getMany ? messageRecords.getMany(messageRows.map(row => row.messageId ?? row.eventId)) : messageRecords;
       const messages = [];
       for (const row of messageRows) {
         const id = row.messageId ?? row.eventId;
@@ -5348,7 +5349,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers,
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: messageRepository(this, roomId, room.state),
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
@@ -5372,7 +5373,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         floor ? [floor.sequence, floor.at, [...floor.sameInstant].sort()] : null] : null;
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
         now: this.now(), metadata, window, anchorId, cursor,
-        floor, scope }),
+        floor, scope, messageRecords: messageRepository(this, roomId, room.state) }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -5477,7 +5478,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const isOwner = viewerId === authority.ownerId;
       // PRIV-2: since_join readers page past events from before their join.
       const floor = this.historyFloor(roomId, viewerId, sequence);
-      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+      const floorMessages = floor ? messageRepository(this, roomId) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
       const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, this.archivedDmPartiesReader(roomId));
@@ -5707,7 +5708,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Derive continuation from scanned rows before removing private events:
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
-      const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
+      const floorMessages = floor ? messageRepository(this, roomId, room.state) : null;
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, this.archivedDmPartiesReader(roomId)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, auth.member.id, isOwner)
