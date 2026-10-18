@@ -477,6 +477,13 @@ export function draftRecoveryScope(identity) {
     identity.member.id, identity.sessionBinding]);
 }
 
+// The recovery payload cap, enforced on BOTH sides: read() refuses an
+// oversized payload wholesale (a corruption guard — every draft is lost),
+// so write() must never persist one. Composer bodies run to 65,536 chars
+// (MAX_MESSAGE_BODY_CHARS), so a handful of large drafts crosses the cap
+// well inside the 50-entry count limit.
+export const DRAFT_RECOVERY_MAX_CHARS = 500000;
+
 // Tab-scoped recovery. The composer used to hide this behind a checkbox; drafts
 // now save for this tab until the 12-hour expiry or sign-out. Read only after
 // an authenticated room snapshot.
@@ -493,7 +500,16 @@ export class DraftRecovery {
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
           pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
-      this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
+      // Shed least-recently-written entries (entry order is last-write
+      // order) until the payload fits the cap read() enforces — persisting
+      // an oversized backup would make the next restore wipe every draft.
+      const expires = this.now() + 12 * 60 * 60 * 1000;
+      let payload = JSON.stringify({ scope, expires, threadId, activeKey, entries });
+      while (payload.length > DRAFT_RECOVERY_MAX_CHARS && entries.length) {
+        entries.shift();
+        payload = JSON.stringify({ scope, expires, threadId, activeKey, entries });
+      }
+      this.storage.setItem(this.key, payload);
       this.storage.removeItem("project-room:drafts:v2");
       return true;
     } catch { this.clear(); return false; }
@@ -503,7 +519,7 @@ export class DraftRecovery {
       if (typeof scope !== "string" || !scope) { this.clear(); return null; }
       const raw = this.storage?.getItem(this.key) ?? this.storage?.getItem("project-room:drafts:v2");
       if (!raw) return null;
-      if (raw.length > 500000) throw new Error("size");
+      if (raw.length > DRAFT_RECOVERY_MAX_CHARS) throw new Error("size");
       const saved = JSON.parse(raw);
       if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now() || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error("scope or expiry");
       const index = conversationIndex(state.messages), drafts = new ConversationDrafts(), restoredKeys = new Map();

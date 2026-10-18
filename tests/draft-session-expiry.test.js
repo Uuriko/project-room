@@ -23,7 +23,7 @@
 // mechanism the policy gates.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ConversationDrafts, DraftRecovery, shouldPreserveDrafts } from "../src/conversation.js";
+import { ConversationDrafts, DraftRecovery, DRAFT_RECOVERY_MAX_CHARS, shouldPreserveDrafts } from "../src/conversation.js";
 
 // Minimal sessionStorage stand-in.
 function mapStorage() {
@@ -91,6 +91,27 @@ test("DraftRecovery cap evicts the least-recently-written draft, not the oldest-
   const before = drafts.get("thread-7");
   drafts.save("thread-7", { error: "x" });
   assert.equal(drafts.entries.get("thread-7"), before, "save keeps entry identity");
+});
+
+test("DraftRecovery write never persists a payload read() would reject wholesale (HUNT-FRONTEND F5)", () => {
+  // read() treats an oversized payload as corruption and clears it — every
+  // draft gone. Composer bodies run to 65,536 chars, so eight large drafts
+  // (520k+ serialized) crossed the 500k cap while write() happily persisted
+  // them. write() now sheds least-recently-written entries until the
+  // payload fits the one shared cap.
+  const storage = mapStorage();
+  const recovery = new DraftRecovery(storage, () => 1000);
+  const drafts = new ConversationDrafts();
+  for (let i = 0; i < 8; i++) drafts.save(`thread-${i}`, { body: "x".repeat(65000), replyToId: null });
+  assert.equal(recovery.write(SCOPE, drafts, "thread-7"), true);
+  const raw = storage.getItem("project-room:drafts:v3");
+  assert.ok(raw.length <= DRAFT_RECOVERY_MAX_CHARS, `persisted payload ${raw.length} exceeds the read cap`);
+  const state = { messages: Array.from({ length: 8 }, (_, i) => ({ id: `thread-${i}` })) };
+  const restored = recovery.read(SCOPE, state);
+  assert.ok(restored, "the restore survives instead of wiping every draft");
+  assert.equal(restored.drafts.entries.size, 7, "only the oldest draft was shed to fit the cap");
+  assert.ok(!restored.drafts.entries.has("thread-0"), "the least-recently-written draft is shed first");
+  assert.equal(restored.drafts.entries.get("thread-7").body.length, 65000, "the most recent draft is intact");
 });
 
 test("DraftRecovery mechanism: write survives when clear() is skipped, read is null after clear()", () => {
