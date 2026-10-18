@@ -15,7 +15,9 @@ public enum LocalHostReadiness {
         return ["mode": tools["inputApproval"] as? String == "approve" ? "control" : "approval_required", "connection": connection]
     }
 
-    public static func notice(host: [String: Any], local: [String: Any], connection: String) -> String? {
+    /// Conversation does not require local computer permissions. Keep its
+    /// readiness independent from optional tools and never imply model success.
+    public static func conversationNotice(host: [String: Any]) -> String? {
         guard host["configured"] as? Bool == true else { return "Set up this Mac’s agent to work from Conversation." }
         if host["stopping"] as? Bool == true { return "This Mac’s agent is stopping. Wait before starting it again." }
         guard host["running"] as? Bool == true else {
@@ -35,6 +37,11 @@ public enum LocalHostReadiness {
         guard host["protocol"] as? String == "qualified",
               ["present", "not_required"].contains(host["credentials"] as? String ?? "")
         else { return "This Mac’s agent is checking its connection and sign-in." }
+        return nil
+    }
+
+    public static func notice(host: [String: Any], local: [String: Any], connection: String) -> String? {
+        if let blocker = conversationNotice(host: host) { return blocker }
         let tools = host["macTools"] as? [String: String] ?? [:]
         switch tools["mode"] {
         case "none": return "For computer tasks, stop this agent and connect Mac tools in My Mac."

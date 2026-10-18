@@ -101,6 +101,18 @@ final class LocalToolsTests {
             LocalHostReadiness.notice(host: base.merging(changes) { _, new in new }, local: state ?? local, connection: connection)
         }
         expectEqual(notice([:]), nil)
+        // Basic conversation remains available with no computer tool grant.
+        // The computer diagnostics must still explain the missing capability.
+        for mode in ["none", "unknown", "approval_required", "control"] {
+            let chatHost = base.merging(["macTools": ["mode": mode, "connection": "/different"]]) { _, new in new }
+            expectEqual(LocalHostReadiness.conversationNotice(host: chatHost), nil)
+            expectEqual(LocalHostReadiness.notice(host: chatHost, local: ["enabled": false], connection: connection) != nil, true)
+        }
+        for changes: [String: Any] in [["configured": false], ["running": false], ["stopping": true],
+            ["statusFresh": false], ["credentials": "login_required"], ["protocol": "unverified"],
+            ["phase": "retrying_room"], ["phase": "recovery_pending"]] {
+            expectEqual(LocalHostReadiness.conversationNotice(host: base.merging(changes) { _, new in new }) != nil, true)
+        }
         for (change, fragment) in [
             (["configured": false], "Set up"), (["running": false], "stopped"), (["stopping": true], "stopping"),
             (["running": false, "lastExit": "unconfirmed"], "without a confirmed stop"),

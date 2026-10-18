@@ -124,7 +124,10 @@ import CoreGraphics
             + "\n\nFiles and apps may require additional access. These local checks do not verify your agent connection or model access."
         let readiness = LocalHostReadiness.notice(host: agent, local: snapshot, connection: connection.connectionURL.path)
         if hostIssue == nil, let readiness { hostState.stringValue = readiness }
-        if readiness != lastReadiness { lastReadiness = readiness; onReadinessChange?(readiness) }
+        // My Mac retains tool diagnostics; Conversation shows only blockers to
+        // the agent itself, without asking for unrelated computer permissions.
+        let conversation = LocalHostReadiness.conversationNotice(host: agent)
+        if conversation != lastReadiness { lastReadiness = conversation; onReadinessChange?(conversation) }
     }
     @objc private func copyConnection() {
         let executable = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ProjectRoomTools")
