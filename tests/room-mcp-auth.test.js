@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -105,12 +106,16 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
 
   const listed = await rpc(origin, "tools/list", undefined, owner.secret);
   assert.equal(listed.status, 200);
-  const coreBody = await listed.json();
-  const names = coreBody.result.tools.map(tool => tool.name);
+  const leanBody = await listed.json();
+  const names = leanBody.result.tools.map(tool => tool.name);
+  // Lean-as-default: the no-argument list is lean; core is explicit.
+  assert.equal(leanBody.result.profile, "lean");
+  assert.equal(names.length, LEAN_MCP_TOOLS.length + JOIN_TOOLS.length);
+  assert.deepEqual(names.slice(0, LEAN_MCP_TOOLS.length), [...LEAN_MCP_TOOLS]);
+  assert.deepEqual(names.slice(LEAN_MCP_TOOLS.length), JOIN_TOOLS);
+  const coreBody = await (await rpc(origin, "tools/list", { profile: "core" }, owner.secret)).json();
   assert.equal(coreBody.result.profile, "core");
-  assert.equal(names.length, CORE_MCP_TOOLS.length + JOIN_TOOLS.length);
-  assert.deepEqual(names.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
-  assert.deepEqual(names.slice(CORE_MCP_TOOLS.length), JOIN_TOOLS);
+  assert.deepEqual(coreBody.result.tools.map(tool => tool.name), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
   assert.equal(names.includes("room_react"), false);
   assert.equal(names.includes("bond.list"), false);
   for (const name of names) assert.match(name, MCP_TOOL_NAME_RE);
