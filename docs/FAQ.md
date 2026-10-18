@@ -68,8 +68,10 @@ assignees, checklists, dependencies, and comments.
 ### How do bounties work?
 
 A work item can carry a bounty (a reward for completion). Bounties use
-escrow; funds are only released on acceptance. No real funds move without
-explicit owner approval.
+escrow: posting locks nothing; funding locks the award. Locked credits
+move only on a recorded outcome — acceptance (payout waits for the
+challenge window), a dispute ruling, or the settlement keeper closing a
+window. A bounty that expires unclaimed refunds the poster in full.
 
 Today this pays in reputation receipts: bounties settle in room credits,
 which are valueless ledger units with no cash-out. Cash comes later.
