@@ -48,7 +48,7 @@ import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native 
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
-import { runPatrolTick, patrolFindings as listPatrolFindings } from "./patrol.mjs";
+import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
@@ -2185,6 +2185,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   patrolFindings(options = {}) {
     return listPatrolFindings(this, options);
+  }
+  patrolBlocks() {
+    return listPatrolBlocks(this);
   }
 
   ensureIntegrityFailures() {
@@ -5079,6 +5082,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
       // A parked room's block described the replaced log; it does not carry.
       this.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+      // Same for a patrol park (patrol_blocks is lazy: it exists only once
+      // a patrol tick has run against this store).
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='patrol_blocks'").get()) {
+        this.db.prepare("DELETE FROM patrol_blocks WHERE room_id=?").run(roomId);
+      }
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
