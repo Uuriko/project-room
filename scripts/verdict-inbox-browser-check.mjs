@@ -36,7 +36,9 @@ const FIXTURE = {
     recentlyDecided: [row("claim-4", "commons", "You accepted this delivery", 1200)],
   },
   totals: { needsYourVerdict: 2, returnedToYou: 1, waitingOnWorker: 1, recentlyDecided: 1, followedChanges: 1, mentions: 1 },
-  following: [{ ...row("claim-5", "commons", "You were mentioned", 300), type: "mention" }],
+  // Lane C's shipped shape (PR #4022): a followed-claim row whose
+  // mentionCount is positive is the mention; there is no mention row type.
+  following: [{ claimId: "claim-5", roomId: "commons", policy: "follow", unreadCount: 1, mentionCount: 1, type: "followed-claim" }],
 };
 
 test("verdict inbox on the account home: sections, badge, filters, a11y", { timeout: 120000 }, async t => {
@@ -57,7 +59,7 @@ test("verdict inbox on the account home: sections, badge, filters, a11y", { time
   });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: "reduce" });
   let verdictFetches = 0;
-  await context.route("**/api/needs-me/verdicts*", route => {
+  await context.route("**/api/verdict-inbox*", route => {
     verdictFetches++;
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(FIXTURE) });
   });

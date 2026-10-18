@@ -42,9 +42,12 @@ function fullDoc() {
       recentlyDecided: [row("claim-5", "room-a", "You accepted this delivery", 1200)],
     },
     totals: { needsYourVerdict: 7, returnedToYou: 1, waitingOnWorker: 1, recentlyDecided: 1, followedChanges: 2, mentions: 1 },
+    // Lane C's shipped shape (PR #4022): following[] aliases follow.claims,
+    // every row type "followed-claim" with unread/mention counts and no
+    // title/reason/since — a mention is mentionCount > 0, not a row type.
     following: [
-      { ...row("claim-6", "room-b", "Followed claim changed — new delivery", 900), type: "followed" },
-      { ...row("claim-7", "room-c", "You were mentioned", 300), type: "mention" },
+      { claimId: "claim-6", roomId: "room-b", policy: "follow", unreadCount: 2, mentionCount: 0, type: "followed-claim" },
+      { claimId: "claim-7", roomId: "room-c", policy: "follow", unreadCount: 1, mentionCount: 1, type: "followed-claim" },
     ],
   };
 }
@@ -57,7 +60,7 @@ function emptyDoc() {
 }
 
 test("contract path is the single declared read path", () => {
-  assert.equal(VERDICT_INBOX_PATH, "/api/needs-me/verdicts");
+  assert.equal(VERDICT_INBOX_PATH, "/api/verdict-inbox");
   assert.equal(isVerdictInboxDoc(fullDoc()), true);
   assert.equal(isVerdictInboxDoc({ sections: {} }), false);
   assert.equal(isVerdictInboxDoc(null), false);
@@ -157,19 +160,38 @@ test("follow block renders in the same neighbourhood, totals from the API", () =
   const html = verdictFollowingHtml(fullDoc(), "all", { now: NOW });
   assert.match(html, /data-verdict-section="following"/);
   assert.match(html, /2 followed changes · 1 mention/);
-  assert.match(html, /Followed claim changed — new delivery/);
+  // Shipped rows carry counts, not prose: the why-line is synthesised from
+  // unreadCount / mentionCount, and the claimId is the row's link text.
+  assert.match(html, /Followed claim changed/);
   assert.match(html, /You were mentioned/);
-  // Per-type filters narrow the block by row type.
+  assert.match(html, />claim-6</);
+  // Per-type filters narrow the block: mentions are the followed-claim rows
+  // whose mentionCount is positive (Lane C emits no mention row type).
   const mentionsOnly = verdictFollowingHtml(fullDoc(), "mentions", { now: NOW });
   assert.match(mentionsOnly, /You were mentioned/);
   assert.doesNotMatch(mentionsOnly, /Followed claim changed/);
+  assert.doesNotMatch(mentionsOnly, /claim-6/);
   const followedOnly = verdictFollowingHtml(fullDoc(), "following", { now: NOW });
   assert.match(followedOnly, /Followed claim changed/);
-  assert.doesNotMatch(followedOnly, /You were mentioned/);
+  assert.match(followedOnly, /You were mentioned/);
   // Section filters hide the block entirely.
   assert.equal(verdictFollowingHtml(fullDoc(), "verdicts", { now: NOW }), "");
   // No follow rows in the read → no block under "all".
   assert.equal(verdictFollowingHtml(emptyDoc(), "all", { now: NOW }), "");
+});
+
+test("follow block falls back to the canonical follow.claims when the alias is absent", () => {
+  const doc = emptyDoc();
+  doc.totals.followedChanges = 3;
+  doc.totals.mentions = 1;
+  doc.follow = {
+    totals: { followedClaims: 1, unreadClaims: 1, unreadEvents: 3, mentions: 1 },
+    claims: [{ claimId: "claim-9", roomId: "room-a", policy: "follow", unreadCount: 3, mentionCount: 1 }],
+  };
+  const html = verdictFollowingHtml(doc, "all", { now: NOW });
+  assert.match(html, /data-verdict-section="following"/);
+  assert.match(html, /You were mentioned/);
+  assert.match(html, />claim-9</);
 });
 
 test("summary is built from totals verbatim", () => {

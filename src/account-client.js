@@ -235,7 +235,7 @@ export class AccountClient {
   async verdictInbox() {
     const session = this.currentSession("loading the verdict inbox", { authenticated: true }), generation = this.generation;
     let value;
-    try { value = await this.request("/api/needs-me/verdicts", { session }); }
+    try { value = await this.request("/api/verdict-inbox", { session }); }
     catch (error) {
       if (!this.owns(generation, session)) return null;
       if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);

@@ -19,7 +19,7 @@
 //   - Every row shows why (reason) and when (waiting time from
 //     waitingSeconds, with `since` as the fallback source).
 
-export const VERDICT_INBOX_PATH = "/api/needs-me/verdicts";
+export const VERDICT_INBOX_PATH = "/api/verdict-inbox";
 
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -141,10 +141,30 @@ export function verdictSectionsHtml(doc, filter = "all", { now = Date.now() } = 
     .map(def => verdictSectionHtml(doc, def, { now })).join("");
 }
 
+// Lane C's shipped follow shape (PR #4022): `following[]` aliases the
+// canonical `follow.claims`, every row typed "followed-claim" and carrying
+// unreadCount / mentionCount — there is no separate mention row type; a
+// mention is a followed-claim row whose mentionCount is positive. Rows
+// carry no title / reason / since, so the block synthesises the why-line
+// from those counts (the title already falls back to the claimId).
+function followSourceRows(doc) {
+  if (Array.isArray(doc?.following)) return doc.following;
+  return Array.isArray(doc?.follow?.claims) ? doc.follow.claims : [];
+}
+
+const isMentionRow = row => row?.type === "mention"
+  || (Number.isSafeInteger(row?.mentionCount) && row.mentionCount > 0);
+
+function followDisplayRow(row) {
+  if (typeof row?.reason === "string" && row.reason) return row;
+  return { ...row, reason: isMentionRow(row) ? "You were mentioned"
+    : (Number.isSafeInteger(row?.unreadCount) && row.unreadCount > 0) ? "Followed claim changed" : "Followed claim" };
+}
+
 function followRows(doc, filter) {
-  const rows = Array.isArray(doc?.following) ? doc.following : [];
+  const rows = followSourceRows(doc);
   if (filter === "following") return rows.filter(row => row?.type !== "mention");
-  if (filter === "mentions") return rows.filter(row => row?.type === "mention");
+  if (filter === "mentions") return rows.filter(isMentionRow);
   return rows;
 }
 
@@ -162,7 +182,7 @@ export function verdictFollowingHtml(doc, filter = "all", { now = Date.now() } =
     mentions > 0 ? `${mentions} ${mentions === 1 ? "mention" : "mentions"}` : "",
   ].filter(Boolean).join(" · ");
   const body = rows.length
-    ? rows.map(row => verdictRowHtml(row, { now })).join("")
+    ? rows.map(row => verdictRowHtml(followDisplayRow(row), { now })).join("")
     : `<p class="form-hint">Nothing new on work you follow.</p>`;
   return `<section class="verdict-section" data-verdict-section="following" aria-label="Following">
       <h4>Following${counts ? ` <span class="form-hint">${esc(counts)}</span>` : ""}</h4>
@@ -188,7 +208,7 @@ export function verdictSummaryText(doc) {
 
 function isZeroDoc(doc) {
   return VERDICT_SECTIONS.every(def => totalOf(doc, def.key) === 0)
-    && (!Array.isArray(doc?.following) || doc.following.length === 0);
+    && followSourceRows(doc).length === 0;
 }
 
 export function createVerdictInbox({ load, section }) {
