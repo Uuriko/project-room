@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { queryPublicReceipts as queryLive } from "../server/receipts-live.mjs";
+import { queryPublicReceipts as queryLive } from "../server/public-read-model.mjs";
 import { queryPublicReceipts as queryModel, projectPublicWorkReceipt } from "../server/public-read-model.mjs";
 
 function serve(t) {

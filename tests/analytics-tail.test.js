@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { collectPublicReceipts } from "../server/receipts-live.mjs";
+import { collectPublicReceipts } from "../server/public-read-model.mjs";
 import { workClaimReceiptDue, workItemReceiptDue } from "../server/analytics/map-room-event.mjs";
 import { ensureAnalyticsSchema } from "../server/analytics/schema.mjs";
 import { analyticsTailJob, runAnalyticsTail } from "../server/analytics/tail.mjs";

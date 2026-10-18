@@ -1,4 +1,4 @@
-// Public receipts HTML. Script-free. Live records come from receipts-live.mjs.
+// Public receipts HTML. Script-free. Live records come from the public read model.
 // Every interpolated string is escaped: titles and names are room data.
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
@@ -106,7 +106,7 @@ ${next}
 // posted is exactly what the page says — and the share targets are plain
 // anchors, because these pages are script-free. The badge embed is the
 // worker's copy-paste path into READMEs and portfolios. This renders only
-// for a receipt that already resolved as public through receipts-live.
+// for a receipt that already resolved as public through the read model.
 function shareSection(receipt) {
   const links = receiptShareLinks(receipt);
   return `<section class="share" aria-label="Share this receipt">

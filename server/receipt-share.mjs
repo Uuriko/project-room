@@ -3,7 +3,7 @@
 // visible page, the embeddable badge, and the OG-card fields.
 //
 // Consent boundary: nothing here widens publicity. Every consumer resolves
-// the receipt through receipts-live (publicReceiptById / queryRoomProof), so
+// the receipt through the public read model (publicReceiptById / queryRoomProof), so
 // the owner toggle and operator unpublish gate the share surfaces exactly
 // like the page itself — a non-public receipt has no OG card, no badge, and
 // no share block; the routes 404 before this module is asked to render.

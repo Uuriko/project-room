@@ -59,7 +59,7 @@ import {
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
-import { publicReceiptById } from "./receipts-live.mjs";
+import { publicReceiptById } from "./public-read-model.mjs";
 import { publicReceiptUrl, publicWorkClaimReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";

@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkReviews, publicWorkReviewsSchema } from '../server/public-work-reviews.mjs';
-import { publicReceiptById, queryPublicReceipts } from '../server/receipts-live.mjs';
+import { publicReceiptById, queryPublicReceipts } from '../server/public-read-model.mjs';
 import { renderReceiptDetailHtml, renderReceiptsHtml, receiptJson, receiptsListJson } from '../server/receipts-page.mjs';
 
 const REVIEWER = 'rev-3733-member';

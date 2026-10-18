@@ -6,7 +6,7 @@
 // Route-table rows (batch RT): the OpenAPI route gate forbids new
 // legacy-chain registrations (the legacy allowlist only shrinks), so
 // the route lives here, not inline in server/http.mjs.
-import { collectPublicReceipts } from "../receipts-live.mjs";
+import { collectPublicReceipts } from "../public-read-model.mjs";
 
 export function frontDoorFacts(ctx) {
   ctx.rate(`receipts:${ctx.remoteAddress}`, 120);

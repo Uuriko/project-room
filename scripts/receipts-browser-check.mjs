@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { collectPublicReceipts } from "../server/receipts-live.mjs";
+import { collectPublicReceipts } from "../server/public-read-model.mjs";
 
 test("a public receipt fits a 390px viewport", { timeout: 60000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "receipts-browser-"));

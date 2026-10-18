@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { projectPublicWorkReceipt } from "../server/receipts-live.mjs";
+import { projectPublicWorkReceipt } from "../server/public-read-model.mjs";
 
 const PWR = `pwr_${"cd".repeat(32)}`;
 const NAMESPACE = `public_${"ef".repeat(16)}`;

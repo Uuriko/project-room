@@ -90,7 +90,8 @@ import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs"
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { renderOgPng } from "./og-render.mjs";
 import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
-import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
+import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID } from "./public-read-model.mjs";
+import { verifyPublicReceipt } from "./receipt-verify.mjs";
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";

@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { publicReceiptById } from "../server/receipts-live.mjs";
+import { publicReceiptById } from "../server/public-read-model.mjs";
 import { verifyPublicReceipt } from "../server/receipt-verify.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";

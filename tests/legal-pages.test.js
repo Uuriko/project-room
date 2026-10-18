@@ -11,7 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { TERMS_VERSION } from "../server/legal-store.mjs";
 import { EMBEDDED_LEGAL } from "../server/legal-documents.mjs";
-import { collectPublicReceipts, projectPublicWorkReceipt } from "../server/receipts-live.mjs";
+import { collectPublicReceipts, projectPublicWorkReceipt } from "../server/public-read-model.mjs";
 
 const HASH = `sha256:${"ab".repeat(32)}`;
 const PWR = `pwr_${"cd".repeat(32)}`;

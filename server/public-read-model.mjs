@@ -7,6 +7,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import { ensurePublicReceiptsColumn } from "./room-directory.mjs"; // legacy-column migration used by the owner-toggle filter below
 
 export const PUBLIC_START_URL = "https://room.trydemigod.com/?start=room";
 const PUBLIC_ORIGIN = new URL(PUBLIC_START_URL).origin;
@@ -701,8 +702,8 @@ const HIDDEN_RECEIPT = `NOT EXISTS (
 
 // The owner half of hidden (#3595): a receipt also stays out when any room
 // it belongs to turned public receipts off (room_directory_settings
-// .public_receipts = 0, default 1). Resolved the way receipts-live resolves
-// the toggle — the origin room, plus the owning room of a public-work
+// .public_receipts = 0, default 1). Resolved the way the owner-toggle
+// filter at the end of this module resolves it — the origin room, plus the owning room of a public-work
 // receipt through its task record, since a pwr_ row's origin is a namespace
 // rather than a room id. Same predicate the directory receipt count uses.
 const OWNER_HIDDEN_RECEIPT = `NOT EXISTS (
@@ -735,7 +736,7 @@ const receiptFilter = (room, needle) => {
   return { clauses, params };
 };
 
-export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
+function queryPublicReceiptsBase(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
   if (room != null && (typeof room !== "string" || !room || room.length > 128)) {
     return { error: { status: 422, code: "invalid_receipt_query", message: "room filter must be a room id" } };
   }
@@ -780,7 +781,7 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
   return { receipts: page, nextCursor };
 }
 
-export function publicReceiptById(store, id) {
+function publicReceiptByIdBase(store, id) {
   if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
   if (LOT_RECEIPT_ID.test(id)) return publicLotReceiptById(store, id);
   const row = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE id=? AND ${HIDDEN_RECEIPT}`).get(id);
@@ -946,7 +947,7 @@ const finiteNumber = value => typeof value === "number" && Number.isFinite(value
 // not bounty movements (transfers carry no bounty_id), the id is a 404.
 // The owner's consent gates it like every other shape, through the
 // switches that can apply to a row-less record: operator unpublish,
-// the directory receipts toggle (receipts-live), and the room's own
+// the directory receipts toggle (the owner-toggle filter below), and the room's own
 // recorded public-receipts setting — a RECORDED off hides the lot,
 // while a room that never recorded the setting is served by default.
 // Amounts convert at MILLIS_PER_CREDIT = 1000 (server/bounty-escrow.mjs).
@@ -1056,12 +1057,12 @@ export function publicLotReceiptById(store, id) {
   };
 }
 
-export function collectPublicReceipts(store) {
+function collectPublicReceiptsBase(store) {
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC`).all()
     .map(row => receiptWithOutcome(store, row));
 }
 
-export function listPublicReceiptSitemap(store, limit = 1000) {
+function listPublicReceiptSitemapBase(store, limit = 1000) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
   return store.db.prepare(`SELECT id, at FROM public_receipts WHERE ${HIDDEN_RECEIPT} ORDER BY at DESC, id ASC LIMIT ?`).all(cap).map(row => ({
     path: `/receipts/${row.id}`,
@@ -1122,9 +1123,9 @@ export function proofLevelOf(receipt) {
 // the room directly, plus the room's own work-claim / work-item receipts
 // (origin_room_id) which carry room_id only when the room is listed.
 // Operator unpublish applies here (HIDDEN_RECEIPT); the owner public-
-// receipts toggle is the receipts-live wrapper's job, like every other
+// receipts toggle is applied by queryRoomProof below, like every other
 // public receipt read.
-export function roomProofRows(store, slug) {
+function roomProofRows(store, slug) {
   return store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts
     WHERE ${HIDDEN_RECEIPT} AND (room_id=? OR (origin_room_id=? AND source IN ('work-claim','work-item')))
     ORDER BY at DESC, id ASC`).all(slug, slug).map(row => receiptWithOutcome(store, row));
@@ -1171,4 +1172,133 @@ export function queryDirectoryEntries(store, { cursor = null, limit = DIRECTORY_
     roomCount: row.room_count,
   }));
   return { agents: page, nextCursor: rows.length > cap ? page.at(-1)?.agentId ?? null : null };
+}
+
+// ---------------------------------------------------------------------------
+// Owner public-receipts toggle — folded in from server/receipts-live.mjs
+// (simplification register D10: the shim is deleted; the read model owns
+// the filter now). A room whose owner turned public receipts off
+// (room_directory_settings.public_receipts = 0, default 1) drops out of
+// every public read below — listings, detail reads, and the sitemap.
+// Members still read the room's receipts through the member-gated room
+// endpoints. The filter wraps the base reads in this module rather than
+// editing their queries, so receipt projection keeps working and flipping
+// the toggle back on restores visibility immediately. The public exports
+// keep the old wrapper's contracts: they never read rooms.projection,
+// never write on a booted store, and issue a constant set of parameterized
+// queries (batched via json_each) so the query plan does not grow with
+// the room count.
+
+// Column presence. The schema carries public_receipts on every booted
+// store; this is only the legacy-database path (a table predating the
+// column). The steady-state read issues one indexed query.
+function anyRoomPrivate(db) {
+  try {
+    return !!db.prepare("SELECT 1 FROM room_directory_settings WHERE public_receipts = 0 LIMIT 1").get();
+  } catch (error) {
+    if (!/no such column/i.test(error?.message ?? "")) throw error;
+    ensurePublicReceiptsColumn(db);
+    return !!db.prepare("SELECT 1 FROM room_directory_settings WHERE public_receipts = 0 LIMIT 1").get();
+  }
+}
+
+// A receipt hides when any room it belongs to disabled public receipts.
+// pwr_ rows carry the public-work namespace in origin_room_id, so the
+// owning room resolves through the task record; wcr_/wir_ rows carry the
+// room id in origin_room_id directly. A namespace never matches a
+// settings row (settings are keyed by room id), so no rooms-table read is
+// needed to tell them apart.
+function hiddenReceiptIds(store, receiptIds) {
+  const hidden = new Set();
+  if (!receiptIds.length) return hidden;
+  const db = store.db;
+  // Fast path: no room turned receipts private — nothing can hide.
+  if (!anyRoomPrivate(db)) return hidden;
+  const idList = JSON.stringify(receiptIds);
+  const rows = store.db.prepare(`SELECT pr.id AS id, pr.origin_room_id AS origin, pwt.room_id AS taskRoom
+      FROM public_receipts pr
+      LEFT JOIN public_work_receipts pwr ON pwr.receipt_id = pr.id
+      LEFT JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+      WHERE pr.id IN (SELECT value FROM json_each(?))`).all(idList);
+  const candidates = new Set();
+  const roomsOf = new Map();
+  for (const row of rows) {
+    const rooms = [];
+    if (row.taskRoom) rooms.push(row.taskRoom);
+    if (row.origin && row.origin !== row.taskRoom) rooms.push(row.origin);
+    roomsOf.set(row.id, rooms);
+    for (const roomId of rooms) candidates.add(roomId);
+  }
+  const privateRooms = new Set();
+  if (candidates.size) {
+    for (const row of store.db.prepare(`SELECT room_id FROM room_directory_settings
+        WHERE public_receipts = 0 AND room_id IN (SELECT value FROM json_each(?))`).all(JSON.stringify([...candidates]))) {
+      privateRooms.add(row.room_id);
+    }
+  }
+  for (const id of receiptIds) {
+    if (!roomsOf.has(id) || (roomsOf.get(id) ?? []).some(roomId => privateRooms.has(roomId))) hidden.add(id);
+  }
+  return hidden;
+}
+
+const receiptIdOf = entry => String(entry.path).split("/").pop();
+
+// Secondary receipt surfaces (room pages, embeds) list receipts the toggle
+// wrapper never saw. Apply the same owner-toggle filter there: a receipt the
+// owner hid must not leak its title/href through /r/<slug>. Fail-closed on
+// unknown ids, matching hiddenReceiptIds.
+export function excludeHiddenReceipts(store, items) {
+  if (!items.length) return items;
+  const hidden = hiddenReceiptIds(store, items.map(item => item.id));
+  return items.filter(item => !hidden.has(item.id));
+}
+
+export function queryPublicReceipts(store, options) {
+  const page = queryPublicReceiptsBase(store, options);
+  if (!page || page.error || !Array.isArray(page.receipts)) return page;
+  const hidden = hiddenReceiptIds(store, page.receipts.map(receipt => receipt.id));
+  return { ...page, receipts: page.receipts.filter(receipt => !hidden.has(receipt.id)) };
+}
+
+// Lot receipts have no public_receipts row for hiddenReceiptIds to key
+// on, so the owner toggle is checked against the lot's own room. Fail
+// closed when the setting cannot be read, matching hiddenReceiptIds.
+function roomReceiptsPrivate(db, roomId) {
+  try {
+    if (!anyRoomPrivate(db)) return false;
+    const row = db.prepare("SELECT public_receipts FROM room_directory_settings WHERE room_id=?").get(roomId);
+    return row ? row.public_receipts === 0 : false;
+  } catch { return true; }
+}
+
+export function publicReceiptById(store, id) {
+  if (typeof id !== "string" || !PUBLIC_RECEIPT_ID.test(id)) return null;
+  if (LOT_RECEIPT_ID.test(id)) {
+    const receipt = publicReceiptByIdBase(store, id);
+    if (!receipt) return null;
+    if (!receipt.room?.id || roomReceiptsPrivate(store.db, receipt.room.id)) return null;
+    return receipt;
+  }
+  if (hiddenReceiptIds(store, [id]).has(id)) return null;
+  return publicReceiptByIdBase(store, id);
+}
+
+export function listPublicReceiptSitemap(store, limit) {
+  const entries = listPublicReceiptSitemapBase(store, limit);
+  const hidden = hiddenReceiptIds(store, entries.map(receiptIdOf));
+  return entries.filter(entry => !hidden.has(receiptIdOf(entry)));
+}
+
+export function collectPublicReceipts(store) {
+  const receipts = collectPublicReceiptsBase(store);
+  const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
+  return receipts.filter(receipt => !hidden.has(receipt.id));
+}
+
+// One room's proof-page rows with the owner toggle applied, newest first.
+export function queryRoomProof(store, slug) {
+  const receipts = roomProofRows(store, slug);
+  const hidden = hiddenReceiptIds(store, receipts.map(receipt => receipt.id));
+  return receipts.filter(receipt => !hidden.has(receipt.id));
 }
