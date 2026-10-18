@@ -1,4 +1,5 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
+import { uiText } from "./strings.js";
 // Conversation structure is derived from immutable reply links, including older logs.
 
 // Composition, key repeat, and touch Return must never accidentally submit.
@@ -152,6 +153,8 @@ export function memberOnLine(member, { workItems, now } = {}) {
 
 export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
+  // R350-n1: the seat is still a member, but its identity signed out for good.
+  if (member.identityRevoked === true) return uiText("people.status.signed_out_for_good");
   const line = context ? memberOnLine(member, context) : "";
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
