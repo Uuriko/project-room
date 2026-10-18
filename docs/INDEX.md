@@ -77,3 +77,7 @@ Specialized references that are current but narrow: [WORKITEMS-BOARD-STEP0.md](W
 Dated plans, checkpoints, and working notes are in [history/](../archive/docs/history). That folder is not maintained. Point-in-time audits, plans, and reports moved out of the active tree live in the [repository archive](../archive/docs/) — also a record, not maintained.
 
 - [Read-only Board claim pages](WORK-CLAIMS-READ.md) — scoped paging without lifecycle housekeeping.
+
+## Storage migration
+
+[Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
