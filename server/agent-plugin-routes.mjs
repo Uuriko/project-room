@@ -20,6 +20,7 @@
 // Mounted from server/http.mjs via createAgentPluginRoutes, which receives
 // the server's local helpers. handleAgentPluginRoutes returns true when it
 // served the request, false so http.mjs can fall through to other routes.
+import { JOB_BUDGET_MS } from "./jobs.mjs";
 import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
@@ -604,7 +605,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
   const processWebhooks = translate(async (req, res) => {
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     rate(`agent-webhooks-process:${auth.identityId}`, 12);
-    const summary = await store.agentPlugin.drainWebhookDeliveries({ agentId: auth.identityId });
+    // The cron drains run under cronDeadline(); this agent-triggered sweep
+    // gets the same one-job budget from its own start (PR-2 named this
+    // caller as the deadline follow-on). Unreached deliveries stay due in
+    // order and the summary reports budgetExceeded/pending.
+    const summary = await store.agentPlugin.drainWebhookDeliveries({
+      agentId: auth.identityId, deadline: Date.now() + JOB_BUDGET_MS
+    });
     return json(res, 200, { summary });
   });
 
