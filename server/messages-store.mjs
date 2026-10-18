@@ -392,10 +392,46 @@ export function archivedMatchingRecords(db, roomId, needle) {
   return out;
 }
 
-function pruneMessages(db, roomId) {
+// PRUNE GUARD (PRUNE-SAFETY, 2026-10-18): the DELETE in pruneMessages
+// derives its keep set from rooms.projection alone. json_each over an
+// absent or null $.messages yields zero rows WITHOUT error, so a
+// legacy/foreign projection shape — or a valid-JSON subset at the head
+// sequence (content-level corruption) — empties the NOT IN set and the
+// prune deletes every tail row, live messages included, silently: the
+// backfill cursor already sits at head and never replays them back.
+// The stored projection is trusted only when its message-id set EQUALS
+// the replayed state's live id set, less the archived-out ids the
+// archive marker accounts for (the parity model: |projection.messages|
+// + archived == |table|). The replayed state is complete by
+// construction — full-journal fold to head, throw-if-short — so
+// equality certifies the projection's set at this head, inside this
+// transaction. Any mismatch, $.messages absent included, skips the
+// prune for the room; the parity sweep surfaces the room instead.
+function projectionMatchesReplay(db, roomId, liveState) {
+  const type = db.prepare("SELECT json_type(projection, '$.messages') AS t FROM rooms WHERE id=?").get(roomId)?.t;
+  if (type !== "array") return false;
+  const archived = archivedMessageIds(db, roomId);
+  const expected = new Set();
+  for (const message of liveState?.messages ?? []) {
+    if (typeof message?.id === "string" && !archived.has(message.id)) expected.add(message.id);
+  }
+  const storedRows = db.prepare(`SELECT json_extract(value, '$.id') AS id
+    FROM rooms, json_each(rooms.projection, '$.messages') WHERE rooms.id=?`).all(roomId);
+  if (storedRows.length !== expected.size) return false;
+  const stored = new Set();
+  for (const row of storedRows) {
+    if (typeof row.id !== "string" || !expected.has(row.id)) return false;
+    stored.add(row.id);
+  }
+  return stored.size === storedRows.length;
+}
+
+function pruneMessages(db, roomId, liveState) {
+  if (!projectionMatchesReplay(db, roomId, liveState)) return false;
   db.prepare(`DELETE FROM messages WHERE room_id=? AND seq>? AND message_id NOT IN (
     SELECT json_extract(value, '$.id') FROM rooms, json_each(rooms.projection, '$.messages') WHERE rooms.id=?
   )`).run(roomId, archiveMarker(db, roomId).throughSeq, roomId);
+  return true;
 }
 
 function resetRoom(store, roomId) {
@@ -588,7 +624,7 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
       // The last chunk already stored its event id. Saving here would replace
       // that id with a blank one and the next pass would replay the room.
       store.transaction(() => {
-        if (seq > 0) pruneMessages(store.db, room.id);
+        if (seq > 0) pruneMessages(store.db, room.id, state);
         else saveCursor(store.db, room.id, 0, "", state);
       });
       return { events, stopped: false, budgetExceeded: false, appliedSeq: seq };
@@ -603,7 +639,7 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
         last = row;
       }
       const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(room.id).sequence;
-      if (last.sequence === sequence) pruneMessages(store.db, room.id);
+      if (last.sequence === sequence) pruneMessages(store.db, room.id, next);
       saveCursor(store.db, room.id, last.sequence, last.id, next);
       return { state: next, seq: last.sequence };
     });
