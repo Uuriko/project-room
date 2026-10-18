@@ -100,5 +100,24 @@
     "Physical iPhone/Android and actual Mac sleep/wake"
   ],
   "finalTargetedSourceRevision": "f5ac5301cea47dd7d3031ad73b91db40eb2297a1",
-  "contract": "All non-unit contract gates passed; local check also launched a second unit run, still completing."
+  "contract": "Non-unit contract gates passed. Its local unit run completed with only the 24 previously recorded Mac host-policy baseline failures.",
+  "contractUnitFollowup": {
+    "tests": 11244,
+    "passed": 11212,
+    "failed": 24,
+    "skipped": 8,
+    "durationMs": 378427.519917,
+    "log": "/tmp/cross-platform-contract-full.log",
+    "baselineFailures": 24,
+    "newFailures": 0,
+    "provenance": "Command started on f9dd98ae; rollback fixture repair was applied during execution before those tests loaded. Completed source is 617d939b; focused rollback/smoke run independently passed 90/90. Not represented as a clean immutable-head run."
+  },
+  "pwaBrowser": {
+    "tests": 3,
+    "passed": 3,
+    "failed": 0,
+    "durationMs": 5851.770292,
+    "sourceRevision": "617d939b",
+    "log": "/tmp/cross-platform-pwa-browser.log"
+  }
 }
