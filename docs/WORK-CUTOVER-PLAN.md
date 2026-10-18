@@ -201,3 +201,5 @@ registration also includes the existing message replay snapshot sidecar.
 The candidate is locally checkpointed, not merged or deployed. Next work is to
 integrate against the chosen main revision and close the supported-host/recovery
 release gates above. Do not add the brainstorm backlog to v1.0 by default.
+
+The next execution plan is [integrated candidate and recovery qualification](WORK-INTEGRATION-PLAN.md).
