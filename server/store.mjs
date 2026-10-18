@@ -1315,10 +1315,14 @@ function deepFreeze(value) {
 // arrays, -0, accessors, etc.) must still take the canonical cold-read path.
 // Freezing in this same walk prevents later command helpers changing a
 // candidate after its bytes have been persisted.
+// Only this validator can establish JSON stability; externally frozen objects
+// may still contain undefined, accessors or other non-canonical values.
+const verifiedJsonStates = new WeakSet();
 function freezeJsonState(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
   if (typeof value !== "object") return false;
+  if (verifiedJsonStates.has(value)) return true;
   const array = Array.isArray(value);
   if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
   const keys = Object.keys(value);
@@ -1330,6 +1334,7 @@ function freezeJsonState(value) {
     if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
   }
   Object.freeze(value);
+  verifiedJsonStates.add(value);
   return true;
 }
 
