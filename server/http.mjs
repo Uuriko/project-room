@@ -2120,7 +2120,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (verifyNow || !receiptDetail[2]) {
               verification = await receiptVerificationFor(receipt, {
                 fresh: verifyNow,
-                token: githubToken === undefined ? githubTokenFromEnv(globalThis.process?.env ?? {}) : githubToken,,
+                token: githubToken === undefined ? githubTokenFromEnv(globalThis.process?.env ?? {}) : githubToken,
               }).catch(() => null);
             }
           }
