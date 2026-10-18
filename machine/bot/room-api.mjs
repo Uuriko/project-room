@@ -53,6 +53,7 @@ export function createRoomApi({ origin, secret, signal }) {
       const items = [];
       let cursor = "";
       let incomplete = null;
+      let truncated = false;
       for (let page = 0; page < 5; page += 1) {
         const params = new URLSearchParams({ state: "actionable", limit: "100" });
         if (cursor) params.set("cursor", cursor);
@@ -63,10 +64,23 @@ export function createRoomApi({ origin, secret, signal }) {
         }
         incomplete = listed.value?.incompleteSources ?? incomplete;
         items.push(...(listed.value?.items ?? []));
-        if (!listed.value?.hasMore || typeof listed.value.cursor !== "string" || !listed.value.cursor) break;
+        if (!listed.value?.hasMore) break;
+        // The server says more items exist but this listing will not reach
+        // them: either it offered no usable cursor to continue with, or the
+        // page cap (5 x 100) is exhausted. Flag the listing truncated so
+        // callers treat it as incomplete instead of acking a wake whose
+        // item lies past the cut as already handled.
+        if (typeof listed.value.cursor !== "string" || !listed.value.cursor || page === 4) {
+          truncated = true;
+          break;
+        }
         cursor = listed.value.cursor;
       }
-      return { ok: true, status: 200, value: { items, incompleteSources: incomplete } };
+      return {
+        ok: true,
+        status: 200,
+        value: { items, incompleteSources: truncated ? { ...(incomplete ?? {}), truncated: true } : incomplete },
+      };
     },
     async markUpdate(roomId, itemId, action, expectedBasis, requestId = randomUUID()) {
       if (typeof itemId !== "string" || !itemId) return { ok: false, skipped: true, reason: "update_id_required", value: null };

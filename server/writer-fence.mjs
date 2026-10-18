@@ -33,6 +33,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
   "public_work_reviews", "public_work_review_requests", // Private review projections/journals never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
+  "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
   "room_assistant_config", "room_assistant_runs", "room_assistant_ops",
   "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests", // Additive private record-only rails; older writers have no routes.
@@ -246,6 +247,10 @@ export const unfencedAdditiveTables = Object.freeze([
   // no code path to them, and the module verifies its own schema on open.
   "guest_invites",
   "guest_members",
+  // guest_invite_authority (F-5): per-invite issuing-authority provenance
+  // for the GX flow. Purely additive and intentionally NOT fenced, same
+  // reasoning as the invite tables it annotates.
+  "guest_invite_authority",
   // guest_selfserve + guest_selfserve_idem (self-serve guest entry,
   // RC-2026-09-25-912): per-room self-serve seat LRU bookkeeping and
   // request-ID idempotency records. Purely additive and intentionally NOT
@@ -402,6 +407,10 @@ export const unfencedAdditiveTables = Object.freeze([
   "public_rooms",
   "public_directory_entries",
   "public_read_model_backfill",
+  // room_public_receipts_setting: the recorded per-room opt-in/out itself,
+  // mirrored by the public read model (#3594). Same class as the four tables
+  // above — older writers have no path to it.
+  "room_public_receipts_setting",
   // Per-room sequence and projection size for the incremental integrity
   // check. The cron writes it; a missing row means that room is due.
   "integrity_room_state",
@@ -410,6 +419,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // The integrity cron writes it. Older writers have no path to it. A missing
   // row means that room has not been replayed. The parity check is the gate.
   "messages_backfill_cursor",
+  // messages_backfill_blocks (MSG-2): rooms the backfill parked on an
+  // un-replayable event, with the event's sequence, id and error. The
+  // integrity cron writes it; a row names what an operator must repair.
+  // Older writers have no path to it. A missing row means not parked.
+  "messages_backfill_blocks",
   // agent_wants_work (BOARD-WAKE-2): an agent's opt-in ready-work filter and
   // its last wake time. Older writers have no path to it. A missing row means
   // off, so a rollback only stops the ready_work wakes.
@@ -432,6 +446,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // and intentionally NOT fenced — older writers have no path to it. The
   // append-only triggers are the integrity gate.
   "operator_actions",
+  // wake_queue_pause_by (R327-1: who set a member's wake pause) is purely
+  // additive and intentionally NOT fenced, same as wake_queue_pause's sibling
+  // registries: the patch ships it as a separate schema string (the
+  // guest_selfserve pattern) so stores from the pre-pause-by window verify
+  // all-or-nothing under allowAbsent without forcing operator reconciliation,
+  // and WakeQueue.verifySchema() on open is the integrity gate.
+  "wake_queue_pause_by",
   // squads (plan-squads): named groups with goal, roster, and thread channel.
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
@@ -494,14 +515,36 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
 // agent_wake_room_activity (room-attributed listener activity), created
 // lazily on first room-scoped poll/heartbeat.
 const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
+// Wake-reliability accounting (#3345, server/wake-metrics.mjs): counters +
+// loss journal, purely additive, created lazily on first recorded outcome;
+// kind/timestamp/subject only, never content. Older writers have no code
+// path to them.
+const WAKE_METRICS_ADDITIVE_TABLES = Object.freeze(["agent_wake_counters", "agent_wake_failures"]);
 // runOnce replay journal (server/run-once.mjs): purely additive, created
 // lazily on first table-backed runOnce() use.
 const RUN_ONCE_ADDITIVE_TABLES = Object.freeze(["request_replays"]);
 // workItems -> board claims backfill marker (server/work-item-board.mjs,
 // decision #10): purely additive, created lazily on first backfill pass;
 // older writers have no code path to it.
-const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES]);
+const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill", "work_item_board_divergence"]);
+// integrity_failures (integrity batch isolation, #3334, server/store.mjs):
+// durable per-record failure rows the integrity job writes when it isolates
+// a poisoned record instead of wedging the whole batch. Purely additive,
+// created lazily on first record/read — a store that never ran the
+// integrity job has no table, so it is allowed by the recovery audit but
+// never required.
+const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
+// patrol_* (ClueBot phase 1, server/patrol.mjs): the resident patrol's own
+// per-room cursor, claim/message shadows and findings journal. Purely
+// additive, created lazily by ensurePatrolSchema on the first patrol tick
+// — a store the patrol has never run against has none of them, so they are
+// allowed by the recovery audit but never required. The patrol writes only
+// these tables; older writers have no code path to them.
+const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"]);
+// R306 rotation receipts (server/agent-identities.mjs): purely additive,
+// created by ensureIdentitySecretSchema; older writers have no code path to it.
+const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

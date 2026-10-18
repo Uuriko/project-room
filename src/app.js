@@ -8,13 +8,26 @@ import { AccountClient } from "./account-client.js";
 import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./client.js";
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, reactionPills } from "./conversation.js";
-import { canonicalReaction, clipGraphemes, emojiCatalog, emojiMatches, emojiName, emojiQuery, foldedReactionMap, frequentEmoji, insertEmoji, renderEmojiShortcodes } from "./emoji.js";
+import { workArrivalAnnouncements } from "./work-announcements.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
+// Clip to at most maxUnits UTF-16 units without splitting a grapheme.
+const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
+function clipGraphemes(text, maxUnits) {
+  const value = String(text ?? "");
+  const limit = Number.isInteger(maxUnits) ? maxUnits : value.length;
+  if (value.length <= limit) return value;
+  let taken = 0;
+  for (const { segment } of graphemes.segment(value)) {
+    if (taken + segment.length > limit) break;
+    taken += segment.length;
+  }
+  return value.slice(0, taken);
+}
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, diffResultLines, diffResultSummary, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
 import { RECIPE_CATALOG, activeRecipes, previewAllRecipes } from "./work-recipes.js";
 import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
-import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage } from "./share-links.js";
+import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
@@ -23,6 +36,7 @@ import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
 import { createNeedsAttentionCard, installMemberPermissions } from "./needs-attention.js";
+import { createOwnerCockpit } from "./owner-cockpit.js";
 // JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
 import { installReminders } from "./reminders.js";
@@ -310,11 +324,13 @@ let referralBoardUI = null;
 let landQueueUI = null;
 let openQuestionsUI = null;
 let retentionUI = null;
+let bountyBoardUI = null;
 let instructionsUI = null;
 let inboxUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
 // JDOT-COH-NAV begin
-let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null;
+let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
+const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
 const workNavigationOrigins = new Map();
 let activeWorkNavigation = null, activeWorkNavigationId = null, workNavigationEpoch = 0, workHistoryReplayKey = null;
 let navigationBoardEpoch = 0;
@@ -326,6 +342,14 @@ let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+// A message deep link whose target is older than the first (windowed)
+// snapshot cannot reveal on arrival: revealMessage no-ops while the id is
+// not held. A pending hash reveal remembers such a target until a fill or
+// sync snapshot first holds it, then reveals it exactly once. It is
+// cancelled when the user takes over first — another hash, another room,
+// a thread/channel switch, or a reader scroll (the noteReaderScroll
+// gesture tracker below) — so the late reveal never steals the view.
+let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
@@ -338,14 +362,15 @@ const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` 
 const TIMELINE_PAGER_KEY = "pager:earlier";
 const timelineWindow = new Map();
 let timelineRevealing = false;
-const viewPositions = new Map(), pendingReactions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
+const viewPositions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
 const timelinePin = createTimelinePin();
 let pinScrollTop = null; // where the pin last moved the list; that scroll event is not the reader's
-let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0, emojiIndex = 0;
+let newVisibleMessages = 0, unreadAnchorId = null, mentionIndex = 0;
 let mutedThreads = new Set(), threadMuteBusy = false;
 let roomCursor = 0, catchUpBoundary = 0, roomGeneration = -1, showAllAttention = false, returnClock = null;
 let signoutOperationId = 0, signoutLoading = false;
 let refreshOperationId = 0, submitOperationId = 0;
+let snapshotAuditView = "full", recordLoading = null, recordLoadFailed = false;
 let submitControls = null, noticeTimer = null, noticeVersion = 0, workFormOpener = null;
 let accessEndContext = null;
 let lastComposerSelection = null;
@@ -380,14 +405,18 @@ try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/
 const draftScope = draftRecoveryScope;
 const client = new RoomClient({
   accountClient,
+  auditView: "activity",
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onSnapshot(snapshot, identity) {
+    snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
     state = snapshot.state; session = identity;
     displayNames = createMemberDisplayNames(state.members);
+    announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
     void refreshRequestRuns();
     offerContextVersion = snapshot.offerContextVersion === 1 ? 1 : null;
     roomCursor = snapshot.cursor;
@@ -425,6 +454,7 @@ const client = new RoomClient({
     landQueueUI?.sync();
     openQuestionsUI?.sync();
     retentionUI?.sync();
+    bountyBoardUI?.sync();
     if (presenceBoundary) startPresencePoll();
     if (firstSnapshot) {
       rememberLastRoom(roomId, undefined, state.room?.title);
@@ -459,6 +489,7 @@ const client = new RoomClient({
     }
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
+    retryPendingHashReveal();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -483,6 +514,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
     // JDOT-COH-NAV end
@@ -518,6 +550,7 @@ const client = new RoomClient({
     landQueueUI?.reset();
     openQuestionsUI?.reset();
     retentionUI?.reset();
+    bountyBoardUI?.reset();
     $("#room-more").open = false;
     $("#advanced-room-tools").open = false;
     instructionsUI?.reset();
@@ -536,7 +569,7 @@ const client = new RoomClient({
     }
     requestRuns = {}; assistantDraft = null; requestMode = null; requestReading = false; requestEpoch++; syncRequestComposer();
     renderComposerError();
-    viewPositions.clear(); timelineWindow.clear(); pendingReactions.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
+    viewPositions.clear(); timelineWindow.clear(); locallyOwnedMessageIds.clear(); newVisibleMessages = 0; briefView.reset();
     if (!pendingSignout) signoutOperationId += 1;
     refreshOperationId += 1;
     $("#signout-button").disabled = pendingSignout;
@@ -690,10 +723,25 @@ retentionUI = lazyDisclosure({ panel: $("#retention-panel"),
   load: () => import("./retention-ui.js"),
   install: module => module.installRetentionPanel({ client, getState: () => state, getSession: () => session }),
   onError: () => notice("Could not load the retention dashboard. Close and reopen to retry.", true) });
+// Bounties & credits (#3437): the in-room human money surface — list, post +
+// fund, review/accept/reject, own balances and receipts, all over the
+// existing bounty-escrow endpoints.
+bountyBoardUI = lazyDisclosure({ panel: $("#bounty-panel"),
+  load: () => import("./bounty-board.js"),
+  install: module => module.installBountyBoard({ client, getSession: () => session }),
+  onError: () => notice("Could not load bounties. Close and reopen to retry.", true) });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention"), getState: () => state });
+// #3342: Owner Cockpit shell on the account home — cross-room Decisions +
+// Exceptions from /api/owner/overview. Decide actions execute against the
+// existing per-room decide endpoint with account-mode room credentials.
+const ownerCockpit = createOwnerCockpit({ accountClient, section: $("#owner-cockpit"), decide: async action => {
+  const session = accountClient.currentSession("deciding an access request", { authenticated: true });
+  return accountClient.request(action.path, { method: action.method, data: action.body, session,
+    headers: { "X-Project-Room-Auth": "account" } });
+} });
 const memberPermissionsUI = installMemberPermissions({ client, getState: () => state, getSession: () => session });
 // JDOT-MEMBER-PERMS-UI end
 // UPDATES HOOK (U batch). Palette Catch up, Activity, Mentions, and Saved for
@@ -757,6 +805,13 @@ const signinUI = createAuthSigninUI({
   accountClient,
   ensureAccountSession,
   loadSigninOptions: () => accountClient.request("/api/auth/signin-options", { method: "GET" }),
+  onProviderCapabilities: providers => {
+    // The OAuth anchors are static HTML whose start routes 503 when the
+    // provider is not configured on this deployment; hide an anchor only
+    // on the feed's positive "configured: false" answer.
+    if (providers?.github?.configured === false) signinNavigation.setProviderUnavailable("github");
+    if (providers?.google?.configured === false) signinNavigation.setProviderUnavailable("google");
+  },
   onViewChange: syncSigninView,
   onBack: handleSigninBack,
   onPasswordResetComplete: async () => {
@@ -1031,6 +1086,7 @@ async function confirmAccount() {
 async function loadAccountRooms(more = false) {
   const version = ++roomListVersion, owned = accountClient.session;
   if (!owned?.authenticated) return;
+  if (!more) ownerCockpit.refresh();
   if (!more) { roomListCursor = null; $("#account-rooms-list").replaceChildren(); }
   $("#account-rooms-more").hidden = true; $("#account-rooms-status").textContent = "Loading…";
   try {
@@ -1922,7 +1978,8 @@ function render() {
   ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
-  selectOptions("#message-to-select", active, "Everyone");
+  // R350-n1: a seat whose identity signed out for good can't read a direct message.
+  selectOptions("#message-to-select", active.filter(m => m.identityRevoked !== true), "Everyone");
   syncWorkForm();
   syncActionForm();
   syncRecipeStrip();
@@ -1944,7 +2001,8 @@ function render() {
   const memberActions = m => {
     if (!ownerView || m.kind !== "agent" || m.active === false) return "";
     const paused = agentPauses.has(m.id), armed = armedRemoval === m.id;
-    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}">${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
+    // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
+    return `<div class="member-actions" data-member-actions="${esc(m.id)}"><button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button><button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
   const presenceStale = presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {
@@ -2084,16 +2142,39 @@ function render() {
 }
 function renderRecordPanel() {
   if (!state || !$("#settings-dialog").open || $("#settings-dialog").classList.contains("results-only") || !$("#record-panel").open) return;
+  for (let parent = $("#record-panel").parentElement; parent && parent !== $("#settings-dialog"); parent = parent.parentElement)
+    if (parent.tagName === "DETAILS" && !parent.open) return;
+  if (snapshotAuditView === "activity") {
+    renderContent("#event-list", uiText(recordLoadFailed ? "record.failedHtml" : "record.loadingHtml"));
+    if (!recordLoading && !recordLoadFailed) {
+      const generation = client.generation;
+      const loading = client.setAuditView("full"); recordLoading = loading;
+      loading.catch(error => {
+        if (generation !== client.generation) return;
+        if ([401, 403].includes(error.status) || error.code === "session_binding_changed") client.handleFailure(error);
+        else recordLoadFailed = true;
+      })
+        .finally(() => { if (recordLoading === loading) recordLoading = null; if (generation === client.generation) renderRecordPanel(); });
+    }
+    return;
+  }
+  recordLoadFailed = false;
   renderContent("#event-list", [...state.eventLog].reverse().map(e => `<li id="${recordDomId("event", e.id)}" tabindex="-1" data-event-record-id="${esc(e.id)}" data-focus-key="event:${esc(e.id)}"><span>${esc(humanize(e.type))}</span><strong>${esc(memberLabel(e.actorId))}</strong><time datetime="${esc(e.at)}">${esc(time(e.at))}</time><code>${esc(e.id)}</code></li>`).join(""));
 
   // Decision register (backlog F2): the register is read from the event feed.
-  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED);
+  const decisions = state.eventLog.filter(e => e.type === T.DECISION_RECORDED || e.type === T.OWNER_DECISION_RECORDED);
   setText("#decision-count", decisions.length || "");
   renderContent("#decision-list", [...decisions].reverse().map(e =>
-    `<li><strong>${esc(e.data.statement)}</strong> <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
+    `<li><strong>${esc(e.type === T.DECISION_RECORDED ? e.data.statement : `${humanize(e.data.decision)}${e.data.reason ? `: ${e.data.reason}` : ""}`)}</strong>${e.data.sourceMessageId ? ` <a class="source-link" href="${esc(recordHref("message", e.data.sourceMessageId))}" data-open-message="${esc(e.data.sourceMessageId)}" data-focus-key="decision-source:${esc(e.id)}">source</a>` : ""}${e.data.note ? ` <span class="rb-detail">${esc(e.data.note)}</span>` : ""} <span class="rb-detail">${esc(memberLabel(e.actorId))} · ${esc(time(e.at))}</span></li>`).join("")
     || '<li class="rb-empty">No decisions recorded yet.</li>');
 }
-$("#record-panel").addEventListener("toggle", renderRecordPanel);
+$("#record-panel").addEventListener("toggle", () => {
+  if (!$("#record-panel").open) { recordLoadFailed = false; void client.setAuditView("activity").catch(() => {}); }
+  renderRecordPanel();
+});
+$("#event-list").addEventListener("click", event => {
+  if (event.target.closest("[data-record-retry]")) { recordLoadFailed = false; void client.refresh(null, { revalidate: true }).catch(() => { recordLoadFailed = true; renderRecordPanel(); }); renderRecordPanel(); }
+});
 // Phase 2 channels: one main channel plus user-created channels. Chat and work
 // share the timeline of the selected channel; work cards follow the channel of
 // their proposal message (the main channel when there is none).
@@ -2253,7 +2334,7 @@ function renderMessages() {
   const focusKey = focused?.closest("[data-key]")?.dataset.key;
   const focusedRect = focused?.getBoundingClientRect();
   const focusedOnScreen = Boolean(focusedRect && focusedRect.bottom > 0 && focusedRect.top < innerHeight);
-  const focusAction = focused?.dataset.messageAction, focusReaction = focused?.dataset.reaction;
+  const focusAction = focused?.dataset.messageAction;
   const focusedFeedback = focused?.closest(".draft-feedback");
   // A control inside a work card is restored by setTimelineWorkNode when that
   // card is re-rendered, but the interleave can then move the card, and moving
@@ -2321,8 +2402,8 @@ function renderMessages() {
       if (!node._content || !node.querySelector(".message-body")) node.innerHTML = html;
       else {
         const next = document.createElement("div"); next.innerHTML = html;
-        // Reply counts/reactions change independently; the selected message text stays put.
-        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".reactions", ".message-links", ".draft-feedback"]) {
+        // Reply counts change independently; the selected message text stays put.
+        for (const selector of [".chat-divider", ".grouped-time", ".message-avatar", ".message-meta", ".message-body", ".message-files", ".message-context", ".message-links", ".draft-feedback"]) {
           const before = node.querySelector(selector), after = next.querySelector(selector);
           if (selector === ".message-files") {
             if (!after) before?.remove();
@@ -2422,7 +2503,7 @@ function renderMessages() {
   if (focused && !focused.isConnected) {
     const row = [...list.children].find(e => e.dataset.key === focusKey);
     const replacement = focusedMessage ? row : focusedFeedback ? row?.querySelector(".draft-state")
-      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction && e.dataset.reaction === focusReaction);
+      : [...(row?.querySelectorAll("[data-message-action]") || [])].find(e => e.dataset.messageAction === focusAction);
     const target = replacement;
     target?.focus({ preventScroll: true });
   }
@@ -2455,17 +2536,14 @@ function draftFeedbackHTML(message) {
 return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 // UI calming #2: per-message actions collapse to Reply + replies-count inline;
-// Add reaction, Save as result, Pin, Make this work, Record decision and
+// Save as result, Pin, Make this work, Record decision and
 // moderation move into one keyboard- and hover-reachable "⋯" overflow menu.
-// Reactions otherwise surface only through a long-press / right-click sheet
-// (Slack/Discord style) — no always-visible picker. Every action keeps its
+// Every action keeps its
 // data-message-action wiring, so the work loop is untouched.
-function messageLinksHTML(m, { linked, moderation, count, muted, canReact = false }) {
+function messageLinksHTML(m, { linked, moderation, count, muted }) {
   if (muted) return `<div class="message-links">${moderation}</div>`;
   const saveHtml = !m.deletedAt && m.workItemId && workActions(state.workItems[m.workItemId], state.members[session.member.id]).some(([action]) => action === "complete")
     ? `<button class="message-to-work" type="button" data-message-action="result" data-message-id="${esc(m.id)}">Save as result</button>` : "";
-  const reactHtml = canReact
-    ? `<button class="message-to-work" type="button" data-message-action="add-reaction" data-message-id="${esc(m.id)}">Add reaction</button>` : "";
   const request = state.replyRequests?.[m.id];
   const clarify = request?.status === "open" && request.recipientId === session.member.id;
   const replyHtml = `<button class="message-to-work" data-message-action="reply" data-message-id="${esc(m.id)}" type="button"${clarify ? ' title="Reply without closing this request"' : ""}>${clarify ? "Clarify" : "Reply"}</button>`;
@@ -2483,31 +2561,9 @@ function messageLinksHTML(m, { linked, moderation, count, muted, canReact = fals
   const own = !m.deletedAt && m.authorId === session.member.id && !m.proposal;
   const editHtml = own ? `<button class="message-to-work" data-message-action="edit" data-message-id="${esc(m.id)}" type="button">Edit message</button>` : "";
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
-  const overflow = [reactHtml, saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
+  const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
-}
-// Used reaction chips under one message. The picker lives in the reaction sheet.
-function reactionButtonsFor(m) {
-  const pills = reactionPills(m.reactions);
-  const seen = new Set(pills.map(pill => pill.key));
-  const prefix = `${m.id}:`;
-  for (const pendingKey of pendingReactions.keys()) {
-    if (!pendingKey.startsWith(prefix)) continue;
-    const key = pendingKey.slice(prefix.length);
-    if (!key || seen.has(key)) continue;
-    pills.push({ key, symbol: key, memberIds: [], count: 0 });
-    seen.add(key);
-  }
-  return pills.map(pill => {
-    const pending = pendingReactions.get(`${m.id}:${pill.key}`);
-    if (!pill.count && !pending) return "";
-    const selected = pill.memberIds.includes(session.member.id);
-    const labelName = emojiName(pill.key);
-    const label = `${pending && !pending.busy ? "Retry " : ""}${labelName}`;
-    const who = pill.memberIds.map(name).join(", ");
-    return `<button type="button" class="reaction${pill.count ? " used" : ""}" aria-pressed="${selected}" aria-label="${esc(label)} reaction, ${pill.count}" title="${esc(who || `React with ${labelName}`)}" data-message-action="react" data-message-id="${esc(m.id)}" data-reaction="${esc(pill.key)}"${pending?.busy ? " disabled" : ""}><span aria-hidden="true">${pill.symbol}</span><span>${pill.count || ""}</span>${pending && !pending.busy ? " Retry" : ""}</button>`;
-  }).join("");
 }
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
@@ -2603,7 +2659,17 @@ async function refreshRoomFiles() {
 }
 async function attachComposerFiles(fileList) {
   if (!state || !client.session || isRoomArchived(state)) return;
+  // Bind the batch before any await: room changes must stop later files,
+  // and removed entries must not receive late success or error updates.
+  const authSession = client.session, generation = client.generation, roomId = state.room.id;
+  const draftOwner = drafts, key = composerKey(), draft = drafts.get(key);
+  const uploadPath = client.path("/files");
+  const owns = () => Boolean(state && session === authSession && client.session === authSession
+    && client.generation === generation && state.room?.id === roomId && authSession.roomId === roomId
+    && client.ownsAccountSession()
+    && drafts === draftOwner && drafts.entries.get(key) === draft && composerKey() === key);
   for (const file of [...(fileList ?? [])]) {
+    if (!owns()) return;
     if (file.size > COMPOSER_FILE_BYTES) {
       setComposerError("That file is larger than 1 MB.");
       continue;
@@ -2612,15 +2678,17 @@ async function attachComposerFiles(fileList) {
     const entry = { id, filename: file.name || "file", mediaType: file.type || "application/octet-stream", status: "uploading" };
     composerFiles = [...composerFiles, entry];
     renderComposerFiles();
+    const ownsEntry = () => owns() && composerFiles.includes(entry);
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!ownsEntry()) continue;
       const payload = attachmentFromBytes({ id, filename: entry.filename, mediaType: entry.mediaType, bytes });
-      await client.request(client.path("/files"), { method: "POST", data: payload });
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "staged";
+      await client.request(uploadPath, { method: "POST", data: payload, authSession, authMode: authSession.authMode });
+      if (!ownsEntry()) continue;
+      entry.status = "staged";
     } catch (error) {
-      const current = composerFiles.find(item => item.id === id);
-      if (current) current.status = "error";
+      if (!ownsEntry()) continue;
+      entry.status = "error";
       setComposerError(attachFailureCopy(error));
     }
     renderComposerFiles();
@@ -2654,11 +2722,10 @@ function messageContent(m, cluster = {}, unreadStart = false, members = Object.v
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
   const count = (conversation.threads.get(m.id)?.length || 1) - 1;
-  const reactionButtons = reactionButtonsFor(m);
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
-  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(renderEmojiShortcodes(parent.body ?? ""), 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div><div class="reactions" role="group" aria-label="Reactions to message by ${esc(authorLabel)}">${muted || m.deletedAt ? "" : reactionButtons}</div>${messageLinksHTML(m, { linked, moderation, count, muted, canReact: !muted && !m.deletedAt })}</div>`;
+  return `${divider}${groupedTime}<div class="message-avatar ${author.kind}" aria-hidden="true">${initials(author.displayName)}</div><div class="message-content"><div class="message-meta"><strong>${esc(authorLabel)}</strong>${isPinned(state, m.id) ? `<span class="pinned-chip">Pinned</span>` : ""}<a class="message-time" href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" aria-label="Link to message by ${esc(authorLabel)} at ${esc(time(m.createdAt))}"><time datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time></a></div><div class="message-context">${m.toMemberId ? `<span class="audience-chip">To ${esc(name(m.toMemberId))} · private</span>` : ""}${parent && parent.id !== currentThreadId ? `<a class="source-link reply-preview" href="${esc(recordHref("message", parent.id))}" data-open-message="${esc(parent.id)}">↳ ${esc(name(parent.authorId))}: ${parent.deletedAt ? "Message deleted" : esc(clipGraphemes(parent.body ?? "", 90))}</a>` : ""}</div>${muted ? `<p class="message-body message-muted">Hidden: you muted ${esc(authorLabel)}.</p>` : m.deletedAt ? `<p class="message-body message-tombstone">Message deleted</p>` : `<div class="message-body">${bodyHtmlCache.html(m.body, members, esc, m.id)}</div>${messageFileChips(m.id)}`}<div class="draft-feedback">${muted ? "" : draftFeedbackHTML(m)}</div>${messageLinksHTML(m, { linked, moderation, count, muted })}</div>`;
 }
 function mentionsFilterOn() {
   return $("#search-mentions")?.getAttribute("aria-pressed") === "true";
@@ -2690,7 +2757,7 @@ function renderSearch(now = Date.now()) {
   const list = $("#search-list"), focused = list.contains(document.activeElement) ? document.activeElement.dataset.searchKey : null;
   const empty = only && !parsed.term ? "No one has @-mentioned you yet." : pinnedOnly && !parsed.term ? "Nothing is pinned yet." : pinnedOnly ? "No pinned messages match." : "No matches. Try a name or another phrase.";
   const html = work.work.map(({ item, excerpt }) => `<li><a href="${esc(workHref(item.id))}" data-open-work="${esc(item.id)}" data-search-key="work:${esc(item.id)}"><strong>${esc(item.title)}</strong><span>${esc(excerpt)}</span><small>Work · ${esc(workStatus(item, now).label)}</small></a></li>`).join("")
-    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : clipGraphemes(renderEmojiShortcodes(m.body ?? ""), 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
+    + result.messages.filter(m => !isMutedBy(state, session?.member?.id, m.authorId)).map(m => `<li><a href="${esc(recordHref("message", m.id))}" data-open-message="${esc(m.id)}" data-search-key="message:${esc(m.id)}"><strong>${esc(name(m.authorId))}</strong><span>${esc(m.deletedAt ? "Message deleted" : clipGraphemes(m.body ?? "", 240))}</span><small>${m.replyToId ? "Open thread at this reply" : "Open in room"}</small></a></li>`).join("") || `<li class="empty-note">${empty}</li>`;
   if (list._content !== html) { list.innerHTML = html; list._content = html; }
   if (focused) ([...list.querySelectorAll("[data-search-key]")].find(e => e.dataset.searchKey === focused) || $("#message-search")).focus({ preventScroll: true });
 }
@@ -2698,6 +2765,33 @@ function saveComposer() {
   drafts.save(composerKey(), { body: $("#message-input").value, toMemberId: $("#message-to-select").value, replyToId, channelId: pendingMessage ? pendingMessage.command.data.channelId : activeChannelId, pending: pendingMessage, files: composerFiles,
     assistantDraft, ...(requestMode ? { mode: requestMode, threadId: currentThreadId } : {}) });
   persistDrafts();
+}
+// A receipt owns only its original draft, even when Retry was clicked after
+// editing, navigating away, or restoring the tab after a lost response.
+function confirmSharedSubmission({ command, fileIds }, result) {
+  saveComposer();
+  const activeKey = composerKey(), acceptedFiles = new Set(fileIds);
+  let activeChanged = false;
+  for (const [key, draft] of drafts.entries) {
+    if (draft.pending?.command.id !== command.id) continue;
+    const files = (draft.files ?? []).filter(file => !acceptedFiles.has(file.id));
+    const unchanged = draft.body.trim() === command.data.body
+      && (draft.toMemberId || null) === (command.data.toMemberId || null)
+      && draft.replyToId === command.data.replyToId && !files.length;
+    if (unchanged) drafts.clear(key);
+    else drafts.save(key, { pending: null, error: "", files,
+      ...(draft.assistantDraft?.runId === result.id ? { assistantDraft: { ...draft.assistantDraft, expectedRevision: result.revision } } : {}) });
+    if (key === activeKey) activeChanged = true;
+  }
+  if (activeChanged) {
+    const cleared = !drafts.entries.has(activeKey);
+    if (cleared && assistantDraft) assistantDraft = null;
+    restoreComposer(drafts.get(cleared ? composerKey() : activeKey));
+    if (cleared) $("#also-send-to-channel").checked = false;
+    updateReply(); syncRequestComposer(); renderComposerError();
+  }
+  persistDrafts();
+  if (acceptedFiles.size) void refreshRoomFiles();
 }
 function restoreComposer(draft) {
   assistantDraft = draft.assistantDraft ?? null;
@@ -2972,6 +3066,11 @@ function revealWorkTimeline(id) {
 }
 // JDOT-COH-NAV begin
 function revealWork(id) {
+  // #3795: a record id the legacy workItems projection does not hold may be
+  // a board claim — its record lives on the board. Reveal it there instead
+  // of reporting the record missing; deep links, reloads and the
+  // needs-attention Review anchor all arrive through this path.
+  if (state && !Object.hasOwn(state.workItems ?? {}, id)) { void revealClaimRecord(id); return; }
   if (activeWorkNavigationId && activeWorkNavigationId !== id) {
     const previous = workRecord(activeWorkNavigationId)?.querySelector(".work-details");
     if (previous) previous.open = false;
@@ -3051,10 +3150,23 @@ function showWorkDestination(kind, id, presentation = "details") {
   else if (kind === "work") revealWork(id); else revealMessage(id);
   syncWorkReturnControl();
 }
+// #3795: open the board on one claim's record — the destination behind
+// revealWork's claim fallback (deep links and reloads carry no origin, so
+// the return control falls back to "Back to room" like a work deep link).
+async function revealClaimRecord(id) {
+  if (!workNavigationContext() || busy) return;
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || !workNavigationContext()) return;
+  await navigationBoardRevealClaim?.(id);
+  syncWorkReturnControl();
+}
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
   if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
-    notice("That source is no longer available in this room.", true); return false;
+    notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "details";
   const target = recordHref(kind, id), origin = { ...captureWorkOrigin(extra), presentation };
@@ -3087,6 +3199,52 @@ function navigateWorkRecord(kind, id, extra = {}) {
   showWorkDestination(kind, id, presentation);
   return true;
 }
+// #3795: navigate to a board claim's record. The destination is the board
+// itself — the claim's card with its record disclosure open — so this
+// mirrors navigateWorkRecord's origin/ticket bookkeeping without a
+// workItems destination: the origin is captured before the board opens,
+// the claim's presence is proven by revealing it, and only then is the
+// record URL pushed, so a claim the board cannot show never becomes a
+// history entry whose Back leads nowhere.
+async function navigateClaimRecord(id) {
+  if (!workNavigationContext() || busy) return false;
+  const target = recordHref("work", id);
+  const origin = { ...captureWorkOrigin(), targetClaimId: id };
+  const current = currentWorkOrigin();
+  if (current?.target === target && location.hash === target && history.state?.roomWorkTarget === activeWorkNavigation) {
+    // Same record, new surface: refresh the return context, keep the entry.
+    if (!sameWorkOrigin(current, origin)) workNavigationOrigins.set(activeWorkNavigation,
+      { ...origin, url: current.url, previous: current.previous, target, targetUrl: current.targetUrl });
+    workHistoryReplayKey = null;
+    if (!$("#board-dialog").open) $("#tasks-board-open").click();
+    if (await navigationBoardReady?.()) await navigationBoardRevealClaim?.(id);
+    syncWorkReturnControl();
+    return true;
+  }
+  const epoch = workNavigationEpoch;
+  if (!$("#board-dialog").open) $("#tasks-board-open").click();
+  const opening = navigationBoardEpoch;
+  if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  if (!await navigationBoardRevealClaim?.(id)) {
+    notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    return false;
+  }
+  if (opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
+    || origin.context !== workNavigationContext()) return false;
+  const ticket = crypto.randomUUID();
+  origin.target = target; origin.targetUrl = new URL(target, location.href).href;
+  workNavigationOrigins.set(ticket, origin);
+  const entry = history.state && typeof history.state === "object" ? history.state : {};
+  history.replaceState({ ...entry, roomWorkOrigin: ticket }, "", location.href);
+  history.pushState({ ...workHistoryState(), roomWorkTarget: ticket }, "", target);
+  activeWorkNavigation = ticket;
+  // Pre-seed the replay key exactly like navigateWorkRecord, so the pushed
+  // entry's own hashchange/popstate echo dedupes instead of reprocessing.
+  workHistoryReplayKey = [new URL(target, location.href).href, ticket, "", workNavigationContext()].join("|");
+  syncWorkReturnControl();
+  return true;
+}
 async function restoreWorkOrigin(ticket) {
   const origin = currentWorkOrigin(ticket);
   if (!origin || busy) { returnToCurrentRoom(); return; }
@@ -3094,6 +3252,10 @@ async function restoreWorkOrigin(ticket) {
   updatesUi?.cancelPending();
   activeWorkNavigation = currentWorkOrigin(origin.previous) ? origin.previous : null;
   inboxUI?.showRooms();
+  // #3795: a claim record's destination is the board itself; returning to an
+  // origin that was not the board closes it again (a work record's
+  // destination never had it open).
+  if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
   if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
   switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
   if (origin.mode) setRequestMode(origin.mode);
@@ -3164,7 +3326,9 @@ function replayWorkNavigation() {
   if (returning) { void restoreWorkOrigin(back); return true; }
   if (targetOrigin && targetOrigin.targetUrl === location.href) {
     activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
-    if ($("#board-dialog").open) $("#board-dialog").close();
+    // A claim record's destination keeps the board open; every other
+    // record destination starts with it closed.
+    if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
     const work = /^#pr-record\/work\/(.+)$/.exec(location.hash);
     if (work && targetOrigin.presentation === "drafts" && state?.workItems[decodeFragment(work[1])]) revealDrafts(decodeFragment(work[1]));
     else revealLocationHash();
@@ -3207,16 +3371,52 @@ function revealRoom() {
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   focusRecord($("#room-title"));
 }
-function revealEvent(id) {
+function revealEvent(id, requireExisting = false) {
   if (!state || busy) return;
-  openSettings("record-panel");
-  focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
-    .find(node => node.dataset.eventRecordId === id));
+  const generation = client.generation, navigationHash = location.hash;
+  if (!requireExisting) openSettings("record-panel");
+  void client.setAuditView("full").then(() => {
+    if (generation !== client.generation || !state) return;
+    if (requireExisting && location.hash !== navigationHash) return;
+    if (requireExisting && !state.eventLog.some(event => event.id === id)) {
+      if (!$("#settings-dialog").open || !$("#record-panel").open) void client.setAuditView("activity").catch(() => {});
+      return;
+    }
+    if (requireExisting) openSettings("record-panel");
+    if (!$("#settings-dialog").open) return;
+    focusRecord([...$("#event-list").querySelectorAll("[data-event-record-id]")]
+      .find(node => node.dataset.eventRecordId === id));
+  }).catch(error => {
+    if (generation === client.generation && ([401, 403].includes(error.status) || error.code === "session_binding_changed")) client.handleFailure(error);
+  });
 }
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
+// Remember a message deep-link target the held history does not contain
+// yet, with the navigation context at arm time, so the retry can tell a
+// still-waiting cold load apart from a user who has since gone elsewhere.
+function pendHashReveal(messageId) {
+  pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
+    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
+}
+// Runs on every snapshot. The pending reveal fires only when this
+// snapshot first holds the target and nothing about the navigation
+// context changed since it was armed; any change cancels it for good.
+function retryPendingHashReveal() {
+  const pending = pendingHashReveal;
+  if (!pending) return;
+  if (!state || client.generation !== pending.generation
+    || (state.room?.id ?? session?.roomId) !== pending.roomId
+    || location.hash !== pending.hash
+    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId
+    || readerScrollAt !== pending.readerScrollAt) { pendingHashReveal = null; return; }
+  if (busy || !conversation?.byId.has(pending.messageId)) return;
+  pendingHashReveal = null;
+  revealMessage(pending.messageId);
+}
 function revealLocationHash() {
+  if (pendingHashReveal && location.hash !== pendingHashReveal.hash) pendingHashReveal = null;
   if (!location.hash) return;
   const hash = location.hash;
   // Account destinations also work before any room has been opened.
@@ -3258,7 +3458,15 @@ function revealLocationHash() {
   const current = /^#pr-record\/(message|work|member|event|room)\/(.+)$/.exec(hash);
   if (current) {
     const id = decodeFragment(current[2]);
-    if (id !== null) ({ message: revealMessage, work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
+    if (id !== null && current[1] === "message") {
+      // Held already: reveal now (and drop any pending twin). Not held
+      // yet — an older message still behind the background fill: pend it
+      // for the first snapshot that holds it instead of dropping it.
+      if (conversation.byId.has(id)) { pendingHashReveal = null; revealMessage(id); }
+      else pendHashReveal(id);
+      return;
+    }
+    if (id !== null) ({ work: revealWork, member: revealMember, event: revealEvent, room: revealRoom }[current[1]])(id);
     return;
   }
   const rawWorkId = decodeFragment(hash.slice(1));
@@ -3270,11 +3478,13 @@ function revealLocationHash() {
   for (const [prefix, reveal] of [["#message-", revealMessage], ["#work-", revealWork], ["#member-", revealMember], ["#event-", revealEvent]]) {
     if (!hash.startsWith(prefix)) continue;
     const id = decodeFragment(hash.slice(prefix.length));
+    if (id !== null && prefix === "#event-" && snapshotAuditView === "activity") { revealEvent(id, true); return; }
     const exists = prefix === "#message-" ? conversation.byId.has(id)
       : prefix === "#work-" ? Boolean(state.workItems[id])
       : prefix === "#member-" ? Boolean(state.members[id])
       : state.eventLog.some(event => event.id === id);
     if (id !== null && exists) { reveal(id); return; }
+    if (id !== null && prefix === "#message-") pendHashReveal(id);
     break;
   }
 }
@@ -3458,7 +3668,7 @@ function workCard(i, now, drafts, messages = []) {
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
-`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...draft.body].slice(0, 100).join(""))}${[...draft.body].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
+`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...(draft.body ?? "")].slice(0, 100).join(""))}${[...(draft.body ?? "")].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const staleBasis = latestDraft?.proposal && latestDraft.proposal.basisRevision < i.revision ? latestDraft.proposal.basisRevision : null;
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
   const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
@@ -3493,6 +3703,10 @@ function timelineWorkEntries() {
   for (let index = state.messages.length - 1; index >= 0; index--) {
     const message = state.messages[index];
     if (!message.workItemId || !message.proposal) continue;
+    // A deleted or redacted draft keeps its proposal context but its body is
+    // tombstoned to null: it is not a draft anymore, so it must neither count
+    // toward "Drafts (n)" nor be rendered (mirrors pinnedMessages' filter).
+    if (message.deletedAt || message.body == null) continue;
     if (!draftsByWork.has(message.workItemId)) draftsByWork.set(message.workItemId, []);
     draftsByWork.get(message.workItemId).push(message);
   }
@@ -3547,7 +3761,7 @@ async function submit(form, fn, { failureHint } = {}) {
   try { await fn(current); }
   catch (error) {
     if (!current()) return;
-    const text = `${requestFailureMessage(error)}. ${failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again.")}`;
+    const text = failureTextWithHint(error, failureHint ?? (state ? "Your entries were kept; try again." : "Sign in again."));
     // One live-announcement owner per send result: when the form has its own status region
     // it owns the announcement (the visible composer error); the page-level region stays
     // silent so a screen reader announces the failure exactly once.
@@ -3768,7 +3982,7 @@ $("#join-agent-copy")?.addEventListener("click", async () => {
 // C1: mobile session menu (short header) - toggle, Escape, outside click.
 installRoomLayout();
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
-  openWork: id => revealWork(id), openMessage: id => revealMessage(id),
+  openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
   getContribution: () => assistantDraft, endContribution: () => switchThread(currentThreadId),
   startContribution: (sourceMessageId, intent) => {
     const source = conversation?.byId.get(sourceMessageId);
@@ -3951,6 +4165,9 @@ $("#message-form").addEventListener("submit", e => {
   // Preserve the exact legacy payload, including an omitted default channel.
   const data = unchanged ? previous : { messageId: crypto.randomUUID(), ...content };
   pendingMessage = draftCommand(pendingMessage, T.MESSAGE_POSTED, data);
+  const sendingCommand = pendingMessage.command;
+  const sharedRequest = Boolean(askRoom || humanExperience.hasSubmission(sendingCommand));
+  const stagedFileIds = composerFiles.filter(file => file.status === "staged").map(file => file.id);
   saveComposer();
   const generation = client.generation, draftKey = composerKey();
   submit(e.currentTarget, async () => {
@@ -3958,10 +4175,15 @@ $("#message-form").addEventListener("submit", e => {
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
     try {
-      await client.send(pendingMessage.command);
+      if (sharedRequest) {
+        await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
+        if (generation === client.generation && state) maybeShowGuestUpgradeHint();
+        return;
+      }
+      await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(pendingMessage.command, error) ?? error;
+      throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
     await commitComposerFiles(data.messageId);
@@ -3974,7 +4196,6 @@ $("#message-form").addEventListener("submit", e => {
       assistantDraft = null; restoreComposer(drafts.get(composerKey()));
       updateReply(); syncRequestComposer(); persistDrafts();
     }
-    await humanExperience.posted(data.messageId, askRoom);
     maybeShowGuestUpgradeHint();
   }, { failureHint: "Draft kept. Send again to retry." });
 });
@@ -4166,8 +4387,6 @@ $("#message-list").addEventListener("click", e => {
     const message = conversation.byId.get(id), item = state.workItems[message?.workItemId];
     if (item && workActions(item, state.members[session.member.id]).some(([action]) => action === "complete")) openWorkAction(item, "complete", id);
   }
-  else if (button.dataset.messageAction === "react") setReaction(id, button.dataset.reaction);
-  else if (button.dataset.messageAction === "add-reaction") openReactionSheet(id, button.closest("li.message"));
   else if (button.dataset.messageAction === "pin") setPinned(id);
   else if (button.dataset.messageAction === "mark-unread") void markMessageUnread(id);
   else if (button.dataset.messageAction === "save") void toggleSaved(id);
@@ -4288,50 +4507,9 @@ function hideMentions() {
   const list = $("#mention-list"), input = $("#message-input");
   if (!list) return;
   list.hidden = true; list.replaceChildren(); mentionIndex = 0;
-  if ($("#emoji-list")?.hidden !== false) {
-    // Closed listbox: the textarea stops pointing at an option that no longer exists.
-    input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
-    input?.setAttribute("aria-controls", "mention-list");
-  }
-}
-function hideEmoji() {
-  const list = $("#emoji-list"), input = $("#message-input");
-  if (!list || list.hidden) return;
-  list.hidden = true; list.replaceChildren(); emojiIndex = 0;
-  if ($("#mention-list")?.hidden !== false) {
-    input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
-    input?.setAttribute("aria-controls", "mention-list");
-  }
-}
-function emojiChoices() {
-  const input = $("#message-input");
-  if (!input || ($("#mention-list") && !$("#mention-list").hidden)) return null;
-  const found = emojiQuery(input.value, input.selectionStart);
-  if (!found) return null;
-  const matches = emojiMatches(found.query, 8);
-  return matches.length ? { found, matches } : null;
-}
-function renderEmoji() {
-  const list = $("#emoji-list");
-  if (!list) return;
-  const choice = emojiChoices();
-  if (!choice) { hideEmoji(); return; }
-  emojiIndex = Math.min(Math.max(emojiIndex, 0), choice.matches.length - 1);
-  list.hidden = false;
-  list.innerHTML = choice.matches.map((item, i) => `<li role="option" id="emoji-option-${i}" class="mention-option${i === emojiIndex ? " active" : ""}" data-emoji="${esc(item.emoji)}" aria-selected="${i === emojiIndex}"><span class="emoji-glyph" aria-hidden="true">${item.emoji}</span> ${esc(item.name)}</li>`).join("");
-  const input = $("#message-input");
-  input.removeAttribute("aria-expanded");
-  input.setAttribute("aria-controls", "emoji-list");
-  input.setAttribute("aria-activedescendant", `emoji-option-${emojiIndex}`);
-}
-function applyEmoji(emoji) {
-  const input = $("#message-input");
-  const found = input && emojiQuery(input.value, input.selectionStart);
-  if (!input || !found || !emoji) return;
-  const next = insertEmoji(input.value, input.selectionStart, found.start, emoji);
-  input.value = next.body;
-  hideEmoji(); saveComposer(); syncRequestComposer();
-  input.focus(); input.setSelectionRange(next.caret, next.caret);
+  // Closed listbox: the textarea stops pointing at an option that no longer exists.
+  input?.removeAttribute("aria-expanded"); input?.removeAttribute("aria-activedescendant");
+  input?.setAttribute("aria-controls", "mention-list");
 }
 function mentionChoices() {
   const input = $("#message-input"), found = mentionQuery(input.value, input.selectionStart);
@@ -4376,7 +4554,7 @@ function applyMentionMember(member) {
   hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); renderEmoji(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
+$("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
 $("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
@@ -4402,16 +4580,6 @@ $("#message-input").addEventListener("keydown", e => {
     }
     if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); chooseMention(matches[mentionIndex]); return; }
   }
-  const emojiChoice = emojiChoices();
-  if (emojiChoice) {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      emojiIndex = (emojiIndex + (e.key === "ArrowDown" ? 1 : emojiChoice.matches.length - 1)) % emojiChoice.matches.length;
-      renderEmoji();
-      return;
-    }
-    if (e.key === "Tab" || e.key === "Enter") { e.preventDefault(); applyEmoji(emojiChoice.matches[emojiIndex].emoji); return; }
-  }
   // Some IME confirmation keys arrive after compositionend; keyCode 229 is the
   // legacy UI Events signal. Neither confirmation nor key repeat sends a message.
   if (sendsOnEnter(e, touchKeyboard.matches)) {
@@ -4424,12 +4592,6 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   if (!option) return;
   e.preventDefault();
   chooseMention(state.members[option.dataset.mentionId]);
-});
-$("#emoji-list")?.addEventListener("mousedown", e => {
-  const option = e.target.closest("[data-emoji]");
-  if (!option) return;
-  e.preventDefault();
-  applyEmoji(option.dataset.emoji);
 });
 // C6: the owner's pause roster is one read when People opens and after each
 // action; the row buttons never appear for non-owners or inactive agents.
@@ -4560,7 +4722,6 @@ function chatEscapeState() {
   return {
     dialogOpen: Boolean(document.querySelector("dialog[open]")),
     mentionOpen: Boolean($("#mention-list") && !$("#mention-list").hidden),
-    emojiOpen: Boolean($("#emoji-list") && !$("#emoji-list").hidden),
     replyOpen: Boolean(state && conversation?.byId.get(replyToId) && replyToId !== currentThreadId),
     inThread: Boolean(currentThreadId)
   };
@@ -4607,8 +4768,7 @@ function runEscapeChat(event) {
   const action = escapeChatAction(chatEscapeState());
   if (!action) return false;
   event.preventDefault();
-  if (action === "hide-emoji") hideEmoji();
-  else if (action === "hide-mentions") hideMentions();
+  if (action === "hide-mentions") hideMentions();
   else if (action === "clear-reply") { cancelReply(); saveComposer(); }
   else if (action === "leave-thread") switchThread(null);
   return true;
@@ -4691,7 +4851,7 @@ function roomActionEntries() {
     { id: "mentions", label: "Mentions", words: "mentions addressed @me to:me", target: "#search-mentions", activate: true, always: true },
     { id: "pinned-search", label: "Pinned", words: "pins pinned search", target: "#search-pinned", activate: true, always: true },
     { id: "catch-up", label: "Catch up", words: "updates attention needs me reminders", always: true },
-    { id: "activity", label: "Activity", words: "activity mentions replies reactions feed unread", always: true },
+    { id: "activity", label: "Activity", words: "activity mentions replies feed unread", always: true },
     { id: "later", label: "Saved for later", words: "later saved bookmarks read later", always: true },
     { id: "results", label: "View results", words: "completed approved finished artifacts", always: true },
     { id: "people", label: "People", words: "members collaborators team", target: "#people-panel > summary", reveal: "#people-panel" },
@@ -4956,7 +5116,11 @@ $("#main").addEventListener("click", e => {
     revealMessage(link.dataset.openMessage);
   } else if (link.dataset.openWork) {
     // JDOT-COH-NAV begin
-    navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
+    // #3795: a claim record link (marked data-open-claim), and any record id
+    // the legacy workItems projection does not hold, resolves to the board
+    // claim's record instead of the work timeline.
+    if (link.dataset.openClaim || !state?.workItems?.[link.dataset.openWork]) void navigateClaimRecord(link.dataset.openWork);
+    else navigateWorkRecord("work", link.dataset.openWork, link.hasAttribute("data-view-drafts") ? { presentation: "drafts" } : {});
     // JDOT-COH-NAV end
   } else if (link.dataset.openMember) {
     history.replaceState(null, "", recordHref("member", link.dataset.openMember));
@@ -5034,149 +5198,6 @@ $("#pinned-list").addEventListener("click", e => {
   if (button && state && !busy) setPinned(button.dataset.messageId);
 });
 
-async function setReaction(messageId, reaction) {
-  const emoji = canonicalReaction(reaction);
-  const key = emoji ? `${messageId}:${emoji}` : "";
-  const previous = key ? pendingReactions.get(key) : null;
-  const message = conversation?.byId.get(messageId);
-  if (!emoji || !message || previous?.busy) return;
-  const selected = reactionPills(message.reactions).some(pill => pill.key === emoji && pill.memberIds.includes(session.member.id));
-  const active = !selected;
-  const pending = previous || draftCommand(null, T.MESSAGE_REACTION_SET, { messageId, reaction: emoji, active });
-  pending.busy = true; pendingReactions.set(key, pending); renderMessages();
-  const generation = client.generation;
-  try {
-    const receipt = await client.send(pending.command);
-    if (generation !== client.generation || !state) return;
-    // A successful command receipt can update this member's choice while a snapshot is delayed.
-    if (client.sequence < receipt.sequence) {
-      const current = conversation.byId.get(messageId);
-      const folded = foldedReactionMap(current.reactions);
-      const ids = new Set(folded[emoji] || []);
-      if (receipt.event.data.active) ids.add(session.member.id); else ids.delete(session.member.id);
-      if (ids.size) folded[emoji] = [...ids].sort(); else delete folded[emoji];
-      current.reactions = folded;
-    }
-    pendingReactions.delete(key);
-  } catch (error) {
-    if (generation === client.generation && state) { pending.busy = false; notice(`${error.message}. Retry keeps the same reaction choice.`, true); }
-  } finally { if (state && generation === client.generation) renderMessages(); }
-}
-
-// Reaction sheet (Slack/Discord style): no always-visible picker. A long-press
-// on a message (touch), a right-click (desktop), or the "Add reaction" item in
-// the ⋯ menu opens a sheet with the room's reactions; tapping one toggles it.
-const REACTION_SHEET_LONGPRESS_MS = 550;
-let reactionSheetMessageId = null, reactionSheetInvokerKey = null;
-let longpressTimer = null, longpressAt = 0, longpressStartX = 0, longpressStartY = 0;
-function clearLongpress() {
-  if (longpressTimer) { clearTimeout(longpressTimer); longpressTimer = null; }
-}
-const RECENT_EMOJI_KEY = "project-room:recent-emoji";
-function recentEmoji() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(RECENT_EMOJI_KEY) || "[]");
-    return Array.isArray(parsed) ? parsed.map(canonicalReaction).filter(Boolean).slice(0, 16) : [];
-  } catch { return []; }
-}
-function rememberEmoji(emoji) {
-  const key = canonicalReaction(emoji);
-  if (!key) return;
-  const next = [key, ...recentEmoji().filter(item => item !== key)].slice(0, 16);
-  try { localStorage.setItem(RECENT_EMOJI_KEY, JSON.stringify(next)); } catch { /* recent emoji are optional */ }
-}
-function reactionChoiceButton(emoji, pressed) {
-  return `<button type="button" class="reaction-pick" data-reaction="${esc(emoji)}" aria-pressed="${pressed}" aria-label="${esc(emojiName(emoji))}">${emoji}</button>`;
-}
-function renderReactionChoices(message, query) {
-  const pressed = new Set(reactionPills(message.reactions).filter(pill => pill.memberIds.includes(session.member.id)).map(pill => pill.key));
-  const q = String(query ?? "").trim();
-  if (q) {
-    const matches = emojiMatches(q, 64);
-    if (!matches.length) return `<p class="reaction-sheet-empty">No emoji match.</p>`;
-    return `<div class="reaction-grid" role="group" aria-label="Emoji matches">${matches.map(item => reactionChoiceButton(item.emoji, pressed.has(item.emoji))).join("")}</div>`;
-  }
-  const quick = frequentEmoji(recentEmoji());
-  const quickHtml = `<p class="reaction-sheet-heading" id="reaction-frequent-label">Frequent</p><div class="reaction-grid" role="group" aria-labelledby="reaction-frequent-label">${quick.map(emoji => reactionChoiceButton(emoji, pressed.has(emoji))).join("")}</div>`;
-  const catalog = emojiCatalog().map(({ category, items }) => {
-    const id = `reaction-cat-${category.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, "")}`;
-    return `<p class="reaction-sheet-heading" id="${id}">${esc(category)}</p><div class="reaction-grid" role="group" aria-labelledby="${id}">${items.map(item => reactionChoiceButton(item.emoji, pressed.has(item.emoji))).join("")}</div>`;
-  }).join("");
-  return quickHtml + catalog;
-}
-function openReactionSheet(messageId, invoker) {
-  const message = conversation?.byId.get(messageId);
-  if (!message || message.deletedAt || !state || busy) return;
-  if (isMutedBy(state, session.member.id, message.authorId)) return;
-  reactionSheetMessageId = messageId;
-  reactionSheetInvokerKey = invoker?.dataset?.key || null;
-  const sheet = $("#reaction-sheet");
-  const search = $("#reaction-search");
-  $("#reaction-sheet-label").textContent = `React to ${displayName(message.authorId)}’s message`;
-  if (search) search.value = "";
-  $("#reaction-sheet-options").innerHTML = renderReactionChoices(message, "");
-  if (!sheet.open) sheet.showModal();
-  search?.focus({ preventScroll: true });
-}
-function closeReactionSheet() {
-  const sheet = $("#reaction-sheet");
-  if (sheet?.open) sheet.close();
-}
-$("#reaction-sheet-close").addEventListener("click", closeReactionSheet);
-$("#reaction-sheet").addEventListener("click", e => {
-  if (e.target === e.currentTarget) closeReactionSheet();
-});
-$("#reaction-sheet").addEventListener("close", () => {
-  reactionSheetMessageId = null;
-  if (reactionSheetInvokerKey) {
-    const node = document.querySelector(`#message-list [data-key="${CSS.escape(reactionSheetInvokerKey)}"]`);
-    node?.focus({ preventScroll: true });
-    reactionSheetInvokerKey = null;
-  }
-});
-$("#reaction-search")?.addEventListener("input", () => {
-  const message = conversation?.byId.get(reactionSheetMessageId);
-  if (!message) return;
-  $("#reaction-sheet-options").innerHTML = renderReactionChoices(message, $("#reaction-search").value);
-});
-function reactionSheetButtons() {
-  return [...($("#reaction-sheet-options")?.querySelectorAll("button[data-reaction]") || [])];
-}
-$("#reaction-sheet").addEventListener("keydown", e => {
-  const buttons = reactionSheetButtons();
-  const search = $("#reaction-search");
-  if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
-    if (!buttons.length) return;
-    const index = buttons.indexOf(document.activeElement);
-    if (document.activeElement === search || index < 0) {
-      if (e.key === "ArrowUp" || e.key === "ArrowLeft") return;
-      e.preventDefault();
-      buttons[0].focus();
-      return;
-    }
-    const grid = buttons[index].closest(".reaction-grid");
-    const columns = grid ? Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(" ").length) : 8;
-    const delta = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" ? -columns : columns;
-    const next = index + delta;
-    if (next < 0 || next >= buttons.length) return;
-    e.preventDefault();
-    buttons[next].focus();
-    return;
-  }
-  if (e.key === "Enter" && document.activeElement === search && search.value.trim() && buttons[0]) {
-    e.preventDefault();
-    buttons[0].click();
-  }
-});
-$("#reaction-sheet-options").addEventListener("click", e => {
-  const button = e.target.closest("[data-reaction]");
-  if (!button || !reactionSheetMessageId || busy) return;
-  const id = reactionSheetMessageId;
-  const emoji = button.dataset.reaction;
-  rememberEmoji(emoji);
-  closeReactionSheet();
-  setReaction(id, emoji);
-});
 // Chrome that mounts or resizes around the timeline after it opened at the
 // newest message (assistant panel, pill, composer) keeps it there (R68-1).
 if (globalThis.ResizeObserver) new ResizeObserver(() => {
@@ -5194,37 +5215,6 @@ function stickPinnedTimeline(list) {
   pinScrollTop = list.scrollTop;
   if (offBottom) { clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null; }
 }
-// Long-press (touch/pen): hold a message to open the reaction sheet.
-$("#message-list").addEventListener("pointerdown", e => {
-  if (e.pointerType === "mouse" || e.button !== 0) return;
-  const node = e.target.closest("li.message");
-  if (!node?.dataset.messageRecordId) return;
-  clearLongpress();
-  longpressStartX = e.clientX; longpressStartY = e.clientY;
-  const messageId = node.dataset.messageRecordId;
-  longpressTimer = setTimeout(() => {
-    longpressTimer = null;
-    longpressAt = Date.now();
-    try { window.getSelection()?.removeAllRanges(); } catch {}
-    openReactionSheet(messageId, node);
-  }, REACTION_SHEET_LONGPRESS_MS);
-});
-$("#message-list").addEventListener("pointermove", e => {
-  if (!longpressTimer) return;
-  if (Math.hypot(e.clientX - longpressStartX, e.clientY - longpressStartY) > 10) clearLongpress();
-});
-for (const cancel of ["pointerup", "pointercancel"]) $("#message-list").addEventListener(cancel, clearLongpress);
-// Right-click (desktop): open the reaction sheet instead of the native menu.
-$("#message-list").addEventListener("contextmenu", e => {
-  const node = e.target.closest("li.message");
-  if (!node?.dataset.messageRecordId) return;
-  e.preventDefault();
-  // A contextmenu fired right after our own long-press already opened the sheet.
-  if (Date.now() - longpressAt < 800) return;
-  clearLongpress();
-  openReactionSheet(node.dataset.messageRecordId, node);
-});
-
 // Decision register (backlog F2): a human with decide promotes a message into
 // a source-backed decision; the room reads the register from the event feed.
 let decisionSourceId = null;
@@ -5426,7 +5416,7 @@ async function setMute(memberId, muted) {
     if (generation !== client.generation || !state) return;
     notice(muted ? `${target.displayName} muted for you. Their messages are hidden here until you unmute; nobody else is affected.` : `${target.displayName} unmuted.`);
   } catch (error) {
-    if (generation === client.generation && state) notice(`${requestFailureMessage(error)}. Your mute choice was not changed.`, true);
+    if (generation === client.generation && state) notice(failureTextWithHint(error, "Your mute choice was not changed."), true);
   }
 }
 $("#presence-list").addEventListener("click", e => {
@@ -5483,7 +5473,7 @@ function loadReports() {
     reportsSequence = sequence; reportsGeneration = generation;
     renderReports(result.reports);
   }).catch(error => {
-    if (generation === client.generation && state) setFormStatus($("#report-list-status"), `${requestFailureMessage(error)}. Open this section again to retry.`, true);
+    if (generation === client.generation && state) setFormStatus($("#report-list-status"), failureTextWithHint(error, "Open this section again to retry."), true);
   }).finally(() => { reportsFlight = null; });
 }
 function renderReports(reports) {
@@ -5904,6 +5894,10 @@ $("#work-recipe-select").addEventListener("change", event => {
   } catch { /* Definition changed since the list was built; leave the fields as they are. */ }
 });
 $("#new-work-button").addEventListener("click", () => openWork());
+// Front-door batch B-2 (#3772): a visible, labeled New work address in the
+// Tasks navigation — the same single control the composer Options menu
+// carries, reached without opening a disclosure.
+$("#new-work-open")?.addEventListener("click", () => openWork());
 $("#review-settings-button").addEventListener("click", () => {
   $("#work-options").open = true;
   $("#require-verification").focus();
@@ -5932,6 +5926,20 @@ $("#create-work-button").addEventListener("click", e => {
   $("#verifier-hint").hidden = false;
   $("#verifier-select").focus();
 });
+// Front-door batch B-1 (#3771): an invalid submit must never be silent.
+// Native validation fires "invalid" per control but a dialog form can
+// swallow it without a visible word; name the first invalid field in the
+// form's own status region and open any closed disclosure around it.
+for (const [formSelector, statusSelector] of [["#new-work-form", "#new-work-status"], ["#action-form", "#action-error"], ["#decision-form", "#decision-status"]]) {
+  const form = $(formSelector); if (!form) continue;
+  form.addEventListener("invalid", event => {
+    const field = event.target;
+    const label = field.closest("label")?.textContent?.trim().replace(/\s+/g, " ").slice(0, 60)
+      || field.getAttribute?.("aria-label") || field.name || "A required field";
+    const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: label }), true);
+    const details = field.closest("details"); if (details && !details.open) details.open = true;
+  }, true);
+}
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
 $("#message-list").addEventListener("click", e => {
@@ -6062,7 +6070,8 @@ function renderRoomOverview() {
     + section("Next for you", steps.map(step => `<li>${link(step.kind === "request" ? "message" : "work", step.id, step.title, step.key)}<p class="form-hint">${esc(step.label)}</p></li>`), "Nothing needs your attention right now.")
     + section(`Active work · ${orientation.activeWork.length} of ${orientation.activeWorkTotal}`, orientation.activeWork.map(item => `<li>${link("work", item.id, item.title, `active:${item.id}`)}<p class="form-hint">${esc(item.state)} · ${esc(time(item.updatedAt))}</p></li>`), "No active work yet. Start with a conversation.")
     + section("Recent decisions", decisions.map(e => `<li><p>${esc(e.statement)}</p>${link("message", e.sourceMessageId, "Open discussion", e.eventId)}<p class="form-hint">${esc(memberLabel(e.authorId))} · ${esc(time(e.at))}</p></li>`), "No decisions recorded yet.")
-    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here."));
+    + section("Recent results", results.map(item => `<li>${link("work", item.id, item.title, `result:${item.id}`)}<p>${esc(item.receipt.summary)}</p><p class="form-hint">${currentResult(item).status === "approved" ? "Approved" : "Completed"} · ${esc(time(item.updatedAt))}</p></li>`), "No completed results yet. When a work item completes and its receipt is recorded, it lands here.")
+    + `<section><h3>All results</h3><p><button type="button" class="text-button" data-open-results>Open the room's Results</button></p></section>`);
 }
 $("#room-overview-open").addEventListener("click", () => {
   if (!state || busy) return;
@@ -6072,6 +6081,9 @@ $("#room-overview-open").addEventListener("click", () => {
 $("#room-overview-close").addEventListener("click", () => {
   $("#room-overview-dialog").close();
   $("#room-overview-open").focus({ preventScroll: true });
+});
+$("#room-overview-content").addEventListener("click", event => {
+  if (event.target.closest("[data-open-results]")) { $("#room-overview-dialog").close(); selectWorkView("results"); }
 });
 $("#room-overview-dialog").addEventListener("click", event => {
   // Close before the existing source-link handler moves focus to the timeline.
@@ -6576,6 +6588,13 @@ $("#action-form").addEventListener("submit", e => {
       }
       // A rationale can settle after the result changed. Never silently rebase
       // its verdict; uncertain decision retries still reconcile the original.
+      // The gate below reads current state, so re-read first: a send() whose
+      // receipt was applied as a local delta (delta sync) settles without the
+      // snapshot read that used to guarantee this freshness.
+      if (entry.publishRationale && !entry.decisionDispatched) {
+        await client.refresh();
+        if (!owns()) return;
+      }
       if (entry.publishRationale && !entry.decisionDispatched && actionChanged(entry)) {
         entry.uncertain = false; entry.needsReview = true; entry.error = uiText("human.decisionRationaleChanged"); return;
       }
@@ -6742,14 +6761,7 @@ function renderNotifications() {
       : (state.workItems[item.workItemId]?.title ?? item.workItemId);
     const actor = item.kind === "access_request" && item.displayName ? item.displayName : memberLabel(item.actorId);
     const label = `${actor} ${NOTIFICATION_LABELS[item.kind] ?? humanize(item.kind)}${item.changes > 1 ? ` · ${item.changes} changes` : ""}`;
-    // Tag acknowledgment (2026-09-23): a pending mention carries a one-tap 👍
-    // button. A bare react counts as a response, so the button sends the
-    // suggested react through the normal reaction path; it sits outside the
-    // row's link so tapping it never navigates to the message.
-    const ack = item.kind === "mention" && item.ackState === "pending" && item.messageId
-      ? `<button type="button" class="notification-ack" data-ack-message="${esc(item.messageId)}" data-ack-reaction="${esc(item.suggestedAck ?? "like")}" title="Acknowledge with a 👍 react" aria-label="Acknowledge mention with thumbs up">👍</button>`
-      : "";
-    return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a>${ack}</li>`;
+    return `<li class="rb-event notification-item" data-notification-kind="${esc(item.kind)}"><a class="rb-event-link" href="${esc(recordHref(target.kind, target.id))}" data-open-${target.kind}="${esc(target.id)}" data-brief-key="notification:${esc(item.kind)}:${esc(target.id)}"><span class="rb-actor">${esc(label)}</span><time datetime="${esc(item.at)}">${esc(time(item.at))}</time>${detail ? `<span class="rb-detail">${esc(detail)}</span>` : ""}</a></li>`;
   }).join("") || (owned && feed && !notificationError ? `<li class="rb-empty">${feed.nextBefore ? 'No notifications in this part of the history.' : feed.pageBefore !== null ? 'No older notifications.' : 'Nothing new for you.'}</li>` : ""));
   humanPushUi?.refresh();
 }
@@ -6763,25 +6775,6 @@ humanPushUi = installHumanPush({
     dm: $("#human-push-pref-dm")
   },
   eligible: () => Boolean(state) && ownsNotifications(notificationOwner) && client.session?.member?.kind !== "agent"
-});
-// Tag acknowledgment (2026-09-23): one tap on a pending mention sends the
-// suggested 👍 react through the normal reaction path. Idempotent — when the
-// member already reacted (stale feed), the button does nothing rather than
-// toggling the react off.
-function ackMention(messageId, reaction = "like") {
-  const key = canonicalReaction(reaction);
-  if (!messageId || !state || !key) return;
-  // The notification feed can name a message the local conversation index
-  // has not loaded; setReaction reads the local index to toggle, so a
-  // missing message bails instead of throwing (the row's link still reaches it).
-  const message = conversation?.byId.get(messageId);
-  if (!message) return;
-  const already = reactionPills(message.reactions).some(pill => pill.key === key && pill.memberIds.includes(session.member.id));
-  if (!already) setReaction(messageId, key);
-}
-$("#notification-list").addEventListener("click", e => {
-  const button = e.target.closest("[data-ack-message]");
-  if (button && state && !busy) { e.preventDefault(); ackMention(button.dataset.ackMessage, button.dataset.ackReaction); }
 });
 async function loadNotifications() {
   const pagingFocus = ["notification-older", "notification-newest"].includes(document.activeElement?.id) ? document.activeElement : null;
@@ -6819,15 +6812,15 @@ function scheduleNotifications(delay) {
 }
 // ---- Attention: activity feed, read horizons, saved messages ------------------
 // Write-time personal feed (server/activity.mjs): mentions, replies, thread
-// replies, and reactions fanned out per recipient with their own read state.
-// The Activity dialog pages newest-first with All/Mentions/Replies/Threads/
-// Reactions filters; opening an item jumps to the message and marks it read.
+// replies, and thread replies fanned out per recipient with their own read
+// state. The Activity dialog pages newest-first with All/Mentions/Replies/
+// Threads filters; opening an item jumps to the message and marks it read.
 let savedMessageIds = new Set(), savedIdsBusy = false;
 let activityFilter = "", activityItems = [], activityBefore = null, activityHasMore = false, activityBusy = false, activitySerial = 0;
 let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
-const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in", reaction: "reacted to your message" };
+const ACTIVITY_LABELS = { mention: "mentioned you", reply: "replied to you", thread_reply: "replied in a thread you're in" };
 let horizonAdvanceTimer = null;
 function nearBottomOfList() {
   const list = $("#message-list");
@@ -7033,7 +7026,7 @@ async function loadActivity(reset) {
     activityBefore = activityItems.length ? activityItems[activityItems.length - 1].id : null;
     activityHasMore = result.hasMore;
     renderActivity();
-    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions, replies, and reactions will appear.");
+    setText("#activity-status", activityItems.length ? "" : "Nothing here yet — mentions and replies will appear.");
   } catch (error) {
     if (serial === activitySerial && generation === client.generation) setText("#activity-status", `Couldn't load activity: ${error.message}`);
   } finally {
@@ -7459,7 +7452,6 @@ const roleLabel = role => ({ accountableMemberId: "accountable", verifierMemberI
 const BRIEF_GROUP_LABELS = { outcome: "Results", question: "Asked of you", blocker: "Blockers", decision: "Decisions", other: "Other updates" };
 function briefEventTarget(event) {
   if (event.type === T.MESSAGE_POSTED) return { kind: "message", id: event.data.messageId || event.id };
-  if (event.type === T.MESSAGE_REACTION_SET) return { kind: "message", id: event.data.messageId };
   if (event.data.workItemId) return { kind: "work", id: event.data.workItemId };
   if ([T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED].includes(event.type) && event.data.memberId) return { kind: "member", id: event.data.memberId };
   if (event.type === T.ROOM_CREATED) return { kind: "room", id: state.room.id };
@@ -7556,6 +7548,28 @@ $("#contribution-open").addEventListener("click", () => {
   if (["verify", "decide"].includes(step.action)) openWorkAction(state.workItems[step.id], step.action);
   else revealWork(step.id);
 });
+// #3687: arrivals used to surface only as the generic catch-up ping in
+// #rb-status, which names nothing and, being unchanged by a second arrival,
+// announces nothing at all. Diff each incoming log against the event ids this
+// session has already seen and speak every fresh claim, completion, review
+// and decision by another member in the dedicated polite region. A presence
+// boundary (first snapshot, room or generation change) only seeds the seen
+// set: history is not news, and the region restarts empty for the new room.
+let seenLogEventIds = new Set();
+function announceWorkArrivals(eventLog, boundary) {
+  const previous = seenLogEventIds;
+  seenLogEventIds = new Set(eventLog.map(event => event.id));
+  const region = $("#work-announcement");
+  if (boundary) { region.textContent = ""; return; }
+  const fresh = eventLog.filter(event => !previous.has(event.id));
+  if (!fresh.length) return;
+  const text = workArrivalAnnouncements(fresh, {
+    selfId: session?.member?.id,
+    actorName: id => displayName(id),
+    titleFor: id => state.workItems[id]?.title ?? null,
+  });
+  if (text) region.textContent = text;
+}
 function renderReturnBrief({ timelineRendered = false } = {}) {
   clearTimeout(returnClock); returnClock = null;
   const now = Date.now();
@@ -7791,6 +7805,8 @@ document.addEventListener("click", event => {
 function closeSecondaryBoards() {
   $("#land-queue-panel").open = false;
   $("#referral-panel").open = false;
+  recordLoadFailed = false;
+  void client.setAuditView("activity").catch(() => {});
 }
 $("#settings-dialog").addEventListener("close", closeSecondaryBoards);
 $("#settings-dialog").addEventListener("cancel", closeSecondaryBoards);
@@ -8014,6 +8030,7 @@ const ready = (async () => {
       import("./board-keyboard.mjs").then(keynav => keynav.attachBoardKeyboard(document.querySelector("#work-board")))
         .catch(() => { /* keyboard nav is progressive enhancement; the board works without it */ });
       navigationBoardReady = () => controller.whenReady();
+      navigationBoardRevealClaim = id => controller.revealClaim(id);
       return controller;
     },
     // JDOT-COH-NAV end
@@ -8021,12 +8038,25 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   resetNavigationBoard = () => { $("#board-dialog").close(); $("#board-panel").open = false; board.reset(); };
   // JDOT-COH-NAV end
-  const openBoard = () => {
+  // #3688: the native <dialog> close returns focus to whatever was focused
+  // before showModal() — for the board that chain can bottom out at <body>
+  // (palette opened from body focus, or the recorded element removed while
+  // the board was open), stranding keyboard users at the top of the page.
+  // Remember the opener at open time like closeInvitation/closeWorkForm do,
+  // and restore it on close with a stable fallback anchor.
+  let boardOpener = null;
+  const boardAnchorUsable = node => node?.isConnected && node !== document.body && !node.disabled
+    && !node.closest("[hidden]") && !node.closest("dialog") && node.getClientRects().length > 0;
+  const openBoard = (openerHint = null) => {
     // JDOT-COH-NAV begin
     navigationBoardEpoch++;
     // JDOT-COH-NAV end
     const dialog = $("#board-dialog");
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      const hinted = openerHint instanceof Element ? openerHint : null;
+      boardOpener = [hinted, document.activeElement].find(boardAnchorUsable) ?? null;
+      dialog.showModal();
+    }
     $("#board-panel").open = true;
     board.sync();
   };
@@ -8034,6 +8064,24 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
   $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
+  $("#board-dialog").addEventListener("close", () => {
+    const opener = boardOpener; boardOpener = null;
+    const closingEpoch = navigationBoardEpoch;
+    setTimeout(() => {
+      // A reopen or a navigation epoch change owns focus now.
+      if ($("#board-dialog").open || closingEpoch !== navigationBoardEpoch) return;
+      // The close event is delivered after the closing flow has run, so by
+      // now a flow that closed the board to show something (work navigation
+      // focuses the record it reveals, a room switch focuses its anchor)
+      // has already placed focus deliberately. Only stranded focus is ours
+      // to repair: the body, or an element left inside the closed dialog.
+      // Anything focused outside the dialog is owned by that flow.
+      const active = document.activeElement;
+      if (active && active !== document.body && !$("#board-dialog").contains(active)) return;
+      const target = [opener, $("#tasks-board-open"), $("#conversation-title")].find(boardAnchorUsable);
+      target?.focus({ preventScroll: true });
+    }, 0);
+  });
   $("#board-panel").addEventListener("toggle", () => { if (!$("#board-panel").open) navigationBoardEpoch++; });
   // JDOT-COH-NAV end
   $("#signout-button").addEventListener("click", () => { $("#board-dialog").close(); board.reset(); }, true);
@@ -8042,7 +8090,7 @@ const ready = (async () => {
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
-  chooseRoomAction = id => { if (id === "board") { closeRoomActions(false); openBoard(); return; } priorChoose(id); };
+  chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
   const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
   const priorRender = render;

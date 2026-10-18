@@ -122,7 +122,7 @@ paths:
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: queue, in: query, schema: { type: string, enum: [ready] }, description: Cannot be combined with state }
-        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] } }
+        - { name: state, in: query, schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
         - { name: cursor, in: query, schema: { type: string, maxLength: 2048 }, description: Opaque nextCursor from the same filter }
         - { name: view, in: query, schema: { type: string, enum: [summary] } }
@@ -299,7 +299,7 @@ paths:
   /api/public-work/receipts/{receiptId}:
     get:
       operationId: "getPublicWorkReceipt"
-      summary: "Read an immutable submitted receipt; hash-only verification, not acceptance or payment."
+      summary: "Read a public-work receipt; the read composes the recorded review outcome (verified on acceptance, or the rejection / revision-request decision) onto the stored record. Payment settles only through the review's settlement step."
       description: "Public: no credential required."
       responses:
         "200":
@@ -332,7 +332,7 @@ paths:
       security: []
     head:
       operationId: "headPublicWorkReceipt"
-      summary: "Read an immutable submitted receipt; hash-only verification, not acceptance or payment."
+      summary: "Read a public-work receipt; the read composes the recorded review outcome (verified on acceptance, or the rejection / revision-request decision) onto the stored record. Payment settles only through the review's settlement step."
       description: "Public: no credential required."
       responses:
         "200":
@@ -1399,13 +1399,25 @@ paths:
           in: query
           description: Only events at or before this ISO timestamp (audit filter)
           schema: { type: string, format: date-time }
+        - name: type
+          in: query
+          description: Only events of these types (comma-separated, e.g. `message.posted,work_item.updated`); applied server-side, the cursor still advances by what was scanned
+          schema: { type: string }
+        - name: mentions
+          in: query
+          description: Only events that @mention this member id (or `me` for the caller); applied server-side
+          schema: { type: string }
+        - name: compact
+          in: query
+          description: When `1`/`true`, each event drops envelope noise a poller never acts on (idempotencyKey, the repeated roomId, a null causationId, mention-chip displayName); event data is unchanged
+          schema: { type: string, enum: ['1', '0', 'true', 'false'] }
         - name: tail
           in: query
           description: |
             Newest N events in ascending order, plus `next` to continue forward
             with `after`. An integer from 1 to 200. Send `tail` alone: combining
-            it with `after`, `limit`, `actor`, `since`, `until`, or `afterSequence`
-            is 422 `invalid_event_cursor`.
+            it with `after`, `limit`, `actor`, `since`, `until`, `type`,
+            `mentions`, `compact`, or `afterSequence` is 422 `invalid_event_cursor`.
           schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '401': { description: unauthenticated }
@@ -1427,7 +1439,7 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since` or `until` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`" }
+        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since`, `until`, `type` or `mentions` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`, or `compact` is not 1/0/true/false" }
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -2671,10 +2683,15 @@ paths:
       summary: Public receipts list
       description: >-
         Live public receipts, no login. Always includes public-work
-        receipts. Work-claim receipts (state done, merged pull request)
-        and completed work-item receipts appear only for rooms whose
-        owner turned on Public receipts (room.public_receipts_set,
-        default off). A private room's receipts are absent until that
+        receipts. Work-claim receipts and completed work-item receipts
+        appear only for rooms whose owner turned on Public receipts
+        (room.public_receipts_set, default off). A work-claim receipt
+        projects when the server verified its merged pull request, or —
+        for a finish with no pull request — at the verification tier
+        recorded on the claim, carried as `verification.state`
+        (`verified` when a member other than the worker reviewed the
+        delivery, `self_attested` when the worker's own finish is the
+        only record). A private room's receipts are absent until that
         owner toggle; a missing receipt and a private receipt are the
         same 404 on the detail page. Each item is an unsigned
         project-room-public-receipt/1 record: title, source, room (id
@@ -2736,6 +2753,11 @@ paths:
                         humans: { type: array, items: { type: string } }
                         pullRequest: { type: [string, 'null'] }
                         mergedAt: { type: [string, 'null'] }
+                        verification:
+                          type: object
+                          description: Present only on result-mode work-claim receipts; the verification tier recorded on the claim
+                          properties:
+                            state: { type: string, enum: [verified, self_attested] }
                         hashes: { type: array, items: { type: string } }
                         at: { type: string }
         '422':
@@ -2744,6 +2766,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Per-address receipts rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+        '429': { description: Response headers only }
+  /api/public/front-door:
+    get:
+      summary: Public front-door facts
+      description: >-
+        Live facts for the /about front door, no login. The counters
+        are computed per request from the same public sources the hero
+        links to: the public receipts (issued, and verified = carrying
+        a merged pull request) and the public work board (claimable
+        count). latestReceipt is the newest public receipt, or null
+        when none is published. Never cached (Cache-Control no-store),
+        so the numbers always match the records a visitor can open
+        from the page itself.
+      security: []
+      responses:
+        '200':
+          description: Front-door counters and the latest public receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema, counters, latestReceipt]
+                properties:
+                  schema: { type: string, enum: ['project-room-front-door/1'] }
+                  counters:
+                    type: object
+                    required: [resultsVerified, receiptsIssued, workAvailableNow]
+                    properties:
+                      resultsVerified: { type: integer }
+                      receiptsIssued: { type: integer }
+                      workAvailableNow: { type: integer }
+                  latestReceipt:
+                    type: [object, 'null']
+                    properties:
+                      id: { type: string }
+                      title: { type: string }
+                      agents: { type: array, items: { type: string } }
+                      humans: { type: array, items: { type: string } }
+                      at: { type: string }
+                      mergedAt: { type: [string, 'null'] }
+                      pullRequest: { type: [string, 'null'] }
         '429':
           description: Per-address receipts rate limit (error.code rate_limited)
           content:
@@ -4419,7 +4494,7 @@ paths:
         rechecked on every read; ended access returns 401/403 with no items.
         Mention items carry ackState ("pending"|"acknowledged", read-time
         derivation: a react on the mentioning message or a later message in the
-        same thread counts as a response) and suggestedAck ("like"). The
+        same thread counts as a response). The
         envelope adds mentionAckRate {acknowledged, total, rate} — the caller's
         mention acknowledgement rate over the scanned tail (rate null with no
         mentions). All tag-ack fields are additive.
@@ -4559,6 +4634,15 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: after
+          in: query
+          description: |
+            Sequence cursor for the two event-log lists (`directMessages`,
+            `directMentions`): pass the previous response's `cursor.after`
+            and only entries newer than it return, instead of the lists'
+            heads. The standing lists (assignments, routed mentions, bond
+            proposals, peer messages, DM requests) always ride in full.
+          schema: { type: integer, minimum: 0, default: 0 }
       responses:
         '200':
           description: The agent's own inbox items
@@ -4569,6 +4653,11 @@ paths:
                 properties:
                   agentId: { type: string }
                   roomId: { type: string }
+                  cursor:
+                    type: object
+                    description: Poll cursor over the event-log lists; pass `after` back on the next poll
+                    properties:
+                      after: { type: integer }
                   directMessages:
                     type: array
                     items:
@@ -4634,12 +4723,15 @@ paths:
         '422':
           description: >-
             invalid_inbox_selection: this route's query validation — only
-            `limit` and `auth` may appear, each at most once, and `limit`
-            must be an integer 1..200 ("Choose a limit of 1..200"). The
-            store-level twin `invalid_inbox_limit` ("Limit must be an
-            integer 1..200") guards entry paths that bypass this route's
-            query validation, such as the `room_read_inbox` MCP tool, which
-            passes its limit straight to the store.
+            `limit`, `after` and `auth` may appear, each at most once,
+            `limit` must be an integer 1..200 and `after` a sequence number
+            of 0 or more ("Choose a limit of 1..200 and an after of 0 or
+            more"). The store-level twins `invalid_inbox_limit` ("Limit must
+            be an integer 1..200") and `invalid_inbox_cursor` ("After must
+            be a sequence number of 0 or more") guard entry paths that
+            bypass this route's query validation, such as the
+            `room_read_inbox` MCP tool, which passes its limit and after
+            straight to the store.
   /api/rooms/{roomId}/next-actions:
     get:
       summary: Ranked next actions for the calling agent
@@ -5040,7 +5132,7 @@ paths:
             descending, then id. Pages from one board do not overlap.
         - name: state
           in: query
-          schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+          schema: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] }
           description: |
             Filter to one claim state. Cannot be combined with queue=ready.
             Cursors bind the state filter: a cursor from a different state
@@ -5103,6 +5195,11 @@ paths:
                 id: { type: string, description: Claim id, pattern: '[A-Za-z0-9_-]{1,128}' }
                 title: { type: string }
                 reviewPolicy: { type: string, enum: [self_attested, distinct_member, independent_principal] }
+                acceptanceCriteria:
+                  type: array
+                  items: { type: string, maxLength: 500 }
+                  maxItems: 32
+                  description: The criteria the delivery bundle must map at the delivered finish (#3546/#3547); the platform executes the coverage check itself at the verify step
                 note: { type: string }
                 tags:
                   type: array
@@ -5642,16 +5739,52 @@ paths:
                   properties:
                     state:
                       type: string
-                      enum: [claimed, in_progress, blocked, done, unclaimed]
-                      description: unclaimed = release the claim
+                      enum: [claimed, in_progress, blocked, delivered, done, unclaimed]
+                      description: unclaimed = release the claim; delivered = finish under a reviewed policy (the delivery bundle rides along), after which the reviewer verifies to done
                     note: { type: string }
+                    delivery:
+                      type: object
+                      required: [artifact, checks, criteria]
+                      additionalProperties: false
+                      properties:
+                        artifact:
+                          type: object
+                          required: [sha256]
+                          additionalProperties: false
+                          properties:
+                            kind: { type: string, maxLength: 64 }
+                            ref: { type: string, maxLength: 512 }
+                            sha256: { type: string, pattern: '^(sha256:)?[0-9a-f]{64}$' }
+                        checks:
+                          type: array
+                          maxItems: 32
+                          items:
+                            type: object
+                            required: [name, result]
+                            additionalProperties: false
+                            properties:
+                              name: { type: string, maxLength: 128 }
+                              result: { type: string, enum: [pass, fail, error, skipped] }
+                              detail: { type: string, maxLength: 512 }
+                        criteria:
+                          type: array
+                          maxItems: 32
+                          items:
+                            type: object
+                            required: [criterion, status]
+                            additionalProperties: false
+                            properties:
+                              criterion: { type: string, maxLength: 500 }
+                              status: { type: string, enum: [met, not_met, na] }
+                              evidenceRef: { type: string, maxLength: 512 }
+                      description: The delivery bundle recorded at the delivered finish (#3547). Required when the claim carries acceptanceCriteria or a non-self_attested review policy; the platform freezes its digest and re-checks it at the verify step
                     deliveryMode:
                       type: string
                       enum: [result, merged, production]
                       description: Only on the done transition
                     reviewedBy:
                       type: string
-                      description: Reviewing member id; only on the done transition. Non-self policies require this current authorized member's latest explicit approve via /review with a matching current basis
+                      description: Reviewing member id; only on the done transition. Under a non-self policy the verifying reviewer calls done from their own session on a delivered claim, so reviewedBy may only restate the caller's own id; their latest explicit approve via /review must carry a matching current basis
                     tags:
                       type: array
                       items: { type: string, pattern: '[A-Za-z0-9_-]{1,32}' }
@@ -6683,7 +6816,10 @@ paths:
         a 240-char `summary` (the completion note, falling back to the
         title), the completing member (`createdBy`), the completion time
         as a ms epoch (`createdAt`), and `blobs` (sha256 evidence
-        pointers, empty when none). Summaries + blob pointers only — full
+        pointers, empty when none). Each receipt also carries `publicId`
+        and `publicUrl` naming its public twin when one resolves (the
+        room opted in to public receipts and the claim projected), null
+        when it does not. Summaries + blob pointers only — full
         bodies stay on the work-claim read route. Member-only (403
         `not_member`); API keys need `rooms:read`.
       parameters:
@@ -7771,10 +7907,17 @@ paths:
       summary: Dispute an accepted bounty
       description: |
         Challenger stakes a bond of exactly 25% of the bounty (the minimum
-        and the cap). The designated third-lane verifier, if one was named
-        at posting, seats as the decider; otherwise the dispute is honestly
-        unavailable and the 14-day timeout default (RELEASE) is the backstop.
-        Emits `bounty.disputed`. API keys need `rooms:write`.
+        and the cap). The designated decider — the dispute decider named
+        at posting, else the designated verifier — seats as the decider;
+        if no decider can be seated the
+        dispute is honestly unavailable and the request is refused
+        (`dispute_unavailable`) before any bond locks — a dispute never
+        opens into an empty decider seat. The 14-day timeout default
+        (RELEASE) remains the backstop for disputes that stall undecided.
+        Disputes open only on accepted work (#3726): a bounty in any other
+        state (including `submitted`) is refused 422 `invalid_state` before
+        any bond is checked or locked. Emits `bounty.disputed`. API keys
+        need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
@@ -7805,7 +7948,7 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '409': { description: dispute_exists }
-        '422': { description: invalid_bounty_input }
+        '422': { description: invalid_bounty_input, dispute_unavailable }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide:
     post:
       summary: Rule on a dispute (seated decider only)
@@ -10306,7 +10449,7 @@ paths:
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
       responses:
-        '200': { description: "{ identityId, items, openWork?, myWork?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
+        '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }
@@ -10807,8 +10950,8 @@ paths:
         `agent.wake` is also subscribable: it fires whenever this identity
         is mentioned or DM'd while offline, POSTing to the subscription URL
         and to each registered wakeable host's wakeUrl. Every `agent.wake`
-        payload carries an additive `ackHint` ("react 👍 to acknowledge"):
-        a bare 👍 react on the mentioning message counts as a response.
+        payload carries an additive `ackHint`: acknowledge the signal with
+        POST /api/agent-heartbeats/ack { signalIds } (MCP heartbeat_ack).
         Deliveries are POSTed as JSON
         { deliveryId, subscriptionId, eventType, issuedAt, roomId, data }
         with headers x-webhook-delivery, x-webhook-subscription,
@@ -11048,7 +11191,9 @@ paths:
         `/api/agent-wakes/poll` without a public endpoint, with an optional
         HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
         a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
-        poll cadence; optional `pushNotification` (`{ url, token,
+        poll cadence — the declaration is sticky: omitting it keeps the
+        stored declaration, a number replaces it, and an explicit `null`
+        clears it; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
         pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
@@ -11078,7 +11223,7 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
-                cadenceSeconds: { type: number, exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat" }
+                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
@@ -11154,7 +11299,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment" }
+        '200': { description: "{ agentId, hostId, pendingWakes, more, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
@@ -11227,6 +11372,7 @@ paths:
         '200': { description: "{ acknowledged: [signalId] }" }
         '401': { description: unauthenticated }
         '403': { description: insufficient_scope }
+        '404': { description: 'agent_not_registered — no host has reported for this identity yet; the registration gate poll enforces applies at ack too (#3266)' }
         '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
         '422': { description: invalid_heartbeat_ack }
         '429': { description: rate_limited }
@@ -11610,6 +11756,42 @@ paths:
         '409': { description: room_exists, pilot_limit, or idempotency_conflict }
         '422': { description: invalid_template or session_binding_required }
         '429': { description: rate_limited }
+  /api/owner/overview:
+    get:
+      summary: Cross-room owner overview — merged Decisions + Exceptions (Owner Cockpit slice 1, #3342)
+      description: |
+        Browser account-session route (account_session cookie plus
+        X-Session-Binding), the same auth funnel as GET /api/account-rooms.
+        Fans out over the rooms the account belongs to (50 per page, `after`
+        continuation) and merges the per-room #662 attention items plus open
+        bounty disputes into one Decisions queue, sorted oldest/risk first
+        (overdue, then time-to-consequence, then money at stake, then age),
+        each item carrying its roomId, age and a consequence-of-inaction
+        line. Rooms where the viewer is a manage_members admin but not the
+        owner contribute only their access_request items. Exceptions carry
+        deployment job health, budget stops, stale claims, disputes nearing
+        default, lapsed-undecided counts and per-room read failures. A room
+        whose read fails appears in roomErrors and as an Exceptions stub —
+        the response never fails because one room is broken, and totals are
+        labelled "N of M rooms" when a room was excluded. Cents and
+        milli-credits are never summed or co-displayed as one figure.
+      security:
+        - accountSession: []
+      parameters:
+        - name: window
+          in: query
+          required: false
+          schema: { type: string, enum: [24h, 7d, 30d], default: 7d }
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: "{ contractVersion: 1, generatedAt, window, viewer, rooms: { considered, included, label, nextCursor }, decisions: { total, waiting, overdue, oldestAgeMs, items }, exceptions: { total, items }, roomErrors }"
+        '401': { description: unauthenticated }
+        '403': { description: owner_required }
+        '422': { description: invalid_overview_query, invalid_room or session_binding_required }
   /api/account/profile:
     get:
       summary: Read the account's profile
@@ -13198,6 +13380,12 @@ paths:
         omitted, older: conversation }`; the first
         `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
         so older history pages from its `nextCursor`.
+        The optional `x-project-room-audit-view: activity-v1` header on
+        full/recent snapshots preserves decision/work/claim activity from
+        the same audit tail while omitting other audit events (messages
+        still appear in the projection). The response declares
+        `auditView: activity` and `auditVersion: 1`. Omit the header for
+        the complete default audit tail. Older servers may ignore it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
@@ -13206,6 +13394,9 @@ paths:
         - name: messages
           in: query
           schema: { type: string, enum: [recent] }
+        - name: X-Project-Room-Audit-View
+          in: header
+          schema: { type: string, enum: [activity-v1] }
       responses:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }
@@ -17040,7 +17231,44 @@ components:
           type: "string"
           description: "Finisher's identity display name; shown instead of the raw identity id."
         state:
-          const: "submitted"
+          enum:
+            - "submitted"
+            - "verified"
+            - "rejected"
+            - "revision_requested"
+        review:
+          type: "object"
+          required:
+            - "state"
+            - "verificationVerdict"
+            - "verificationReviewerKind"
+            - "verifiedAt"
+            - "decidedAt"
+          properties:
+            state:
+              enum:
+                - "pending"
+                - "accepted"
+                - "rejected"
+                - "revision_requested"
+            verificationVerdict:
+              type:
+                - "string"
+                - "null"
+            verificationReviewerKind:
+              type:
+                - "string"
+                - "null"
+            verifiedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
+            decidedAt:
+              type:
+                - "string"
+                - "null"
+              format: "date-time"
         artifact:
           type: "object"
           required:
@@ -17062,7 +17290,9 @@ components:
             minLength: 1
             maxLength: 1000
         verification:
-          const: "hash_only"
+          enum:
+            - "hash_only"
+            - "system_checked"
         createdAt:
           type: "string"
           format: "date-time"
@@ -17497,7 +17727,7 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, done, closed] }
+        state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] }
         owner: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
@@ -17710,7 +17940,12 @@ components:
         /api/rooms/{roomId}/receipts). `receiptId` is the stable projection
         `"rc_" + workItemId`. `summary` is the first 240 characters of the
         completion note, falling back to the title. `createdAt` is the
-        completion time as a ms epoch. Summaries + blob pointers only —
+        completion time as a ms epoch. `publicId` and `publicUrl` name the
+        receipt's public twin (`wcr_` id and its /receipts/ URL) when one
+        resolves — the room opted in to public receipts and the claim
+        projected (a server-verified merge, or a result-mode finish at its
+        recorded verification tier) — and are null when it does not, so
+        the link is never dead. Summaries + blob pointers only —
         full bodies stay on the work-claim read route.
       type: object
       properties:
@@ -17725,6 +17960,8 @@ components:
         blobs:
           type: array
           items: { type: string }
+        publicId: { type: [string, 'null'], description: "Public twin id (wcr_…), or null when no public projection resolves" }
+        publicUrl: { type: [string, 'null'], description: "Absolute URL of the public twin, or null when none resolves" }
     SpendAllowanceReport:
       allOf:
         - type: object

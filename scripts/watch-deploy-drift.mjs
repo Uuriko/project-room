@@ -99,6 +99,7 @@ const out = {
 console.log(JSON.stringify(out, null, 2));
 if (drift) console.error(`DRIFT: prod ${report.sourceRevision} lags ${REF} ${mainTip} (${measured.reason})`);
 if (doorSplit) console.error(`${doorState === "do-stale" ? "DO still on old revision" : "VERSION DOORS DISAGREE"}: /api/version ${doors.doRev} vs /api/version/worker ${doors.workerRev}`);
+if (report.verdict !== "healthy") console.error(`PROBE ${report.verdict}: ${(report.endpoints ?? []).filter(e => !e.ok).map(e => `${e.label} ${e.status}`).join(", ") || report.note || "no detail"}`);
 if (out.incident_window) console.error("1101 WINDOW: do-rpc-fail signature present - docs/INCIDENT-1101-RUNBOOK.md");
 if (out.jobs_health && out.jobs_health.status !== "ok") {
   console.error(`JOBS HEALTH (report only, does not fail the drift verdict): status=${out.jobs_health.status}${out.jobs_health.failing.length ? ` failing=${out.jobs_health.failing.join(",")}` : ""} - see /api/health/jobs`);

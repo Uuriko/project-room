@@ -61,7 +61,11 @@ async function loadList(more = false, refreshSelection = false) {
     const incoming = result.offers.map(checkedOffer);
     if (flight !== listFlight) return;
     offers = [...new Map([...(more ? offers : []), ...incoming].map(offer => [offer.id, offer])).values()]; cursor = result.nextCursor;
-    paintList(); listStatus.textContent = offers.length ? '' : 'No open offers yet. Check back soon.';
+    paintList();
+    // Honest empty state: an empty board is a normal moment, not a dead
+    // end — point at the proof of finished work instead of "check back".
+    if (offers.length) listStatus.textContent = '';
+    else listStatus.innerHTML = 'No open tasks right now — <a href="/receipts">see work already done</a>.';
     if (refreshSelection && selectedId) await select(selectedId, { history: false, focus: false });
   } catch {
     if (flight !== listFlight || flight.signal.aborted) return;
@@ -105,17 +109,33 @@ async function loadContribution(offer, flight) {
   try {
     const task = await read(`/api/public-work/tasks/${encodeURIComponent(offer.id)}`, flight.signal);
     if (!current()) return;
-    if (task?.schema !== 'public-work-task/1' || task.taskId !== offer.id || task.termsVersion !== offer.version || !validId(task.namespaceId) || !task.claim || !['unclaimed', 'claimed', 'submitted'].includes(task.claim.state) || !Number.isSafeInteger(task.claim.generation) || task.claim.generation < 0) throw new Error('Unsupported contribution');
+    if (task?.schema !== 'public-work-task/1' || task.taskId !== offer.id || task.termsVersion !== offer.version || !validId(task.namespaceId) || !task.claim || !['unclaimed', 'claimed', 'submitted', 'verified'].includes(task.claim.state) || !Number.isSafeInteger(task.claim.generation) || task.claim.generation < 0) throw new Error('Unsupported contribution');
     taskRead = true;
-    if (task.claim.state !== 'submitted') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Claimed' : 'Open to contributors'}</p>`); return; }
+    if (task.claim.state !== 'submitted' && task.claim.state !== 'verified') { paint(`<p role="status">${task.claim.state === 'claimed' ? 'Claimed' : 'Open to contributors'}</p>`); return; }
     submitted = true;
     if (!validId(task.claim.submittedReceiptId)) throw new Error('Unsupported receipt');
     paint('<p role="status">Submitted · loading receipt…</p>');
     const id = task.claim.submittedReceiptId, record = await read(`/api/public-work/receipts/${encodeURIComponent(id)}`, flight.signal);
     if (!current()) return;
-    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || record.state !== 'submitted' || record.verification !== 'hash_only' || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
+    if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'verified', 'rejected', 'revision_requested'].includes(record.state) || !['hash_only', 'system_checked'].includes(record.verification) || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
-    paint(`<p role="status">Submitted</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.</p>`);
+    // #3546: an accepted receipt carries the verified successor state. Show
+    // it truthfully — the level still separates what the platform executed
+    // itself (system_checked) from a hash-only record of acceptance.
+    // #3733: a rejection or revision request never stamps the record; the
+    // canonical read composes the decision onto it, and this view shows
+    // that outcome rather than masking the delivery as a bare submission.
+    const status = record.state === 'verified' ? 'Verified' : record.state === 'rejected' ? 'Rejected' : record.state === 'revision_requested' ? 'Revision requested' : 'Submitted';
+    const note = record.state === 'rejected'
+      ? 'Unsigned receipt. The designated reviewer rejected this delivery; the decision is recorded with the receipt.'
+      : record.state === 'revision_requested'
+      ? 'Unsigned receipt. The designated reviewer asked for changes to this delivery.'
+      : record.verification === 'system_checked'
+      ? 'System-checked, unsigned receipt. The platform ran its own checks over the submission.'
+      : record.state === 'verified'
+        ? 'Hash-only, unsigned receipt. Acceptance is recorded on the receipt; reported checks are not system-verified.'
+        : 'Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.';
+    paint(`<p role="status">${status}</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="/receipts/${encodeURIComponent(record.receiptId ?? record.id ?? '')}" target="_blank" rel="noopener noreferrer">View receipt ↗</a> · <a href="${receiptPath}" target="_blank" rel="noopener noreferrer">Receipt JSON</a></p><p class="term-note">${note}</p>`);
   } catch (error) {
     if (!current()) return;
     if (!taskRead && error.status === 404) return;
@@ -177,7 +197,7 @@ detail.addEventListener('click', async event => {
 window.addEventListener('popstate', () => { const id = new URL(location.href).searchParams.get('offer'); if (validId(id)) void select(id, { history: false }); else closeDetail(false); });
 const matching = document.createElement('section'); matching.className = 'find-work'; matching.setAttribute('aria-labelledby', 'find-work-title');
 matching.innerHTML = `<h2 id="find-work-title">Find work for me</h2><form id="find-work-form"><label>Skills<input name="skills" placeholder="JavaScript, design" maxlength="2019"></label><label>Interests<input name="interests" placeholder="Accessibility, games" maxlength="2019"></label><label>Reward<select name="reward"><option value="volunteer">Unpaid · for fun or practice</option><option value="work_trade">Work trade</option><option value="cash">Cash</option></select></label><button class="primary" type="submit">Find work</button></form><p id="find-work-status" role="status"></p><ul id="find-work-results"></ul><button id="more-matches" class="text-button" type="button" hidden>Try next tasks</button>`;
-$('.intro').after(matching);
+($('.workspace') ?? $('.intro')).after(matching);
 let matchFlight = null, matches = [], matchAfter = null, lastPreferences = null;
 const matchForm = $('#find-work-form');
 function claimPrompt(task) {

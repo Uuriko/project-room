@@ -6,6 +6,42 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Share layer
+
+`/receipts/<id>/og.png` is the receipt's share card: the title, the graded verdict line, and a footer
+stating that hashes are stored values, not re-verified — rendered at request time from the same public
+record as the page and named by the page's `og:image`. It exists only while the receipt is public: the
+read re-checks the owner toggle and operator unpublish on every request. Unlike the pages (`no-store`),
+the card is cacheable for five minutes so link unfurlers can fetch it — the one deliberate exception,
+bounded by that TTL.
+
+The detail page embeds JSON-LD (`CreativeWork`) mirroring the visible record: title, verdict level,
+pull request, hash evidence (labelled as stored, not re-verified), and the proven note as its
+description. Names are omitted — the page qualifies them as room-recorded, not identity-verified, and
+the structured vocabulary cannot carry that qualifier. There is no rating or review markup: a receipt
+is a record, not a review.
+
+## Per-room proof page
+
+`/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
+`project-room-public-room-proof/1`). It exists only when the room is
+publicly listed and its owner has public receipts on. It lists the room's
+own public receipts — the same records as above, through the same toggle
+and unpublish filters — and labels each with the level of proof its record
+carries:
+
+- **Server-verified merge** — a work claim this server recorded as merged
+  (`pr_merged` with `syncedAt`) before publishing. The strongest claim here.
+- **Room-recorded completion** — a completed work item with a receipt. The
+  room's own record; no server-verified merge backs it.
+- **Artifact hash recorded** — a public-work delivery whose artifact
+  sha256 was recorded at submission. Its checks are worker-reported
+  (`hash_only`): not an acceptance, not a payment.
+
+Every entry links to its `/receipts/<id>` record. No payment is proved on
+the proof page: bounty credit movements are proved by signed lot receipts,
+which have a public page of their own (`/receipts/<lotId>`, below).
+
 ## What is public
 
 - Public-work receipts are already public. They stay on this page.
@@ -15,6 +51,20 @@ No login. The page is indexable when the URL has no query string.
   not.
 - A completed work item appears only when it has a receipt and the same
   owner setting is on.
+- A bounty lot (`/receipts/lot_<id>`) appears once its bounty's settlement
+  verdict is recorded — paid out, failed, unverified, or split. The page
+  shows every ledger movement the lot carries (each movement's kind,
+  amount, source and destination accounts) plus the settlement's worker
+  and refund amounts, the bounty's poster, worker, award, pinned rubric
+  hash, and settlement outcome. Before settlement, and for journal
+  lots that are not bounty movements, the id is a 404. The record is
+  composed from the credit ledger at read time, not stored as a copy.
+  Unlike the claim and work-item shapes, a lot does not wait for the
+  owner's public-receipts opt-in: it is public once settled. What hides
+  it is the owner's recorded opt-out (the room's own public-receipts
+  setting recorded off), the room's directory receipts switch turned
+  off, or operator unpublish — the same switches that hide the other
+  shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has
@@ -28,8 +78,46 @@ time the room recorded a merge, and hash evidence already stored as
 
 Names are as recorded by the room — member display names on work-claim and
 work-item receipts, a self-supplied name on public-work receipts — not
-identity-verified. Hash values are stored as recorded, not re-verified at
-read time.
+identity-verified. Hash values are stored as recorded; the plain page does
+not re-verify them — verification is an explicit read-time action (below).
+
+A public-work receipt also carries its outcome, composed at read time
+from the receipt record and the room's review record: `state` (the
+record's own state — `submitted` until the designated reviewer's
+acceptance stamps it `verified`; a rejection or revision request, which
+never stamps the record, reads as `rejected` or `revision_requested`),
+`verification` (the tier the record carries, `hash_only` or
+`system_checked`), `checksReported` (the checks the worker reported),
+`executedChecks` when the record carries platform-executed checks, and —
+once a review is recorded — a `review` summary (review state, the
+reviewer's verdict and kind, and the verdict/decision times). The
+reviewer's identity, reason, and review fingerprint never appear. A
+rejected delivery reads as rejected on the page, in the JSON, and in
+the list — it is not removed, and it is not dressed as accepted work.
+
+## Verification
+
+Every detail page carries a verification block. Unverified, it says so —
+"Not yet verified" — and offers **Verify this receipt now** (`?verify=1`
+on the HTML or `.json` URL). A verify run re-checks the record at read
+time and renders one graded verdict in the same block, stamped with the
+time it ran: what was checked, what was not checked, and by whom ("the
+Project Room server, at read time"). The JSON shape gains a `verification`
+field (`project-room-receipt-verification/1`); without a verify run the
+field is absent, so "checked just now" is distinguishable from "stored
+values" in both shapes.
+
+The checks (server/receipt-verify.mjs): the record is re-derived from its
+current source and compared field by field; a public-work artifact is
+re-hashed; a bounty lot's escrow entries are re-hashed and their chain
+links re-checked; the linked pull request is re-fetched from GitHub and
+its current state compared with the recorded merge. Verdicts:
+`server-verified` (only when GitHub itself confirmed the merge),
+`record-checked`, `partially-verifiable` (a check could not run, e.g.
+GitHub unreachable), `contradicted` (a re-check found a mismatch, which
+the block names), `no-longer-verifiable` (the source is gone). Verify
+runs are rate-limited per address (10/minute) because they can cost a
+GitHub call; the plain page is unaffected.
 
 The JSON envelope is unsigned. Receipt Standard v1 was not used: that
 draft requires a fresh signature, and these pages are durable records of

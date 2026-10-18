@@ -89,7 +89,13 @@ test("an export hashes secrets and replays the room into a fresh store", t => {
   try {
     assert.deepEqual(restored.room("commons"), store.room("commons"));
     assert.equal(restored.db.prepare("SELECT public_key FROM referral_invite_keys").get().public_key, PUBLIC_KEY);
-    assert.equal(restored.db.prepare("SELECT private_seed FROM referral_invite_keys").get().private_seed, sha(SEED));
+    // #3599: the placeholder is never a live value — the seed restores as
+    // the NOT NULL substitute and the substitution is on the receipt.
+    assert.equal(restored.db.prepare("SELECT private_seed FROM referral_invite_keys").get().private_seed, "");
+    assert.equal(receipt.sanitizedCells.referral_invite_keys.private_seed, 1);
+    assert.equal(receipt.sanitizedCells.agent_webhook_subs.secret, 1);
+    assert.equal(receipt.sanitizedCells.gmail_mailboxes.encrypted, 1);
+    assert.deepEqual(Object.keys(receipt.sanitizedCells.human_push_subscriptions).sort(), ["auth", "p256dh"]);
     assert.equal(restored.db.prepare("SELECT auth_epoch FROM accounts").get().auth_epoch, 17);
   } finally { restored.close(); }
   const again = join(directory, "again.sqlite");
@@ -306,11 +312,11 @@ test("a KV backup split into many parts reassembles byte-equal, replays, and cat
 test("Durable Object BLOB cells (ArrayBuffer) export as base64, not {}", () => {
   const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
   const expected = { $base64: Buffer.from(bytes).toString("base64") };
-  assert.deepEqual(sanitizeCell("bytes", bytes.buffer.slice(0)), expected);
-  assert.deepEqual(sanitizeCell("bytes", new DataView(bytes.buffer)), expected);
+  assert.deepEqual(sanitizeCell("room_attachments", "bytes", bytes.buffer.slice(0)), expected);
+  assert.deepEqual(sanitizeCell("room_attachments", "bytes", new DataView(bytes.buffer)), expected);
   const padded = new Uint8Array(260); padded.set(bytes, 2);
-  assert.deepEqual(sanitizeCell("bytes", new Uint8Array(padded.buffer, 2, 256)), expected);
-  assert.notEqual(JSON.stringify(sanitizeCell("bytes", bytes.buffer)), "{}");
+  assert.deepEqual(sanitizeCell("room_attachments", "bytes", new Uint8Array(padded.buffer, 2, 256)), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("room_attachments", "bytes", bytes.buffer)), "{}");
 });
 
 test("a version 1 KV manifest for today is rewritten; a current one is kept", async t => {
@@ -482,8 +488,8 @@ test("Durable Object BLOB cells (bare SharedArrayBuffer) export as base64, not {
   const sab = new SharedArrayBuffer(64);
   new Uint8Array(sab).set(bytes);
   const expected = { $base64: Buffer.from(bytes).toString("base64") };
-  assert.deepEqual(sanitizeCell("bytes", sab), expected);
-  assert.notEqual(JSON.stringify(sanitizeCell("bytes", sab)), "{}");
+  assert.deepEqual(sanitizeCell("room_attachments", "bytes", sab), expected);
+  assert.notEqual(JSON.stringify(sanitizeCell("room_attachments", "bytes", sab)), "{}");
 });
 
 test("exportTrailer pages the event log and hashes exactly what one full read would", () => {
@@ -545,4 +551,23 @@ test("export pages never read a whole large table at once", t => {
   assert.ok(events > 250);
   for (const _line of exportNdjsonLines(spy)) { /* drain */ }
   assert.ok(biggest <= 100, `events were read ${biggest} rows at once`);
+});
+
+test("replayNdjson refuses a tampered non-event row and reports the verification level (#3325)", t => {
+  const { directory, store } = openFixture(t);
+  const ndjson = exportNdjsonText(store.db);
+  const clean = replayNdjson(ndjson, join(directory, "clean", "room.sqlite"));
+  assert.equal(clean.verified, true);
+  assert.equal(clean.contentVerification, "full", "a version 2 trailer pins every loadable table");
+  let done = false;
+  const tampered = ndjson.split("\n").map(line => {
+    if (done || !line.includes('"table":"account_credentials"')) return line;
+    const record = JSON.parse(line);
+    if (typeof record.row.expires_at !== "number") return line;
+    record.row.expires_at += 315576000000;
+    done = true;
+    return JSON.stringify(record);
+  }).join("\n");
+  assert.ok(done, "fixture export has an account_credentials row to tamper");
+  assert.throws(() => replayNdjson(tampered, join(directory, "tampered", "room.sqlite")), /table digest does not match for account_credentials/);
 });

@@ -19,6 +19,7 @@ const hostStaleAfterMs = 120000;
 // A queued run nobody claimed within this window reads not picked up.
 const notPickedUpAfterMs = 10000;
 const keys = {
+  submit: ['command', 'intent', 'fileIds'],
   configure: ['name', 'coordinatorMemberId', 'expectedRevision'], invoke: ['runId', 'sourceMessageId'],
   contribute: ['runId', 'sourceMessageId', 'expectedRevision', 'conflict'],
   resolve: ['runId', 'sourceMessageId', 'expectedRevision'],
@@ -106,12 +107,15 @@ export class RoomAssistant {
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
-      return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
+      // R366-1: a coordinator under an owner (or self) pause cannot claim, so
+      // say paused instead of implying the host is offline.
+      const connected = coordinator?.active && coordinator.permissions.includes('accept_work');
+      const paused = connected && Boolean(this.store.wakeQueue?.pauseStatus?.(roomId, coordinator.id));
+      return { contractVersion: 1, roomId, assistant: { ...config, availability: !connected ? 'not_connected' : paused ? 'paused' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
   }
-  // postToken is the host's own credential, threaded from the route or MCP
-  // dispatch. publish is the only action that needs it: the server posts the
-  // run's answer as the coordinator inside the run transaction (SV-1 fence).
+  // postToken is the caller's credential, threaded from the route or MCP.
+  // submit and publish post messages as that caller inside the run transaction.
   apply(roomId, input, authorize, postToken = null) {
     if (!input || Array.isArray(input) || !Object.hasOwn(keys, input.action) || !validId(input.requestId)
       || Object.keys(input).some(key => !['action', 'requestId', ...keys[input.action]].includes(key)))
@@ -157,8 +161,24 @@ export class RoomAssistant {
           fail('assistant_conversation_mismatch', 'Choose a message in the request conversation');
         return message;
       };
-      let result;
-      if (input.action === 'configure') {
+      let result, receipt;
+      if (input.action === 'submit') {
+        if (!isHuman || input.intent?.action === 'invoke' && !actor.permissions.includes('steer')) fail('assistant_denied', 'Shared requests require permission to steer work', 403);
+        if (!postToken || input.command?.type !== 'message.posted' || !validId(input.command?.data?.messageId)
+          || !['invoke', 'contribute', 'resolve'].includes(input.intent?.action)
+          || !Array.isArray(input.fileIds) || input.fileIds.length > 20 || input.fileIds.some(id => !validId(id)))
+          fail('invalid_assistant_action', 'Supply a message, shared request and staged files', 422);
+        // The message, attachments and accepted work are one durable send.
+        // Existing command and assistant authorization still run inside this transaction.
+        const posted = this.store.command(postToken, roomId, input.command);
+        receipt = { sequence: posted.sequence, duplicate: posted.duplicate };
+        const sourceMessageId = input.command.data.messageId;
+        for (const id of input.fileIds) this.store.roomAttachments.commit(postToken, roomId, { id, messageId: sourceMessageId });
+        result = this.apply(roomId, { ...input.intent,
+          requestId: `submit-${createHash('sha256').update(input.requestId).digest('hex')}`,
+          ...(input.intent.action === 'invoke' ? { runId: `run-${sourceMessageId}` } : {}), sourceMessageId
+        }, authorize, postToken).result;
+      } else if (input.action === 'configure') {
         if (!isOwner) fail('assistant_denied', 'Only the room owner configures its assistant', 403);
         if (input.expectedRevision !== config.revision) fail('assistant_revision_conflict', 'Assistant settings changed; read them before retrying');
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64
@@ -183,6 +203,9 @@ export class RoomAssistant {
         let run = row && JSON.parse(row.value);
         if (input.action === 'invoke') {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
+          // Asking dispatches work to the room's agent, so it takes the same
+          // steer permission as proposing work. Posting a message stays open.
+          if (!actor.permissions?.includes('steer')) fail('assistant_denied', 'Asking the room assistant needs the steer permission. Ask the room owner for access.', 403);
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
@@ -348,7 +371,7 @@ export class RoomAssistant {
         this.store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO UPDATE SET value=excluded.value').run(roomId, run.id, JSON.stringify(run));
         result = state.messages.find(m => m.id === run.sourceMessageId)?.deletedAt ? deletedControl(run) : run;
       }
-      const response = { contractVersion: 1, roomId, action: input.action, result };
+      const response = { contractVersion: 1, roomId, action: input.action, result, ...(receipt ? { receipt } : {}) };
       if (input.action !== 'draft') this.store.db.prepare('INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)').run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
       return response;
     });

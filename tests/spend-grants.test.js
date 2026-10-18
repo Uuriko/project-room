@@ -2,7 +2,7 @@
 // charge-then-forward trust boundary for priced MCP tools.
 //
 // Contracts owned here (nothing else covers them):
-// - issuance: guests/t1 refused, caps validated, credits-only denomination
+// - issuance: guests/t1 refused, caps validated, cents-only denomination
 //   (grants.test.js owns generic edges, not spend money terms)
 // - expiry/revocation bite on the next authorization
 //   (spend-allowance.test.js owns the room allowance, not per-agent grants)
@@ -122,7 +122,7 @@ test("issueSpendGrant records caps and the summary reports remaining", async t =
   const summary = issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
     grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
   });
-  assert.equal(summary.denomination, "credits");
+  assert.equal(summary.denomination, "cents");
   assert.equal(summary.capCents, "100");
   assert.equal(summary.perTxCapCents, "10");
   assert.equal(summary.remainingCents, "100");
@@ -132,7 +132,25 @@ test("issueSpendGrant records caps and the summary reports remaining", async t =
   assert.equal(grant.terms.capCents, "100");
 });
 
-test("issuance refusals: guest, t1_readonly, bad caps, non-credits denomination", async t => {
+// #3305: pre-rename grant rows stored the denomination label "credits" for
+// what was always integer cents. ensureSpendGrantsSchema converges the
+// stored label only — caps and prices keep their exact values.
+test("ensureSpendGrantsSchema converges a stored 'credits' label to 'cents'", async t => {
+  const f = roomWithPeer(t);
+  issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, {
+    grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: Date.now(),
+  });
+  f.store.db.prepare(`UPDATE spend_grant_terms SET denomination = 'credits'
+    WHERE room_id = ? AND agent_id = ?`).run(f.roomId, f.peerMemberId);
+  assert.equal(resolveSpendGrant(f.store.db, f.roomId, f.peerMemberId).terms.denomination, "credits");
+  ensureSpendGrantsSchema(f.store.db);
+  const terms = resolveSpendGrant(f.store.db, f.roomId, f.peerMemberId).terms;
+  assert.equal(terms.denomination, "cents");
+  assert.equal(terms.capCents, "100", "the rename moves no amount");
+  assert.equal(terms.perTxCapCents, "10", "the rename moves no amount");
+});
+
+test("issuance refusals: guest, t1_readonly, bad caps, non-cents denomination", async t => {
   const f = roomWithPeer(t);
   const now = Date.now();
   const base = { grantedBy: f.ownerMemberId, capCents: "100", perTxCapCents: "10", nowMs: now };
@@ -154,10 +172,13 @@ test("issuance refusals: guest, t1_readonly, bad caps, non-credits denomination"
     { ...base, capCents: "1.5" },
     { ...base, capCents: "-5" },
     { ...base, denomination: "usdc" },
+    // #3305: the pre-rename label is refused too — spend is cents, and the
+    // bounty ledger's "credits" are a different unit that never converts.
+    { ...base, denomination: "credits" },
     { ...base, allowlist: ["room_post_message"] },
     { ...base, allowlist: [] },
   ]) {
-    spendError(() => issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, bad), { status: 422, code: bad.denomination === "usdc" ? "spend_grant_denomination_unsupported" : "invalid_spend_grant" });
+    spendError(() => issueSpendGrant(f.store.db, f.roomId, f.peerMemberId, bad), { status: 422, code: bad.denomination ? "spend_grant_denomination_unsupported" : "invalid_spend_grant" });
   }
 });
 
@@ -600,11 +621,11 @@ test("refusal names the tool and price in text and structured detail", async t =
     () => chargeSpendBeforeCall(f.store, f.peer.secret, "room_put_file", { roomId: f.roomId }),
     { status: 402, code: "payment_required" });
   assert.match(error.message, /room_put_file/);
-  assert.match(error.message, /5 credits/);
+  assert.match(error.message, /5 cents/);
   assert.match(error.message, /nothing was charged/);
   assert.equal(error.detail.tool, "room_put_file");
   assert.equal(error.detail.priceCents, 5);
-  assert.equal(error.detail.denomination, "credits");
+  assert.equal(error.detail.denomination, "cents");
   assert.equal(error.detail.reason, "no_spend_grant");
   // No ledger row was written by the refusal.
   const count = f.store.db.prepare(`SELECT COUNT(*) AS n FROM spend_authorizations`).get().n;
@@ -654,10 +675,10 @@ test("tools/call: priced tool without a grant is refused and never runs", async 
   assert.equal(value.status, 402);
   assert.equal(value.code, "payment_required");
   assert.equal(value.detail.priceCents, 5);
-  assert.match(value.detail ? JSON.stringify(value) : "", /5 credits/);
+  assert.match(value.detail ? JSON.stringify(value) : "", /5 cents/);
   // The refusal text names the price (x402: both structured and text).
   const text = response.result.content[0].text;
-  assert.match(text, /5 credits/);
+  assert.match(text, /5 cents/);
   assert.match(text, /room_put_file/);
   // The tool never ran: nothing staged.
   const listed = await callTool(f.call, f.peer.secret, "room_list_files", { roomId: f.roomId });
@@ -759,10 +780,10 @@ test("every priced tool advertises its price in its description", async t => {
   for (const [name, cents] of Object.entries(PRICED_MCP_TOOLS)) {
     const def = hostedMcpToolDefs.find(entry => entry.name === name);
     assert.ok(def, `${name} must exist in the hosted tool catalog`);
-    assert.match(def.description, /^\[paid: room-credits\] /,
+    assert.match(def.description, /^\[paid: room-cents\] /,
       `${name}: description must open with the machine-readable paid prefix`);
-    assert.match(def.description, new RegExp(`\\b${cents} credits?\\b`),
-      `${name}: description must name its ${cents}-credit price`);
+    assert.match(def.description, new RegExp(`\\b${cents} cents?\\b`),
+      `${name}: description must name its ${cents}-cent price`);
   }
   assert.equal(priceForTool("room_list_files"), null, "unpriced tools stay free");
   assert.equal(priceForTool("no_such_tool"), null);

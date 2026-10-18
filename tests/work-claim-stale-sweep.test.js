@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { sweepStaleUnclaimedClaims, syncClaimPullRequests, STALE_SWEEP_INTERVAL_MS } from "../server/claim-pr-sync.mjs";
+import { staleSweepDueAt, sweepStaleUnclaimedClaims, syncClaimPullRequests, STALE_SWEEP_INTERVAL_MS } from "../server/claim-pr-sync.mjs";
+import { jobByName, jobEnabled, jobIsDue, jobNextDue } from "../server/jobs.mjs";
 import {
   DEFAULT_MAX_OPEN_CLAIMS, STALE_UNCLAIMED_DAYS, STALE_SWEEP_BATCH, closeStaleUnclaimed, countsTowardOpenCap,
   createWork, claimWork, isDormantClaim, openClaimCount,
@@ -122,4 +123,105 @@ test("the cron tick sweeps dormant unclaimed items, emits closed events, and thr
   assert.equal(sweepStaleUnclaimedClaims(store, NOW + 1000), 0, "throttled inside the interval");
   assert.equal(sweepStaleUnclaimedClaims(store, NOW + STALE_SWEEP_INTERVAL_MS), 1);
   assert.equal(store.workClaims.get("commons", "dormant-2").state, "closed");
+});
+
+// #3739: the sweep's only caller is the claim-prs tick, and that job used to
+// wake only while a pull request was waiting — in a store with no PR-linked
+// claims the sweep was unreachable however old unclaimed items got. The job
+// now carries a due probe for the sweep itself; these tests pin the probe
+// and the scheduler gate.
+test("staleSweepDueAt: null until an opted-in room holds an unpinned unclaimed item", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  assert.equal(staleSweepDueAt(store, NOW), null, "no opt-in, no due time");
+  store.workClaims.configure("commons", { staleSweep: true });
+  assert.equal(staleSweepDueAt(store, NOW), OLD + STALE_UNCLAIMED_DAYS * DAY,
+    "due at the oldest candidate's dormancy instant");
+});
+
+test("staleSweepDueAt: a fresh item schedules the wake at its dormancy instant", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.configure("commons", { staleSweep: true });
+  store.workClaims.set("commons", createWork({ id: "fresh" }, { now: NOW - DAY, agentId: "alice" }));
+  assert.equal(staleSweepDueAt(store, NOW), NOW - DAY + STALE_UNCLAIMED_DAYS * DAY);
+});
+
+test("staleSweepDueAt: activity is claimUpdatedAt — a fresher history stamp wins over updatedAt", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.configure("commons", { staleSweep: true });
+  const created = createWork({ id: "touched" }, { now: OLD, agentId: "alice" });
+  const touched = { ...created, history: [...created.history, { action: "note", agentId: "alice", at: new Date(NOW - DAY).toISOString() }] };
+  store.workClaims.set("commons", touched);
+  assert.equal(isDormantClaim(store.workClaims.get("commons", "touched"), NOW), false);
+  assert.equal(staleSweepDueAt(store, NOW), NOW - DAY + STALE_UNCLAIMED_DAYS * DAY);
+});
+
+test("staleSweepDueAt: pinned items and unknown-age items never schedule a wake", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.configure("commons", { staleSweep: true });
+  store.workClaims.set("commons", createWork({ id: "pinned", tags: ["Never-Sweep"] }, { now: OLD, agentId: "alice" }));
+  const unknown = { ...createWork({ id: "unknown" }, { now: OLD, agentId: "alice" }), updatedAt: null, history: [] };
+  store.workClaims.set("commons", unknown);
+  assert.equal(staleSweepDueAt(store, NOW), null);
+});
+
+test("staleSweepDueAt: a sweep pass inside the interval defers the next wake to the interval", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  assert.equal(sweepStaleUnclaimedClaims(store, NOW, { force: true }), 0, "not opted in yet: nothing closes");
+  store.workClaims.configure("commons", { staleSweep: true });
+  assert.equal(staleSweepDueAt(store, NOW), NOW + STALE_SWEEP_INTERVAL_MS,
+    "dormancy is already past, but the sweep's own cadence is the next wake");
+});
+
+test("claim-prs stays disabled when only an opted-out room has dormant items", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  const job = jobByName("claim-prs");
+  assert.equal(jobEnabled(job, {}, store), false);
+  assert.equal(jobIsDue(job, store, NOW, undefined), false);
+});
+
+test("claim-prs wakes for the stale sweep with no pull request waiting (#3739)", async t => {
+  const { store } = await roomStore(t);
+  const job = jobByName("claim-prs");
+  store.workClaims.configure("commons", { staleSweep: true });
+  store.workClaims.set("commons", createWork({ id: "dormant" }, { now: OLD, agentId: "alice" }));
+  assert.equal(jobEnabled(job, {}, store), true);
+  assert.equal(jobIsDue(job, store, NOW, undefined), true);
+  await job.run(store, { env: {}, deadline: Infinity });
+  assert.equal(store.workClaims.get("commons", "dormant").state, "closed");
+  const closedEvents = store.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence").all("commons")
+    .map(row => JSON.parse(row.body))
+    .filter(event => event.type === "work_claim.updated" && JSON.stringify(event).includes("\"dormant\"") && JSON.stringify(event).includes("\"closed\""));
+  assert.equal(closedEvents.length, 1, "exactly one closed event for the retired item");
+});
+
+test("claim-prs arms a future wake for an item that is not dormant yet", async t => {
+  const { store } = await roomStore(t);
+  const job = jobByName("claim-prs");
+  store.workClaims.configure("commons", { staleSweep: true });
+  store.workClaims.set("commons", createWork({ id: "fresh" }, { now: NOW - DAY, agentId: "alice" }));
+  assert.equal(jobEnabled(job, {}, store), true);
+  assert.equal(jobIsDue(job, store, NOW, undefined), false);
+  assert.equal(jobNextDue(job, store, NOW, undefined), NOW - DAY + STALE_UNCLAIMED_DAYS * DAY);
+});
+
+test("a backlog drains one bounded batch per sweep interval under the tick", async t => {
+  const { store } = await roomStore(t);
+  store.workClaims.configure("commons", { staleSweep: true });
+  for (let i = 0; i < STALE_SWEEP_BATCH + 5; i += 1) {
+    store.workClaims.set("commons", createWork({ id: `b-${i}` }, { now: OLD - i * 1000, agentId: "alice" }));
+  }
+  const fetchImpl = async () => { throw new Error("no GitHub call expected"); };
+  await syncClaimPullRequests(store, { fetchImpl, token: null, nowMs: NOW });
+  assert.equal(store.workClaims.list("commons").filter(item => item.state === "closed").length, STALE_SWEEP_BATCH);
+  assert.equal(staleSweepDueAt(store, NOW), NOW + STALE_SWEEP_INTERVAL_MS,
+    "the remainder waits one interval, not the next scheduler tick");
+  await syncClaimPullRequests(store, { fetchImpl, token: null, nowMs: NOW + STALE_SWEEP_INTERVAL_MS });
+  assert.equal(store.workClaims.list("commons").filter(item => item.state === "closed").length, STALE_SWEEP_BATCH + 5);
+  assert.equal(staleSweepDueAt(store, NOW + STALE_SWEEP_INTERVAL_MS), null);
+  await syncClaimPullRequests(store, { fetchImpl, token: null, nowMs: NOW + 2 * STALE_SWEEP_INTERVAL_MS });
+  assert.equal(store.workClaims.list("commons").filter(item => item.state === "closed").length, STALE_SWEEP_BATCH + 5,
+    "repeat ticks close nothing twice");
 });
