@@ -62,7 +62,14 @@ test("non-rooms commits leave a warm room warm, byte-identical to a cold read", 
         store.transaction(() => write(store));
         const after = store.room("commons");
         assert.equal(after, warm, `${label}: the cached object itself must survive the commit`);
-        assert.equal(projectionReads(), readsAfterWarm, `${label}: no projection re-read may happen`);
+        // Under ROOM_VERIFY_PROJECTION_CACHE=1 room() deliberately
+        // re-reads the projection to cross-check every hit — that read
+        // is the verifier's, not an eviction, so the count assertion
+        // applies only in the normal mode. Identity above is the
+        // invariant that holds in both.
+        if (process.env.ROOM_VERIFY_PROJECTION_CACHE !== "1") {
+          assert.equal(projectionReads(), readsAfterWarm, `${label}: no projection re-read may happen`);
+        }
         // Cached state equals a cold read, byte for byte: force the
         // cold path and compare the full serialized values.
         store._dropProjectionCache();
