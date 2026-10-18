@@ -1,3 +1,4 @@
+import { messageReadIndex } from "./message-read-index.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
@@ -5301,7 +5302,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type') IN ('decision.recorded','owner.decision_recorded')
          ORDER BY sequence DESC LIMIT 10`
       ).all(roomId, effectiveSince, through);
-      const currentById = indexHistoryMessages(room.state.messages ?? []);
+      const currentById = messageReadIndex(room.state.messages);
       const messageRows = this.db.prepare(
         `SELECT sequence AS seq, json_extract(body,'$.id') AS eventId, json_extract(body,'$.data.messageId') AS messageId,
                 json_extract(body,'$.data.body') AS body, json_extract(body,'$.data.toMemberId') AS toMemberId,

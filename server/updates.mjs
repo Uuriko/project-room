@@ -1,3 +1,4 @@
+import { messageReadIndex } from "./message-read-index.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -168,7 +169,7 @@ function projectRoom(store, roomId, memberId, identityId) {
   const items = [];
   const requests = state.replyRequests ?? {};
   const messages = state.messages ?? [];
-  const byId = new Map(messages.map(message => [message.id, message]));
+  const byId = messageReadIndex(messages);
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;
@@ -217,8 +218,7 @@ function projectRoom(store, roomId, memberId, identityId) {
     flags.mentions = true;
   }
 
-  const replied = new Set(messages.filter(message => message.authorId === memberId && message.replyToId).map(message => message.replyToId));
-  for (const message of messages) {
+  for (const message of byId.receivedBy(memberId)) {
     if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
@@ -226,7 +226,7 @@ function projectRoom(store, roomId, memberId, identityId) {
       kind: "dm", roomId, key: `dm|${message.id}`,
       title: clip(message.body || "Direct message"), actor: message.authorId, createdAt: at, updatedAt: at,
       basis: message.id, sourceRef: { messageId: message.id },
-      terminal: replied.has(message.id) ? "answered" : null,
+      terminal: byId.hasReply(memberId, message.id) ? "answered" : null,
       next: { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/commands` }
     }));
   }

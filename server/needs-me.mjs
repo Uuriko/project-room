@@ -1,3 +1,4 @@
+import { messageReadIndex } from "./message-read-index.mjs";
 import { sessionWatermark } from "./read-cursor.mjs";
 // Cross-room "what needs me" for one identity.
 //
@@ -215,7 +216,7 @@ function roomDmsOf(store, roomId, memberId, after, state) {
   // must show its current body, not the pre-edit text. Messages missing
   // from the projection (e.g. archived out of it) fall back to the logged
   // body, as deriveNotifications does.
-  const currentById = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  const currentById = messageReadIndex(state?.messages);
   const items = [];
   // Scan in batches: a deleted DM must not consume one of the
   // MAX_PER_KIND + 1 slots, or the caller's overflow check (kind length >
