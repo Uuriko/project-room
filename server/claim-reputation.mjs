@@ -34,6 +34,11 @@
 //   lease_expired                            -> claim_flaked (-6, existing
 //                                            weight) to the previous owner
 //   reviewed with verdict changes_requested  -> claim_judged_bad (-10)
+//   closed / deleted (terminal)              -> no signal; closes any open
+//                                            position and marks the
+//                                            lifecycle settled, so a claim
+//                                            re-created under the same id
+//                                            folds as a fresh position
 //   renewed                                  -> nothing; the position stays
 //                                            open. Renewal is the correct
 //                                            escape hatch for long work:
@@ -70,7 +75,7 @@ export { REPUTATION_BANDS, BOUNTY_SIGNAL_WEIGHTS, bandOf };
 // above normal, below the observed hoard.
 export const HOARDING_CAP = 5;
 
-// The four P1 signal types, all registered in BOUNTY_SIGNAL_WEIGHTS (the
+// The five P1 signal types, all registered in BOUNTY_SIGNAL_WEIGHTS (the
 // tracker's signal vocabulary; signalTyped throws on unknown types).
 export const CLAIM_REPUTATION_SIGNAL_TYPES = Object.freeze([
   "claim_completed",  // +3: claimed work finished and marked done
@@ -236,6 +241,23 @@ function foldClaims(rows) {
           // counting the claim while it is being reworked.
         }
         // Any other verdict leaves the position open; a note is not a verdict.
+        break;
+      }
+      case "closed":
+      case "deleted": {
+        // Terminal close/cancel (owner route in work-claim-routes, system
+        // sweep in claim-pr-sync) and delete (land-queue): close any open
+        // position with NO signal — the recorded decision on #4062,
+        // mirroring the duplicate-terminal rule. Close/cancel is an owner
+        // action already visible in the room; pricing it would punish the
+        // cleanup the room wants. closePosition marks the lifecycle
+        // settled, so a claim re-created under the same id (the delete
+        // case: the registry row is gone and the id can be claimed again)
+        // folds as a fresh position credited to its new owner, instead of
+        // the stale position suppressing it. With no open position the
+        // mark still lands and the row stays silent.
+        seen.set(claimId, true);
+        closePosition(claimId);
         break;
       }
       // created, renewed, pr_merged, pr_closed, ci_changed: no signal.
