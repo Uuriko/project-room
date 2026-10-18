@@ -3160,7 +3160,16 @@ async function revealClaimRecord(id) {
   const opening = navigationBoardEpoch;
   if (!await navigationBoardReady?.() || opening !== navigationBoardEpoch || epoch !== workNavigationEpoch
     || !workNavigationContext()) return;
-  await navigationBoardRevealClaim?.(id);
+  // #3892: the click path (navigateClaimRecord) checks this boolean and
+  // says so when the board cannot show the claim; the deep-link path
+  // discarded it, opening the board dialog on nothing with the record
+  // hash still in the URL. Same honesty here: an unplaceable claim
+  // (closed, aged past the board's week, another room's id) gets the
+  // unavailable notice instead of silence.
+  if (!await navigationBoardRevealClaim?.(id)) {
+    notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    return;
+  }
   syncWorkReturnControl();
 }
 function navigateWorkRecord(kind, id, extra = {}) {
