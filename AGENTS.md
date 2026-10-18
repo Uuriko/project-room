@@ -3,10 +3,19 @@
 ## Check commands (run before you push)
 
 ```sh
+npm run verify:pr         # hosted-gate parity in one command: lint + untested-modules + contract censuses (CI check) + diff-keyed registration checklist; run before you push
 npm run verify:affected   # tests related to your diff vs origin/main, ~30s; --list to preview
-npm run lint              # eslint, design tokens, reachability, i18n, UI strings
+npm run lint              # eslint, design tokens, reachability, i18n, UI strings (verify:pr runs this plus the gates below)
 npm test                  # full unit suite (CI runs it sharded, plus browser/cloudflare)
 ```
+
+`npm run verify:pr` is the pre-push gate: it also runs
+`scripts/untested-modules-lint.mjs` (a sibling step of hosted lint that local
+lint alone misses), the hosted contract job's censuses via
+`CI=1 npm run check`, and a registration checklist keyed to your diff
+(runtime-package / candidate-runtime-fixture, test imports, census pins,
+route auth tables and probe inventory). It does not run the unit, browser,
+cloudflare or coverage test suites.
 
 Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
 start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
