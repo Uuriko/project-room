@@ -4,6 +4,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
+import { jsonLdScriptTag, receiptJsonLd, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -35,8 +36,11 @@ dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}
 @media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}h2 a{min-height:var(--control-min-target-coarse)}}`;
 
-function head({ title, description, path }) {
+function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
+  const ogImageAlt = ogAlt ? `
+<meta property="og:image:alt" content="${escapeHtml(ogAlt)}">
+<meta name="twitter:image:alt" content="${escapeHtml(ogAlt)}">` : "";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)}</title>
@@ -47,12 +51,12 @@ function head({ title, description, path }) {
 <meta property="og:url" content="${escapeHtml(canonical)}">
 <meta property="og:title" content="${escapeHtml(title)}">
 <meta property="og:description" content="${escapeHtml(description)}">
-<meta property="og:image" content="${OG_IMAGE}">
+<meta property="og:image" content="${escapeHtml(ogImage)}">${ogImageAlt}
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="${escapeHtml(title)}">
 <meta name="twitter:description" content="${escapeHtml(description)}">
-<meta name="twitter:image" content="${OG_IMAGE}">
-<style>${pageStyle()}</style>
+<meta name="twitter:image" content="${escapeHtml(ogImage)}">
+${jsonLd}<style>${pageStyle()}</style>
 </head>`;
 }
 
@@ -157,7 +161,8 @@ export function renderVerificationBlock(receipt, verification) {
 }
 
 export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
-  const description = `${receipt.title}. A public receipt from Project Room.`;
+  const verdictLine = verdictLineOf(receipt);
+  const description = `${receipt.title} — ${verdictLine}. A public receipt from Project Room.`;
   const room = receipt.room?.title
     ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.title)}</dd></div>`
     : receipt.room?.id
@@ -290,7 +295,14 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     : receipt.verification?.state === "self_attested"
     ? "Verification tier: bundle unaltered (self-asserted). What was checked: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : "Verification tier: bundle unaltered (self-asserted). What was checked: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
-  return `${head({ title: receipt.title, description, path: `/receipts/${receipt.id}` })}
+  return `${head({
+    title: receipt.title,
+    description,
+    path: `/receipts/${receipt.id}`,
+    jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, { description: provenNote })),
+    ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
+    ogAlt: verdictLine,
+  })}
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
