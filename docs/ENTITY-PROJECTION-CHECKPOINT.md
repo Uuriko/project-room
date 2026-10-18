@@ -4,6 +4,10 @@ This continues the architecture execution plan after `84676b7a`. It is local,
 opt-in implementation work. No deployment, production flag or rollback admission
 is implied by these results.
 
+Schema 41 supersedes the replay detachment below with isolated staging; see
+[MESSAGE-REPLAY-ISOLATION-PLAN.md](MESSAGE-REPLAY-ISOLATION-PLAN.md) for implementation
+and measurements. This document records the schema 40 checkpoint.
+
 ## Implemented boundary
 
 Qualified message writes store `{id, _entity: 1}` working-set entries. Normalized

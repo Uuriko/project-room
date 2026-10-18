@@ -226,3 +226,22 @@ placement and experience contracts. The schema carrier alone satisfies none of
 those remaining exit criteria.
 
 See [ENTITY-PROJECTION-CHECKPOINT.md](ENTITY-PROJECTION-CHECKPOINT.md) for implementation, measurements and qualification limits.
+
+
+## Replay isolation progress
+
+Schema 41 separates snapshot bodies from hot certification metadata and keeps
+partial replay isolated from serving records. Exact-head publication is atomic;
+interrupted replay, intervening live edits, privacy deletion and injected write
+failures have executable coverage. See
+[MESSAGE-REPLAY-ISOLATION-PLAN.md](MESSAGE-REPLAY-ISOLATION-PLAN.md) for measurements
+and remaining replay/publication bounds. Stages 1 and 2 remain in progress; this
+does not complete independent aggregate writers or stages 3 through 7.
+
+## Durable scope and quality tracking
+
+The [delivery ledger](DELIVERY-LEDGER.md) preserves these seven stages and tracks
+research-derived additions. The [quality scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md)
+extends qualification beyond speed to correctness, recovery, context, human effort,
+cost, maintainability, accessibility and portability. Existing exit criteria remain
+required; new research does not supersede unfinished architecture work.

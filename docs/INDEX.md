@@ -86,4 +86,10 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 - [Message domain checkpoint](MESSAGE-DOMAIN-CHECKPOINT.md) — schema 39, extracted reducers, replay and measured restoration costs.
 
+- [Frontier infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md): 2025–2026 papers, October engineering discussions, architecture decisions and measurable experiments.
+- [Replay isolation and measurements](MESSAGE-REPLAY-ISOLATION-PLAN.md): schema 41 staging/publication boundary, snapshot separation and qualification.
 - [Entity projection checkpoint](ENTITY-PROJECTION-CHECKPOINT.md): schema 40 reference storage, safety boundaries and measured write volume.
+
+- [Startup research and productivity strategy](STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md)
+- [Delivery ledger](DELIVERY-LEDGER.md)
+- [Quality and productivity scorecard](QUALITY-AND-PRODUCTIVITY-SCORECARD.md)

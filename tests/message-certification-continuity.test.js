@@ -396,13 +396,141 @@ for(const archive of [false,true]) test(`resumable backfill never rewinds servin
  for(let i=0;i<8;i++)f.post(`replay-${i}`,`Original ${i}.`);
  f.command('message.edited',{messageId:'replay-0',body:'Latest must remain visible.',expectedMessageRevision:0});
  const expected=f.read({limit:100}).messages;
+ const serving=f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
  f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='invalid-anchor',parity_at_seq=NULL WHERE room_id='commons'").run();
  let done=false;
  for(let i=0;i<50&&!done;i++) {
   done=f.store.backfillMessages({limit:1}).done;
   assert.deepEqual(f.read({limit:100}).messages,expected);
-  assert.equal(f.store.room('commons').state.messages.find(m=>m.id==='replay-0').body,'Latest must remain visible.');
+  assert.equal(f.read({messageId:'replay-0'}).messages[0].body,'Latest must remain visible.');
+  assert.equal(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection,serving);
  }
  assert.equal(done,true);assert.equal(f.store.checkMessagesParity().ok,true);
  f.reopen();assert.deepEqual(f.read({limit:100}).messages,expected);
+});
+
+
+test('ordinary certified writes never read or rewrite the replay snapshot',async t=>{
+ const {constants}=await import('node:sqlite');
+ const f=setup(t,true,4,true);f.certify();f.post('small-write','Original.');f.certify();
+ const snapshot=f.store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json;
+ const access=[];
+ f.store.db.setAuthorizer((operation,table)=>{
+  if(table==='message_replay_snapshots')access.push(operation);
+  return constants.SQLITE_OK;
+ });
+ try {f.command('message.edited',{messageId:'small-write',body:'Changed.',expectedMessageRevision:0});}
+ finally {f.store.db.setAuthorizer(null);}
+ assert.deepEqual(access,[]);
+ assert.equal(f.store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json,snapshot);
+ assert.equal(f.store.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_cursor') WHERE name='state_json'").get(),undefined);
+});
+
+
+test('staged replay resumes across reopen and incorporates a newer live edit',t=>{
+ const f=setup(t,true,2,true);f.certify();f.store.roomFlood={consume(){}};
+ for(let i=0;i<8;i++)f.post(`concurrent-${i}`,`Original ${i}.`);
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='invalid',parity_at_seq=NULL WHERE room_id='commons'").run();
+ const progress=f.store.backfillMessages({limit:3});
+ assert.equal(progress.appliedSeq,0);assert.equal(progress.replaySeq,3);
+ assert.equal(f.certificate().applied_seq,0);
+ const staged=f.certificate().state_seq;assert.ok(staged>0);
+ f.reopen();assert.equal(f.certificate().state_seq,staged);
+ f.command('message.edited',{messageId:'concurrent-0',body:'New live version.',expectedMessageRevision:0});
+ let done=false;
+ for(let i=0;i<50&&!done;i++) {
+  done=f.store.backfillMessages({limit:1}).done;
+  assert.equal(f.read({messageId:'concurrent-0'}).messages[0].body,'New live version.');
+ }
+ assert.equal(done,true);assert.equal(f.store.checkMessagesParity().ok,true);
+ f.reopen();assert.equal(f.read({messageId:'concurrent-0'}).messages[0].body,'New live version.');
+});
+
+test('failed replay publication rolls back serving rows and staging progress together',t=>{
+ const f=setup(t,true,2,true);f.certify();f.store.roomFlood={consume(){}};
+ for(let i=0;i<6;i++)f.post(`atomic-${i}`,`Current ${i}.`);
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='invalid',parity_at_seq=NULL WHERE room_id='commons'").run();
+ f.store.backfillMessages({limit:2});
+ const cursor={...f.certificate()};
+ const snapshot=f.store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json;
+ const rows=f.store.db.prepare("SELECT * FROM messages WHERE room_id='commons' ORDER BY message_id").all();
+ const expected=f.read({limit:100}).messages;
+ f.store.db.exec("CREATE TRIGGER reject_replay_publication BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'injected publication failure'); END");
+ assert.throws(()=>f.store.backfillMessages({limit:1000}),/injected publication failure/);
+ assert.deepEqual({...f.certificate()},cursor);
+ assert.equal(f.store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json,snapshot);
+ assert.deepEqual(f.store.db.prepare("SELECT * FROM messages WHERE room_id='commons' ORDER BY message_id").all(),rows);
+ assert.deepEqual(f.read({limit:100}).messages,expected);
+ f.store.db.exec('DROP TRIGGER reject_replay_publication');
+ f.certify();f.reopen();assert.deepEqual(f.read({limit:100}).messages,expected);
+});
+
+
+test('archive fallback pages preserve ordering and private-message filtering during replay',t=>{
+ const f=setup(t,true,2,true);f.store.roomFlood={consume(){}};
+ f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ const reader=f.store.issueAccessKey('commons','reader');f.certify();
+ for(let i=0;i<12;i++)f.post(`page-${i}`,`Page ${i}.`,i%3===0?{toMemberId:'owner'}:{});
+ f.command('message.edited',{messageId:'page-1',body:'Old retained edit.',expectedMessageRevision:0});
+ const walk=()=>{
+  const pages=[];let cursor=null;
+  for(let i=0;i<20;i++) {
+   const page=f.read({limit:2,...(cursor?{cursor}:{})},reader);
+   assert.equal(page.mode,'replace');pages.push(...page.messages.map(m=>m.id).reverse());
+   cursor=page.nextCursor;if(!cursor)return pages;
+  }
+  assert.fail('pagination did not terminate');
+ };
+ const expected=walk();assert.equal(expected.some(id=>Number(id.split('-')[1])%3===0),false);
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='invalid',parity_at_seq=NULL WHERE room_id='commons'").run();
+ f.store.backfillMessages({limit:2});assert.deepEqual(walk(),expected);
+ f.certify();assert.deepEqual(walk(),expected);
+});
+
+
+test('deletion scrubs a staged replay snapshot and cannot resurrect on publication',t=>{
+ const f=setup(t,true,2,true);f.certify();f.store.roomFlood={consume(){}};
+ f.post('staged-secret','Secret staged text.');
+ for(let i=0;i<8;i++)f.post(`delete-tail-${i}`,`Tail ${i}.`);
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET applied_event_id='invalid',parity_at_seq=NULL WHERE room_id='commons'").run();
+ f.store.backfillMessages({limit:4});
+ assert.ok(f.store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json.includes('Secret staged text.'));
+ f.command('message.deleted',{messageId:'staged-secret',expectedMessageRevision:0});
+ assert.equal(JSON.stringify(f.store.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").all()).includes('Secret staged text.'),false);
+ f.reopen();f.certify();
+ assert.equal(f.read({messageId:'staged-secret'}).messages[0].body,null);
+ assert.equal(f.store.checkMessagesParity().ok,true);
+});
+
+
+test('archive conversation filters private bodies before decoding them',t=>{
+ const f=setup(t,true,2,true);f.store.roomFlood={consume(){}};
+ f.command('member.added',{memberId:'reader',displayName:'Reader',kind:'human',permissions:[]});
+ const reader=f.store.issueAccessKey('commons','reader');f.certify();
+ f.post('hidden-archive','Private.',{toMemberId:'owner'});
+ for(let i=0;i<8;i++)f.post(`visible-${i}`,`Public ${i}.`);
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id='commons'").run();
+ f.store.db.prepare("UPDATE messages SET record_json='{invalid' WHERE message_id='hidden-archive'").run();
+ assert.equal(f.read({limit:100},reader).messages.length,8);
+ assert.throws(()=>f.read({limit:100}),SyntaxError);
+});
+
+
+test('archive fallback applies same-instant history exclusions before the page limit',t=>{
+ const f=setup(t,true,2,true);f.store.roomFlood={consume(){}};
+ const at=Date.now();f.store.now=()=>at+1000;
+ f.post('future-visible','Visible by timestamp policy.');
+ f.store.now=()=>at;
+ for(let i=0;i<6;i++)f.post(`before-join-${i}`,'Before join.');
+ f.command('room.history_visibility_set',{historyVisibility:'since_join'});
+ f.command('member.added',{memberId:'late',displayName:'Late',kind:'human',permissions:[]});
+ const late=f.store.issueAccessKey('commons','late');
+ f.post('after-join','After join.');f.certify();
+ f.store.archiveMessages('commons',{keepNewest:2,dryRun:false});
+ const expected=f.read({limit:2},late);
+ assert.deepEqual(expected.messages.map(m=>m.id),['future-visible','after-join']);
+ f.store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id='commons'").run();
+ const page=f.read({limit:2},late);
+ assert.deepEqual(page.messages,expected.messages);assert.equal(page.nextCursor,null);
+ assert.throws(()=>f.read({messageId:'before-join-0'},late),error=>error.status===404);
 });

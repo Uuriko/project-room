@@ -1,3 +1,4 @@
+import { readMessageReplaySnapshot, writeMessageReplaySnapshot, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 // PRIV-1: rewrite a message out of the log, the projection, and the messages
 // table in one transaction. Read-time masking stays; this is the write that
 // makes the old text unreadable in storage.
@@ -186,15 +187,15 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 // backfill rebuilds it from the redacted log. Never keeps a snapshot that
 // still holds removed text.
 function redactReplaySnapshot(db, roomId, ids, removedTexts) {
-  const cursor = db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
-  if (!cursor) return;
+  const cursor = readMessageReplaySnapshot(db,roomId);
   const discard = () => {
-    db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
+    discardMessageReplaySnapshot(db,roomId);
+    db.prepare("UPDATE messages_backfill_cursor SET state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
     // A split snapshot (cursor parts, research r21) goes with its marker.
     try { db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId); }
     catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
   };
-  if (typeof cursor.state_json !== "string") return discard();
+  if (!cursor || typeof cursor.state_json !== "string") return discard();
   let state;
   try { state = JSON.parse(cursor.state_json); } catch { return discard(); }
   if (!state || !Array.isArray(state.messages)) return discard();
@@ -220,7 +221,8 @@ function redactReplaySnapshot(db, roomId, ids, removedTexts) {
     return false;
   };
   if (holdsRemovedText(state)) return discard();
-  db.prepare("UPDATE messages_backfill_cursor SET state_json=?, parity_at_seq=NULL WHERE room_id=?").run(JSON.stringify(state), roomId);
+  writeMessageReplaySnapshot(db,roomId,JSON.stringify(state));
+  db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?").run(roomId);
   // The kept snapshot supersedes any split-snapshot parts left from a large
   // pre-redaction write (research r21): purge them the way discard() does, so
   // no part can hold text this redaction just removed. Pre-r21 databases have
@@ -249,7 +251,8 @@ export function redactRemainingMessageBodies(db, roomId) {
   // These bodies are not tied to one message's snapshot redaction: discard
   // the replay snapshot so no removed text survives in it.
   if (rewritten) {
-    try { db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId); }
+    try { discardMessageReplaySnapshot(db,roomId);
+    db.prepare("UPDATE messages_backfill_cursor SET state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId); }
     catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
   }
   return rewritten;

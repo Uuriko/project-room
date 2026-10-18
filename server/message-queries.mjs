@@ -1,6 +1,8 @@
 // Ordered, explicitly requested queries over the transitional message store.
 // This module never hydrates full history into the room projection.
 import { archiveMarker } from './messages-store.mjs';
+import { DEFAULT_CHANNEL_ID } from '../src/events.js';
+import { messageInHistory } from './history-visibility.mjs';
 
 export function decodeMessageRecord(row) {
   const record = JSON.parse(row.record_json);
@@ -12,10 +14,25 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
   const live = state.messages ?? [];
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = marker ? [roomId, marker.throughSeq, marker.retainedJson] : [];
-  function* records({ bodyPrefix = null, descending = false, afterId = null } = {}) {
+  function* records({ bodyPrefix = null, descending = false, afterId = null, visibility = null } = {}) {
     if (afterId !== null && typeof afterId !== 'string') throw new TypeError('Message cursor must be an ID');
     if (bodyPrefix !== null && typeof bodyPrefix !== 'string') throw new TypeError('Message prefix must be text');
-    const matches = m => bodyPrefix === null || typeof m.body === 'string' && m.body.startsWith(bodyPrefix);
+    const matches = m => (bodyPrefix === null || typeof m.body === 'string' && m.body.startsWith(bodyPrefix))
+      && (!visibility || ((!m.toMemberId || m.authorId === visibility.viewerId || m.toMemberId === visibility.viewerId)
+        && (visibility.channelId == null || !m.toMemberId && (m.channelId || DEFAULT_CHANNEL_ID) === visibility.channelId)
+        && (!visibility.floor || messageInHistory(m, visibility.floor))));
+    // Filter archived visibility metadata in SQLite before fetching bodies.
+    // The caller authenticates the viewer and supplies the current history floor.
+    const visibleSql = visibility ? `
+      AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
+      AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
+      AND (? IS NULL OR created_at>=?)
+      AND (? IS NULL OR created_at>? OR message_id NOT IN (SELECT value FROM json_each(?)))` : '';
+    const visibleParams = visibility ? [visibility.viewerId, visibility.viewerId,
+      visibility.channelId ?? null, DEFAULT_CHANNEL_ID, visibility.channelId ?? null,
+      visibility.floor?.at ?? null, visibility.floor?.at ?? null,
+      visibility.floor?.at ?? null, visibility.floor?.at ?? null,
+      JSON.stringify([...(visibility.floor?.sameInstant ?? [])])] : [];
     if (!marker) {
       const cursor = afterId === null ? null : live.findIndex(m => m.id === afterId);
       if (cursor === -1) throw new RangeError('Unknown message cursor');
@@ -46,8 +63,9 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
     for (;;) {
       const rows = store.db.prepare(`SELECT message_id,seq,record_json,body FROM messages WHERE ${archived}
         AND (seq ${compare} ? OR (seq=? AND message_id ${compare} ?))
+        ${visibleSql}
         ${bodyPrefix === null ? '' : 'AND substr(body,1,length(?))=?'} ORDER BY seq ${direction},message_id ${direction} LIMIT 128`)
-        .all(...params, sequence, sequence, id, ...(bodyPrefix === null ? [] : [bodyPrefix,bodyPrefix]));
+        .all(...params, sequence, sequence, id, ...visibleParams, ...(bodyPrefix === null ? [] : [bodyPrefix,bodyPrefix]));
       if (!rows.length) break;
       for (const row of rows) {
         const key = {seq:row.seq,id:row.message_id};
