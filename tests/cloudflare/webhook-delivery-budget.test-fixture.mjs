@@ -1,9 +1,9 @@
 // Local test fixture only. Measures Durable Object SQL rowsRead while the
 // room store opens a production-sized webhook delivery table. Not a deploy
 // entrypoint.
-import { RoomStore } from "../server/store.mjs";
-import { RECENT_WEBHOOK_DELIVERIES_SQL } from "../server/agent-plugin-store.mjs";
-import { DurableDatabase, durableStorage } from "./storage.mjs";
+import { RoomStore } from "../../server/store.mjs";
+import { RECENT_WEBHOOK_DELIVERIES_SQL } from "../../server/agent-plugin-store.mjs";
+import { DurableDatabase, durableStorage } from "../../cloudflare/storage.mjs";
 
 const LEGACY_DELIVERY_SQL = `SELECT * FROM agent_webhook_deliveries WHERE delivery_id IN (
   SELECT delivery_id FROM agent_webhook_deliveries d2

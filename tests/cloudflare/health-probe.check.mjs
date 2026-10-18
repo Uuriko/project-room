@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHealthProbe, healthLivenessResponse, readyProbeResponse } from './health-probe.mjs';
+import { createHealthProbe, healthLivenessResponse, readyProbeResponse } from '../../cloudflare/health-probe.mjs';
 
 const healthRequest = (method = 'GET') => new Request('https://room.example.test/api/health', { method });
 

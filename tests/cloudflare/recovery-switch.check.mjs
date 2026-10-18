@@ -8,12 +8,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
-import { createRuntimePackage, verifyRuntimePackage } from '../scripts/runtime-package.mjs';
-import { frozenRecoveryFixture, v8ConnectionBaseline, v12HelpBaseline } from '../scripts/frozen-runtime-fixture.mjs';
-import { currentAttention } from '../client/attention-inbox.mjs';
+import { createRuntimePackage, verifyRuntimePackage } from '../../scripts/runtime-package.mjs';
+import { frozenRecoveryFixture, v8ConnectionBaseline, v12HelpBaseline } from '../../scripts/frozen-runtime-fixture.mjs';
+import { currentAttention } from '../../client/attention-inbox.mjs';
 
 const baseline = '7075c1ddfe5ced3ae970f817dbfd0fc3e88a13b6';
-const repository = fileURLToPath(new URL('../', import.meta.url));
+const repository = fileURLToPath(new URL('../../', import.meta.url));
 const observerState = directory => {
   const db = new DatabaseSync(join(directory, 'watch.sqlite'), { readOnly: true });
   try { return { checkpoint: db.prepare('SELECT * FROM checkpoint').all(),

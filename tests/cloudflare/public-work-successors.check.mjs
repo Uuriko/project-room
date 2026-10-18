@@ -11,8 +11,8 @@ import { Miniflare } from 'miniflare';
 // Setup and raw observation are the only fixture routes. Every contribution,
 // decision and follow-up traverses the production HTTP/MCP bridge in workerd.
 const fixture = `
-import entry, { ProjectRoom } from './room.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
+import entry, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
 export class SuccessorTestRoom extends ProjectRoom {
  async fetch(request) {
   const path = new URL(request.url).pathname;

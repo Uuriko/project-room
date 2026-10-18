@@ -9,7 +9,7 @@ import { Miniflare } from 'miniflare';
 // that only watches /api/version/worker cannot see this: that route already
 // bypassed the object. This wraps ProjectRoom.fetch and counts calls.
 test('static assets and discovery documents do not enter the Durable Object', async () => {
-  const cloudflareDir = fileURLToPath(new URL('.', import.meta.url));
+  const cloudflareDir = fileURLToPath(new URL('../../cloudflare/', import.meta.url));
   const bundled = await build({
     stdin: {
       contents: `
@@ -48,8 +48,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
   });
   const origin = 'https://room.example.test';
   let assetFetches = 0;
-  const wordmarkFont = readFileSync(new URL('../og/fonts/Inter-Regular.ttf', import.meta.url));
-  const fontLicense = readFileSync(new URL('../og/fonts/OFL.txt', import.meta.url));
+  const wordmarkFont = readFileSync(new URL('../../og/fonts/Inter-Regular.ttf', import.meta.url));
+  const fontLicense = readFileSync(new URL('../../og/fonts/OFL.txt', import.meta.url));
   const mf = new Miniflare({
     modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
@@ -99,7 +99,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
     // /about is the one public page with a first-party script: its policy
     // path-pins src/front-door.js and its /api/public/front-door feed ahead
-    // of the shared beacon sources — the shape cloudflare/public-search.check.mjs
+    // of the shared beacon sources — the shape tests/cloudflare/public-search.check.mjs
     // and tests/public-search-http.test.js pin by full directive map. Every
     // other public page keeps the insights-only policy asserted there.
     assert.match(about.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
@@ -231,7 +231,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
 });
 
 test('security.txt is served from the edge when a contact is configured', async () => {
-  const cloudflareDir = fileURLToPath(new URL('.', import.meta.url));
+  const cloudflareDir = fileURLToPath(new URL('../../cloudflare/', import.meta.url));
   const bundled = await build({
     stdin: {
       contents: `

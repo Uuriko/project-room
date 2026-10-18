@@ -10,8 +10,8 @@ import { Miniflare } from 'miniflare';
 // Dedicated local-only provisioning/observation fixture. The real store,
 // public-claim kernel, review policy and SQLite transactions perform all writes.
 const fixture=`
-import entry,{ProjectRoom} from './room.mjs';
-import {initialRoom} from '../server/bootstrap.mjs';
+import entry,{ProjectRoom} from '../../cloudflare/room.mjs';
+import {initialRoom} from '../../server/bootstrap.mjs';
 export class ReviewTestRoom extends ProjectRoom {
  async fetch(request){
   const path=new URL(request.url).pathname;

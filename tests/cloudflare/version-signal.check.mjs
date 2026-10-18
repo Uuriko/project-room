@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 // to; two doors serving different ids are a split. It claims nothing about
 // room health.
 test('pure-Worker /api/version/worker: revision, build, deployment, served object id', async () => {
-  const cloudflareDir = fileURLToPath(new URL('.', import.meta.url));
+  const cloudflareDir = fileURLToPath(new URL('../../cloudflare/', import.meta.url));
   const bundled = await build({
     stdin: { contents: `export { default, ProjectRoom } from './room.mjs';`, resolveDir: cloudflareDir, loader: 'js' },
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']
@@ -72,8 +72,8 @@ test('pure-Worker /api/version/worker: revision, build, deployment, served objec
 // production Durable Object, so the answers it gives itself (liveness,
 // readiness, version/worker) must say production, not staging.
 test('entry door Worker built from the checked-in config reports production', async () => {
-  const cloudflareDir = fileURLToPath(new URL('.', import.meta.url));
-  const release = JSON.parse(await readFile(new URL('./wrangler.jsonc', import.meta.url), 'utf8'));
+  const cloudflareDir = fileURLToPath(new URL('../../cloudflare/', import.meta.url));
+  const release = JSON.parse(await readFile(new URL('../../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   const bundled = await build({
     stdin: { contents: `export { default, ProjectRoom } from './room.mjs';`, resolveDir: cloudflareDir, loader: 'js' },
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*']

@@ -11,11 +11,11 @@ import { Miniflare } from 'miniflare';
 // Provisioning and fault routes belong only to this disposable fixture. All
 // storage, claim, identity, hashing and lease writes use the production services.
 const fixture = `
-import entry, { ProjectRoom } from './room.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
-import { createWork } from '../server/work-claims.mjs';
-import { createDurableWorkClaimRegistry } from '../server/work-claim-sqlite.mjs';
-import { withPublicWorkClaimWriter, verifyPublicWorkClaimFence } from '../server/public-work-claim-fence.mjs';
+import entry, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
+import { createWork } from '../../server/work-claims.mjs';
+import { createDurableWorkClaimRegistry } from '../../server/work-claim-sqlite.mjs';
+import { withPublicWorkClaimWriter, verifyPublicWorkClaimFence } from '../../server/public-work-claim-fence.mjs';
 export class PublicClaimTestRoom extends ProjectRoom {
   async fetch(request) {
     const path = new URL(request.url).pathname;

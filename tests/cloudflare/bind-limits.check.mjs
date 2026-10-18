@@ -17,13 +17,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RoomStore } from "../server/store.mjs";
-import { initialRoom } from "../server/bootstrap.mjs";
-import { exportNdjsonStream } from "../server/room-export.mjs";
-import { writeKvBackup } from "./room-backup.mjs";
+import { RoomStore } from "../../server/store.mjs";
+import { initialRoom } from "../../server/bootstrap.mjs";
+import { exportNdjsonStream } from "../../server/room-export.mjs";
+import { writeKvBackup } from "../../cloudflare/room-backup.mjs";
 
 // Repo root from this file, so the check runs from cloudflare/ (CI) or the root.
-const source = process.env.ROOM_SOURCE_ROOT || fileURLToPath(new URL("..", import.meta.url));
+const source = process.env.ROOM_SOURCE_ROOT || fileURLToPath(new URL("../..", import.meta.url));
 const require = createRequire(join(source, "cloudflare/package.json"));
 const { Miniflare } = require("miniflare");
 const { build } = require("esbuild");
