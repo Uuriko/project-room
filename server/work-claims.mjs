@@ -750,7 +750,22 @@ const requestOutcomeRecordOf = record => {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
   if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
   if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
-  return Object.freeze({ at: record.at, digest: record.digest });
+  // Reviewer replay authority is never inferred from legacy timestamps or
+  // digest-only records. Malformed provenance loses only this extra authority.
+  let reviewer;
+  const value = record.reviewer;
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && typeof value.actorId === "string" && value.actorId.length > 0 && value.actorId.length <= 128
+    && ["done", "in_progress"].includes(value.state)
+    && Number.isSafeInteger(value.historyLength) && value.historyLength > 0
+    && typeof value.readingAckDigest === "string" && /^[0-9a-f]{64}$/.test(value.readingAckDigest)
+    && value.basis && Object.hasOwn(value.basis, "deliveryDigest") && Object.hasOwn(value.basis, "deliveryGeneration")) {
+    try {
+      reviewer = Object.freeze({ actorId: value.actorId, state: value.state, historyLength: value.historyLength,
+        basis: reviewBasisOf(value.basis), readingAckDigest: value.readingAckDigest });
+    } catch { /* old or malformed provenance cannot authorize reviewer replay */ }
+  }
+  return Object.freeze({ at: record.at, digest: record.digest, ...(reviewer ? { reviewer } : {}) });
 };
 const requestOutcomesOf = value => {
   if (value === undefined || value === null) return null;
@@ -761,7 +776,48 @@ const requestOutcomesOf = value => {
   // String-key insertion order is oldest-first: drop the oldest beyond the cap.
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
-const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({ ...(current ?? {}), [key]: { at, digest } });
+const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({
+  // Reserve the new record's slot before adding it: integer-like ids sort
+  // ahead of string keys and must not be evicted by the normalization cap.
+  ...Object.fromEntries(Object.entries(current ?? {}).filter(([id]) => id !== key).slice(-(MAX_REQUEST_OUTCOMES - 1))),
+  [key]: { at, digest },
+});
+// The route seals a successful reviewer exit after all same-request writes
+// (including readingAck). This metadata is server-created, never request input.
+// Lifetime history length makes the binding exact even if a release/reclaim
+// uses the same timestamp and identical delivery bytes. Later edits fail closed.
+const readingAckDigest = value => createHash("sha256").update(canonicalPayload(value), "utf8").digest("hex");
+export function bindReviewerRequestOutcome(before, work, actorId, requestId, readingAck) {
+  const item = workOf(work), prior = workOf(before), actor = agentOf(actorId), key = requestIdOf(requestId);
+  const record = item.requestOutcomes?.[key];
+  check(prior.state === "delivered" && prior.owner !== actor
+    && !Object.hasOwn(prior.requestOutcomes ?? {}, key)
+    && prior.id === item.id && sameBasis(reviewBasisFor(prior), reviewBasisFor(item))
+    && record && typeof record === "object" && item.owner !== actor
+    && item.verification?.by === actor && item.verification.at === record.at
+    && ((item.state === "done" && item.verification.state === "verified")
+      || (item.state === "in_progress" && item.verification.state === "changes_requested")),
+  "reviewer request outcome must describe a successful reviewer exit");
+  const reviewer = Object.freeze({ actorId: actor, state: item.state, historyLength: claimHistoryLength(item),
+    basis: reviewBasisFor(item), readingAckDigest: readingAckDigest(readingAck) });
+  return Object.freeze({ ...work, requestOutcomes: requestOutcomesOf({ ...item.requestOutcomes, [key]: { ...record, reviewer } }) });
+}
+// Provenance is necessary, never sufficient: the route must also recheck live
+// membership and the current review policy before returning a stored outcome.
+export function reviewerRequestOutcome(work, requestId, actorId) {
+  const record = work.requestOutcomes && Object.hasOwn(work.requestOutcomes, requestId)
+    ? requestOutcomeRecordOf(work.requestOutcomes[requestId]) : undefined;
+  const bound = record?.reviewer, verification = work.verification;
+  return bound && bound.actorId === actorId && bound.state === work.state
+    && bound.historyLength === claimHistoryLength(work)
+    && sameBasis(bound.basis, reviewBasisFor(work))
+    && verification?.by === actorId && verification.at === record.at
+    && sameBasis(verification.basis, bound.basis)
+    && verification.state === (bound.state === "done" ? "verified" : "changes_requested")
+    ? bound : null;
+}
+export const reviewerReadingAckMatches = (outcome, readingAck) => outcome.readingAckDigest === readingAckDigest(readingAck);
+
 // Exported so writer paths that build claim rows outside the state machine
 // (the work-item-board backfill, #3465) validate a row BEFORE storing it:
 // the durable registry's codec decodes without validation, so a row stored

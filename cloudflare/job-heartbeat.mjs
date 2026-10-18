@@ -73,11 +73,18 @@ export function summaryFailure(result) {
 
 const DETAIL_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 const DETAIL_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
+const DETAIL_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 // A job may attach a sanitized failure detail (stable codes and classes
 // only, e.g. the integrity job's failing sub-check — #3334). Every field
-// must be a short token, so no id, body or secret can ride this channel
-// onto the public health surface.
+// must be a short token, so no body or secret can ride this channel onto
+// the public health surface. The integrity job may attach the failing
+// ROOM (recordId) for its room-record steps to the stored failure detail
+// — operators read it from the job detail and the token-gated operator
+// status — but jobHealthView deliberately does not project it: the
+// public health view must not carry block evidence for a room
+// (integrity-block-health), not even its id. The shape check below still
+// bars everything that is not id-shaped.
 export function sanitizeFailureDetail(detail) {
   if (!detail || typeof detail !== "object") return null;
   const out = {};
@@ -85,6 +92,7 @@ export function sanitizeFailureDetail(detail) {
   for (const key of ["subcheck", "errorClass", "recordClass"]) {
     if (typeof detail[key] === "string" && DETAIL_TOKEN.test(detail[key])) out[key] = detail[key];
   }
+  if (typeof detail.recordId === "string" && DETAIL_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
   return Object.keys(out).length ? out : null;
 }
 
@@ -154,12 +162,25 @@ export function applyOutcomes(previous, outcomes) {
     // failure (consecutiveFailures, lastError, lastFailure all stand)
     // nor advance the success clock (lastSuccessAt). Only an outcome
     // that observed the work itself may do either.
+    // A failing tick that returned a result carries that tick's own summary
+    // (numbers/booleans only, via compactSummary). Persist it — with its own
+    // lastSummaryAt — instead of leaving the last successful tick's summary
+    // on the surface for as long as the job keeps failing. Dropping it hid
+    // #3855's blockedRooms count in production: the integrity job merges
+    // the standing count into its result on failing ticks too, but while
+    // an unrelated sub-check (agent_connections) kept every tick failing,
+    // the surface kept serving a pre-#3855 success summary that has no
+    // blockedRooms key at all. A tick that threw carries no summary
+    // (runCronJobs records null); then the prior summary stands, still
+    // labelled by its own lastSummaryAt.
+    const failureSummary = outcome.ok ? null : compactSummary(outcome.summary);
     next[outcome.job] = outcome.ok
       ? outcome.unobserved
         ? { ...prior, lastRunAt: at, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at }
         : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
-        lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure) };
+        lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure),
+        ...(failureSummary ? { lastSummary: failureSummary, lastSummaryAt: at } : {}) };
   }
   return next;
 }

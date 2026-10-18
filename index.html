@@ -288,6 +288,7 @@
           <nav id="tasks-destination" aria-label="Tasks">
             <p class="sidebar-label"><span>Tasks</span></p>
             <button id="tasks-board-open" type="button">Board</button>
+            <button id="new-work-open" type="button">New work</button>
             <button id="squads-open" type="button" aria-haspopup="dialog" aria-controls="squads-dialog">Squads</button>
           </nav>
           <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
@@ -533,7 +534,7 @@
           <details id="room-permissions"><summary>Permissions</summary>
             <p class="form-hint">The room owner controls whether members can assign and wake agents across owners.</p>
             <button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button>
-            <label id="public-receipts-control" class="field" hidden><input id="public-receipts-toggle" type="checkbox"> Publish receipts from this room on the public receipts page</label>
+            <label id="public-receipts-control" class="field" hidden><input id="public-receipts-toggle" type="checkbox"> Public receipts — publish receipts from this room on the public receipts page</label>
             <label id="history-visibility-control" class="field" hidden><input id="history-visibility-toggle" type="checkbox"> New members see only messages from after they join</label>
             <p id="history-visibility-hint" class="form-hint" hidden>You and members who manage membership always see the full history.</p>
             <label id="public-page-control" class="field" hidden><input id="public-page-toggle" type="checkbox"> Public room page</label>
@@ -661,13 +662,13 @@
             <div class="dialog-head"><h2 id="work-dialog-title">New work</h2></div>
             <p id="work-reuse-hint" class="form-hint" hidden></p>
             <p id="new-work-status" class="status form-status" role="status"></p>
-            <label id="work-title-label" class="field"><span>Request</span><textarea id="work-title-input" name="title" rows="2" maxlength="4096" required></textarea></label>
+            <label id="work-title-label" class="field"><span>Request (required)</span><textarea id="work-title-input" name="title" rows="2" maxlength="4096" required></textarea></label>
             <input id="new-work-title" type="hidden" name="new-work-title">
             <input id="source-message-id" type="hidden" name="sourceMessageId">
             <p id="source-context" class="form-hint source-context"></p>
             <label id="work-recipe-field" class="field" hidden><span>Recipe</span><select id="work-recipe-select"></select></label>
-            <label id="work-done-field" class="field"><span>Done when</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
-            <label id="assignee-field" class="field"><span>Assignee</span><select id="assignee-select" name="assigneeId" required></select></label>
+            <label id="work-done-field" class="field"><span>Done when (required)</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
+            <label id="assignee-field" class="field"><span>Assignee (required)</span><select id="assignee-select" name="assigneeId" required></select></label>
             <p id="assignee-hint" class="form-hint" hidden></p>
             <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label" aria-describedby="verifier-hint"></select><p id="verifier-hint" class="form-hint" role="status" hidden></p><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
             <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
