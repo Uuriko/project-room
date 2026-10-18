@@ -1,5 +1,10 @@
 // #3342 — Owner Cockpit slice 1: the cross-room read model behind
 // GET /api/owner/overview (spec: project-room-owner-cockpit.md §§2, 4, 6).
+// #3343 — Slice 2 adds the Money (§5) and Roster (§3) sections below:
+// Panel C (cents, spendAllowanceReport) and Panel R (milli-credits, the
+// escrow ledger) as separate field families that are never summed, plus
+// presence()-derived roster rows. Money and roster are owner-only: an
+// admin-everywhere viewer receives neither section (null, not empty).
 //
 // Every owner reader in the product is per-room (#662 owner-attention) or
 // agent-scoped (needs-me). This module is the account-scoped fan-out: it
@@ -24,9 +29,12 @@
 // store, AccessRequests and job-health reader).
 import { attentionReport, accessRequestAttentionItem } from "./owner-attention.mjs";
 import { REQUEST_TTL_MS } from "./access-requests.mjs";
-import { DISPUTE_TIMEOUT_MS } from "./bounty-escrow.mjs";
+import { DISPUTE_TIMEOUT_MS, BOUNTY_GROUPS, stateGroup, POOL_ACCOUNT, canonicalLane } from "./bounty-escrow.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
+import { reputationSummary } from "./bounty-reputation.mjs";
+import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
+import { SESSION_EVENT_TYPES, sessionRecord } from "../src/work-item-session.js";
 
 class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -120,6 +128,8 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
   const decisions = [];
   const exceptions = [];
   const roomErrors = [];
+  const moneyRooms = [];
+  const rosterRows = [];
   let roomsConsidered = 0;
   let roomsIncluded = 0;
   let ownerRoomsIncluded = 0;
@@ -178,6 +188,8 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
 
     collectDisputes(store, roomId, base, nowMs, decisions, exceptions);
     collectRoomExceptions(store, roomId, base, state, nowMs, windowStart, exceptions);
+    const moneyEntry = collectRoomMoney(store, roomId, base, state, nowMs, windowStart, moneyRooms);
+    collectRoomRoster({ store, token, binding }, roomId, base, state, nowMs, moneyEntry, rosterRows);
     roomsIncluded++;
     ownerRoomsIncluded++;
   };
@@ -199,6 +211,11 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
   // the access-request queue only — no exceptions section at all.
   if (ownerRoomsIncluded === 0) exceptions.length = 0;
   else collectJobExceptions(jobHealth, nowMs, exceptions);
+
+  // Slice 2 sections are owner-only: with no owned room in the page they
+  // are null (absent), never an empty aggregate an admin could read.
+  const money = ownerRoomsIncluded === 0 ? null : buildMoneySection(moneyRooms);
+  const roster = ownerRoomsIncluded === 0 ? null : buildRosterSection(rosterRows);
 
   const sortedDecisions = [...decisions].sort(decisionOrder);
   const sortedExceptions = [...exceptions].sort(exceptionOrder);
@@ -228,6 +245,8 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
       total: sortedExceptions.length,
       items: Object.freeze(sortedExceptions.slice(0, EXCEPTIONS_CAP)),
     }),
+    money,
+    roster,
     roomErrors: Object.freeze(roomErrors),
   });
 }
@@ -511,4 +530,385 @@ function collectJobExceptions(jobHealth, nowMs, exceptions) {
       evaluatedThrough: null,
     }));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Slice 2 (§5) — Money. Two panels, always separate: Panel C carries only
+// *Cents fields, Panel R only *Millis fields, and no field anywhere sums
+// or converts between them. Spend is agent-reported (spec §0.3): an
+// attempt that never reported renders "unknown", is excluded from sums,
+// and is counted — never zeroed.
+// ---------------------------------------------------------------------------
+
+const DAY_MS = 24 * 3600 * 1000;
+// Escrow states whose award is still locked in the ledger (spec §5.2).
+const LOCKED_BOUNTY_STATES = Object.freeze(["funded", "claimed", "submitted", "accepted", "disputed"]);
+const LOT_STATES = Object.freeze(["payable", "locked", "attributed", "approved"]);
+
+const hasTable = (store, name) => Boolean(store.db.prepare(
+  "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+
+// Fold the window's session events into attempts with the foldSessionEvents
+// semantics (usage-summary.mjs): a session.started opens an attempt, the
+// latest cumulative spendCents report wins, session.stopped closes it. The
+// fold here additionally carries the attempt's worker (the session.started
+// actor) so spend attributes per agent and per task from the same pass —
+// the room totals equal foldSessionEvents' on the same rows (pinned by
+// test). usage-summary.mjs itself is not imported: it pulls store.mjs,
+// which this module deliberately stays cycle-free of (see header).
+function foldAttribution(rows) {
+  const open = new Map();
+  const attempts = [];
+  const attemptFor = (workItemId, fresh, actorId) => {
+    if (fresh || !open.has(workItemId)) {
+      const attempt = { workItemId, actorId: actorId ?? null, spendCents: null };
+      attempts.push(attempt);
+      open.set(workItemId, attempt);
+    }
+    return open.get(workItemId);
+  };
+  for (const row of rows) {
+    if (row.type === SESSION_EVENT_TYPES.STARTED) attemptFor(row.workItemId, true, row.actorId);
+    if (Number.isSafeInteger(row.spendCents) && row.spendCents >= 0) attemptFor(row.workItemId, false, row.actorId).spendCents = row.spendCents;
+    if (row.type === SESSION_EVENT_TYPES.STOPPED) open.delete(row.workItemId);
+  }
+  return attempts;
+}
+
+// Group folded attempts by a key: reported spend sums, unreported attempts
+// count. A group whose every attempt is unreported reports "unknown".
+function spendByKey(attempts, keyOf) {
+  const groups = new Map();
+  for (const attempt of attempts) {
+    const key = keyOf(attempt);
+    if (key === null) continue;
+    if (!groups.has(key)) groups.set(key, { reportedCents: 0, reported: 0, unreported: 0 });
+    const group = groups.get(key);
+    if (attempt.spendCents === null) group.unreported++;
+    else { group.reported++; group.reportedCents += attempt.spendCents; }
+  }
+  return groups;
+}
+const groupSpend = group => group.reported > 0 ? group.reportedCents : "unknown";
+
+// Per-room Money inputs: the Panel C reader output verbatim, the window
+// attribution fold, accepted-outcome counting, and the Panel R ledger sums.
+function collectRoomMoney(store, roomId, base, state, nowMs, windowStart, moneyRooms) {
+  const report = spendAllowanceReport(state, nowMs);
+  const rows = store.db.prepare(
+    `SELECT json_extract(body,'$.type') AS type, json_extract(body,'$.data.workItemId') AS workItemId,
+            json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.data.spendCents') AS spendCents
+     FROM events WHERE room_id=? AND json_extract(body,'$.type') IN (?,?,?) AND json_extract(body,'$.at')>=?
+     ORDER BY sequence`
+  ).all(roomId, SESSION_EVENT_TYPES.STARTED, SESSION_EVENT_TYPES.STATUS_CHANGED, SESSION_EVENT_TYPES.STOPPED, iso(windowStart));
+  const attempts = foldAttribution(rows.filter(row => typeof row.workItemId === "string"));
+  const byAgent = spendByKey(attempts, attempt => attempt.actorId);
+  const byTask = spendByKey(attempts, attempt => attempt.workItemId);
+
+  const workItems = state.workItems ?? {};
+  const tasks = [...byTask.entries()].map(([workItemId, group]) => {
+    const item = workItems[workItemId];
+    const session = item ? sessionRecord(item) : null;
+    return Object.freeze({
+      roomId, roomName: base.roomName, workItemId,
+      title: item?.title ?? workItemId,
+      spendCents: groupSpend(group),
+      attempts: group.reported + group.unreported,
+      unreportedAttempts: group.unreported,
+      budgetMaxSpendCents: session?.budget?.maxSpendCents ?? null,
+      drill: Object.freeze({ action: "review", method: "GET", path: `/api/rooms/${roomId}/usage` }),
+    });
+  }).sort((a, b) => a.workItemId.localeCompare(b.workItemId));
+  const agents = [...byAgent.entries()].map(([memberId, group]) => Object.freeze({
+    roomId, roomName: base.roomName, memberId,
+    displayName: state.members?.[memberId]?.displayName ?? memberId,
+    periodCostCents: groupSpend(group),
+    reportedAttempts: group.reported,
+    unreportedAttempts: group.unreported,
+  })).sort((a, b) => a.memberId.localeCompare(b.memberId));
+
+  // Accepted outcomes in the window (§5.3): a work item reaching its
+  // completed (accepted-terminal) state, plus bounties reaching paid.
+  // The escrow records carry no bounty↔work-item link, so the two
+  // recorded outcome sources are counted as recorded — no linkage is
+  // invented here.
+  let bountyOutcomes = 0;
+  if (hasTable(store, "bounty_records")) {
+    bountyOutcomes = store.db.prepare(
+      "SELECT COUNT(*) AS n FROM bounty_records WHERE room_id=? AND state='paid' AND state_changed_ms>=? AND state_changed_ms<=?"
+    ).get(roomId, windowStart, nowMs).n;
+  }
+  let workOutcomes = 0;
+  for (const item of Object.values(workItems)) {
+    if (!item || item.state !== "completed") continue;
+    const atMs = ms(item.updatedAt) ?? ms(item.createdAt);
+    if (atMs !== null && atMs >= windowStart && atMs <= nowMs) workOutcomes++;
+  }
+
+  const entry = {
+    base, report, attempts, byAgent, tasks, agents,
+    acceptedOutcomes: workOutcomes + bountyOutcomes,
+    credits: collectRoomCredits(store, roomId),
+  };
+  moneyRooms.push(entry);
+  return entry;
+}
+
+// Panel R inputs for one room, read straight off the escrow ledger tables
+// (the same rows BountyEscrow.balances/metrics fold): bounty_records for
+// the by-group / locked / disputed sums, bounty_journal for balances.
+function collectRoomCredits(store, roomId) {
+  const empty = { byGroup: null, lockedMillis: 0, disputedMillis: 0, poolBalanceMillis: 0, agentBalances: [] };
+  if (!hasTable(store, "bounty_records")) return empty;
+  const byGroup = Object.fromEntries(BOUNTY_GROUPS.map(group => [group, { count: 0, amountMillis: 0 }]));
+  let lockedMillis = 0, disputedMillis = 0;
+  for (const row of store.db.prepare(
+    "SELECT state, amount_millis AS amountMillis FROM bounty_records WHERE room_id=?").all(roomId)) {
+    const group = stateGroup(row.state);
+    if (group !== null) { byGroup[group].count++; byGroup[group].amountMillis += row.amountMillis; }
+    if (LOCKED_BOUNTY_STATES.includes(row.state)) lockedMillis += row.amountMillis;
+    if (row.state === "disputed") disputedMillis += row.amountMillis;
+  }
+  let poolBalanceMillis = 0;
+  const agentBalances = [];
+  if (hasTable(store, "bounty_journal")) {
+    poolBalanceMillis = store.db.prepare(
+      "SELECT COALESCE(SUM(amount),0) AS total FROM bounty_journal WHERE room_id=? AND account_id=?")
+      .get(roomId, POOL_ACCOUNT).total;
+    const rows = store.db.prepare(
+      `SELECT account_id AS accountId, lot_state AS lotState, COALESCE(SUM(amount),0) AS total
+       FROM bounty_journal WHERE room_id=? AND account_id<>? GROUP BY account_id, lot_state`).all(roomId, POOL_ACCOUNT);
+    const byAccount = new Map();
+    for (const row of rows) {
+      if (!byAccount.has(row.accountId)) byAccount.set(row.accountId, { accountId: row.accountId, totalMillis: 0 });
+      const entry = byAccount.get(row.accountId);
+      if (LOT_STATES.includes(row.lotState)) entry[row.lotState + "Millis"] = row.total;
+      entry.totalMillis += row.total;
+    }
+    agentBalances.push(...[...byAccount.values()].sort((a, b) => a.accountId.localeCompare(b.accountId))
+      .map(entry => Object.freeze({ payableMillis: 0, lockedMillis: 0, attributedMillis: 0, approvedMillis: 0, ...entry })));
+  }
+  return { byGroup, lockedMillis, disputedMillis, poolBalanceMillis, agentBalances };
+}
+
+// §5.3: reported cents ÷ accepted outcomes, denominator always shown.
+// Ratio suppressed at n=0; "unknown" when every attempt is unreported.
+function costPerOutcome(totals) {
+  const { reportedCents, unreportedAttempts, acceptedOutcomes } = totals;
+  if (acceptedOutcomes === 0) {
+    return Object.freeze({ status: "no_outcomes", ratioCents: null, acceptedOutcomes,
+      unreportedAttempts, label: "no accepted outcomes in window" });
+  }
+  if (reportedCents === "unknown") {
+    return Object.freeze({ status: "unknown", ratioCents: null, acceptedOutcomes,
+      unreportedAttempts, label: "unknown" });
+  }
+  const ratioCents = reportedCents / acceptedOutcomes;
+  return Object.freeze({ status: "ok", ratioCents, acceptedOutcomes, unreportedAttempts,
+    label: `$${(ratioCents / 100).toFixed(2)} / accepted outcome (n=${acceptedOutcomes}, ${unreportedAttempts} unreported)` });
+}
+
+function totalsOf(entries) {
+  let reported = 0, reportedAttempts = 0, unreportedAttempts = 0, acceptedOutcomes = 0;
+  for (const entry of entries) {
+    for (const attempt of entry.attempts) {
+      if (attempt.spendCents === null) unreportedAttempts++;
+      else { reportedAttempts++; reported += attempt.spendCents; }
+    }
+    acceptedOutcomes += entry.acceptedOutcomes;
+  }
+  return { reportedCents: reportedAttempts > 0 ? reported : "unknown", reportedAttempts, unreportedAttempts, acceptedOutcomes };
+}
+
+function buildMoneySection(moneyRooms) {
+  const roomsC = [], roomsR = [], tasks = [], agentsC = [], agentsR = [];
+  for (const entry of moneyRooms) {
+    const { base, report } = entry;
+    const periodStartMs = ms(report.period?.since), periodEndMs = ms(report.period?.until);
+    const elapsed = periodStartMs !== null && periodEndMs !== null
+      ? Math.max(1, Math.round((periodEndMs - periodStartMs) / DAY_MS)) : (report.period?.days ?? 30);
+    roomsC.push(Object.freeze({
+      ...base,
+      allowanceCents: report.allowance?.allowanceCents ?? null,
+      periodDays: report.period?.days ?? null,
+      spentCents: report.spentCents, reservedCents: report.reservedCents,
+      heldCents: report.heldCents, committedCents: report.committedCents,
+      headroomCents: report.headroomCents, overCents: report.overCents,
+      burnRateCentsPerDay: Math.round((report.spentCents / elapsed) * 100) / 100,
+      burnFraction: report.allowance?.allowanceCents ? report.committedCents / report.allowance.allowanceCents : null,
+      drill: Object.freeze({ action: "review", method: "GET", path: `/api/rooms/${base.roomId}/spend-allowance` }),
+    }));
+    tasks.push(...entry.tasks);
+    agentsC.push(...entry.agents);
+    const credits = entry.credits;
+    roomsR.push(Object.freeze({
+      ...base,
+      byGroup: credits.byGroup === null ? null : Object.freeze(Object.fromEntries(
+        Object.entries(credits.byGroup).map(([group, sums]) => [group, Object.freeze(sums)]))),
+      lockedMillis: credits.lockedMillis,
+      disputedMillis: credits.disputedMillis,
+      poolBalanceMillis: credits.poolBalanceMillis,
+      drill: Object.freeze({ action: "review", method: "GET", path: `/api/rooms/${base.roomId}/bounties` }),
+    }));
+    for (const balance of credits.agentBalances) {
+      agentsR.push(Object.freeze({ ...base, ...balance }));
+    }
+  }
+  const totals = totalsOf(moneyRooms);
+  return Object.freeze({
+    cents: Object.freeze({
+      unit: "cents", source: "agent-reported",
+      rooms: Object.freeze(roomsC), tasks: Object.freeze(tasks), agents: Object.freeze(agentsC),
+      totals: Object.freeze({ reportedCents: totals.reportedCents,
+        reportedAttempts: totals.reportedAttempts, unreportedAttempts: totals.unreportedAttempts }),
+      costPerAcceptedOutcome: costPerOutcome(totals),
+    }),
+    credits: Object.freeze({
+      unit: "milli-credits",
+      rooms: Object.freeze(roomsR), agents: Object.freeze(agentsR),
+      totals: Object.freeze({
+        lockedMillis: moneyRooms.reduce((sum, entry) => sum + entry.credits.lockedMillis, 0),
+        disputedMillis: moneyRooms.reduce((sum, entry) => sum + entry.credits.disputedMillis, 0),
+        poolBalanceMillis: moneyRooms.reduce((sum, entry) => sum + entry.credits.poolBalanceMillis, 0),
+      }),
+    }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Slice 2 (§3) — Roster. One row per (agent × room), derived from
+// store.presence() (host status, last seen, live working map) plus the
+// room's board claims (claimIdle stalled derivation), the member's session
+// records (blocked), its autonomy tier, its per-room reputation band and
+// its latest journal-stamped bounty receipt. Humans and guests excluded.
+// ---------------------------------------------------------------------------
+
+function collectRoomRoster({ store, token, binding }, roomId, base, state, nowMs, moneyEntry, rosterRows) {
+  let presenceDoc = null;
+  try { presenceDoc = store.presence(token, roomId, [], binding); } catch { presenceDoc = null; }
+  const presenceByMember = new Map((presenceDoc?.members ?? []).map(member => [member.memberId, member]));
+  const escrow = store.bountyEscrow ?? null;
+
+  let claims = [];
+  try { claims = store.workClaims?.list(roomId) ?? []; } catch { claims = []; }
+  const claimsByOwner = new Map();
+  for (const claim of claims) {
+    if (!claim || claim.owner == null || TERMINAL_CLAIM_STATES.has(claim.state)) continue;
+    if (!claimsByOwner.has(claim.owner)) claimsByOwner.set(claim.owner, []);
+    claimsByOwner.get(claim.owner).push(claim);
+  }
+
+  const lastReceiptByLane = latestReceiptsByLane(store, roomId);
+  const members = Object.values(state.members ?? {})
+    .filter(member => member && member.kind === "agent" && member.system !== true && member.active !== false)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  for (const member of members) {
+    const presenceRow = presenceByMember.get(member.id) ?? null;
+    const hostStatus = presenceRow?.presence?.status ?? null;
+    const workingOn = presenceRow?.workingOn ?? [];
+    const sessions = Object.values(state.workItems ?? {})
+      .map(item => ({ item, session: sessionRecord(item) }))
+      .filter(({ session }) => session.worker_member_id === member.id);
+    const blocked = sessions.some(({ session }) =>
+      session.suspended_by !== null || (session.stop_requested_at !== null
+        && ["processing", "active", "suspended"].includes(session.status)));
+    const stalled = (claimsByOwner.get(member.id) ?? []).some(claim => claimIdle(claim, nowMs));
+    const workState = hostStatus === "offline" ? "offline"
+      : workingOn.length > 0 ? "working"
+      : stalled ? "stalled"
+      : blocked ? "blocked" : "idle";
+
+    let reputationBand = null;
+    if (escrow && hasTable(store, "bounty_events")) {
+      try { reputationBand = reputationSummary(escrow, roomId, canonicalLane(member.id), { nowMs }).band; }
+      catch { reputationBand = null; }
+    }
+    let autonomyTier = DEFAULT_AUTONOMY_TIER;
+    try { autonomyTier = getTier(store.db, roomId, member.id)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER; }
+    catch { autonomyTier = DEFAULT_AUTONOMY_TIER; }
+
+    const cost = moneyEntry?.byAgent.get(member.id);
+    const lane = canonicalLane(member.id);
+    const receipt = lastReceiptByLane.get(lane) ?? null;
+    rosterRows.push(Object.freeze({
+      ...base,
+      memberId: member.id,
+      displayName: member.displayName ?? member.id,
+      identityId: presenceRow?.ownerIdentityId ?? null,
+      hostStatus,
+      lastSeenAt: presenceRow?.lastSeenAt ?? null,
+      currentWork: workingOn.length > 0 ? Object.freeze({ ...workingOn[0] }) : null,
+      workState,
+      autonomyTier,
+      reputationBand,
+      lastReceipt: receipt === null ? null : Object.freeze({
+        receiptId: receipt.receiptId, bountyId: receipt.bountyId, at: receipt.at,
+        drill: Object.freeze({ action: "review", method: "GET",
+          path: `/api/rooms/${roomId}/bounties/${encodeURIComponent(receipt.bountyId)}` }),
+      }),
+      periodCostCents: cost ? groupSpend(cost) : "unknown",
+      unreportedAttempts: cost?.unreported ?? 0,
+      lifetimeAcceptedOutcomes: lifetimeAcceptedOutcomes(store, state, roomId, member.id),
+    }));
+  }
+}
+
+// Lifetime (all-time, per room) accepted outcomes for one member: work
+// items they hold that reached completed, plus bounties they claimed
+// that reached paid (the escrow records carry no bounty↔work-item link,
+// so the two recorded sources are counted as recorded).
+function lifetimeAcceptedOutcomes(store, state, roomId, memberId) {
+  let count = 0;
+  if (hasTable(store, "bounty_records")) {
+    count += store.db.prepare(
+      "SELECT COUNT(*) AS n FROM bounty_records WHERE room_id=? AND state='paid' AND claimant=?")
+      .get(roomId, canonicalLane(memberId)).n;
+  }
+  for (const item of Object.values(state.workItems ?? {})) {
+    if (!item || item.state !== "completed") continue;
+    const session = sessionRecord(item);
+    if (session.worker_member_id === memberId || item.claim?.owner === memberId
+      || item.accountableMemberId === memberId) count++;
+  }
+  return count;
+}
+
+// Latest signed-receipt linkage per ledger lane, from the journal — the
+// same receipt_id stamping escrow.history() surfaces as signedReceiptIds.
+function latestReceiptsByLane(store, roomId) {
+  const byLane = new Map();
+  if (!hasTable(store, "bounty_journal")) return byLane;
+  const hasReceiptId = store.db.prepare(
+    "SELECT 1 FROM pragma_table_info('bounty_journal') WHERE name='receipt_id'").get();
+  if (!hasReceiptId) return byLane;
+  const rows = store.db.prepare(
+    `SELECT account_id AS accountId, receipt_id AS receiptId, bounty_id AS bountyId, at
+     FROM bounty_journal WHERE room_id=? AND receipt_id IS NOT NULL ORDER BY at DESC, entry_id DESC`).all(roomId);
+  for (const row of rows) {
+    if (!byLane.has(row.accountId)) {
+      byLane.set(row.accountId, { receiptId: row.receiptId, bountyId: row.bountyId, at: row.at });
+    }
+  }
+  return byLane;
+}
+
+function buildRosterSection(rosterRows) {
+  const byIdentity = new Map();
+  for (const row of rosterRows) {
+    const key = row.identityId ?? row.memberId;
+    if (!byIdentity.has(key)) {
+      byIdentity.set(key, { identityId: row.identityId, memberId: row.memberId,
+        displayName: row.displayName, rooms: [] });
+    }
+    byIdentity.get(key).rooms.push(row);
+  }
+  const counts = { total: rosterRows.length, working: 0, idle: 0, stalled: 0, blocked: 0, offline: 0 };
+  for (const row of rosterRows) counts[row.workState]++;
+  return Object.freeze({
+    total: rosterRows.length,
+    counts: Object.freeze(counts),
+    agents: Object.freeze([...byIdentity.values()].map(group => Object.freeze({
+      ...group, rooms: Object.freeze(group.rooms) }))),
+    rows: Object.freeze(rosterRows),
+  });
 }
