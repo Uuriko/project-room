@@ -58,6 +58,115 @@ export const workClaimSchema = `
   );
 `;
 
+// PERF-BUILDS P0-1: generated probe columns over item_json, so the job
+// due probes (claimDueAt / autolinkDueAt in server/jobs.mjs) are index
+// lookups instead of full scans that json_extract every row. The columns
+// COALESCE the enveloped ($.data.*) and legacy ($.*) shapes exactly as the
+// probes' OR clauses did. Kept OUT of workClaimSchema: the strict DDL-text
+// verifySchema compares the stored CREATE TABLE verbatim, and deployed
+// tables carry the old text — the columns converge additively via
+// ensureWorkClaimProbeColumns (the agent-heartbeats additive pattern),
+// and workClaimProbeSchema is hashed into the room schema stamp so a
+// warm wake whose stamp predates the columns runs the full schema pass
+// once and gains them.
+//
+// P0-1-RESHAPE (RESEARCH-WAVE STORAGE §4.0, measured): the due index is
+// PARTIAL — (claim_state, claim_next_poll_at) WHERE claim_pr_url IS NOT
+// NULL AND claim_pr_outcome IS NULL — and every production call site
+// (jobs claimDueAt, claim-pr-sync due/verification polls,
+// agent-identities claims-by-owner) references the columns with that
+// predicate shape; a COALESCE expression index leaves the OR'd
+// dual-path probes at SCAN, and the earlier non-partial multi-column
+// index lost to a scan at production selectivity. The column set also
+// carries claim_owner, claim_pr_rate_limited_until and
+// claim_delivery_mode so those call sites convert too.
+export const WORK_CLAIM_PROBE_COLUMNS = Object.freeze({
+  claim_state: "COALESCE(json_extract(item_json, '$.data.state'), json_extract(item_json, '$.state'))",
+  claim_pr_url: "COALESCE(json_extract(item_json, '$.data.pullRequest.url'), json_extract(item_json, '$.pullRequest.url'))",
+  claim_pr_outcome: "COALESCE(json_extract(item_json, '$.data.pullRequest.outcome'), json_extract(item_json, '$.pullRequest.outcome'))",
+  claim_next_poll_at: "COALESCE(json_extract(item_json, '$.data.pullRequest.nextPollAt'), json_extract(item_json, '$.pullRequest.nextPollAt'), 0)",
+  claim_repo: "COALESCE(json_extract(item_json, '$.data.repo'), json_extract(item_json, '$.repo'))",
+  claim_owner: "COALESCE(json_extract(item_json, '$.data.owner'), json_extract(item_json, '$.owner'))",
+  claim_pr_rate_limited_until: "COALESCE(json_extract(item_json, '$.data.pullRequest.rateLimitedUntil'), json_extract(item_json, '$.pullRequest.rateLimitedUntil'))",
+  claim_delivery_mode: "COALESCE(json_extract(item_json, '$.data.deliveryMode'), json_extract(item_json, '$.deliveryMode'))"
+});
+export const workClaimProbeSchema = `
+  CREATE INDEX IF NOT EXISTS work_claims_due_probe ON work_claims(claim_state, claim_next_poll_at) WHERE claim_pr_url IS NOT NULL AND claim_pr_outcome IS NULL;
+  CREATE INDEX IF NOT EXISTS work_claims_owner_probe ON work_claims(claim_state, claim_owner);
+`;
+const PROBE_COLUMN_TYPES = Object.freeze({
+  claim_state: "TEXT", claim_pr_url: "TEXT", claim_pr_outcome: "TEXT",
+  claim_next_poll_at: "INTEGER", claim_repo: "TEXT", claim_owner: "TEXT",
+  claim_pr_rate_limited_until: "INTEGER", claim_delivery_mode: "TEXT"
+});
+// Add any missing probe column and the probe indexes. Idempotent; a
+// no-op when work_claims does not exist yet (the schema pass creates the
+// table first, then calls this). Returns true when the table exists.
+// A due-probe index left by the pre-reshape P0-1 shape (non-partial) is
+// dropped and recreated: CREATE INDEX IF NOT EXISTS would keep it.
+export function ensureWorkClaimProbeColumns(db) {
+  if (!db?.prepare) return false;
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_claims'").get()) return false;
+  const present = new Set(db.prepare("SELECT name FROM pragma_table_xinfo('work_claims')").all().map(row => row.name));
+  for (const [name, expression] of Object.entries(WORK_CLAIM_PROBE_COLUMNS)) {
+    if (!present.has(name)) {
+      db.exec(`ALTER TABLE work_claims ADD COLUMN ${name} ${PROBE_COLUMN_TYPES[name]} GENERATED ALWAYS AS (${expression}) VIRTUAL`);
+    }
+  }
+  const dueIndex = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='work_claims_due_probe'").get()?.sql ?? "";
+  if (dueIndex && !/\bWHERE\b/i.test(dueIndex)) db.exec("DROP INDEX work_claims_due_probe");
+  db.exec(workClaimProbeSchema);
+  return true;
+}
+
+// Split a CREATE TABLE statement into its top-level comma-separated
+// definitions (paren-depth aware, single-quoted strings skipped).
+function splitTopLevelDefinitions(sql) {
+  const open = sql.indexOf("(");
+  const close = sql.lastIndexOf(")");
+  if (open < 0 || close <= open) return null;
+  const parts = [];
+  let depth = 0, start = open + 1, quoted = false;
+  for (let i = open; i <= close; i++) {
+    const ch = sql[i];
+    if (quoted) { if (ch === "'") quoted = false; continue; }
+    if (ch === "'") { quoted = true; continue; }
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth -= 1;
+    else if (ch === "," && depth === 1) { parts.push(sql.slice(start, i)); start = i + 1; }
+  }
+  parts.push(sql.slice(start, close));
+  return { head: sql.slice(0, open + 1), parts, tail: sql.slice(close) };
+}
+
+// Remove the generated probe-column definitions from a stored CREATE
+// TABLE text, verifying each removed definition matches the expected
+// generated column exactly. ALTER TABLE ADD COLUMN rewrites the stored
+// text, so without this the strict DDL-text comparison in verifySchema
+// refused every converged database. Any other drift is left in place
+// for that comparison to refuse; a probe definition that does not match
+// its expected form yields null (the caller refuses).
+export function stripWorkClaimProbeColumns(sql) {
+  if (typeof sql !== "string") return sql;
+  const split = splitTopLevelDefinitions(sql);
+  if (!split) return sql;
+  const expected = new Map(Object.entries(WORK_CLAIM_PROBE_COLUMNS).map(([name, expression]) =>
+    [name, `${name} ${PROBE_COLUMN_TYPES[name]} GENERATED ALWAYS AS (${expression}) VIRTUAL`.replace(/\s+/g, " ").trim()]));
+  const kept = [];
+  let removed = 0;
+  for (const part of split.parts) {
+    const name = part.trim().split(/\s+/)[0];
+    if (expected.has(name)) {
+      if (part.replace(/\s+/g, " ").trim() !== expected.get(name)) return null;
+      removed += 1;
+      continue;
+    }
+    kept.push(part);
+  }
+  if (!removed) return sql;
+  return `${split.head}${kept.join(",")}${split.tail}`;
+}
+
 const parse = text => {
   const value = JSON.parse(text);
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("work claim row is not an object");
@@ -92,7 +201,13 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
       const definitions = workClaimSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean);
       const shapes = definitions.map(sql => ({ sql, actual: db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(/CREATE TABLE IF NOT EXISTS ([a-z_]+)/.exec(sql)[1])?.sql }));
       if (allowAbsent && shapes.every(shape => shape.actual === undefined)) return false;
-      if (shapes.some(shape => normalize(shape.sql) !== normalize(shape.actual))) throw new Error("Work-claim schema requires operator reconciliation");
+      // The work_claims table may carry the generated probe columns:
+      // strip (and check) exactly those definitions before comparing —
+      // ALTER TABLE rewrote the stored text when they converged.
+      if (shapes.some(shape => normalize(shape.sql) !== normalize(
+        shape.actual === undefined ? undefined : stripWorkClaimProbeColumns(shape.actual)))) {
+        throw new Error("Work-claim schema requires operator reconciliation");
+      }
       return true;
     },
     get(roomId, id) {

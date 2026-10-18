@@ -65,7 +65,7 @@ import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
 import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
-import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
+import { createDurableWorkClaimRegistry, workClaimSchema, ensureWorkClaimProbeColumns, workClaimProbeSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
 import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
@@ -1130,7 +1130,7 @@ function roomSchemaStamp() {
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     wakeQueuePauseBySchema,
-    attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
+    attentionSchema, workClaimSchema, workClaimProbeSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
@@ -1302,6 +1302,7 @@ const LOOKUP_INDEXES = `
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+const ANY_WRITE = /^\s*(?:insert|update|delete|replace)\b/i;
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
@@ -1745,6 +1746,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.workClaims.verifySchema({ allowAbsent: true });
       this.db.exec(workClaimSchema);
       this.workClaims.verifySchema();
+      // PERF-BUILDS P0-1: converge the generated due-probe columns + index
+      // additively (kept out of workClaimSchema for the DDL-text verify).
+      ensureWorkClaimProbeColumns(this.db);
       // RC-2026-09-18-051: wakeable agent presence — host heartbeats and the
       // wake-signal queue are purely additive as well: IF NOT EXISTS is
       // idempotent, no schema version bump.
@@ -3269,10 +3273,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const stmt = prepare(sql);
       if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
       const roomsWrite = ROOMS_WRITE.test(sql), eventAppend = EVENT_APPEND.test(sql);
-      if (!roomsWrite && !eventAppend) return stmt;
+      const anyWrite = ANY_WRITE.test(sql);
+      if (!roomsWrite && !eventAppend && !anyWrite) return stmt;
       const run = stmt.run.bind(stmt);
       stmt.run = (...args) => {
         const result = run(...args);
+        // PERF-BUILDS P0-1: every successful write statement bumps the
+        // write stamp. A write rolled back later still bumped it — the
+        // stamp is a dirty counter, so it may over-report writes, never
+        // under-report them; consumers (the job next-due cache, the
+        // per-request alarm gate) only ever do redundant work on a
+        // false positive, never miss a real write.
+        if (anyWrite) this._writesSeen = (this._writesSeen ?? 0) + 1;
         if (roomsWrite) invalidate();
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
@@ -3285,11 +3297,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
+        if (typeof sql === "string" && ANY_WRITE.test(sql)) this._writesSeen = (this._writesSeen ?? 0) + 1;
         if (typeof sql === "string" && ROOMS_WRITE.test(sql)) invalidate();
         return result;
       };
     }
   }
+  // PERF-BUILDS P0-1: the store's write stamp — how many write statements
+  // have successfully run against this store since it opened (see
+  // _armProjectionWatch). transaction() arms the watch on entry, so any
+  // write committed through a transaction is counted before its commit
+  // returns. Purely in-memory; a fresh store starts at 0.
+  writeStamp() { return this._writesSeen ?? 0; }
   // An events row was inserted for `roomId`. Inside a transaction the append
   // is only pending: it becomes visible to stream pumps when the outermost
   // transaction commits (_flushEventAppends, called from transaction()), and
