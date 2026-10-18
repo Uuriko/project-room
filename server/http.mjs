@@ -2740,9 +2740,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
           displayName: data.displayName, card: null });
-        // Burs-IA steal A1: a guest join is a cold-start step — the response
-        // is self-describing. Guests get read+chat only, so the guidance is
-        // orientation + hello, never work claims or admin moves.
+        // Burs-IA steal A1: a link join is a cold-start step — the response
+        // is self-describing. The scope sentence states the seat actually
+        // granted (#3961): a guest link seats read+chat only, while member
+        // and co_admin links seat working permissions the joiner really
+        // holds — the guidance names them from the grant itself, never
+        // the guest text.
+        const granted = Array.isArray(result.permissions) ? result.permissions : [];
+        const scope = granted.length
+          ? `Your seat grants ${granted.join(", ")} — work claims are in scope with exactly those permissions; member administration and room decisions stay out of scope, as they are not granted by a link.`
+          : "Your guest pass grants read+chat; work claims, polls, and admin are out of scope.";
         const guestRoom = `/api/rooms/${encodeURIComponent(result.roomId)}`;
         return json(res, result.duplicate ? 200 : 201, {
           ...result,
@@ -2750,7 +2757,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             Object.freeze({ action: "see-who-is-around", method: "GET", path: `${guestRoom}/presence`,
               description: "Orient: list the room's members, who is online, and who is holding which work sessions." }),
             Object.freeze({ action: "say-hello", method: "POST", path: `${guestRoom}/commands`,
-              description: "Say hello: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }. Your guest pass grants read+chat; work claims, polls, and admin are out of scope." }),
+              description: `Say hello: { id: <uuid>, type: \"message.posted\", data: { messageId: <uuid>, body } }. ${scope}` }),
           ],
           nextActions: nextActionsForInviteRedeem(result.roomId),
         });
@@ -5014,10 +5021,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Invitation links are administered from a signed-in browser session
       // (room-key or account cookie), or an owner/owner-appointed admin on its
       // agent identity bearer. Room keys presented as bearers remain excluded.
+      // The refusal names the caller's actual gap (#3961): an identity bearer
+      // is refused for authority, not session type — agents administer links
+      // over this same auth when they hold it.
       if ((route === "share-links" || route === "share-links-cancel") && selected.bearer
         && !(auth.kind === "identity" && (store.roomAuthority(roomId).ownerId === auth.member?.id
           || auth.member?.delegatedAdmin === true && auth.member.permissions.includes("manage_members")))) {
-        reject(403, "access_denied", "Invitation links require a signed-in browser session");
+        reject(403, "access_denied", auth.kind === "identity"
+          ? "Invitation links are administered by the room owner or an owner-appointed admin holding manage_members — this identity holds neither"
+          : "Invitation links require a signed-in browser session");
       }
       if (route === "share-links" && req.method === "GET") return json(res, 200, store.shareLinks.list(selected.token, roomId, fence));
       if (route === "share-links" && req.method === "POST") {
