@@ -7,6 +7,7 @@ import { connectSnippets, HOSTED_MCP_URL, WORK_LOOP, renderedSnippet } from "../
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://room.trydemigod.com";
 export const PASTE_PAGE = Object.freeze({ id: "paste", docsPath: "/docs/agents/paste", htmlFile: "docs/agents/paste.html" });
+export const MCP_PAGE = Object.freeze({ id: "mcp", docsPath: "/docs/agents/mcp", htmlFile: "docs/agents/mcp.html" });
 
 const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -131,16 +132,27 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
-function page({ title, description, path, body, steps }) {
+function page({ title, description, path, body, steps, extraLd = [] }) {
   const canonical = ORIGIN + path;
+  const ogImage = `${ORIGIN}/og/home.png`;
+  const extraScripts = extraLd.map(entry => `\n<script type="application/ld+json">${JSON.stringify(entry).replaceAll("<", "\\u003c")}</script>`).join("");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escape(title)}</title>
 <meta name="description" content="${escape(description)}">
 <link rel="canonical" href="${canonical}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:url" content="${canonical}">
+<meta property="og:title" content="${escape(title)}">
+<meta property="og:description" content="${escape(description)}">
+<meta property="og:image" content="${ogImage}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${escape(title)}">
+<meta name="twitter:description" content="${escape(description)}">
+<meta name="twitter:image" content="${ogImage}">
 <style>${style}</style>
-<script type="application/ld+json">${howTo(title, steps)}</script>
+<script type="application/ld+json">${howTo(title, steps)}</script>${extraScripts}
 </head><body><main>
 ${body}
 <footer><a href="/docs/agents">All agents</a> · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
@@ -178,6 +190,27 @@ export function agentPages(dir = join(root, "docs", "agents")) {
     path: PASTE_PAGE.docsPath,
     body: renderMarkdown(pasteMd, { labelPrefix: "Paste block" }),
     steps: sections(pasteMd),
+  }));
+  // AEO Lane 3 (2026-10-17): the MCP subject page. Same renderer and secret
+  // guard as the tool pages; HowTo steps come from its sections, and it also
+  // carries SoftwareApplication JSON-LD so engines can cite the server itself.
+  const mcpMd = readFileSync(join(dir, MCP_PAGE.id + ".md"), "utf8");
+  if (/pri_[A-Za-z0-9_-]{8,}/.test(mcpMd)) throw new Error("mcp page contains a secret");
+  if (!indexMd.includes(`(${MCP_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the mcp page");
+  pages.set(MCP_PAGE.htmlFile, page({
+    title: "The Project Room MCP server",
+    description: "The hosted Project Room MCP server: an MCP server for task marketplaces and multi-agent collaboration. Endpoint, public and enrolled tools, the official registry listing, and enrollment.",
+    path: MCP_PAGE.docsPath,
+    body: renderMarkdown(mcpMd, { labelPrefix: "MCP server" }),
+    steps: sections(mcpMd),
+    extraLd: [{
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      name: "Project Room",
+      url: `${ORIGIN}/`,
+      applicationCategory: "BusinessApplication",
+      operatingSystem: "Web",
+    }],
   }));
   const indexBody = renderMarkdown(indexMd) + "<ul>" + connectSnippets.map(tool => `<li><a href="${tool.docsPath}">${escape(tool.label)}</a> — <code>${escape(tool.command)}</code></li>`).join("") + "</ul>";
   pages.set("docs/agents/index.html", page({
