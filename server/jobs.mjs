@@ -602,13 +602,15 @@ export const JOBS = Object.freeze([
     slow: true,
     runtimes: Object.freeze(["worker", "node"]),
     // P0-6: archiveRoomMessages had no caller, so a room's projection grew
-    // toward the 4 MiB cap (PILOT_LIMITS.projectionBytes) until writes
-    // refused. This job wakes only while some room's stored projection is
-    // at or over 70% of the cap (see messages-archive.mjs for the math) —
-    // the registry's standing rule that an idle store never wakes for it.
-    // Slow, like store-growth and integrity: it rides the safety-net cron.
+    // toward the storage limit until writes refused. Sizing uses the 2 MB
+    // Durable Object row-limit contract (ARCHIVE_CAP_BYTES in
+    // messages-archive.mjs), not the 4 MiB application cap. This job wakes
+    // only while some room's stored projection is at or over 70% of that
+    // contract — the registry's standing rule that an idle store never
+    // wakes for it. Slow, like store-growth and integrity: it rides the
+    // safety-net cron.
     enabled: (_env, store) => (store ? roomsOverArchiveTrigger(store).length > 0 : false),
-    disabledReason: () => "No room projection is at or over 70% of the projection cap",
+    disabledReason: () => "No room projection is at or over 70% of the 2 MB archive sizing contract",
     // Dry-run is the default posture: the tick reports what WOULD move per
     // room (count, bytes, oldest/newest, resulting projection size) and
     // moves nothing. Live archival takes the ROOM_MESSAGES_ARCHIVE_LIVE=1

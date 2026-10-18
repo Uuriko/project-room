@@ -21,9 +21,8 @@ import { ServiceError } from "./store.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";
 import { archiveRoomMessages } from "./messages-store.mjs";
 import {
-  ARCHIVE_MIN_KEEP_NEWEST, archiveDryRunReport, archiveTriggerBytes
+  ARCHIVE_CAP_BYTES, ARCHIVE_MIN_KEEP_NEWEST, archiveDryRunReport, archiveTriggerBytes
 } from "./messages-archive.mjs";
-import { PILOT_LIMITS } from "./store.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -109,11 +108,11 @@ export function createOperatorArchive(store) {
 // the same trigger context as the target-seeking report.
 function explicitDryRun(store, roomId, keepNewest) {
   const plan = store.archiveMessages(roomId, { keepNewest, dryRun: true });
-  const capBytes = PILOT_LIMITS.projectionBytes;
+  const capBytes = ARCHIVE_CAP_BYTES;
   const projectionBytes = plan.projectionBytesBefore ?? null;
   return {
     ok: plan.ok, roomId, dryRun: true, live: false,
-    projectionBytes, capBytes, triggerBytes: archiveTriggerBytes(capBytes),
+    projectionBytes, capBytes, capBasis: "durable-object-row-limit-2mb", triggerBytes: archiveTriggerBytes(capBytes),
     overTrigger: projectionBytes != null ? projectionBytes >= archiveTriggerBytes(capBytes) : null,
     keepNewest, wouldArchive: plan.archived ?? 0, plan
   };

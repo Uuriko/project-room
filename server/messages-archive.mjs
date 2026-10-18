@@ -1,8 +1,16 @@
 // P0-6: give archiveRoomMessages its two missing callers — an owner-only
 // operator route (server/operator-archive.mjs) and a threshold job in
 // server/jobs.mjs. This module is the shared core both call: when a room's
-// stored projection crosses 70% of the projection cap
-// (PILOT_LIMITS.projectionBytes, 4 MiB), archival is due for that room.
+// stored projection crosses 70% of the archive sizing contract (below),
+// archival is due for that room.
+//
+// Sizing basis: the application's own write cap is
+// PILOT_LIMITS.projectionBytes (4 MiB), but a room projection is a single
+// Durable Object storage row, and the published Durable Object row limit
+// is 2 MB — half the app cap. All archive sizing in this build (trigger,
+// target, dry-run accounting) therefore uses the 2 MB contract
+// (ARCHIVE_CAP_BYTES), not the 4 MiB app cap: headroom computed against
+// 4 MiB would overstate the real runway by 2×.
 //
 // Dry-run is the default posture everywhere. A plan reports what WOULD move
 // — message count, bytes, oldest/newest timestamps of the moving set, and
@@ -20,9 +28,11 @@
 // converts rather than expires). Flagged to the coordinator in the P0-6
 // report as the one spot where "nothing is throwaway" needs this nuance.
 
-import { PILOT_LIMITS } from "./store.mjs";
 import { archiveRoomMessages, roomProjectionBytes } from "./messages-store.mjs";
 
+// The archive sizing contract: 2 MB (2 × 1024 × 1024 bytes), the published
+// Durable Object row limit — NOT the 4 MiB application cap. See the header.
+export const ARCHIVE_CAP_BYTES = 2 * 1024 * 1024;
 export const ARCHIVE_TRIGGER_FRACTION = 0.7;
 // After a live run the room should sit at or below this share of the cap,
 // so the job does not re-trigger on the next tick for the same room.
@@ -39,20 +49,20 @@ export const ARCHIVE_MAX_PER_RUN = 5000;
 export const ARCHIVE_LIVE_ENV = "ROOM_MESSAGES_ARCHIVE_LIVE";
 
 // The first projection size, in bytes, that is over the trigger:
-// strictly more than 70% of the 4 MiB cap (0.70 × 4,194,304 = 2,936,012.8,
-// so 2,936,013 bytes is the first triggering size).
-export function archiveTriggerBytes(capBytes = PILOT_LIMITS.projectionBytes) {
+// strictly more than 70% of the 2 MB contract (0.70 × 2,097,152 =
+// 1,468,006.4, so 1,468,007 bytes is the first triggering size).
+export function archiveTriggerBytes(capBytes = ARCHIVE_CAP_BYTES) {
   return Math.floor(capBytes * ARCHIVE_TRIGGER_FRACTION) + 1;
 }
 
-export function archiveTargetBytes(capBytes = PILOT_LIMITS.projectionBytes) {
+export function archiveTargetBytes(capBytes = ARCHIVE_CAP_BYTES) {
   return Math.floor(capBytes * ARCHIVE_TARGET_FRACTION);
 }
 
 // Ids and stored sizes of every room over the trigger, largest first.
 // Returns [] when the rooms table cannot be read (a store without the
 // schema yet has no room that can be archived).
-export function roomsOverArchiveTrigger(store, capBytes = PILOT_LIMITS.projectionBytes) {
+export function roomsOverArchiveTrigger(store, capBytes = ARCHIVE_CAP_BYTES) {
   if (!store?.db?.prepare) return [];
   let rows;
   try {
@@ -71,7 +81,7 @@ export function roomsOverArchiveTrigger(store, capBytes = PILOT_LIMITS.projectio
 // back to the floor when even keeping the minimum cannot reach the target
 // (retained messages alone exceed it) — the plan then reports the honest
 // remainder. Returns null when no plan can be produced for the room.
-export function planArchiveToTarget(store, roomId, { capBytes = PILOT_LIMITS.projectionBytes, targetBytes = archiveTargetBytes(capBytes) } = {}) {
+export function planArchiveToTarget(store, roomId, { capBytes = ARCHIVE_CAP_BYTES, targetBytes = archiveTargetBytes(capBytes) } = {}) {
   const probe = keep => {
     try { return store.archiveMessages(roomId, { keepNewest: keep, dryRun: true }); }
     catch { return null; }
@@ -107,13 +117,13 @@ export function planArchiveToTarget(store, roomId, { capBytes = PILOT_LIMITS.pro
 // One room's dry-run report: the archive plan against the trigger math.
 // live:false and nothing moved — the plan comes from archiveRoomMessages
 // in its default dry-run mode.
-export function archiveDryRunReport(store, roomId, { capBytes = PILOT_LIMITS.projectionBytes } = {}) {
+export function archiveDryRunReport(store, roomId, { capBytes = ARCHIVE_CAP_BYTES } = {}) {
   const projectionBytes = roomProjectionBytes(store, roomId);
   if (projectionBytes == null) return { ok: false, reason: "room_not_found", roomId };
   const triggerBytes = archiveTriggerBytes(capBytes);
   const base = {
     ok: true, roomId, dryRun: true, live: false,
-    projectionBytes, capBytes, triggerBytes,
+    projectionBytes, capBytes, capBasis: "durable-object-row-limit-2mb", triggerBytes,
     overTrigger: projectionBytes >= triggerBytes
   };
   const planned = planArchiveToTarget(store, roomId, { capBytes });
@@ -131,7 +141,7 @@ export function archiveDryRunReport(store, roomId, { capBytes = PILOT_LIMITS.pro
 
 // The job's live mode for one room: same plan as the dry-run report, then
 // one bounded live pass. Never called unless the caller opted in.
-export function runLiveArchive(store, roomId, { capBytes = PILOT_LIMITS.projectionBytes } = {}) {
+export function runLiveArchive(store, roomId, { capBytes = ARCHIVE_CAP_BYTES } = {}) {
   const planned = planArchiveToTarget(store, roomId, { capBytes });
   if (!planned) return { ok: false, reason: "archive_unavailable", roomId };
   if (planned.plan.archived === 0) return { ...planned.plan, roomId };
@@ -154,7 +164,7 @@ export function archiveLiveOptedIn(env = globalThis.process?.env ?? {}) {
 // One job tick over every room past the trigger. Default posture is
 // dry-run: the tick returns the per-room reports and moves nothing. With
 // the env opt-in it runs one bounded live pass per room instead.
-export function runMessagesArchiveTick(store, { env = globalThis.process?.env ?? {}, capBytes = PILOT_LIMITS.projectionBytes } = {}) {
+export function runMessagesArchiveTick(store, { env = globalThis.process?.env ?? {}, capBytes = ARCHIVE_CAP_BYTES } = {}) {
   const live = archiveLiveOptedIn(env);
   const rooms = roomsOverArchiveTrigger(store, capBytes);
   const reports = [];

@@ -17,14 +17,16 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import {
-  ARCHIVE_MIN_KEEP_NEWEST, archiveLiveOptedIn, archiveTargetBytes, archiveTriggerBytes,
+  ARCHIVE_CAP_BYTES, ARCHIVE_MIN_KEEP_NEWEST, archiveLiveOptedIn, archiveTargetBytes, archiveTriggerBytes,
   roomsOverArchiveTrigger, runMessagesArchiveTick, archiveDryRunReport
 } from "../server/messages-archive.mjs";
 import { JOBS, jobByName, jobEnabled } from "../server/jobs.mjs";
 
 const TOKEN = "operator-archive-test-token-0123456789";
 const HASH = createHash("sha256").update(TOKEN).digest("hex");
-const CAP = 4 * 1024 * 1024;
+// The sizing contract is the 2 MB Durable Object row limit, not the
+// 4 MiB application cap (PILOT_LIMITS.projectionBytes).
+const CAP = 2 * 1024 * 1024;
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -84,10 +86,11 @@ function padProjection(store, targetBytes, roomId = "commons") {
   return projectionBytes(store, roomId);
 }
 
-test("trigger math: 70% of the 4 MiB cap, first triggering byte is 2,936,013", () => {
-  assert.equal(archiveTriggerBytes(), 2_936_013);
+test("trigger math: 70% of the 2 MB contract, first triggering byte is 1,468,007", () => {
+  assert.equal(ARCHIVE_CAP_BYTES, CAP);
+  assert.equal(archiveTriggerBytes(), 1_468_007);
   assert.equal(archiveTriggerBytes(CAP), Math.floor(CAP * 0.7) + 1);
-  assert.ok(2_936_012 < CAP * 0.7 && 2_936_013 > CAP * 0.7);
+  assert.ok(1_468_006 < CAP * 0.7 && 1_468_007 > CAP * 0.7);
   assert.equal(archiveTargetBytes(), Math.floor(CAP * 0.5));
   assert.equal(archiveLiveOptedIn({}), false);
   assert.equal(archiveLiveOptedIn({ ROOM_MESSAGES_ARCHIVE_LIVE: "1" }), true);
@@ -143,6 +146,7 @@ test("archiveDryRunReport reports what would move for an over-trigger room", t =
   assert.equal(report.live, false);
   assert.equal(report.overTrigger, true);
   assert.equal(report.capBytes, CAP);
+  assert.equal(report.capBasis, "durable-object-row-limit-2mb");
   assert.equal(report.triggerBytes, archiveTriggerBytes());
   assert.ok(report.keepNewest >= ARCHIVE_MIN_KEEP_NEWEST);
   assert.equal(report.wouldArchive, report.plan.archived);
