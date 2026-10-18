@@ -1551,6 +1551,17 @@ const ROWS = [
     }
   },
   {
+    "table": "public_receipts_projection_stamp",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "room_public_settings",
     "key": "room_id",
     "action": "delete",

@@ -66,6 +66,13 @@ const parse = text => {
 
 export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
+  // Per-room change counter (PR-1 receipt gate): bumped on every set/delete
+  // in this process, so a consumer can fingerprint the registry's inputs
+  // without listing every claim. Monotonic per process; a fresh registry
+  // starts at 0, which simply never matches a stamp written by another
+  // process instance — consumers must treat a mismatch as "changed".
+  const changeCounts = new Map();
+  const bumpChange = roomId => changeCounts.set(roomId, (changeCounts.get(roomId) ?? 0) + 1);
   // Prepare lazily: RoomStore constructs services before its atomic schema migration.
   const statement = sql => ({
     get: (...args) => db.prepare(sql).get(...args),
@@ -102,9 +109,11 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     set(roomId, item) {
       if (!item || typeof item.id !== "string") throw new TypeError("work claim item needs an id");
       upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, item)), now());
+      bumpChange(roomId);
       if (typeof onChange === "function") onChange(roomId);
       return item;
     },
+    changeCount(roomId) { return changeCounts.get(roomId) ?? 0; },
     list(roomId) { return selectRoom.all(roomId).map(row => decodeItem(row.item_json)); },
     has(roomId, id) { return selectOne.get(roomId, id) != null; },
     delete(roomId, id) {
@@ -123,6 +132,7 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
         upsert.run(roomId, item.id, JSON.stringify(encodeRow(WORK_CLAIM_ROW_KIND, waived)), now());
       }
       db.prepare("DELETE FROM work_claims WHERE room_id=? AND claim_id=?").run(roomId, id);
+      bumpChange(roomId);
       if (typeof onChange === "function") onChange(roomId);
     },
     configure(roomId, config) {

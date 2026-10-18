@@ -24,6 +24,10 @@ const EMPTY_UNTIL_CRON = new Set([
   "public_rooms",
   "public_read_model_backfill",
   "room_public_receipts_setting",
+  // PR-1: the re-projection gate stamp is written only in the same
+  // transaction as a receipt rebuild for an opted-in room; the fixture
+  // never opts in, so it stays empty like the public page tables above.
+  "public_receipts_projection_stamp",
   "private_update_marks",
   "private_update_commands",
   "messages_backfill_cursor",
