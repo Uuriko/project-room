@@ -163,7 +163,7 @@
     "scripts/deploy-recovery.mjs": "sha256:58df9eed890ae69b0bd0fa87a6355ecd44d73889dae23ed638068a36ba6b48ef"
   },
   "packages": {
-    "package-lock.json": "sha256:4393bfb366eb7228708fe0da7ff99939fc4f89cf28cd97f54db1217aa5d39bac",
-    "package.json": "sha256:b8af04e88c45036cb76900861d9675049040753680bad39c4d364248cab1dc2f"
+    "package-lock.json": "sha256:dd2cdd693051d1b9f7baac01d8e439e24ab74de6f145268b9d7fc6e0367ce3fd",
+    "package.json": "sha256:0681b313835578589fd45597f5177c02169ba0e61fd6e7c2102095cc1749994f"
   }
 }
