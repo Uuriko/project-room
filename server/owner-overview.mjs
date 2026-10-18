@@ -61,6 +61,7 @@ const CONSEQUENCE = Object.freeze({
   claim_lease: "When the lease expires the work returns to the board",
   verification: "Settlement stays locked in escrow and the worker stays unpaid until this is verified",
   decision: "Settlement stays locked in escrow and the worker stays unpaid until you decide",
+  board_review: "The delivered work stays unverified until this review is completed",
   spend: "At zero headroom, new session starts are refused",
 });
 
@@ -169,10 +170,20 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
     }
     const workItems = state.workItems ?? {};
     const budgetsByWorkItem = sessionBudgetsByWorkItem(store, roomId);
+    // #3890: board_review facts read the claims registry, and spend
+    // facts the allowance period — neither lives in workItems.
+    const claimsById = new Map();
+    try {
+      for (const claim of store.workClaims?.list(roomId) ?? []) {
+        if (claim && typeof claim.id === "string") claimsById.set(claim.id, claim);
+      }
+    } catch { /* a claims read failure leaves board_review items fact-less, never fails the room */ }
+    let spendSinceMs = null;
+    try { spendSinceMs = ms(spendAllowanceReport(state, nowMs).period?.since); } catch { spendSinceMs = null; }
     for (const item of items) {
       if (item.kind === "jev_escalation") continue; // shadow diagnostics are not decisions (spec §4.1)
       decisions.push(enrichDecision(item, base, decisionFacts(item, {
-        requestsById, workItems, budgetsByWorkItem,
+        requestsById, workItems, budgetsByWorkItem, claimsById, spendSinceMs,
       }), nowMs));
     }
 
@@ -251,12 +262,28 @@ function enrichDecision(item, base, facts, nowMs) {
   });
 }
 
-function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem }) {
+export function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem, claimsById, spendSinceMs }) {
   if (item.kind === "access_request") {
     const request = requestsById.get(item.id);
     const createdAtMs = request ? ms(request.createdAt) : null;
     return { createdAtMs, consequenceAtMs: createdAtMs === null ? null : createdAtMs + REQUEST_TTL_MS,
       consequence: CONSEQUENCE.access_request };
+  }
+  if (item.kind === "board_review") {
+    // #3890: board-native claims live in the claims registry, not in
+    // workItems — the fallthrough below read workItems[item.id], found
+    // nothing, and produced a fact-less item (no age, no consequence,
+    // sorted as brand-new, invisible to the oldest-age summary). The
+    // review has been waiting since the delivery landed: the claim's
+    // deliveredAt, falling back to its last transition, then its claim
+    // time. No deadline constant governs a board review, so there is a
+    // consequence line but no consequence moment (never overdue) —
+    // the same shape verification/decision carry.
+    const claim = claimsById?.get(item.id) ?? null;
+    return { createdAtMs: claim
+        ? (ms(claim.delivery?.deliveredAt) ?? ms(claim.updatedAt) ?? ms(claim.claimedAt))
+        : null,
+      consequenceAtMs: null, consequence: CONSEQUENCE.board_review };
   }
   const workItem = workItems[item.id] ?? null;
   if (item.kind === "claim_lease") {
@@ -275,7 +302,12 @@ function decisionFacts(item, { requestsById, workItems, budgetsByWorkItem }) {
       amountCents: typeof budget === "number" ? budget : null };
   }
   if (item.kind === "spend") {
-    return { createdAtMs: null, consequenceAtMs: null, consequence: CONSEQUENCE.spend };
+    // #3890 sibling: spend items shared the invisible age. No moment is
+    // recorded when headroom crossed the warning fraction, so the age
+    // is dated from the current period's start — the earliest moment
+    // this period's warning can date from, an honest bound rather than
+    // a fabricated crossing time.
+    return { createdAtMs: spendSinceMs ?? null, consequenceAtMs: null, consequence: CONSEQUENCE.spend };
   }
   return { createdAtMs: workItem ? ms(workItem.createdAt) : null, consequenceAtMs: null, consequence: null };
 }
