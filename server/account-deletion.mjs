@@ -17,7 +17,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
-import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
+import { commitMessageRedaction, readRedactionLog, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
 import { ServiceError } from "./store.mjs";
@@ -114,10 +114,19 @@ const countJournalLegs = (store, accountId) => {
   if (!tableExists(db, "bounty_journal")) return 0;
   const lanes = new Set([accountId]);
   for (const { member_id: memberId } of memberBindings(store, accountId)) lanes.add(canonicalLane(memberId));
-  const placeholders = [...lanes].map(() => "?").join(",");
-  return db.prepare(`SELECT count(*) AS n FROM bounty_journal WHERE account_id IN (${placeholders})`)
-    .get(...lanes)?.n ?? 0;
+  // Durable Object SQL allows 100 bound values per statement. One lane per
+  // room membership passes that at the pilot cap (ACCOUNT_ROOM_LIMIT rooms
+  // plus the account's own lane), so count in disjoint batches.
+  const all = [...lanes];
+  let total = 0;
+  for (let i = 0; i < all.length; i += JOURNAL_LANE_CHUNK) {
+    const chunk = all.slice(i, i + JOURNAL_LANE_CHUNK);
+    total += db.prepare(`SELECT count(*) AS n FROM bounty_journal WHERE account_id IN (${chunk.map(() => "?").join(",")})`)
+      .get(...chunk)?.n ?? 0;
+  }
+  return total;
 };
+const JOURNAL_LANE_CHUNK = 90;
 
 const countMemberIssuedInvites = (store, accountId) => {
   const db = store.db;
@@ -196,6 +205,11 @@ function fileCount(store, roomId) {
 
 // Another owner is an active human member bound to a different live account.
 // Agents stay with their sponsor, so they cannot receive the room.
+// R365-1: a share-link guest account (origin share-link-guest) with NO login
+// method is a throwaway 8-hour link pass, not an heir. It must never receive
+// the room. A kept guest that upgraded (/api/auth/guest/upgrade/confirm links
+// a login method but keeps origin) is a real human with credentials: it counts
+// as an heir like any other human owner.
 function otherHumanOwners(store, state, roomId, accountId, ownerMemberId) {
   const heirs = [];
   for (const member of Object.values(state.members ?? {})) {
@@ -204,8 +218,14 @@ function otherHumanOwners(store, state, roomId, accountId, ownerMemberId) {
       "SELECT account_id AS accountId FROM member_accounts WHERE room_id=? AND member_id=?"
     ).get(roomId, member.id);
     if (!row || row.accountId === accountId) continue;
-    const account = store.db.prepare("SELECT active FROM accounts WHERE id=?").get(row.accountId);
+    const account = store.db.prepare("SELECT active, origin FROM accounts WHERE id=?").get(row.accountId);
     if (!account || account.active !== 1) continue;
+    if (account.origin === "share-link-guest") {
+      const login = store.db.prepare(
+        "SELECT 1 AS has_login FROM account_login_methods WHERE account_id=? LIMIT 1"
+      ).get(row.accountId);
+      if (!login) continue;
+    }
     heirs.push(member.id);
   }
   heirs.sort();
@@ -317,8 +337,16 @@ function redactRoomMessages(store, roomId, actorId) {
   let state = room.state;
   let removed = 0;
   const at = new Date(store.now()).toISOString();
-  for (const messageId of ids) {
-    const result = commitMessageRedaction(store.db, { roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest });
+  // One read of the room's log for the whole pass, and one projection write
+  // (on the last message). Per message, each call re-read and re-parsed the
+  // entire log and rewrote the whole projection: O(messages x events), which
+  // put a solely owned room of a few thousand messages past the Worker's
+  // 30 s CPU limit, so the account could not be deleted.
+  const log = readRedactionLog(store.db, roomId);
+  for (const [index, messageId] of ids.entries()) {
+    const result = commitMessageRedaction(store.db, {
+      roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest, log, writeProjection: index === ids.length - 1
+    });
     state = result.state;
     removed += result.rewritten;
   }

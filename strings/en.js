@@ -407,6 +407,7 @@ export default {
   "human.face.connectionInterrupted": "Connection interrupted",
   "human.face.asked": "Asked. Waiting for the assistant.",
   "human.face.notPickedUp": "Not picked up yet. The assistant hasn't started, so it may be offline. Your request will wait.",
+  "human.face.hostPaused": "Paused by the room owner. Your request will wait until they resume it.",
   "human.face.stalled": "Stalled. No update from the assistant for 2 minutes.",
   "human.face.working": "Working",
   "human.face.paused": "Paused",
@@ -420,6 +421,7 @@ export default {
   "human.face.sharedRequest": "Shared request",
   "human.face.openResult": "Open result",
   "human.assistantChange": "Change",
+  "human.assistantPaused": "Paused",
   "deletion.plain.shared": "Messages and work history already shared in those rooms will remain.",
   "join.dead.title": "This invite has ended",
   "join.dead.scope": "Unable to open this invitation. Ask the person who invited you for a fresh link.",
@@ -453,5 +455,6 @@ export default {
   "work.announce.decision_approved": "{actor} approved '{title}'.",
   "work.announce.decision_changes_requested": "{actor} requested changes on '{title}'.",
   "work.announce.decision_rejected": "{actor} rejected '{title}'.",
-  "work.announce.decision_recorded": "{actor} recorded a decision on '{title}'."
+  "work.announce.decision_recorded": "{actor} recorded a decision on '{title}'.",
+  "people.status.signed_out_for_good": "Signed out for good"
 };

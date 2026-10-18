@@ -154,12 +154,25 @@ export function applyOutcomes(previous, outcomes) {
     // failure (consecutiveFailures, lastError, lastFailure all stand)
     // nor advance the success clock (lastSuccessAt). Only an outcome
     // that observed the work itself may do either.
+    // A failing tick that returned a result carries that tick's own summary
+    // (numbers/booleans only, via compactSummary). Persist it — with its own
+    // lastSummaryAt — instead of leaving the last successful tick's summary
+    // on the surface for as long as the job keeps failing. Dropping it hid
+    // #3855's blockedRooms count in production: the integrity job merges
+    // the standing count into its result on failing ticks too, but while
+    // an unrelated sub-check (agent_connections) kept every tick failing,
+    // the surface kept serving a pre-#3855 success summary that has no
+    // blockedRooms key at all. A tick that threw carries no summary
+    // (runCronJobs records null); then the prior summary stands, still
+    // labelled by its own lastSummaryAt.
+    const failureSummary = outcome.ok ? null : compactSummary(outcome.summary);
     next[outcome.job] = outcome.ok
       ? outcome.unobserved
         ? { ...prior, lastRunAt: at, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at }
         : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
-        lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure) };
+        lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure),
+        ...(failureSummary ? { lastSummary: failureSummary, lastSummaryAt: at } : {}) };
   }
   return next;
 }
@@ -196,6 +209,12 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       secondsSinceSuccess: enabled ? ageSeconds : null,
       lastError: record.lastError ?? null,
       lastErrorAt: iso(record.lastErrorAt),
+      // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
+      // the text alone cannot say whether it is today's failure. On
+      // 2026-10-17 claim-prs read degraded (github_rate_limited) beside a
+      // lastError from 2026-10-15 and was triaged as a live validation
+      // failure. lastErrorCurrent is true only while the job is failing now.
+      lastErrorCurrent: record.lastError != null && (record.consecutiveFailures ?? 0) > 0,
       lastErrorCode: record.lastFailure?.code ?? null,
       lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
       lastErrorClass: record.lastFailure?.errorClass ?? null,

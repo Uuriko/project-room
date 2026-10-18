@@ -10,12 +10,13 @@ export function faceRun(runs) {
   const latest = items => items.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0] ?? null;
   return latest(list.filter(run => !CLOSED.includes(run.status))) ?? latest(list);
 }
-export function askFaceStatus(run, now = Date.now()) {
+export function askFaceStatus(run, now = Date.now(), assistant = null) {
   if (!run) return null;
   if (run.stopOutcome === 'attempt_revoked') return { key: 'unknown', text: uiText('human.face.connectionInterrupted') };
   const waited = Math.max(0, now - (run.createdAt ?? now));
-  const key = run.status === 'queued' ? (waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
-  const textKey = ({ asked: 'asked', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
+  // R366-1: a paused assistant will not claim; say so instead of "may be offline".
+  const key = run.status === 'queued' ? (assistant?.availability === 'paused' ? 'host_paused' : waited >= NOT_PICKED_UP_MS ? 'not_picked_up' : 'asked') : run.status === 'unknown' ? 'stalled' : run.status;
+  const textKey = ({ asked: 'asked', host_paused: 'hostPaused', not_picked_up: 'notPickedUp', stalled: 'stalled', working: 'working', paused: 'paused', pause_requested: 'pausing', resume_requested: 'resuming', cancel_requested: 'stopping', needs_input: 'needsDecision', done: 'done', failed: 'failed', cancelled: 'stopped' })[key];
   return { key, text: textKey ? uiText(`human.face.${textKey}`) : run.status };
 }
 // A plain message in a one-person room goes to the Room assistant only when it
@@ -102,7 +103,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
     if (!human() || !projection) return;
     const assistant = projection.assistant;
     section.querySelector('strong').textContent = assistant.name || 'Room';
-    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : 'Not connected';
+    $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : assistant.availability === 'paused' ? uiText("human.assistantPaused") : 'Not connected';
     $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     const runs = Object.values(projection.runs ?? {});
@@ -143,7 +144,7 @@ export function installHumanExperience({ getState, getSession, client, notice, o
         controls && !sourceDeleted && run.status === 'needs_input' ? ["<button type=\"button\" class=\"text-button\" data-contribute-run=\"", esc(run.id), "\" data-resolve=\"true\" data-revision=\"", run.revision, "\">", uiText('human.resolveDirection'), "</button>"].join('') : '',
         "</div></details>"].join('');
     }).join('');
-    const current = faceRun(Object.values(projection.runs ?? {}).filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current);
+    const current = faceRun(Object.values(projection.runs ?? {}).filter(run => !getState().messages.find(m => m.id === run.sourceMessageId)?.deletedAt)), status = askFaceStatus(current, Date.now(), projection.assistant);
     const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
     const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
     const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.attemptId, current.stopOutcome, current.resultMessageId, faceControls, faceSource?.body?.slice(0, 120)]) : '';

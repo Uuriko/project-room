@@ -198,3 +198,61 @@ for (const [name, value, errorClass] of [
     for (const privateText of [privateRoom, privateEvent, privateError]) assert.ok(!JSON.stringify(result).includes(privateText));
   });
 }
+
+// Regression (live, 2026-10-17): #3855's count reached the health surface
+// only when a tick SUCCEEDED. applyOutcomes dropped a failing tick's
+// summary, so while agent_connections kept integrity failing, the surface
+// kept serving the last success summary — recorded before #3855 shipped —
+// which has no blockedRooms key at all (absent, not zero). These cases run
+// the whole Worker reporting chain (integrity.run -> runCronJobs ->
+// applyOutcomes -> jobHealthView) on failing scans, starting from a stored
+// success record whose summary predates the count.
+test("failing scan: the persisted health summary carries blockedRooms (count only, never room ids)", async t => {
+  const store = syntheticStore(t);
+  park(store);
+  store.db.prepare("INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error) VALUES (?, 3, ?, ?)")
+    .run("second-blocked-room", privateEvent, privateError);
+  // The live failure shape: an isolated agent_connections failure returned
+  // (not thrown), with the scan's ordinary counts alongside it.
+  store.verifyRoomIntegrity = async () => ({
+    matched: 1, skipped: 1, verified: 0, invitations: 50, checked: 2, swept: 1,
+    failures: [{ step: "agent_connections", code: "connection_integrity_error", message: privateError }]
+  });
+  const at = Date.now();
+  let stored = applyOutcomes({}, [{ job: "integrity", ok: true, at: at - HOUR_MS, summary: { matched: 1, skipped: 1, verified: 0, invitations: 50, checked: 2, swept: 1 } }]);
+  const outcomes = await runCronJobs({ integrity: () => integrity.run(store, {}) }, { now: () => at, log() {} });
+  stored = applyOutcomes(stored, outcomes);
+  const view = jobHealthView(stored, at).jobs.find(job => job.name === "integrity");
+  assert.equal(view.status, "failing");
+  assert.equal(view.lastErrorSubcheck, "agent_connections");
+  assert.equal(view.lastErrorCode, "connection_integrity_error");
+  assert.equal(view.lastSummary.blockedRooms, 2, "the failing tick's standing count is persisted, not dropped");
+  assert.equal(view.lastSummary.matched, 1);
+  assert.equal(view.lastSummaryAt, new Date(at).toISOString());
+  for (const value of [privateRoom, "second-blocked-room", privateEvent, privateError]) {
+    assert.ok(!JSON.stringify(view).includes(value), "public health must not contain block evidence");
+  }
+
+  // Same failing scan with the park cleared: zero reads as zero — the key
+  // is present, not absent.
+  store.db.exec("DELETE FROM messages_backfill_blocks");
+  const outcomes2 = await runCronJobs({ integrity: () => integrity.run(store, {}) }, { now: () => at + HOUR_MS, log() {} });
+  stored = applyOutcomes(stored, outcomes2);
+  const view2 = jobHealthView(stored, at + HOUR_MS).jobs.find(job => job.name === "integrity");
+  assert.equal(view2.status, "failing");
+  assert.equal(view2.lastSummary.blockedRooms, 0);
+});
+
+test("thrown scan failure: the persisted health summary still carries blockedRooms", async t => {
+  const store = syntheticStore(t);
+  park(store);
+  store.verifyRoomIntegrity = async () => { throw Object.assign(new Error(privateError), { integritySubcheck: "agent_connections" }); };
+  const at = Date.now();
+  const outcomes = await runCronJobs({ integrity: () => integrity.run(store, {}) }, { now: () => at, log() {} });
+  const stored = applyOutcomes({}, outcomes);
+  const view = jobHealthView(stored, at).jobs.find(job => job.name === "integrity");
+  assert.equal(view.consecutiveFailures, 1);
+  assert.equal(view.lastErrorSubcheck, "agent_connections");
+  assert.equal(view.lastSummary.blockedRooms, 1);
+  assert.ok(!JSON.stringify(view).includes(privateRoom), "public health must not contain block evidence");
+});

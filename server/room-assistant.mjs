@@ -107,7 +107,11 @@ export class RoomAssistant {
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
-      return { contractVersion: 1, roomId, assistant: { ...config, availability: !coordinator?.active || !coordinator.permissions.includes('accept_work') ? 'not_connected' : recent ? 'connected' : 'awaiting_host' }, runs };
+      // R366-1: a coordinator under an owner (or self) pause cannot claim, so
+      // say paused instead of implying the host is offline.
+      const connected = coordinator?.active && coordinator.permissions.includes('accept_work');
+      const paused = connected && Boolean(this.store.wakeQueue?.pauseStatus?.(roomId, coordinator.id));
+      return { contractVersion: 1, roomId, assistant: { ...config, availability: !connected ? 'not_connected' : paused ? 'paused' : recent ? 'connected' : 'awaiting_host' }, runs };
     });
   }
   // postToken is the caller's credential, threaded from the route or MCP.
@@ -199,6 +203,9 @@ export class RoomAssistant {
         let run = row && JSON.parse(row.value);
         if (input.action === 'invoke') {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
+          // Asking dispatches work to the room's agent, so it takes the same
+          // steer permission as proposing work. Posting a message stays open.
+          if (!actor.permissions?.includes('steer')) fail('assistant_denied', 'Asking the room assistant needs the steer permission. Ask the room owner for access.', 403);
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
