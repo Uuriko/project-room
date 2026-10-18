@@ -188,7 +188,14 @@ function finish(res, req, status, type, body, extra = {}) {
   return true;
 }
 
-function unavailable(res, req, status) {
+// A person who opens a dead link in a browser gets a small page with a way
+// home; agents and other non-HTML readers keep the one plain line.
+const UNAVAILABLE_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Invite link not available</title><style>body{font-family:system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}</style></head><body><h1>This invite link no longer works</h1><p>${UNAVAILABLE.trim()}</p><p><a href="/">Go to Project Room</a></p></body></html>`;
+
+function unavailable(res, req, status, url) {
+  if (url && !wantsMarkdown(req, url)) {
+    return finish(res, req, status, "text/html; charset=utf-8", UNAVAILABLE_HTML, { "Content-Security-Policy": AGENT_CONNECT_CSP });
+  }
   return finish(res, req, status, "text/plain; charset=utf-8", UNAVAILABLE);
 }
 
@@ -209,13 +216,13 @@ export function handleAgentConnect(req, url, ctx) {
   rate(`agent-connect:${remoteAddress}`, 30);
   let code = "";
   try { code = decodeURIComponent(match[1]); }
-  catch { return unavailable(res, req, 404); }
-  if (!code || code.length > 64) return unavailable(res, req, 404);
+  catch { return unavailable(res, req, 404, url); }
+  if (!code || code.length > 64) return unavailable(res, req, 404, url);
   let preview;
   try { preview = store.invites.preview(code); }
   catch (error) {
     const status = error?.status === 404 ? 404 : (error?.status === 409 || error?.status === 410 ? 410 : null);
-    if (status) return unavailable(res, req, status);
+    if (status) return unavailable(res, req, status, url);
     throw error;
   }
   const room = store.room(preview.roomId);
