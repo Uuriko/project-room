@@ -528,13 +528,29 @@ const reviewBasisOf = value => {
     || typeof value.deliveryDigest === "string" && /^[0-9a-f]{64}$/.test(value.deliveryDigest), "review basis deliveryDigest must be a delivery digest or null");
   check(value.deliveryGeneration === undefined || value.deliveryGeneration === null
     || Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration >= 0, "review basis deliveryGeneration must be a non-negative integer");
+  // B4-HARDENING (D3): the basis also binds the claim ROUND the review
+  // was recorded against. claimedAt does not discriminate rounds — a
+  // release/reclaim inside one millisecond reuses it — so a basis that
+  // omits the round compares equal across rounds and a delayed round-1
+  // approval could land on round 2. Bases written before the binding
+  // carry no claimRound and normalize to null (predates rounds; the
+  // comparisons below scope what a null round may still attest).
+  check(value.claimRound === undefined || value.claimRound === null
+    || Number.isSafeInteger(value.claimRound) && value.claimRound >= 0, "review basis claimRound must be a non-negative integer");
   return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha,
-    deliveryDigest: value.deliveryDigest ?? null, deliveryGeneration: value.deliveryGeneration ?? 0 });
+    deliveryDigest: value.deliveryDigest ?? null, deliveryGeneration: value.deliveryGeneration ?? 0,
+    claimRound: value.claimRound ?? null });
 };
 const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
   revision: item.revision ?? null, headSha: item.ci?.headSha ?? null,
-  deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0 });
-const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key => left[key] === right[key]);
+  deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0,
+  claimRound: item.claimRound ?? 0 });
+// A stored/expected basis whose claimRound is null predates the round
+// binding: it names no round, so the round key alone does not falsify
+// the comparison. An integer claimRound must match exactly — that is
+// what binds a review to its round (D3).
+const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key =>
+  left[key] === right[key] || (key === "claimRound" && (left[key] === null || left[key] === undefined)));
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
   if (!basis) return false;
@@ -547,7 +563,14 @@ const currentReviewBasis = (review, item) => {
   const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
     ? basis.deliveryDigest === current.deliveryDigest
     : (basis.deliveryGeneration ?? 0) === 0 && current.deliveryGeneration <= 1;
-  return deliveryCurrent
+  // D3 round binding, mirroring the delivery rule's legacy scope: a
+  // basis recorded before rounds existed (claimRound null) attests the
+  // claim's first explicit round at most; a round-stamped basis counts
+  // only in its own round, however the timestamp fields line up.
+  const roundCurrent = basis.claimRound === null || basis.claimRound === undefined
+    ? (current.claimRound ?? 0) <= 1
+    : basis.claimRound === current.claimRound;
+  return deliveryCurrent && roundCurrent
     && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
@@ -1222,7 +1245,7 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
 // in_progress work under self_attested collapses finish+verify into one
 // step; under a reviewed policy it is refused (work_not_delivered) — the
 // work must occupy delivered and be verified by its reviewer.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
   // already landed on this claim replays the stored outcome — the update
@@ -1357,10 +1380,26 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     verification = null;
   }
   if (released) verification = null;
+  // B4-HARDENING (D2): a send-back (delivered -> in_progress) re-enters
+  // the lease sweep's jurisdiction — delivered is not an active claim
+  // state, so a lease that lapsed while the claim awaited review was
+  // inert, and keeping it would let the next sweep reap a claim a
+  // reviewer had just handed back, clearing the owner and the delivery
+  // record with it. A lapsed lease therefore restarts for the rework
+  // spell at the room's default duration. A live lease is the owner's
+  // remaining budget and is kept untouched; a claim that opted out of
+  // leases stays lease-less.
+  const sendBack = state === "in_progress" && item.state === "delivered";
+  const lapsedLease = item.leaseExpiresAt !== null && Date.parse(item.leaseExpiresAt) <= atMs;
+  const restartLease = sendBack && lapsedLease;
+  const leaseStartAt = released ? null
+    : restartLease ? isoOf(atMs) : item.leaseStartAt;
+  const leaseExpiresAt = released ? null
+    : restartLease ? isoOf(atMs + roomWorkClaimConfig(room).defaultLeaseHours * 3600 * 1000) : item.leaseExpiresAt;
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
-    leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
-    leaseExpiresAt: released ? null : item.leaseExpiresAt, // a released claim holds no lease
+    leaseStartAt, // a released claim holds no lease
+    leaseExpiresAt, // a released claim holds no lease
     // a released claim drops its reviews too — attestations belong to the
     // lapsed owner's round of work, never to whoever claims next
     attestations: released ? Object.freeze([]) : item.attestations,
@@ -1523,7 +1562,22 @@ export function recordReview(work, agentId, { verdict, summary, url, now, expect
     const soleHeadMove = prior.basis !== null && prior.basis !== undefined && currentBasis.headSha !== null
       && prior.basis.headSha !== currentBasis.headSha
       && ["version", "owner", "claimedAt", "revision", "deliveryDigest", "deliveryGeneration"].every(key => prior.basis[key] === currentBasis[key]);
-    const deliberateRefresh = namedBasis !== null && (soleHeadMove || !prior.basis);
+    // B4-HARDENING (D1): the same deliberate refresh holds when only the
+    // DELIVERY moved — a re-delivery after a send-back replaces the
+    // digest and advances the generation while every other basis field
+    // stands. The dedupe keyed on the summary text across that move:
+    // the reviewer's identical wording with the current basis named
+    // vanished, the stale approval could never go current, and Verify
+    // deadlocked. A caller naming the current basis has read the new
+    // delivery; only a blind retry (no basis) stays a no-op, and a move
+    // of owner, claim, revision or round still takes a fresh summary.
+    const soleDeliveryMove = prior.basis !== null && prior.basis !== undefined
+      && (prior.basis.deliveryDigest !== currentBasis.deliveryDigest
+        || prior.basis.deliveryGeneration !== currentBasis.deliveryGeneration)
+      && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => prior.basis[key] === currentBasis[key])
+      && (prior.basis.claimRound === null || prior.basis.claimRound === undefined
+        || prior.basis.claimRound === currentBasis.claimRound);
+    const deliberateRefresh = namedBasis !== null && (soleHeadMove || soleDeliveryMove || !prior.basis);
     if (!deliberateRefresh) return Object.freeze(item);
   }
   const at = isoOf(atMs);

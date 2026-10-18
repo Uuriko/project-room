@@ -1260,7 +1260,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
         delivery: data.delivery, policy,
         jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
-        requestId: data.requestId, now: nowMs,
+        requestId: data.requestId, now: nowMs, room: roomLike,
         authority: (verifyCall || sendBackCall) && item.owner !== caller }));
     if (data.state === "done" && jevDecision) {
       try {
