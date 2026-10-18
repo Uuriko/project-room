@@ -30,7 +30,6 @@ export function createSigninNavigation({ getUI, active }) {
     $("#github-signin").hidden = view === "welcome";
     if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
     if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
-    $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {
     replay = value;

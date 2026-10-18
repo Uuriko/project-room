@@ -14,17 +14,19 @@ import { createRoomServer } from "../server/http.mjs";
 import { createMagicLinkMailer } from "../server/magic-links.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
+import { googleAuth } from "./helpers/google-oauth-fixture.mjs";
 
 // The secret-scan allowlist already covers this synthetic fixture password.
 const PASSWORD = "synthetic-email-password";
 const DESK = { viewport: { width: 1280, height: 860 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-async function setup(t, { mailConfigured = true } = {}) {
+async function setup(t, { mailConfigured = true, googleConfigured = false } = {}) {
   const f = createAcceptanceFixture();
   const sent = [];
   let mailer = null;
   const server = createRoomServer({ store: f.store, streamInterval: 40,
+    ...(googleConfigured ? { googleAuth: googleAuth() } : {}),
     magicLinkMailer: { isConfigured: () => mailConfigured, sendMagicLink: p => mailer.sendMagicLink(p), sendPasswordResetNotice: p => mailer.sendPasswordResetNotice(p) } });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -259,7 +261,7 @@ test("cached HTML that names app.js directly still starts the existing workspace
 });
 
 test("an incoming room link owns navigation while its workspace module downloads", async t => {
-  const f = await setup(t), page = await f.open(), requests = [];
+  const f = await setup(t, { googleConfigured: true }), page = await f.open(), requests = [];
   await page.goto(f.origin);
   await page.locator('[data-signin-form="password"]').waitFor({ state: "visible" });
   let release;

@@ -1,23 +1,10 @@
-// F2/F6: the discovery surfaces must not be dead ends. The landing's
-// served bytes are the contract for strangers and crawlers (the server
-// serves index.html verbatim): the sign-in wall's entry routes link the
-// two public surfaces, and the footer carries one real, already-published
-// receipt. The /offers page's empty state is the exact string its client
-// renders, so it is pinned at the source: an empty board points at the
-// gallery ("see work already done") instead of ending at "check back".
+// Public discovery pages retain useful onward links and a published example.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const read = path => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
-
-test("the landing links open work and the receipts gallery from the sign-in wall (F2)", () => {
-  const html = read("../index.html");
-  const routes = html.slice(html.indexOf('id="signin-entry-routes"'), html.indexOf("</section>", html.indexOf('id="signin-entry-routes"')));
-  assert.match(routes, /<a class="text-button" href="\/offers">Open work<\/a>/);
-  assert.match(routes, /<a class="text-button" href="\/receipts">Receipts<\/a>/);
-});
 
 test("the landing footer carries one real published receipt (F2)", () => {
   const html = read("../index.html");

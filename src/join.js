@@ -321,7 +321,7 @@ function renderEnter() {
   if (roomEl) {
     if (room) {
       const textEl = $("join-enter-room-text");
-      if (textEl) textEl.textContent = `Room "${room}" — enter its invite code below, or if you're already a member:`;
+      if (textEl) textEl.textContent = `Room "${room}" — open its invitation link below, or if you're already a member:`;
       const openEl = $("join-enter-open");
       if (openEl) openEl.href = roomEntryHref(room);
       roomEl.hidden = false;
@@ -335,7 +335,7 @@ function renderEnter() {
       const statusEl = $("join-enter-status");
       const code = parseInviteCodeInput($("join-enter-code")?.value);
       if (!code) {
-        if (statusEl) { statusEl.textContent = "That doesn't look like an invite code. Codes look like RM-XXXXXX — or paste the whole invite link."; statusEl.classList.add("visible"); }
+        if (statusEl) { statusEl.textContent = "That invitation wasn't recognized. Paste the full link from your host."; statusEl.classList.add("visible"); }
         $("join-enter-code")?.focus();
         return;
       }

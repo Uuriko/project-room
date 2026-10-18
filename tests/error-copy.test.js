@@ -15,7 +15,7 @@ test("spot-checked fallthrough codes map to specific human copy", () => {
   );
   assert.equal(
     humanErrorMessage({ status: 410, code: "invite_expired" }),
-    "That invite code expired. Ask the host for a fresh code."
+    "That invitation expired. Ask the host for a new link."
   );
   assert.equal(
     humanErrorMessage({ status: 409, code: "too_many_open_claims" }),

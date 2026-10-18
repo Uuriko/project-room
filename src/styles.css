@@ -1796,9 +1796,7 @@ summary { overflow-wrap: anywhere; }
 .signin-more > a, .signin-more > button { display: block; margin: .25rem auto; min-height: 44px; padding: .6rem; font-size: var(--text-sm); }
 #signin-entry-routes { margin-top: .6rem; }
 #signin-entry-routes #agent-signin-button { justify-self: center; color: var(--muted); text-decoration: none; font-weight: 400; }
-#signin-entry-routes #join-code-link { justify-self: center; display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); text-decoration: none; }
 [data-signin-form="password"] > .signin-more, #signup-password-hint { grid-column: 1 / -1; }
-#terms-notice { margin: .5rem 0 0; font-size: var(--text-xs); text-align: center; }
 @media (max-width: 520px) { #auth-panel.auth-panel { margin-top: 22vh; } }
 
 .app-shell:has(#auth-panel:not([hidden])) ~ .site-footer { display: none; }
