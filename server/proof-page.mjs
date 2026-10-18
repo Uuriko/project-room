@@ -58,7 +58,7 @@ export const PROOF_HONESTY = Object.freeze([
   "Names are as the room recorded them — member display names, or a self-supplied name on public-work receipts — not identity-verified.",
   "Hashes are stored sha256 values, not re-verified when this page is read.",
   "These records are unsigned. A receipt proves the room stored this record and the owner chose to publish it — nothing beyond the level named on each entry.",
-  "No payment is proved on this page. Bounty credit movements are proved by signed lot receipts, each served on its own public page once its bounty settles, unless the room owner has turned public receipts off.",
+  "No payment is proved on this page. Bounty credit movements are proved by signed lot receipts, each served on its own public page once its bounty settles and the room owner has public receipts on.",
   "Only receipts the room owner chose to publish appear here. Turning public receipts off removes this page's entries; private work is never listed.",
 ]);
 

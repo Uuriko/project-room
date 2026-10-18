@@ -37,19 +37,20 @@ which have a public page of their own (`/receipts/<lotId>`, below).
 - A completed work item appears only when it has a receipt and the same
   owner setting is on.
 - A bounty lot (`/receipts/lot_<id>`) appears once its bounty's settlement
-  verdict is recorded — paid out, failed, unverified, or split. The page
+  verdict is recorded — paid out, failed, unverified, or split — and the
+  room owner has turned on public receipts: a lot takes the same opt-in
+  as the claim and work-item shapes, and the setting is off until the
+  owner records it, so a settled lot in a room that never opted in is a
+  404. The page
   shows every ledger movement the lot carries (each movement's kind,
   amount, source and destination accounts) plus the settlement's worker
   and refund amounts, the bounty's poster, worker, award, pinned rubric
   hash, and settlement outcome. Before settlement, and for journal
   lots that are not bounty movements, the id is a 404. The record is
   composed from the credit ledger at read time, not stored as a copy.
-  Unlike the claim and work-item shapes, a lot does not wait for the
-  owner's public-receipts opt-in: it is public once settled. What hides
-  it is the owner's recorded opt-out (the room's own public-receipts
-  setting recorded off), the room's directory receipts switch turned
-  off, or operator unpublish — the same switches that hide the other
-  shapes.
+  On top of the opt-in, the room's directory receipts switch turned
+  off or operator unpublish hides a lot — the same switches that hide
+  the other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has
