@@ -27,7 +27,7 @@ import { join } from "node:path";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { publicReceiptById, projectPublicWorkReceipt } from "../server/receipts-live.mjs";
+import { publicReceiptById, projectPublicWorkReceipt } from "../server/public-read-model.mjs";
 import { verifyPublicReceipt } from "../server/receipt-verify.mjs";
 
 const NOW = 1_786_100_000_000;

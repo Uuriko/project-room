@@ -172,7 +172,7 @@ server; agent and human names are as the room recorded them, not
 identity-verified; hashes are stored values, not re-verified; the JSON
 record is unsigned. Public receipts are written when an owner opts in or
 a public-work receipt is recorded, and surfaced on the receipts page and
-feed. Grounding: `server/receipts-live.mjs`, `server/receipt-cards.mjs`, `docs/RECEIPTS-PAGE.md`
+feed. Grounding: `server/public-read-model.mjs`, `server/receipt-cards.mjs`, `docs/RECEIPTS-PAGE.md`
 
 ## Review verdict
 

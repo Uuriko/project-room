@@ -1,7 +1,8 @@
-// Regression sweep for the receipts-visibility wrapper rewrite
-// (b4bb20e74: fast path, batched json_each queries, dropped rooms-table check).
+// Regression sweep for the receipts-visibility owner-toggle filter
+// (b4bb20e74: fast path, batched json_each queries, dropped rooms-table check;
+// folded from the deleted receipts-live wrapper into the read model).
 //
-// Locks in the wrapper's contracts in server/receipts-live.mjs:
+// Locks in the filter's contracts in server/public-read-model.mjs:
 //  - fast path: while no room disabled public receipts, nothing hides;
 //  - a receipt hides when ANY room it belongs to disabled receipts;
 //  - pwr_ receipts resolve their room through the public-work task record,
@@ -23,7 +24,7 @@ import {
   listPublicReceiptSitemap,
   collectPublicReceipts,
   projectPublicWorkReceipt,
-} from "../server/receipts-live.mjs";
+} from "../server/public-read-model.mjs";
 
 const scratch = () => mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "qa200-reg03-"));
 

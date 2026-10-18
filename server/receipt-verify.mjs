@@ -168,7 +168,7 @@ const VERDICTS = {
 };
 
 // Re-run every check the server can run on one public receipt, now.
-// `receipt` is the public shape (server/receipts-live.mjs publicReceiptById).
+// `receipt` is the public shape (server/public-read-model.mjs publicReceiptById).
 // fetchImpl/token are injected the same way claim-pr-sync's are, so tests
 // and the Worker resolve GitHub access identically.
 export async function verifyPublicReceipt(store, receipt, { fetchImpl = fetch, token = null, nowMs = Date.now() } = {}) {

@@ -6,7 +6,7 @@
 // The page exists only for a room that is publicly listed AND whose owner
 // turned public receipts on (public_rooms.receipts_enabled). It lists the
 // room's public receipts — the same rows /receipts serves, read through
-// receipts-live so the owner toggle and operator unpublish apply — and
+// the public read model so the owner toggle and operator unpublish apply — and
 // labels each entry with what its record actually proves (proofLevelOf in
 // the read model), never more. Every entry links to its own receipt page,
 // so a claim on this page is one click from the record behind it.
@@ -22,7 +22,7 @@ import { CONTENT_TRUST } from "./content-trust.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { escapeHtml } from "./receipts-page.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
-import { queryRoomProof } from "./receipts-live.mjs";
+import { queryRoomProof } from "./public-read-model.mjs";
 import { PROOF_LEVELS, jsonLdScriptTag } from "./receipt-share.mjs";
 
 export { PROOF_LEVELS };

@@ -1,6 +1,6 @@
 // F8: the public receipts gallery must list room-published receipts next to
 // public-work receipts. The projection chain (settings toggle ->
-// public_receipts -> receipts-live feed) was exercised in production only
+// public_receipts -> public read model feed) was exercised in production only
 // in the opt-in-after-settle order: suites seeded claims first and opted
 // the room in afterwards, which re-projects from scratch. The live order
 // is the reverse — a room opts in, THEN its work settles — and that order

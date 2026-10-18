@@ -31,7 +31,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { createReceiptSigner, generateReceiptKeyPair } from "../server/bounty-receipts.mjs";
-import { publicReceiptById } from "../server/receipts-live.mjs";
+import { publicReceiptById } from "../server/public-read-model.mjs";
 import { renderReceiptDetailHtml, receiptJson, receiptsListJson } from "../server/receipts-page.mjs";
 
 const ROOM = "room-test";

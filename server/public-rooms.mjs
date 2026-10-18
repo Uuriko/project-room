@@ -11,7 +11,7 @@ import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
 import { listRoomTemplates, getRoomTemplate } from "./templates.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
-import { excludeHiddenReceipts } from "./receipts-live.mjs";
+import { excludeHiddenReceipts } from "./public-read-model.mjs";
 
 export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
 

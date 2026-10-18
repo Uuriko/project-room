@@ -97,7 +97,7 @@ function mark(facts, kind, scope, at) {
 
 // A work-claim receipt (wcr_) exists when the claim is done and its pull
 // request merged. A work-item receipt (wir_) exists when a completed work
-// item carries a receipt object. Same rule as server/receipts-live.mjs.
+// item carries a receipt object. Same rule as the public read model (server/public-read-model.mjs).
 export function workClaimReceiptDue(claim) {
   return Boolean(claim && claim.state === "done" && claim.pullRequest?.outcome === "merged");
 }

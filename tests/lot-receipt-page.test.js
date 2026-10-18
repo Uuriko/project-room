@@ -36,7 +36,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { createReceiptSigner, generateReceiptKeyPair } from "../server/bounty-receipts.mjs";
-import { publicReceiptById } from "../server/receipts-live.mjs";
+import { publicReceiptById } from "../server/public-read-model.mjs";
 import { renderReceiptDetailHtml, receiptJson } from "../server/receipts-page.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
