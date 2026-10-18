@@ -239,7 +239,7 @@ for (const outcome of ['resolve', 'reject']) {
       else assert.equal(await page.locator('#share-link-result').isVisible(), false);
       await page.locator('#share-management-summary').focus();
       const currentStatus = await page.locator('#share-link-status').textContent();
-      assert.equal(currentStatus, replacement ? 'Link ready.' : '');
+      assert.equal(currentStatus, replacement ? 'Guest link ready — the link shown above is the one to share.' : '');
       await page.evaluate(value => window.finishTestClipboard(value), outcome);
       await settleRendering(page);
       assert.equal(await page.locator('#share-link-status').textContent(), currentStatus);
