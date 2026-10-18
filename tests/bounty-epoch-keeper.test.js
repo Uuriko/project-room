@@ -154,7 +154,7 @@ test("re-running the keeper over settled state is a no-op", () => {
   const balancesBefore = LANES.map(lane => bal(escrow, room, lane));
   for (let i = 0; i < 3; i++) {
     assert.deepEqual(keeper(world),
-      { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0, released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 });
+      { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0, released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 });
   }
   assert.equal(journalRows(), rowsBefore, "no duplicate journal rows");
   assert.deepEqual(LANES.map(lane => bal(escrow, room, lane)), balancesBefore);
@@ -285,7 +285,7 @@ test("a store that has never run escrow reads as empty, never as an error", () =
   const store = { db };
   assert.equal(escrowEpochNextDueAt(store, nowMs), null);
   const EMPTY = { rooms: 0, due: 0, approved: 0, paid: 0, refunded: 0,
-    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0 };
+    released: 0, expired: 0, failed: 0, errors: 0, overdue: 0, unreachable: 0 };
   assert.deepEqual(progressEscrowEpochs(store, { now: nowMs }), EMPTY);
   // A store with no database at all gets the same empty shape.
   assert.deepEqual(progressEscrowEpochs({}, { now: nowMs }), EMPTY);

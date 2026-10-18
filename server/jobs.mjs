@@ -10,7 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
-import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { escrowEpochNextDueAt, escrowUnreachableCount, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
@@ -514,9 +514,23 @@ export const JOBS = Object.freeze([
     // challenge window, an approved one awaiting its sweep, a dispute past
     // its timeout, a deadline refund. One closeEpoch per room per tick:
     // the two-step close (approve, then sweep) is never collapsed.
-    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
+    // #4128: the job also stays enabled while the stuck-state census is
+    // non-zero — an unreachable-only room has no due time, but its keeper
+    // summary is the census's only carrier into job health. The wake for
+    // that case is hourly (census refresh), never the per-minute cadence:
+    // the row is unactionable, so a minute-by-minute wake would burn the
+    // room's alarm budget on a count that cannot change itself.
+    enabled(_env, store) {
+      return store
+        ? escrowEpochNextDueAt(store, Date.now()) != null || escrowUnreachableCount(store) > 0
+        : true;
+    },
     disabledReason: () => "No bounty is waiting on an epoch close",
-    nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
+    nextDueAt(store, now) {
+      const due = escrowEpochNextDueAt(store, now);
+      if (due != null) return due;
+      return escrowUnreachableCount(store) > 0 ? now + HOUR_MS : null;
+    },
     async run(store, ctx) {
       if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
       return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });

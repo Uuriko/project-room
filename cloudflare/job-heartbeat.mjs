@@ -207,7 +207,11 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
     // A tick that succeeded but was held by GitHub's rate limit did no work.
     // Show it, without turning a recoverable wait into a 503.
-    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited' : null;
+    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true
+      ? 'github_rate_limited'
+      : enabled && !stale && !failing && record.lastSummary?.unreachable > 0
+        ? 'escrow_unreachable'
+        : null;
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
