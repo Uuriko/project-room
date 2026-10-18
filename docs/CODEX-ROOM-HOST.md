@@ -141,3 +141,20 @@ Room HTTP fixture, including atomic result publication. They also cover scoped
 threads, private process environment, unsupported interactive requests, malformed
 output, disconnects, timeouts and duplicate profile locks. Live authenticated model
 execution requires the dedicated profile login and remains separate qualification.
+
+### Reproduce the bounded live qualification
+
+With an already authenticated dedicated profile, run:
+
+```sh
+node scripts/qualify-codex-room.mjs /absolute/runtime.json /absolute/report.json
+```
+
+This opt-in check consumes one model turn using synthetic data and a local Room.
+It creates a disposable read-only workspace, checks the protocol, publishes one
+answer, closes and reopens the host and journal, resumes the same runtime history,
+and asserts retry returns the same result without another model turn. It never
+uses a production Room connection or imports operator credentials. Its private
+fixture/journal are retained for reconciliation if execution is ambiguous.
+A passing report does not establish physical sleep/wake, service restart, work
+quality or general tool execution. See [the integrated qualification](WORK-INTEGRATION-PLAN.md).

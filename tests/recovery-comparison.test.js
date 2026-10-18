@@ -222,3 +222,16 @@ test('populated follow-up lineage and exact retry journal appear in private-safe
   assert.deepEqual(store.publicWorkSuccessors.create('commons', 'owner', receipt.receiptId, input), outcome);
   assert.equal(compare(reference, await f.capture()).status, 'no_stored_differences', 'exact restored/current retries create no new lineage or journal row');
 });
+
+
+test('a later canonical work revision is reported without permitting stale capture reopening', async t => {
+  const f = await fixture(t);
+  f.store.command(f.keys.owner, 'commons', { id: 'later-work-accept', type: 'work.accepted',
+    data: { workItemId: 'active', expectedRevision: 0 } });
+  const report = compare(f.older, await f.capture());
+  assert.equal(report.status, 'differences_require_review');
+  assert.equal(delta(report, 'work_entities').changed, 1);
+  assert.equal(report.history.olderHistoryIsPrefix, true);
+  assert.equal(report.history.laterEvents, 2, 'work acceptance and its board synchronization are both retained');
+  assert.equal(report.reopenAllowed, false);
+});

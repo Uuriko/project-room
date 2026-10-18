@@ -75,7 +75,7 @@ function headTree() {
 
 function node(script, scriptArgs, label) {
   const run = spawnSync(process.execPath, ["--expose-gc", join(here, script), ...scriptArgs], { encoding: "utf8", maxBuffer: 64 << 20 });
-  if (run.status !== 0) throw new Error(`${label} failed (${run.status}): ${(run.stderr || "").split("\n").filter(l => !/cold_start|SECURITY_CONTACT|mailer/.test(l)).slice(-8).join("\n")}`);
+  if (run.status !== 0) throw new Error(`${label} failed (${run.status}): ${(run.stderr || "").split("\n").filter(line => !["cold_start", "SECURITY_CONTACT", "mailer"].some(noise => line.includes(noise))).slice(-8).join("\n")}`);
   const line = run.stdout.trim().split("\n").filter(l => l.startsWith("{")).at(-1);
   return JSON.parse(line);
 }
