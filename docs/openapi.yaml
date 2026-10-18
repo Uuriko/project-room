@@ -10225,6 +10225,14 @@ paths:
         The optional `referredBy` free text ("who referred you?") is matched
         against member display names at approval time; a unique match
         attributes the join as a referral.
+        Practice room (issue #602): a request with roomId `practice` and
+        requestedPermissions [] — exactly the fixed chat scope (post
+        messages, read, advertise capabilities; no steer, decide, or
+        manage_*) — is auto-approved inline for any verified pri_
+        identity, with no owner decision. The practice room is
+        untrusted-public. Any other request to `practice`, and any
+        request to any other room without a standing rule, waits for
+        review as above.
       security:
         - bearerAuth: []
       requestBody:

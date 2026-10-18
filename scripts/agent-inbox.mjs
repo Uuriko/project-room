@@ -193,10 +193,12 @@ async function promptYesNo(question) {
 // Onboarding Slice 3 (RC-2026-09-17-028): `check` is a verification
 // ladder. Rung 1: access probe (the existing checkConnection). Rung 2: read
 // probe — the presence roster, which proves the read path. Rung 3: write
-// probe, draft-only until the sandbox practice room (Slice 8) lands: it
-// composes the verification message but never sends it, and says so
-// explicitly. check never writes to a real room. The first failing rung
-// stops the ladder and names the doctor repair.
+// probe, draft-only by design: this ladder runs against the configured
+// (real) room, so it composes the verification message but never sends
+// it, and says so explicitly. For a live write probe, self-join the
+// well-known practice room (id "practice", issue #602, documented in
+// llms.txt) and post there. check never writes to a real room. The
+// first failing rung stops the ladder and names the doctor repair.
 async function checkVerificationLadder(client) {
   const rungs = [];
   let access;
@@ -220,7 +222,7 @@ async function checkVerificationLadder(client) {
     return ladderResult(rungs, access);
   }
   rungs.push({ name: "write", ok: null, state: "not_tested", wrote: false,
-    detail: "draft-only probe: no sandbox room yet, so the verification message was composed but never sent. Nothing was written to any room." });
+    detail: "draft-only probe: the verification message was composed but never sent, so nothing was written to this room. For a live write probe, self-join the practice room (id \"practice\") and post there." });
   return ladderResult(rungs, access);
 }
 
