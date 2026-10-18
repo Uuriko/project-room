@@ -9,7 +9,7 @@ import { catalogDoorHtml } from "../src/room-roster.js";
 // The door's main action: sign in and land inside a new room (src/app.js
 // reads ?start=room).
 export const START_ROOM_URL = `${ROOM_ORIGIN}/?start=room`;
-const DOOR_PAGES = new Set(["/room", "/room/", "/project-room", "/project-room/"]);
+const DOOR_PAGES = new Set(["/room", "/room/"]);
 export const PUBLIC_DOOR_PATHS = Object.freeze(["/room", "/room/"]);
 // Hash-forward: #room/{id} onto Open/People with ?room= so hash-dropping
 // browsers survive. A complete #join/<43-char> leaves the public wrapper so
@@ -166,7 +166,7 @@ export function roomEntry(request) {
   // #956: this door once served a stale unsigned v1 agent card at the
   // prefix-preserving card paths. Redirect them to the signed canonical
   // card on the origin so the door can never serve stale card bytes again.
-  if (url.pathname === "/room/.well-known/agent-card.json" || url.pathname === "/project-room/.well-known/agent-card.json") {
+  if (url.pathname === "/room/.well-known/agent-card.json") {
     return new Response(null, { status: 308, headers: {
       Location: `${ROOM_ORIGIN}${AGENT_CARD_A2A_PATH}`,
       "Cache-Control": "public, max-age=3600",

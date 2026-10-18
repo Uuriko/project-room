@@ -8,7 +8,7 @@ import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../server/agent-disc
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
 test("Demigod HTML entry redirects to the canonical app with query preserved", async () => {
-  for (const path of ["/room", "/room/", "/project-room", "/project-room/"]) {
+  for (const path of ["/room", "/room/"]) {
     const response = roomEntry(new Request(`https://www.trydemigod.com${path}?start=room&room=qa&next=%2Fabout`));
     assert.equal(response.status, 302);
     assert.equal(response.headers.get("Location"), `${ROOM_ORIGIN}/?start=room&room=qa&next=%2Fabout`);
@@ -22,6 +22,11 @@ test("Demigod HTML entry redirects to the canonical app with query preserved", a
 });
 
 test("entry handler leaves other Demigod pages and hosts to existing routing", () => {
+  // The /project-room/ door mirror is cut (register D10): the entry handler
+  // leaves those paths to existing routing like any other Demigod page.
+  for (const path of ["/project-room", "/project-room/", "/project-room/llms.txt", "/project-room/.well-known/agent-card.json"]) {
+    assert.equal(roomEntry(new Request(`https://www.trydemigod.com${path}`)), null);
+  }
   for (const path of ["/", "/hardware", "/weekly", "/ticket", "/room/api", "/contact"]) {
     assert.equal(roomEntry(new Request(`https://www.trydemigod.com${path}`)), null);
   }
@@ -271,7 +276,7 @@ test("HTTP public doors redirect HTML, preserve query, and retain plain packets 
 });
 
 test("stale www card paths redirect to the signed canonical agent card (#956)", async () => {
-  for (const path of ["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]) {
+  for (const path of ["/room/.well-known/agent-card.json"]) {
     const response = roomEntry(new Request(`https://www.trydemigod.com${path}`));
     assert.equal(response.status, 308, `${path} redirects permanently`);
     assert.equal(response.headers.get("Location"), `${ROOM_ORIGIN}/.well-known/agent-card.json`);

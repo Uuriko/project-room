@@ -158,12 +158,12 @@ export const AGENT_CARD_SYNONYMS = Object.freeze(["/room/agent.json"]);
 export const KITS_CATALOG_PATH = "/kits.txt";
 // Machine-readable skills catalog: the HTTP twin of the A2A card's skills
 // array, simplified for plain fetchers (id, name, description, tags, via).
-// Served as JSON at /skills (+ /room/skills, /project-room/skills).
+// Served as JSON at /skills (+ /room/skills on the edge door).
 export const SKILLS_CATALOG_PATH = "/skills";
 
 // Shared procedure library (W008): one global, read-only collection of
 // runbooks/procedures every room's agents can reference. Served as markdown
-// at /procedures (+ /room/procedures, /project-room/procedures). The content
+// at /procedures (+ /room/procedures on the edge door). The content
 // is baked at build time from server/procedures-index.mjs (generated from
 // docs/procedures/*.md); there is no write API in v1.
 export const PROCEDURES_PATH = "/procedures";
@@ -1597,48 +1597,41 @@ const CANONICAL = Object.freeze({
 });
 
 const ALIASES = Object.freeze({
+  // The /project-room/ mirror was cut (simplification register D10):
+  // discovery lives at the canonical root paths and at /room/*, which is
+  // the getdasha edge door's wire format — not a mirror.
   // /room and /room/ are the HTML door (see server/room-entry.mjs).
   // Agents read /room/llms.txt. Explicit Accept: text/plain on /room still
   // maps to this packet in the Worker.
   "/room/llms.txt": "/llms.txt",
   "/room/SKILL.md": "/SKILL.md",
-  "/project-room/SKILL.md": "/SKILL.md",
   "/room/join.txt": JOIN_PROMPT_PATH,
   "/room/llms-full.txt": "/llms-full.txt",
   "/room/kits.txt": KITS_CATALOG_PATH,
   // agents.json leftovers (same bytes as /agents.json).
   ...Object.fromEntries(
-    ["/room/agents.json", "/project-room/agents.json"].flatMap(path =>
+    ["/room/agents.json"].flatMap(path =>
       withSlash(path).map(alias => [alias, AGENTS_JSON_PATH]))),
   // Skills catalog leftovers (same bytes as /skills).
   ...Object.fromEntries(
-    ["/room/skills", "/project-room/skills"].flatMap(path =>
+    ["/room/skills"].flatMap(path =>
       withSlash(path).map(alias => [alias, SKILLS_CATALOG_PATH]))),
   // Shared procedure library leftovers (same bytes as /procedures).
   ...Object.fromEntries(
-    ["/room/procedures", "/project-room/procedures"].flatMap(path =>
+    ["/room/procedures"].flatMap(path =>
       withSlash(path).map(alias => [alias, PROCEDURES_PATH]))),
   "/room/.well-known/agent.json": "/.well-known/agent.json",
   "/room/.well-known/governance.json": "/.well-known/governance.json",
-  "/project-room/.well-known/governance.json": "/.well-known/governance.json",
   ...Object.fromEntries(
     [
       "/.well-known/mcp",
       "/.well-known/mcp.json",
       "/room/.well-known/mcp",
       "/room/.well-known/mcp.json",
-      "/project-room/.well-known/mcp",
-      "/project-room/.well-known/mcp.json",
       "/mcp/server-card",
-      "/room/mcp/server-card",
-      "/project-room/mcp/server-card"
+      "/room/mcp/server-card"
     ].flatMap(path => withSlash(path).filter(alias => alias !== MCP_SERVER_CARD_PATH).map(alias => [alias, MCP_SERVER_CARD_PATH]))
   ),
-  "/project-room/llms.txt": "/llms.txt",
-  "/project-room/join.txt": JOIN_PROMPT_PATH,
-  "/project-room/llms-full.txt": "/llms-full.txt",
-  "/project-room/kits.txt": KITS_CATALOG_PATH,
-  "/project-room/.well-known/agent.json": "/.well-known/agent.json",
   // Conventional skill / agent filenames (same short packet as /llms.txt).
   ...Object.fromEntries(SHORT_PACKET_FILES.flatMap(name => [
     [`/${name}`, "/llms.txt"],
@@ -1649,10 +1642,10 @@ const ALIASES = Object.freeze({
   // Card leftovers — not /.well-known on www (that card is Compute).
   ...Object.fromEntries(AGENT_CARD_SYNONYMS.flatMap(path => withSlash(path).map(alias => [alias, "/.well-known/agent.json"]))),
   // A2A-standard card path + prefix-preserving twins.
-  ...Object.fromEntries(["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]
+  ...Object.fromEntries(["/room/.well-known/agent-card.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_A2A_PATH]))),
   // JWKS key-discovery twins (same bytes as /.well-known/jwks.json).
-  ...Object.fromEntries(["/room/.well-known/jwks.json", "/project-room/.well-known/jwks.json"]
+  ...Object.fromEntries(["/room/.well-known/jwks.json"]
     .flatMap(path => withSlash(path).map(alias => [alias, AGENT_CARD_JWKS_PATH]))),
   // Root card aliases (same bytes as the machine card) for agents that
   // probe the conventional filenames at the origin.

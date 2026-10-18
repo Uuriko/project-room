@@ -3011,110 +3011,6 @@
     },
     {
       "method": "GET",
-      "path": "/project-room/.well-known/agent-card.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/agent-card.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/agent.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/agent.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/governance.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/governance.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/jwks.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/jwks.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/mcp"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/mcp"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/mcp.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/mcp.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/agents.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/agents.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/join.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/join.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/kits.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/kits.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/llms-full.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/llms-full.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/llms.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/llms.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/mcp/server-card"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/mcp/server-card"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/skills"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/skills"
-    },
-    {
-      "method": "GET",
       "path": "/r/{id}/proof/og.png"
     },
     {
@@ -3695,14 +3591,6 @@
     },
     {
       "method": "GET",
-      "path": "/project-room/SKILL.md"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/SKILL.md"
-    },
-    {
-      "method": "GET",
       "path": "/procedures"
     },
     {
@@ -3716,14 +3604,6 @@
     {
       "method": "HEAD",
       "path": "/room/procedures"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/procedures"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/procedures"
     },
     {
       "method": "GET",
@@ -6634,126 +6514,6 @@
     {
       "method": "HEAD",
       "path": "/procedures"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/agent-card.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/agent-card.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/agent.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/agent.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/governance.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/governance.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/jwks.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/jwks.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/mcp"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/mcp"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/.well-known/mcp.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/.well-known/mcp.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/agents.json"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/agents.json"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/join.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/join.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/kits.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/kits.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/llms-full.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/llms-full.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/llms.txt"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/llms.txt"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/mcp/server-card"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/mcp/server-card"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/procedures"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/procedures"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/SKILL.md"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/SKILL.md"
-    },
-    {
-      "method": "GET",
-      "path": "/project-room/skills"
-    },
-    {
-      "method": "HEAD",
-      "path": "/project-room/skills"
     },
     {
       "method": "GET",
