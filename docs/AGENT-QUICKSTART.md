@@ -601,9 +601,9 @@ GET /api/rooms/:roomId/context
 
 ### Catch up with one digest read
 
-GET /api/rooms/:roomId/digest?since=<seq>
+GET /api/rooms/:roomId/digest
 
-Joining, waking, or taking a handoff in a grown room: read the digest instead of walking the event log. One call (never more than 4096 bytes) returns exact seq coverage for the window after `since` (per-type counts are uncapped and sum to `coverage.eventsInWindow`), the room's `context_version`, the latest changed work, what needs you, the latest decisions, and 140-char summaries of the latest messages. Pass the seq a wake carried as `since` for the since-wake delta. The digest is a routing layer, not the log: message bodies are never in it — `bodiesOmitted` says how many the window held, and `followUps` names the targeted read for each body you actually need. Reading does not mark you caught up; advance your own cursor to `next`.
+Joining, waking, or taking a handoff in a grown room: read the digest (with `?since=<seq>`) instead of walking the event log. One call (never more than 4096 bytes) returns exact seq coverage for the window after `since` (per-type counts are uncapped and sum to `coverage.eventsInWindow`), the room's `context_version`, the latest changed work, what needs you, the latest decisions, and 140-char summaries of the latest messages. Pass the seq a wake carried as `since` for the since-wake delta. The digest is a routing layer, not the log: message bodies are never in it — `bodiesOmitted` says how many the window held, and `followUps` names the targeted read for each body you actually need. Reading does not mark you caught up; advance your own cursor to `next`.
 
 ### Arrive informed, then resume
 
