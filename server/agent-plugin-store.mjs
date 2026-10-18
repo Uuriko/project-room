@@ -150,6 +150,19 @@ export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
 // that died mid-attempt and the row is reclaimable.
 export const WEBHOOK_DELIVERY_CLAIM_LEASE_MS = 5 * 60 * 1000;
 
+// The share of each drain batch reserved for retries (attempts > 0).
+// Selection is otherwise oldest-due-first, and a retry's next_attempt_at
+// is always a backoff past its last attempt — so under a sustained fresh
+// flood every batch filled with fresh rows and a retry only moved once
+// the flood ahead of it had had its first attempt (HUNT-SOAK S-1: at a
+// 10k failing backlog, 100 ticks processed 2,500 first attempts and zero
+// retries past them). Reserving a fixed share of every batch for the
+// retry class bounds a retry's wait by the batch rate, not the flood
+// size; the fresh class backfills the reserve when retries run short
+// (and vice versa), so the batch is full-size whenever enough due work
+// exists either way.
+export const WEBHOOK_DRAIN_RETRY_RESERVE_SHARE = 0.4;
+
 // The in-memory journal keeps this many newest rows per subscription.
 // Retention keeps those, plus delivered and dead-letter rows inside the
 // window below. Pending and failed rows are never pruned: they can still
@@ -179,6 +192,27 @@ function noteIsolatedWebhookDelivery(isolated, deliveryId, error) {
   }
   console.warn(`[webhook-dispatch] isolated throwing delivery row ${entry.deliveryId}: ${entry.error}`);
   return entry;
+}
+
+// One drain batch's attempt order: a proportional round-robin merge of
+// the batch's retry rows and fresh rows, so each class is attempted in
+// roughly its share of the batch throughout the batch — if the tick's
+// deadline cuts the batch short, neither class is the one that happened
+// to be standing at the back of the queue. Within each class the rows
+// keep their selection order (oldest due first).
+function drainBatchOrder(retries, fresh) {
+  const ordered = [];
+  let r = 0;
+  let f = 0;
+  while (r < retries.length || f < fresh.length) {
+    if (f >= fresh.length
+      || (r < retries.length && r * fresh.length <= f * retries.length)) {
+      ordered.push(retries[r++]);
+    } else {
+      ordered.push(fresh[f++]);
+    }
+  }
+  return ordered;
 }
 
 // Indexed per subscription. ORDER BY created_at matches the previous
@@ -1603,7 +1637,10 @@ export class AgentPluginStore {
 
   // Sweep due deliveries (pending/failed with next_attempt_at <= now).
   // Called by the Cloudflare cron tick and by the agent-triggered process
-  // endpoint (agentId scopes it to one identity's deliveries). Each
+  // endpoint (agentId scopes it to one identity's deliveries). One call
+  // drains in batches of `limit` until the due queue is empty or the
+  // caller's deadline is spent (HUNT-SOAK S-1), with a reserved retry
+  // share in every batch so fresh floods cannot starve retries. Each
   // delivery mutates in its own transaction so one poison row cannot roll
   // back the rest of the sweep, and a row whose attempt throws is
   // isolated the same way (#3893): its outcome is recorded, it is named
@@ -1636,22 +1673,47 @@ export class AgentPluginStore {
 
   async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers, deadline = Infinity } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
-    // Only rows that can actually be attempted fill the batch. Deliveries of a
+    // Only rows that can actually be attempted fill a batch. Deliveries of a
     // disabled subscription or of an identity no longer linked to the event's
     // room stay pending but are left out here; otherwise a large skipped
     // backlog occupies every LIMIT-sized batch and live deliveries wait behind
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
     // dead-letter as before.
-    const due = this.db.prepare(
-      `SELECT d.* FROM agent_webhook_deliveries d
-       LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
-       WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
+    const dueFrom = `FROM agent_webhook_deliveries d
+       LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id`;
+    const dueWhere = `d.state IN ('pending','failed') AND d.next_attempt_at <= ?
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
-         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
-       ORDER BY d.next_attempt_at ASC, d.created_at ASC, d.delivery_id ASC LIMIT ?`)
-      .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))`;
+    const dueArgs = agentId ? [now, agentId] : [now];
+    // A batch is composed from two classes — retries (attempts > 0) and
+    // fresh rows (attempts = 0) — so the retry class's share of every
+    // batch is structural rather than a sort-order accident (see
+    // WEBHOOK_DRAIN_RETRY_RESERVE_SHARE). Within a class the due order
+    // is unchanged: next_attempt_at, then created_at, then delivery_id.
+    const selectFresh = this.db.prepare(
+      `SELECT d.* ${dueFrom} WHERE ${dueWhere} AND d.attempts = 0
+       ORDER BY d.next_attempt_at ASC, d.created_at ASC, d.delivery_id ASC LIMIT ? OFFSET ?`);
+    const selectRetries = this.db.prepare(
+      `SELECT d.* ${dueFrom} WHERE ${dueWhere} AND d.attempts > 0
+       ORDER BY d.next_attempt_at ASC, d.created_at ASC, d.delivery_id ASC LIMIT ? OFFSET ?`);
+    const countDue = this.db.prepare(`SELECT COUNT(*) AS n ${dueFrom} WHERE ${dueWhere}`);
+    const dueBatch = () => {
+      if (!(limit > 0)) return [];
+      const reserve = Math.min(limit, Math.ceil(limit * WEBHOOK_DRAIN_RETRY_RESERVE_SHARE));
+      const retries = selectRetries.all(...dueArgs, reserve, 0);
+      const fresh = selectFresh.all(...dueArgs, limit - retries.length, 0);
+      if (fresh.length >= limit - retries.length) return drainBatchOrder(retries, fresh);
+      // Fresh ran dry before the batch filled: backfill with the next
+      // retries, so the batch is full-size whenever enough due work
+      // exists. (The mirror case needs no second query: the fresh
+      // allotment above already grows by whatever the reserve left
+      // unused.)
+      return drainBatchOrder(
+        retries.concat(selectRetries.all(...dueArgs, limit - retries.length - fresh.length, retries.length)),
+        fresh);
+    };
     const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     // Deadline discipline (PR-2 / HOT-PATH F2): the same cooperative
@@ -1668,27 +1730,53 @@ export class AgentPluginStore {
     // classification of each URL still runs per attempt, only the DNS
     // answer is reused within the tick; the next drain re-resolves.
     const dnsCache = new Map();
+    // Drain-until-budget (HUNT-SOAK S-1): one drain call used to be a
+    // single batch, so a store's sustained drain was capped at `limit`
+    // deliveries per tick whatever the backlog — a healthy 10k burst
+    // needed ~400 ticks (~6.7 h) and sustained arrivals above 25/min
+    // grew the backlog without bound. The drain now repeats batches
+    // until the due queue is empty or the caller's deadline is spent.
+    // Attempted rows leave the due set — delivered, dead-lettered, or
+    // rescheduled past `now` by backoff / skip-recheck — so the
+    // selection window slides forward on its own. The attempted set
+    // additionally guarantees each row is attempted at most once per
+    // drain: a row that stays due at the head of the queue (one another
+    // instance holds a live claim on — the claim attempt reads
+    // "skipped" and next_attempt_at does not move) is never attempted
+    // twice, and a batch whose rows were all attempted already ends
+    // the drain instead of spinning on them until the deadline. Those
+    // rows keep their queue position for the next drain.
+    const attempted = new Set();
     let budgetExceeded = false;
-    for (const row of due) {
+    for (;;) {
+      const batch = dueBatch();
+      if (batch.length === 0) break;
       if (Date.now() > deadline) { budgetExceeded = true; break; }
-      summary.processed++;
-      const timeoutMs = Number.isFinite(deadline)
-        ? Math.max(1, Math.min(DELIVERY_TIMEOUT_MS, deadline - Date.now()))
-        : DELIVERY_TIMEOUT_MS;
-      try {
-        summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated, timeoutMs, dnsCache })]++;
-      } catch (error) {
-        // #3893 last-resort guard: attemptStoredDelivery records an
-        // outcome for every throw after its claim; a throw that still
-        // escapes (the claim transaction itself, a failed outcome
-        // write) is isolated here so one row can never abort the batch.
-        // The row keeps its queue position and is retried next drain.
-        noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+      const work = batch.filter(row => !attempted.has(row.delivery_id));
+      if (work.length === 0) break;
+      for (const row of work) {
+        if (Date.now() > deadline) { budgetExceeded = true; break; }
+        attempted.add(row.delivery_id);
+        summary.processed++;
+        const timeoutMs = Number.isFinite(deadline)
+          ? Math.max(1, Math.min(DELIVERY_TIMEOUT_MS, deadline - Date.now()))
+          : DELIVERY_TIMEOUT_MS;
+        try {
+          summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated, timeoutMs, dnsCache })]++;
+        } catch (error) {
+          // #3893 last-resort guard: attemptStoredDelivery records an
+          // outcome for every throw after its claim; a throw that still
+          // escapes (the claim transaction itself, a failed outcome
+          // write) is isolated here so one row can never abort the batch.
+          // The row keeps its queue position and is retried next drain.
+          noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+        }
       }
+      if (budgetExceeded || batch.length < limit) break;
     }
     if (budgetExceeded) {
       summary.budgetExceeded = 1;
-      summary.pending = due.length - summary.processed;
+      summary.pending = countDue.get(...dueArgs).n;
     }
     // #3893: the isolated count is numeric, so it survives compactSummary
     // into the job heartbeat; the item detail rides this return value
