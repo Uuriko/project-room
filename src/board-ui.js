@@ -673,15 +673,28 @@ function newItemForm() {
 
 // S3: the create API accepts a note, but the form never sent one (F-parity-1).
 // Pure body builder so the note wiring is unit-testable at this boundary.
-export function newItemCreateBody(data) {
+// The id is the create's operation identity: a caller retrying an unchanged
+// form-fill passes the first attempt's id back as reuseId, so the retry is
+// the same create (the server refuses a second item under one id with
+// work_claim_exists) instead of a guaranteed duplicate under a fresh id.
+export function newItemCreateBody(data, reuseId = null) {
   const title = String(data?.get("title") ?? "").trim();
   if (!title) return null;
-  const body = { id: claimIdFromTitle(title), title };
+  const body = { id: typeof reuseId === "string" && reuseId ? reuseId : claimIdFromTitle(title), title };
   const note = String(data?.get("note") ?? "").trim();
   if (note) body.note = note;
   const files = filesFromField(data?.get("files"));
   if (files.length) body.files = files;
   return body;
+}
+
+// Whether two create bodies are the same operation — every field but the id.
+// The installer reuses the pending id only for an unchanged form-fill; any
+// edit is a new item and mints a new id.
+export function sameNewItemBody(a, b) {
+  if (!a || !b) return false;
+  return a.title === b.title && (a.note ?? null) === (b.note ?? null)
+    && JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []);
 }
 
 // Loading states (BU-02): the board never shows the empty-board copy while a
@@ -825,6 +838,10 @@ export function installWorkBoard({ client, getState, getSession }) {
       ? `${client.generation}|${current.roomId}|${member}` : null;
   };
   let mutating = false;
+  // The board-new-item create in flight or last refused: an unchanged retry
+  // reuses its id (see newItemCreateBody), so a create whose response was
+  // lost cannot duplicate the item when the user submits the form again.
+  let pendingCreate = null;
   let pendingFocus = null;
   let pendingStatus = "";
   let stick = null;
@@ -907,7 +924,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (!owned) return;
     if (loadedContext !== owned) {
       operation++; mutating = false; readFlight = null; actionFlight = null; loadedRoom = null; seen = null; items = []; status = null;
-      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; paint();
+      loadedContext = owned; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; pendingCreate = null; paint();
     }
     if ((mutating && !force) || readFlight) return;
     const events = (getState()?.eventLog ?? []).filter(event => event.type === "work_claim.updated");
@@ -1179,10 +1196,28 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (created && root.contains(created)) {
       event.preventDefault();
       const data = new FormData(created);
-      const body = newItemCreateBody(data);
+      // One id per unchanged form-fill: a retry after a lost or refused
+      // response re-sends the pending create's id instead of minting a
+      // duplicate item. The server refuses an existing id with
+      // work_claim_exists — for the id this form minted, that refusal is
+      // the first attempt's landed outcome, so it reconciles as success
+      // and the forced reload shows the item.
+      let body = newItemCreateBody(data);
       if (!body) return;
+      if (pendingCreate && sameNewItemBody(pendingCreate, body)) body = newItemCreateBody(data, pendingCreate.id);
+      else pendingCreate = body;
+      const sentId = body.id;
       const title = body.title;
-      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
+      flySubmit(created, () => client.request(client.path("/work-claims"), { method: "POST", data: body }).then(result => {
+        if (pendingCreate?.id === sentId) pendingCreate = null;
+        return result;
+      }, error => {
+        if (error?.code === "work_claim_exists" && pendingCreate?.id === sentId) {
+          pendingCreate = null;
+          return { reconciled: sentId };
+        }
+        throw error;
+      }), { id: body.id, status: `Opened '${title}'`, pending: pendingOutcome("create", title) });
       return;
     }
     const form = event.target.closest("[data-claim-reassign]");
@@ -1252,6 +1287,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; pendingCreate = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
