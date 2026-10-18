@@ -755,6 +755,20 @@ export function startNodeScheduler({
   // #3334 parity with the Worker heartbeat: a failing tick keeps a sanitized
   // failure detail (token-shaped fields only) so the Node health surface can
   // name the failing sub-check too.
+  //
+  // Failure NAMING rule (RQ-22, generalising #3624): when a job's failure
+  // is scoped to one record, the job attaches that record's id as
+  // failureDetail.recordId, taken from the structured record in scope at
+  // the failure site (a store row, a loop variable, an isolated-failure
+  // entry) — NEVER parsed out of an error message; the classifiers stay
+  // id-free. Only public-identifier classes ride (room, claim, land-queue
+  // item, webhook delivery, bounty, receipt ids); invitation, credential
+  // and account ids are never attached. The id rides the stored failure
+  // detail and the operator surfaces only: neither health view projects
+  // it (the Worker jobHealthView's omission is deliberate, #3334), and
+  // public error strings (scanError) stay id-free. A job whose failures
+  // are never record-scoped attaches nothing — code-only detail is the
+  // correct shape there.
   const detailToken = /^[a-z][a-z0-9_]{0,63}$/i;
   const failureDetailOf = source => {
     const detail = source?.failureDetail;
@@ -763,9 +777,10 @@ export function startNodeScheduler({
     for (const key of ["code", "subcheck", "errorClass", "recordClass"]) {
       if (typeof detail[key] === "string" && detailToken.test(detail[key])) out[key] = detail[key];
     }
-    // A room id named by the integrity job (room-record steps only; the
-    // job attaches it, this layer only shape-checks it). Ids contain
-    // hyphens, which the token pattern above does not allow.
+    // A record id named by the job whose failure is scoped to that
+    // record (the naming rule above; integrity's room-record steps were
+    // the first). The job attaches it, this layer only shape-checks it.
+    // Ids contain hyphens, which the token pattern above does not allow.
     if (typeof detail.recordId === "string" && SAFE_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
     return Object.keys(out).length ? out : null;
   };

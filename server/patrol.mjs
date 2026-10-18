@@ -295,6 +295,7 @@ export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH
   let patrolled = 0;
   let errors = 0;
   let firstErrorClass = null;
+  let firstErrorRoom = null;
   let budgetExceeded = 0;
   const fresh = [];
   for (const room of rooms) {
@@ -331,6 +332,7 @@ export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH
       if (parkFresh) {
         errors += 1;
         firstErrorClass ??= errorClassOf(error);
+        firstErrorRoom ??= room.id;
       }
       console.error(`[patrol] room ${room.id} failed: ${error?.message ?? error}`);
     }
@@ -359,9 +361,15 @@ export function runPatrolTick(store, { deadline = Infinity, limit = PATROL_BATCH
       // Same #3334 rule: the public surface gets the count's context — a
       // room could not be processed, and the error's class — never the
       // room id. The room, its cursor and the error text are in
-      // patrol_blocks (patrolBlocks), the patrol's own bookkeeping.
+      // patrol_blocks (patrolBlocks), the patrol's own bookkeeping. The
+      // room is additionally named on the failure detail (recordId, the
+      // RQ-22 naming rule generalising #3624): it rides the stored
+      // detail and the operator surfaces, and the public health view
+      // deliberately does not project it. The id is the freshly parked
+      // room row — the record in scope at the failure site — never
+      // parsed out of error text.
       result.scanError = `patrol could not process a room (${firstErrorClass ?? "unknown"})`;
-      result.failureDetail = { code: "patrol_error", subcheck: "patrol", errorClass: firstErrorClass ?? "unknown", recordClass: "room" };
+      result.failureDetail = { code: "patrol_error", subcheck: "patrol", errorClass: firstErrorClass ?? "unknown", recordClass: "room", recordId: firstErrorRoom };
     }
   }
   return result;
