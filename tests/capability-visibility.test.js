@@ -231,9 +231,11 @@ test("listing endpoints: no leaks, no over-filtering", async t => {
     new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"]));
 
   // 2. Server card: public by design, full unfiltered list. The enrolled
-  //    tier is the member core catalog — the default a member bearer gets —
+  //    tier is the member default catalog — lean since the lean-as-default
+  //    flip, the list a member bearer gets with no profile argument —
   //    not the non-member public-work list (#3769).
-  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null)));
+  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("lean", false, null)));
+  assert.deepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools()));
   assert.ok(toolNames(liveEnrolledMcpTools()).has("room_post_message"), "enrolled tier lists hosted room tools");
   assert.notDeepEqual(toolNames(liveEnrolledMcpTools()), toolNames(listedMcpTools("core", false, null, "public_work")),
     "enrolled tier is not the non-member catalog");

@@ -3,8 +3,8 @@
 // Round 1 found public_work_recommend and room_list_work missing from the
 // default profile's tools/list while /.well-known/ard.json lists them. The
 // scoping is intentional (they live under focus=public_work / focus=work and
-// profile=full; the server card's enrolled list is the member core catalog,
-// #3769) - but nothing pinned it, so the next catalog edit could silently
+// profile=full; the server card's enrolled list is the member default
+// catalog, #3769) - but nothing pinned it, so the next catalog edit could silently
 // strand a tool. This test pins the reconciliation contract at the real
 // boundary:
 //
@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 import { aiCatalog } from "../server/agent-discovery.mjs";
 import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../server/mcp-discovery.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
+import { actionMetaToolDefs } from "../server/mcp-action-search.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import { publicWorkMcpDefinitions, anonymousPublicWorkMcpTools } from "../server/mcp-public-work.mjs";
 import { identityMintMcpDefinitions } from "../server/mcp-identity-mint.mjs";
@@ -39,7 +40,8 @@ function ardMcpTools() {
 function servedProfiles() {
   return {
     public: livePublicMcpTools(),
-    "core (default)": listedMcpTools("core"),
+    "lean (default)": listedMcpTools("lean"),
+    core: listedMcpTools("core"),
     full: listedMcpTools("full"),
     "focus=work": listedMcpTools("core", false, null, "work"),
     "focus=conversation": listedMcpTools("core", false, null, "conversation"),
@@ -55,6 +57,9 @@ function servedProfiles() {
 function codeToolNames() {
   return new Set([
     ...hostedMcpToolDefs.map(t => t.name),
+    // The lean front door's meta tools are defined beside the search
+    // implementation and handled in the room profile, not in hosted defs.
+    ...actionMetaToolDefs.map(t => t.name),
     ...MCP_JOIN_TOOLS.map(t => t.name),
     ...publicWorkMcpDefinitions.map(t => t.name),
     ...identityMintMcpDefinitions.map(t => t.name),
@@ -91,13 +96,13 @@ test("every served MCP tool exists in code", () => {
 test("round-1 scoping is pinned: public_work_recommend and room_list_work live outside the default profile", () => {
   const profiles = servedProfiles();
   const names = list => list.map(t => t.name);
-  // The default core profile is intentionally the short catalog; these two
+  // The default lean profile is intentionally the short catalog; these two
   // are discovered via focus profiles and the enrolled server card.
-  assert.ok(!names(profiles["core (default)"]).includes("public_work_recommend"), "public_work_recommend is not in the default profile");
-  assert.ok(!names(profiles["core (default)"]).includes("room_list_work"), "room_list_work is not in the default profile");
+  assert.ok(!names(profiles["lean (default)"]).includes("public_work_recommend"), "public_work_recommend is not in the default profile");
+  assert.ok(!names(profiles["lean (default)"]).includes("room_list_work"), "room_list_work is not in the default profile");
   assert.ok(names(profiles["focus=public_work"]).includes("public_work_recommend"), "public_work_recommend is in focus=public_work");
   assert.ok(names(profiles["focus=work"]).includes("room_list_work"), "room_list_work is in focus=work");
-  // The enrolled server-card list is the member core catalog (#3769): it
+  // The enrolled server-card list is the member default catalog (#3769): it
   // carries the hosted room tools, not the non-member public-work set.
   assert.ok(names(profiles.enrolled).includes("room_post_message"), "enrolled server-card list is the member catalog (hosted room tools)");
   assert.ok(!names(profiles.enrolled).includes("public_work_recommend"), "enrolled server-card list is not the non-member public-work catalog");
