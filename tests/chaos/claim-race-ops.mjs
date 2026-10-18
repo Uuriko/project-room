@@ -382,10 +382,13 @@ const WEAKENINGS = {
   ],
   // P3: release stops clearing the lease (one guard, two lines): a renew that
   // raced the release leaves its extended lease silently surviving on the
-  // unclaimed item — the double effect P3 forbids.
+  // unclaimed item — the double effect P3 forbids. The anchors sit on the
+  // hoisted lease computation in updateWork (B4-HARDENING/D2 moved the
+  // release-clearing there so a send-back can restart a lapsed lease);
+  // negating the released branch there is the same weakening as before.
   p3: [
-    [`leaseStartAt: released ? null : item.leaseStartAt,`, `leaseStartAt: item.leaseStartAt,`],
-    [`leaseExpiresAt: released ? null : item.leaseExpiresAt,`, `leaseExpiresAt: item.leaseExpiresAt,`],
+    [`const leaseStartAt = released ? null`, `const leaseStartAt = released && false ? null`],
+    [`const leaseExpiresAt = released ? null`, `const leaseExpiresAt = released && false ? null`],
   ],
 };
 

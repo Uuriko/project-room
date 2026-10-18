@@ -511,6 +511,15 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     delivery: existing?.delivery ?? null,
     verification: existing?.verification ?? null,
     deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0 ? existing.deliveryGeneration : 0,
+    // B4/H2 added claimRound to the same shape (the claim-round counter
+    // request outcomes and review bases bind to; the codec defaults it to
+    // 0): same rule — the work item cannot express it, an existing row's
+    // counter is preserved verbatim (normalised exactly as workOf
+    // normalises it), and resetting it here would unbind the round's
+    // recorded outcomes. A mapped row that omits it never equals its
+    // stored form and the board diff never converges (the §4.6 /
+    // backfill / sync lifecycle failures on the B4 branch).
+    claimRound: Number.isSafeInteger(existing?.claimRound) && existing.claimRound > 0 ? existing.claimRound : 0,
   };
   if (historyOmitted > 0) row.historyOmitted = historyOmitted;
   if (existing?.deploy !== undefined && existing?.deploy !== null) row.deploy = existing.deploy;
@@ -604,6 +613,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     delivery: null,
     verification: null,
     deliveryGeneration: 0,
+    claimRound: 0,
   };
 }
 

@@ -477,15 +477,56 @@ export function claimReviewForm(item, draft = null) {
 // carrying a requestId records its outcome server-side, and the identical
 // retry replays that outcome instead of applying twice. The id is derived
 // from the operation itself — claim, delivery round, actor — so a retry of
-// the same click re-sends the same id, while a new round (a re-delivery
-// advances deliveryGeneration, #3684) or a different actor is a new
-// operation with a new id. Sanitized to the route's requestId shape.
-const requestIdPart = value => String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 40);
+// the same click re-sends the same id, while a new round or a different
+// actor is a new operation with a new id. Sanitized to the route's
+// requestId shape.
+//
+// B4/H2: the round is bound explicitly, not only through
+// deliveryGeneration. A release resets the generation to 0, so a
+// same-owner re-claim used to derive the IDENTICAL deliver id as round 1
+// and the kernel replayed round 1's recorded outcome — the round-2
+// delivery was silently swallowed (identical bundle) or refused as a
+// conflict (changed bundle). The id now carries a fingerprint of the
+// round basis (claimedAt + lifetime history length, the same basis the
+// release/reassign posts bind), which every new round changes. The
+// kernel also clears recorded outcomes when a round ends, so the two
+// fixes are independent locks on the same door.
+// Two independent 32-bit string hashes combined into 16 hex chars: not a
+// security digest, just a stable fingerprint a browser can compute
+// synchronously for id derivation.
+const fingerprint = value => {
+  const text = String(value ?? "");
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 33) ^ code) >>> 0;
+  }
+  return [h1.toString(16).padStart(8, "0"), h2.toString(16).padStart(8, "0")].join("");
+};
+// Parts were truncated to 40 chars, so two ids sharing a 40-char prefix
+// collided into one operation. A long part now keeps a readable prefix
+// plus a fingerprint of the FULL value, so distinct values stay distinct.
+const requestIdPart = value => {
+  const clean = String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-");
+  return clean.length <= 40 ? clean : [clean.slice(0, 23), fingerprint(clean)].join("-");
+};
+const historyLengthOf = item => (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0);
+const roundPart = item => fingerprint([item?.claimedAt ?? "", historyLengthOf(item)].join("|"));
 export function verifyRequestId(item, memberId) {
-  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
 }
 const deliverRequestId = (item, memberId) =>
-  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), requestIdPart(memberId)].join("-");
+  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
+
+// The round basis a first Verify/Deliver submission is fenced by (H3):
+// the kernel's existing preconditions, computed exactly as the board's
+// release/reassign posts compute them, so a stale form held across a
+// release + re-claim is refused as a conflict instead of replaying into
+// the new round. Only a claimed round carries a basis worth posting.
+const roundBasis = item => typeof item?.claimedAt === "string"
+  ? { expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyLengthOf(item) }
+  : {};
 
 // The reviewer's verify as a pure body, so the requestId wiring is
 // unit-testable at this boundary (the newItemCreateBody precedent). Before
@@ -493,7 +534,7 @@ const deliverRequestId = (item, memberId) =>
 // a lost response could only be retried as a brand-new update against a
 // claim that was already done.
 export function claimVerifyBody(item, memberId) {
-  return { state: "done", requestId: verifyRequestId(item, memberId) };
+  return { state: "done", requestId: verifyRequestId(item, memberId), ...roundBasis(item) };
 }
 
 const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
@@ -592,7 +633,23 @@ export function claimDeliverBody(item, data, memberId) {
   }
   return { state: "delivered",
     delivery: { artifact: { kind, ref, sha256 }, checks, criteria },
-    requestId: deliverRequestId(item, memberId) };
+    requestId: deliverRequestId(item, memberId), ...roundBasis(item) };
+}
+
+// H4 readback for the Deliver submit: the refreshed claim confirms the
+// delivery only when it is actually delivered, by this member, carrying
+// the submitted bundle. The kernel's delivery digest is a pure function
+// of exactly { artifact, checks, criteria } (deliveryDigest in
+// work-claims.mjs), so field equality with the submitted bundle is
+// equality with the submitted bundle's digest — a claim delivered with
+// any other bundle does not confirm this submit.
+export function deliverOutcomeConfirmed(item, body, memberId) {
+  if (!item || item.state !== "delivered" || !item.delivery || !body?.delivery) return false;
+  if (item.delivery.deliveredBy !== memberId) return false;
+  const same = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  return same(item.delivery.artifact, body.delivery.artifact)
+    && same(item.delivery.checks, body.delivery.checks)
+    && same(item.delivery.criteria, body.delivery.criteria);
 }
 
 // One anchor literal for both record targets, so the board's link shape
@@ -1363,9 +1420,22 @@ export function installWorkBoard({ client, getState, getSession }) {
       const body = claimDeliverBody(item, new FormData(deliver), viewer.id);
       if (!body) { note(uiText("board.deliver.invalid")); return; }
       const title = item.title || id;
+      // H4: the Deliver submit gets the Verify treatment — success is
+      // announced only when the refreshed claim is actually delivered
+      // with the submitted bundle (deliverOutcomeConfirmed). A replayed
+      // or lost response that left the claim undelivered reports
+      // unconfirmed instead of the canned "Delivered" text.
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (deliverOutcomeConfirmed(current, body, viewer.id)) {
+          return uiText("board.action.outcome.deliver", { title });
+        }
+        return error?.message || uiText("board.action.deliver.unconfirmed", { title });
+      };
       flySubmit(deliver,
         () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data: body }),
-        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) });
+        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) },
+        reconcile, uiText("board.action.deliver.unconfirmed", { title }));
       return;
     }
     const review = event.target.closest("[data-claim-review]");
