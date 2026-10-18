@@ -968,9 +968,16 @@ export function roomWorkClaimConfig(room) {
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
     ? raw.defaultLeaseHours : DEFAULT_LEASE_HOURS;
   const reviewPolicy = REVIEW_POLICIES.includes(raw.reviewPolicy) ? raw.reviewPolicy : DEFAULT_REVIEW_POLICY;
+  // CD-01 verdict inbox orphan interval (REV §3 req 2): a delivered claim
+  // whose attention set stays empty past this interval auto-adds the room
+  // owner. Room-configured in ms; anything invalid falls back to 24h.
+  const verdictOrphanAfterMs = typeof raw.verdictOrphanAfterMs === "number" && Number.isFinite(raw.verdictOrphanAfterMs)
+    && raw.verdictOrphanAfterMs >= 0 && raw.verdictOrphanAfterMs <= 30 * 24 * 3600 * 1000
+    ? raw.verdictOrphanAfterMs : 24 * 3600 * 1000;
   return Object.freeze({
     defaultLeaseHours,
     reviewPolicy,
+    verdictOrphanAfterMs,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
     staleSweep: raw.staleSweep === true,

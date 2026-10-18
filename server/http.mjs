@@ -72,6 +72,8 @@ import { roomUsageSummary, parseUsageDays } from "./usage-summary.mjs";
 import { AccessRequests, REQUEST_TTL_MS } from "./access-requests.mjs";
 import { attentionReport } from "./owner-attention.mjs";
 import { ownerOverview } from "./owner-overview.mjs";
+import { collectVerdictInbox } from "./verdict-inbox-read.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
 import { jevShadowReport } from "./jev-shadow-journal.mjs";
@@ -2298,6 +2300,37 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (url.searchParams.getAll("window").length > 1) reject(422, "invalid_overview_query", "window must be a single value");
         return json(res, 200, ownerOverview({ store, accessRequests, jobHealth: nodeJobHealth }, token, binding, Date.now(),
           { window: url.searchParams.get("window") ?? "7d", after: url.searchParams.get("after") }));
+      }
+      if (url.pathname === "/api/verdict-inbox" && req.method === "GET") {
+        // CD-01 (COMP-DEEP #1, REV §3 reqs 1–5): the sectioned verdict
+        // inbox over the server-maintained attention set. Two doors, one
+        // underlying set: a Bearer identity secret is the agent door
+        // (agent reviewers get a queue view of the same set, beside
+        // /api/needs-me); an account session is the human door (tuples
+        // held by non-human members never render there).
+        rate(`verdict-inbox:${remoteAddress}`, 60);
+        const secret = bearer(req);
+        if (secret) {
+          if (secret.startsWith(API_KEY_PREFIX)) reject(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
+          if (!isIdentitySecret(secret)) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+          const identity = store.identities.resolveGlobalIdentitySecret(secret);
+          if (!identity) reject(401, "unauthenticated", "Unknown or revoked identity secret");
+          const seats = identityRoomSeats(store.db, identity.identityId, { limit: 40 });
+          const memberByRoom = new Map(seats.map(seat => [seat.roomId, seat.memberId]));
+          return json(res, 200, collectVerdictInbox(store, { memberByRoom, surface: "agent", nowMs: Date.now() }));
+        }
+        const token = cookie(req, accountCookieName), binding = accountBinding(req);
+        const auth = store.authenticateAccountSession(token, null, binding);
+        const memberByRoom = new Map();
+        const roomRows = store.db.prepare(
+          "SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id").all(auth.account.id);
+        for (const { room_id: roomId } of roomRows.slice(0, 40)) {
+          try {
+            const roomAuth = store.authenticateAccountSession(token, roomId, binding);
+            if (roomAuth.member && roomAuth.member.active !== false) memberByRoom.set(roomId, roomAuth.member.id);
+          } catch (error) { if (error.status !== 403) throw error; }
+        }
+        return json(res, 200, collectVerdictInbox(store, { memberByRoom, surface: "human", nowMs: Date.now() }));
       }
       if (url.pathname === "/api/account-rooms" && req.method === "POST") {
         // Issue #6 A2: create a room for the signed-in account. Account session

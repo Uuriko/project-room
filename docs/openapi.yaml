@@ -11792,6 +11792,41 @@ paths:
         '401': { description: unauthenticated }
         '403': { description: owner_required }
         '422': { description: invalid_overview_query, invalid_room or session_binding_required }
+  /api/verdict-inbox:
+    get:
+      summary: Verdict inbox — sectioned attention-set read (COMP-DEEP #1, REV §3 reqs 1–5)
+      description: |
+        The verdict inbox over a server-maintained attention set of
+        (claim, person, reason, since) tuples with Gerrit fold semantics
+        (per person per claim only the latest record is live). Membership
+        changes on claim lifecycle events only: delivery submitted adds
+        the named reviewer(s) with reason verdict-requested; a recorded
+        verdict removes the reviewer; request-revision / reject adds the
+        worker (revision-requested / rejected); accept clears the set;
+        re-delivery re-adds the reviewer (re-review-required); a verdict
+        voided by a new delivery re-adds its reviewers
+        (verdict-voided-new-delivery). A claim awaiting verdict whose set
+        stays empty past the room-configured interval (default 24h,
+        work-claims config verdictOrphanAfterMs) auto-adds the room owner
+        with reason orphaned-review. Sections are server-defined:
+        needsYourVerdict / returnedToYou / waitingOnWorker /
+        recentlyDecided; every row carries claimId, roomId, title,
+        personId, reason, since and waitingSeconds, sorted by waiting
+        time, oldest first. Two doors share the one underlying set: a
+        Bearer identity secret is the agent door (surface agent — agent
+        reviewers get a queue view of the same set); an account session
+        is the human door (surface human — tuples held by non-human
+        members never render there, so bots never enter the human set).
+        The response also carries Contract F follow totals (CD-06) under
+        `follow` when that provider is present, otherwise null. A room
+        whose read fails is named in roomErrors and excluded, never a 500.
+      security:
+        - accountSession: []
+        - identityBearer: []
+      responses:
+        '200':
+          description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
+        '401': { description: unauthenticated or room_token_not_identity }
   /api/account/profile:
     get:
       summary: Read the account's profile
