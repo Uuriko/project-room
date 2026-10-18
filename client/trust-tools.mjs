@@ -18,14 +18,14 @@
 // already has an open sybil-resolver incident. These are reads only.
 //
 // Pure definitions plus argument validation; no I/O, no dependencies.
+import { annotateMcpTool } from "../src/mcp-tool-annotations.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 64 };
 const schema = (properties = {}, required = []) =>
   ({ type: "object", properties, required, additionalProperties: false });
-const tool = (name, description, inputSchema) => ({
-  name, description, inputSchema,
-  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-});
+// Annotations and titles come only from src/mcp-tool-annotations.mjs
+// (COMP-DEEP #4): both tools here are reads, and the registry says so.
+const tool = (name, description, inputSchema) => annotateMcpTool({ name, description, inputSchema });
 
 export const trustTools = [
   tool("identity_read_verification",

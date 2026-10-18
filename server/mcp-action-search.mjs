@@ -10,6 +10,7 @@
 // Search is filtered by the same capabilityVisibleTo predicate as tools/list:
 // a tool this agent may not use is absent, never present-but-denying.
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
+import { annotateMcpTool } from "../src/mcp-tool-annotations.mjs";
 import { capabilityVisibleTo } from "./capability-visibility.mjs";
 
 export const SEARCH_ACTIONS_TOOL = "room_search_actions";
@@ -32,7 +33,6 @@ export const actionMetaToolDefs = Object.freeze([
       required: ["query"],
       additionalProperties: false
     },
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   },
   {
     name: RUN_ACTION_TOOL,
@@ -47,9 +47,9 @@ export const actionMetaToolDefs = Object.freeze([
       additionalProperties: false
     },
     // The wrapped action decides what happens; this wrapper can write.
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
+    // Its registry entry says so (destructive true, idempotent false).
   }
-]);
+].map(tool => annotateMcpTool(tool)));
 
 // The lean default under discussion: read, post, needs-me, answer a formal
 // request, access, join, stop wakes, plus search and run for everything else.

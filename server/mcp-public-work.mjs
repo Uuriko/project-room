@@ -2,15 +2,22 @@ import { mcpInvalidRequest } from './mcp-arg-errors.mjs';
 // Public contribution tools use the same persisted authority and journals as HTTP.
 // No tool admits a room member, provisions credentials or starts a host.
 import { PUBLIC_WORK_MCP_TOOLS, ROOM_MCP_PUBLIC_URL } from '../src/room-mcp-join.js';
+import { annotateMcpTool, mcpToolAnnotation } from '../src/mcp-tool-annotations.mjs';
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
 import { ServiceError } from './service-error.mjs';
 const id = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' };
 const positive = { type: 'integer', minimum: 1 };
 const strings = { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 100 } };
 const schema = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
-const tool = (name, description, inputSchema, readOnly) => ({ name, description, inputSchema,
- _meta: { authorization: ['public_work_recommend', 'public_work_read_task'].includes(name) ? 'none' : 'saved-identity-secret' },
- annotations: { readOnlyHint: readOnly, destructiveHint: name === 'public_work_release', idempotentHint: true, openWorldHint: false } });
+// Annotations and titles come only from src/mcp-tool-annotations.mjs
+// (COMP-DEEP #4); the readOnly argument stays as a cross-check.
+const tool = (name, description, inputSchema, readOnly) => {
+ if (mcpToolAnnotation(name).annotations.readOnlyHint !== readOnly) {
+  throw new Error(`MCP tool "${name}": readOnly argument disagrees with src/mcp-tool-annotations.mjs`);
+ }
+ return annotateMcpTool({ name, description, inputSchema,
+  _meta: { authorization: ['public_work_recommend', 'public_work_read_task'].includes(name) ? 'none' : 'saved-identity-secret' } });
+};
 const binding = { taskId: id, requestId: id, expectedTermsVersion: positive };
 const lease = { type: 'number', exclusiveMinimum: 0, maximum: 24 };
 export const publicWorkMcpDefinitions = Object.freeze([

@@ -87,7 +87,10 @@ test("write work without an exact scope does not start", async () => {
 test("room_begin_work is a hosted tool and rejects a guessed extra field", async () => {
   await import("../server/mcp-hosted-tools.mjs");
   const tool = roomTools.find(entry => entry.name === "room_begin_work");
-  assert.equal(tool.annotations.destructiveHint, true);
+  // COMP-DEEP #4 annotation truth pass: begin is a routine lifecycle
+  // verb, not a destructive one — this assertion used to pin the old
+  // template over-claim (destructiveHint:true on every work verb).
+  assert.equal(tool.annotations.destructiveHint, false);
   assert.equal(tool.annotations.readOnlyHint, false);
   assert.doesNotMatch(tool.description, /Checks this host/);
   assert.match(tool.description, /Room work state/);

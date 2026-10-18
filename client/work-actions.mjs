@@ -4,6 +4,7 @@ import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
+import { annotateMcpTool } from "../src/mcp-tool-annotations.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -72,10 +73,11 @@ const definitions = [
 const actions = new Map(definitions.map(([name, title, type, description, properties, required = Object.keys(properties)]) => {
   const fields = type === T.WORK_PROPOSED ? { requestId: common.requestId, workItemId: id } : type === T.WORK_HALT_CLEARED ? { requestId: common.requestId } : common;
   return ["room_" + name, { type, tool: { name: "room_" + name, title, description: description + retry,
-    inputSchema: object({ ...fields, ...properties }, [...new Set([...Object.keys(fields), ...required])]),
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
+    inputSchema: object({ ...fields, ...properties }, [...new Set([...Object.keys(fields), ...required])]) } }];
 }));
-export const workTools = [...actions.values()].map(action => action.tool);
+// Titles/annotations are attached from src/mcp-tool-annotations.mjs only
+// (COMP-DEEP #4): every work verb used to claim it was destructive.
+export const workTools = [...actions.values()].map(action => annotateMcpTool(action.tool));
 export const isWorkTool = name => actions.has(name);
 
 // Validator for this finite descriptor vocabulary, not a general JSON Schema engine.
