@@ -56,6 +56,7 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
 optional.push("scripts/build-ui-strings.mjs", "src/strings.js", "strings/en.js", "strings/en.json");
+optional.push("client/work-brief.mjs");
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
 optional.push("server/public-work-settlement.mjs"); // First Shift settlement rail (imported by server/store.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs)

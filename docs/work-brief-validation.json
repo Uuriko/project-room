@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "runtime": "v24.19.0",
+  "platform": "darwin-arm64",
+  "fullSuite": {
+    "tests": 11154,
+    "passed": 11122,
+    "failed": 24,
+    "skipped": 8,
+    "durationMs": 416011.695375,
+    "failuresMatchRecordedBaseline": true,
+    "baseline": "release-qualification.json",
+    "failures": [
+      {
+        "file": "tests/host-context-policy.test.js",
+        "test": "host policy has one explicit no-network, no-secret, no-external-effects profile"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "automatic host cannot read parent secrets or reach the network"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "sandbox refuses executables outside the checkout and system paths"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "configured environment is refused before a host starts"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "default host has isolated HOME so a room path cannot expand to operator HOME"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host process receives JSON and literal arguments without ambient environment"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host malformed output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host nonzero output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host oversized output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host empty output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "timeout and cancellation stop host processes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "different host processes cannot write the same checkout concurrently"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "process adapter accepts optional coding evidence without replacing its bytes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "adapter gets a typed data envelope rather than top-level room instructions"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "adapter runs configured checks and binds observations to exact local patch"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "failed configured check remains a failed observed exit, despite model success claim"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "mismatched patch, untracked files, and wrong repository never start checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "check that edits tracked files cannot produce a current verification receipt"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "committed artifact verification requires exact clean head and valid ancestor"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "checkout stays reserved through verification and cancellation releases it"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "model stdout cannot inject an adapter observation"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "observed result is journaled and redelivered after restart without repeating execution or checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "bounded verification times out without an observation and releases checkout ownership"
+      },
+      {
+        "file": "tests/reply-agent.test.js",
+        "test": "one command drives a separate host process and repeat invocation reuses its result"
+      }
+    ]
+  },
+  "focused": {
+    "tests": 43,
+    "passed": 43
+  },
+  "browserJourneys": {
+    "tests": 9,
+    "passed": 9
+  },
+  "storageBoundaryRepair": {
+    "tests": 3,
+    "passed": 3,
+    "candidateHead": "b9c4afed326219194f0b0ad6ac6df6b221bf3b1d"
+  },
+  "lint": "passed",
+  "ciModeCheck": "passed",
+  "untestedModuleGate": "passed",
+  "syntheticContext": "work-brief-qualification.json",
+  "nativeRestart": "work-brief-native-host.json",
+  "roomBenchmark": "work-brief-room-bench.json",
+  "initialRun": {
+    "runtime": "v26.8.2",
+    "failures": 31,
+    "disposition": "24 recorded host baseline failures; five cold-package failures repaired by runtime allowlist; compact-response duplication removed; PNG fixed-byte check passes on supported Node24. Final full suite supersedes initial run."
+  },
+  "releaseReady": false,
+  "openGates": [
+    "Integrated Linux CI",
+    "Shared RELEASE-PAUSE and coordinated release",
+    "Physical Mac sleep/wake",
+    "Human productivity comparison"
+  ]
+}
