@@ -113,9 +113,21 @@ export const agentInviteSchema = `
     member_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
     permissions_json TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    rotated_at INTEGER
   );
 `;
+
+// #3949: the timestamp of the receipt's one credential-less replay rotation
+// (R305-1), recorded on the receipt itself. Existing databases converge via
+// this ALTER; the column is nullable and older writers have no code path to
+// the table at all (unfenced additive journal, see writer-fence.mjs).
+export function ensureInviteReceiptSchema(db) {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_invite_redeem_receipts'").get();
+  if (!exists) return;
+  const columns = new Set(db.prepare("PRAGMA table_info(agent_invite_redeem_receipts)").all().map(column => column.name));
+  if (!columns.has("rotated_at")) db.exec("ALTER TABLE agent_invite_redeem_receipts ADD COLUMN rotated_at INTEGER");
+}
 
 const inviteStatus = (row, now) =>
   row.revoked_at != null ? "revoked"
@@ -173,7 +185,22 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
       fail(410, "invite_replay_rotation_expired",
         "This redemption's secret-rotation window has closed: a credential-less replay can rotate the identity secret only within 30 days of the original redemption. Ask the inviter who sponsored this invite to mint a fresh invite code — or to remove and re-invite this member — then redeem the new code to receive a new identity secret.");
     }
+    // #3949: the R305-1 rationale covers exactly one lost response. Once a
+    // credential-less replay has rotated and delivered a fresh secret, the
+    // holder of that secret is the legitimate holder; a further
+    // credential-less replay must not rotate again — each extra rotation
+    // would retire the delivered secret, revoke the identity's scoped API
+    // keys, and hand full identity possession to anyone holding the burned
+    // code + requestId. The one rotation is recorded on the receipt;
+    // credential-presenting replays never reach this gate and are
+    // unaffected, so the saved-secret holder can always still replay.
+    if (receipt.rotated_at != null) {
+      fail(410, "invite_replay_rotation_used",
+        "This redemption's credential-less secret rotation has already been used: a fresh identity secret was delivered by an earlier replay, and only that secret can replay this redemption now. Replay again presenting the current identity secret — or ask the inviter who sponsored this invite to mint a fresh invite code, or to remove and re-invite this member, then redeem the new code to receive a new identity secret.");
+    }
     rotation = store.identities.rotateForReplay(receipt.identity_id);
+    invites.db.prepare("UPDATE agent_invite_redeem_receipts SET rotated_at=? WHERE request_id=?")
+      .run(rotation.rotatedAt, receipt.request_id);
   }
   const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
     identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName

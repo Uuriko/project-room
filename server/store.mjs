@@ -160,7 +160,7 @@ import {
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
-import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
+import { AgentInvites, agentInviteSchema, ensureInviteReceiptSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
 import { HumanPush, humanPushSchema, humanPushPrefsSchema } from "./human-push.mjs";
@@ -1109,6 +1109,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
   [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureInviteReceiptSchema, "ensureInviteReceiptSchema@1"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
@@ -1634,6 +1635,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // EXISTS is idempotent, no schema version bump, intentionally
       // outside the writer fence (see unfencedAdditiveTables).
       ensureIdentityLinkCodeSchema(this.db);
+      // #3949: the redeem receipt's rotated_at marker (one-shot
+      // credential-less replay rotation) converges the same additive way —
+      // nullable column on an unfenced journal table, no version bump.
+      ensureInviteReceiptSchema(this.db);
       // Graduated autonomy tiers (#928 rescope): purely additive table —
       // IF NOT EXISTS is idempotent, no schema version bump. Replaces the
       // slice 1/3 agent_operator_controls table (module removed).
