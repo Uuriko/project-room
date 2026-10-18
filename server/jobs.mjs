@@ -33,6 +33,14 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// R-7 (ATLAS-JOBS-WAKES): how long the system tolerates a job not running
+// before the silence itself is the incident, stated per job in the registry
+// from the map's 24h-stop verdicts. "incident" = a silent day is a product
+// incident (escrow-epochs only: it is the money clock); "day" = a silent
+// day is the tolerance, a silent week is not; "week" = a silent day is
+// acceptable. The health views surface the field; the guardian vocabulary
+// grades staleness against it (GC-1) — nothing here grades with it yet.
+export const STOP_TOLERANCES = Object.freeze(["incident", "day", "week"]);
 // Slow jobs ride the */30 safety-net cron, whose phase can land a few
 // seconds before the job's own anchor. Without slack the job waits a
 // whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
@@ -247,6 +255,10 @@ function defineJob(job) {
     redactErrors: false,
     slow: false,
     required: false,
+    // No silent default: every registry entry declares its stopTolerance
+    // (R-7); tests/job-registry-honesty.test.js fails the registry if one
+    // is missing or outside STOP_TOLERANCES.
+    stopTolerance: null,
     singleRuntimeReason: null,
     disabledReason() { return "Not configured"; },
     ...job
@@ -298,6 +310,7 @@ export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
 export const JOBS = Object.freeze([
   defineJob({
     name: "gmail-sync",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     redactErrors: true,
@@ -311,6 +324,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "channel-drain",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     enabled(env, store) {
@@ -326,6 +340,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "webhook-dispatch",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     enabled(_env, store) { return store ? webhookDueAt(store) != null : true; },
@@ -338,6 +353,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "land-queue",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     enabled(_env, store) {
@@ -356,6 +372,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "claim-prs",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     enabled(_env, store) {
@@ -383,6 +400,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "retention",
+    stopTolerance: "week",
     cadenceMs: HOUR_MS,
     slow: true,
     runtimes: Object.freeze(["worker", "node"]),
@@ -395,6 +413,9 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "integrity",
+    // The only continuous verifier of store truth: a silent day is the
+    // tolerance; a silent week is flying blind (map §1.2 job 7).
+    stopTolerance: "day",
     cadenceMs: HOUR_MS,
     slow: true,
     runtimes: Object.freeze(["worker", "node"]),
@@ -478,6 +499,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "public-read-model",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     enabled(_env, store) { return store ? backfillPending(store) : true; },
@@ -489,6 +511,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "public-work-reseed",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     // #3530: the keeper is due only when the public board's claimable
@@ -507,6 +530,11 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "escrow-epochs",
+    // The money clock, and the registry's only zero-tolerance job: if it
+    // silently stops, payouts, sweeps, dispute timeouts and deadline
+    // refunds all freeze — a silent day is a product incident (map §1.2
+    // job 10).
+    stopTolerance: "incident",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     // #3693/#3844: payout epochs progress on their own. The keeper is due
@@ -524,6 +552,9 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "room-backup",
+    // One missed day is acceptable (recovery point slips to 48h); a
+    // pattern of missed days is not (map §1.2 job 11).
+    stopTolerance: "day",
     cadenceMs: DAY_MS,
     slow: true,
     // #3894: a required job's disable is a configuration failure, not
@@ -548,6 +579,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "patrol",
+    stopTolerance: "week",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
     // ClueBot phase 1: enabled only while some room has events the patrol
@@ -567,6 +599,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "growth-watch",
+    stopTolerance: "week",
     cadenceMs: DEFAULT_INTERVAL_MS,
     runtimes: Object.freeze(["node"]),
     singleRuntimeReason: "Growth watch reads the process-local collector. The Worker does not host that collector.",
@@ -579,6 +612,7 @@ export const JOBS = Object.freeze([
   }),
   defineJob({
     name: "store-growth",
+    stopTolerance: "week",
     cadenceMs: HOUR_MS,
     slow: true,
     runtimes: Object.freeze(["worker", "node"]),
@@ -607,9 +641,70 @@ export function jobsFor(runtime) {
   return JOBS.filter(job => job.runtimes.includes(runtime));
 }
 
+// R-5 (ATLAS-JOBS-WAKES WP-10): due-ness used to fail silent in both
+// directions — a throwing `enabled` gate read as "disabled" (the rollup
+// then excluded the job from the health surface entirely) and a throwing
+// `nextDueAt` probe read as "not due" (the job read ok-idle), with no
+// record anywhere that the probe itself was broken. The wrappers below
+// still return the safe answer (false / null), but every throw is now
+// recorded as a probeError fact: in this module's memory (projected onto
+// the health rows by both runtimes' views) and through the sink the
+// Worker installs to persist it durably (cloudflare/job-heartbeat.mjs).
+// A later successful evaluation of the same probe clears the fact. The
+// fact is data for the guardian vocabulary (GC-1); grading is unchanged.
+const probeErrors = new Map();
+let probeErrorSink = null;
+
+export function setProbeErrorSink(sink) {
+  probeErrorSink = typeof sink === "function" ? sink : null;
+}
+
+export function probeErrorFor(name) {
+  const fact = probeErrors.get(name);
+  return fact ? { ...fact } : null;
+}
+
+export function clearProbeErrors() {
+  probeErrors.clear();
+}
+
+function notifyProbeErrorSink(event) {
+  if (!probeErrorSink) return;
+  try { probeErrorSink(event); }
+  catch { /* the sink must never break due-ness */ }
+}
+
+function recordProbeError(job, probe, error) {
+  const prior = probeErrors.get(job.name);
+  const at = Date.now();
+  const fact = {
+    probe,
+    error: oneLine(error?.message ?? error),
+    at,
+    firstAt: prior ? prior.firstAt : at,
+    count: (prior?.count ?? 0) + 1
+  };
+  probeErrors.set(job.name, fact);
+  notifyProbeErrorSink({ job: job.name, ...fact });
+}
+
+function clearProbeError(job, probe) {
+  const fact = probeErrors.get(job.name);
+  if (fact && fact.probe === probe) {
+    probeErrors.delete(job.name);
+    notifyProbeErrorSink({ job: job.name, probe, cleared: true });
+  }
+}
+
 export function jobEnabled(job, env, store) {
-  try { return job.enabled(env ?? {}, store ?? null) === true; }
-  catch { return false; }
+  try {
+    const enabled = job.enabled(env ?? {}, store ?? null) === true;
+    clearProbeError(job, "enabled");
+    return enabled;
+  } catch (error) {
+    recordProbeError(job, "enabled", error);
+    return false;
+  }
 }
 
 export function jobDisabledReason(job, env, store) {
@@ -626,8 +721,12 @@ export function jobNextDue(job, store, now, lastRanAt) {
   if (typeof job.nextDueAt === "function") {
     try {
       const value = job.nextDueAt(store, now);
+      clearProbeError(job, "nextDueAt");
       return Number.isFinite(value) ? value : null;
-    } catch { return null; }
+    } catch (error) {
+      recordProbeError(job, "nextDueAt", error);
+      return null;
+    }
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
   return last + job.cadenceMs;
@@ -860,8 +959,11 @@ export function startNodeScheduler({
         const reason = !inRuntime ? (job.singleRuntimeReason ?? "Runs on the Worker only")
           : gated ? "Disabled for this process" : enabled ? null : jobDisabledReason(job, env, store);
         const rec = records.get(job.name) ?? {};
+        const probeFact = probeErrorFor(job.name);
         return {
           name: job.name, runtime: inRuntime ? "node" : "worker-only", enabled, reason,
+          stopTolerance: job.stopTolerance ?? null,
+          probeError: probeFact ? { probe: probeFact.probe, error: probeFact.error, at: iso(probeFact.at), firstAt: iso(probeFact.firstAt), count: probeFact.count } : null,
           periodSeconds: Math.round((overrides.get(job.name) ?? job.cadenceMs) / 1000),
           lastRunAt: iso(rec.lastRunAt), lastSuccessAt: iso(rec.lastSuccessAt), lastErrorAt: iso(rec.lastErrorAt),
           lastError: rec.lastError ?? null,

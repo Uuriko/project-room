@@ -1,4 +1,4 @@
-import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
+import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue, probeErrorFor } from "../server/jobs.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
@@ -8,6 +8,13 @@ import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNext
 // stayed green.
 
 export const HEARTBEAT_STORAGE_KEY = 'cron:job-heartbeats:v1';
+// R-5 (ATLAS-JOBS-WAKES WP-10): durable due-ness probe failures, folded
+// into the health view beside the tick records they used to hide behind.
+export const PROBE_ERRORS_STORAGE_KEY = 'cron:job-probe-errors:v1';
+// R-6 (WP-5): durable count of ticks whose heartbeat record write failed.
+// A lost record used to be a console.error; the count is the visibility
+// system watching its own memory.
+export const UNRECORDED_TICKS_STORAGE_KEY = 'cron:job-unrecorded-ticks:v1';
 export const STALE_PERIODS = 3;
 // Guardian census F1 (2026-10-18): a job summary can carry work its own
 // pass left unactioned (escrow-epochs' `overdue`). One tick's count can
@@ -31,7 +38,8 @@ export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.inclu
   name: job.name,
   periodSeconds: Math.round(job.cadenceMs / 1000),
   redactErrors: job.redactErrors === true,
-  required: job.required === true
+  required: job.required === true,
+  stopTolerance: job.stopTolerance ?? null
 })));
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 
@@ -212,6 +220,97 @@ export function applyOutcomes(previous, outcomes) {
   return next;
 }
 
+const PROBE_KINDS = new Set(["enabled", "nextDueAt"]);
+
+// R-5: folds one due-ness probe failure into the durable probe-error map.
+// Same discipline as tick failures: the error text is redacted before it
+// is stored, and only registry jobs are recorded. The count is the number
+// of recorded throws for the job (the live counter in server/jobs.mjs
+// wins when it is ahead — persistence is coalesced on the write path).
+export function applyProbeError(previous, { job, probe, error, at, count } = {}) {
+  const next = { ...(previous && typeof previous === 'object' ? previous : {}) };
+  if (!JOBS.has(job) || !PROBE_KINDS.has(probe)) return next;
+  const prior = next[job] ?? {};
+  const atMs = Number.isFinite(at) ? at : Date.now();
+  next[job] = {
+    probe,
+    error: redactError(error),
+    at: atMs,
+    firstAt: Number.isFinite(prior.firstAt) ? prior.firstAt : atMs,
+    count: Math.max((Number.isSafeInteger(prior.count) ? prior.count : 0) + 1, Number.isSafeInteger(count) ? count : 0)
+  };
+  return next;
+}
+
+export function clearPersistedProbeError(previous, job) {
+  const next = { ...(previous && typeof previous === 'object' ? previous : {}) };
+  delete next[job];
+  return next;
+}
+
+// Folds the durable probe-error facts into a copy of the heartbeat record
+// for the view. A fact older than the job's last recorded tick is not
+// folded: the tick proves the selection probes ran after the error, so
+// re-presenting it would cry wolf over a recovered probe.
+export function mergeProbeErrorFacts(stored, probeErrors) {
+  const base = stored && typeof stored === 'object' ? stored : {};
+  if (!probeErrors || typeof probeErrors !== 'object') return base;
+  const next = { ...base };
+  for (const [name, fact] of Object.entries(probeErrors)) {
+    if (!JOBS.has(name) || !fact || !PROBE_KINDS.has(fact.probe) || !Number.isFinite(fact.at)) continue;
+    const record = next[name] ?? {};
+    if (Number.isFinite(record.lastRunAt) && record.lastRunAt > fact.at) continue;
+    next[name] = {
+      ...record,
+      probeError: {
+        probe: fact.probe,
+        error: String(fact.error ?? ''),
+        at: fact.at,
+        firstAt: Number.isFinite(fact.firstAt) ? fact.firstAt : fact.at,
+        count: Number.isSafeInteger(fact.count) && fact.count > 0 ? fact.count : 1
+      }
+    };
+  }
+  return next;
+}
+
+// R-6: the unrecorded-tick counter. One key, retried once; the helper
+// never throws — when the counter itself cannot be written there is
+// nothing above it left to tell. Returns the new count, or null when the
+// count could not be recorded.
+export async function incrementUnrecordedTicks(storage) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const current = await storage.get(UNRECORDED_TICKS_STORAGE_KEY);
+      const next = (Number.isSafeInteger(current) && current >= 0 ? current : 0) + 1;
+      await storage.put(UNRECORDED_TICKS_STORAGE_KEY, next);
+      return next;
+    } catch { /* one retry, then the loss is reported as an unwritten count */ }
+  }
+  return null;
+}
+
+export async function readUnrecordedTicks(storage) {
+  try {
+    const value = await storage.get(UNRECORDED_TICKS_STORAGE_KEY);
+    return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  } catch { return 0; }
+}
+
+// Projects a probe-error fact (live memory or the folded durable record)
+// onto a health row, redacted to the surface's discipline. Null when the
+// fact is absent or misshapen.
+function probeErrorView(fact) {
+  if (!fact || !PROBE_KINDS.has(fact.probe) || !Number.isFinite(fact.at)) return null;
+  return {
+    probe: fact.probe,
+    error: redactError(fact.error),
+    at: iso(fact.at),
+    firstAt: iso(Number.isFinite(fact.firstAt) ? fact.firstAt : fact.at),
+    count: Number.isSafeInteger(fact.count) && fact.count > 0 ? fact.count : 1
+  };
+}
+
 const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 
 // Public read model. Stale = no success within STALE_PERIODS periods.
@@ -219,7 +318,7 @@ const iso = ms => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 // required job (registry `required`), whose disable is a configuration
 // failure and fails the rollup below. Gates stay unknown
 // when both env and store are omitted, so a stored heartbeat can still be read.
-export function jobHealthView(stored, now = Date.now(), env = null, store = null) {
+export function jobHealthView(stored, now = Date.now(), env = null, store = null, { unrecordedTicks = 0 } = {}) {
   const gatesKnown = env != null || store != null;
   const jobs = CRON_JOBS.map(job => {
     const record = stored?.[job.name] ?? {};
@@ -228,6 +327,12 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
     const reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
     const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
+    // R-5: the probe-error fact, read after this row's own live probe
+    // evaluations above so a probe broken right now is already recorded.
+    // Live memory wins; the folded durable record (mergeProbeErrorFacts)
+    // is the fallback for a cold instance. A fact, not a grade: status
+    // precedence is unchanged (GC-1 consumes the fact).
+    const probeError = probeErrorView(probeErrorFor(job.name) ?? record.probeError);
     const waiting = Number.isFinite(next) && next > now;
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
     const stale = enabled && !waiting && (ageSeconds === null || ageSeconds > staleAfterSeconds);
@@ -266,6 +371,8 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       lastSummaryAt: iso(record.lastSummaryAt),
       overdueStreak: Number.isFinite(record.overdueStreak) ? record.overdueStreak : null,
       overdueSinceAt: iso(record.overdueSinceAt ?? null),
+      stopTolerance: job.stopTolerance ?? null,
+      probeError,
       required: job.required === true,
       stale,
       degraded,
@@ -283,7 +390,13 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
   const requiredDisabled = jobs.some(job => job.status === 'disabled' && job.required);
   const status = active.some(job => job.stale) ? 'stale' : requiredDisabled || active.some(job => job.status === 'failing') ? 'failing'
     : active.some(job => job.status === 'degraded') ? 'degraded' : 'ok';
-  return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
+  return {
+    schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS,
+    // R-6: ticks that ran but whose heartbeat record write failed (WP-5).
+    // A rising count means the surface is grading from stale memory.
+    unrecordedTicks: Number.isSafeInteger(unrecordedTicks) && unrecordedTicks > 0 ? unrecordedTicks : 0,
+    jobs
+  };
 }
 
 export function jobHealthResponse(view, { head = false } = {}) {
