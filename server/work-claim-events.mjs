@@ -252,7 +252,7 @@ export function emitWorkClaimEvent(store, roomId, { actorId, item, action, previ
   const compact = { ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
   const projection = store.storedProjection(roomId, compact);
   if (!resolvingEvent && Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
-  store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+  store.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
   store.db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, projection, roomId);
   if (coalesce) noteClaimEvent(store, coalesceKey(roomId, item.id, action), stamp);
   try {

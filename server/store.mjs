@@ -468,6 +468,33 @@ const accountView = row => row ? { id: row.id, active: Boolean(row.active), revi
 // NULL and onboarded 1, so legacy accounts are not forced through
 // first-run onboarding; createAccount inserts new accounts with
 // onboarded 0.
+// STORAGE-S1: the patrol idempotency look-back (server/patrol.mjs) probes
+// events by their top-level `$.idempotencyKey`. This column is NOT part of
+// PR #3820's v39 set (ev_type/ev_actor_id/ev_at/ev_work_item_id/
+// ev_message_id/ev_member_id/ev_to_member_id) — it composes with that set:
+// both are VIRTUAL json_extract columns, disjoint, and neither needs a
+// schema-version bump to coexist. Convergence here is additive, like
+// ensureAccountProfileSchema: no STORE_SCHEMA_VERSION bump (the v39 bump
+// is #3820's), intentionally outside the writer fence, and the helper is
+// registered in ADDITIVE_SCHEMA_ENSURES so its label is hashed into
+// roomSchemaStamp() — a room stamped by an older deploy re-runs the pass
+// and gains the column + index on its next wake. VIRTUAL = no row bytes;
+// existing bodies are never rewritten. Generated columns are excluded
+// from export/audit digests by the PRAGMA table_info enumeration those
+// paths already use (table_info omits generated columns), so backups keep
+// carrying bodies only and restores recompute the column from them.
+// NOTE: presence must be probed with pragma_table_xinfo, not table_info —
+// table_info omits generated columns, so it would re-ALTER forever.
+export const EVENT_IDEMPOTENCY_INDEX_SCHEMA =
+  "CREATE INDEX IF NOT EXISTS events_room_idempotency ON events(room_id, ev_idempotency_key, sequence)";
+function ensureEventIdempotencyKeySchema(db) {
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").get()) return;
+  const columns = new Set(db.prepare("SELECT name FROM pragma_table_xinfo('events')").all().map(r => r.name));
+  if (!columns.has("ev_idempotency_key")) {
+    db.exec("ALTER TABLE events ADD COLUMN ev_idempotency_key TEXT GENERATED ALWAYS AS (json_extract(body, '$.idempotencyKey')) VIRTUAL");
+  }
+  db.exec(EVENT_IDEMPOTENCY_INDEX_SCHEMA);
+}
 function ensureAccountProfileSchema(db) {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='accounts'").get()) return;
   const columns = new Set(db.prepare("SELECT name FROM pragma_table_info('accounts')").all().map(r => r.name));
@@ -1114,6 +1141,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
+  [ensureEventIdempotencyKeySchema, "ensureEventIdempotencyKeySchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
 ];
@@ -1653,6 +1681,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-19-078: account profile (display_name/avatar_url) and
       // onboarding flag converge the same additive way; no version bump.
       ensureAccountProfileSchema(this.db);
+      // STORAGE-S1: patrol's idempotency look-back column + index on
+      // events. Purely additive, no schema version bump (composes with
+      // #3820's v39 columns; see ensureEventIdempotencyKeySchema).
+      ensureEventIdempotencyKeySchema(this.db);
       // Integration map slice 9: the agent public-key registry is purely
       // additive — IF NOT EXISTS is idempotent, no schema version bump,
       // and the table is intentionally outside the writer fence (see
@@ -3442,7 +3474,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const projection = this.storedProjection(roomId, state);
     if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
     const sequence = room.sequence + 1;
-    this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
+    this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     return sequence;
   }
@@ -3544,7 +3576,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const state = events.reduce(applyEvent, emptyRoomState());
       const stored = compact(state);
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
-      const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+      const insert = this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
       syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
       return state.room.id;
@@ -4361,7 +4393,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const projection = this.storedProjection(row.room_id, state);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
+      this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
       this.db.prepare("INSERT INTO member_accounts(room_id,member_id,account_id,origin) VALUES(?,?,?,?)")
         .run(row.room_id, row.intended_member_id, row.intended_account_id, `invitation:${row.id}`);
@@ -5066,7 +5098,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // replace it with one taken from the imported state.
       this.db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run(roomId);
       this.db.prepare("DELETE FROM events WHERE room_id=?").run(roomId);
-      const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
+      const insert = this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, this.storedProjection(roomId, state), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
@@ -5980,7 +6012,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const logSpan = getTracer().startSpan(SPAN_NAMES.LOG, { attributes: {
         [ATTR.ROOM_ID]: roomId, [ATTR.MESSAGE_ID]: incoming.data?.messageId ?? incoming.id, [ATTR.EVENT_TYPE]: incoming.type } });
       try {
-        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+        this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
@@ -6198,7 +6230,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const projection = this.storedProjection(roomId, applied);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
       seq += 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
+      this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
         .run(seq, projection, archivedAtOf(applied), roomId);
       // Parity with a command-issued member.access_changed (see command()).
@@ -6274,7 +6306,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const projection = this.storedProjection(roomId, resumed);
       if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) continue;
       seq += 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
+      this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, seq, incoming.id, JSON.stringify(incoming));
       next = resumed;
     }
     if (seq !== sequence) {

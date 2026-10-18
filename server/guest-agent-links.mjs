@@ -172,7 +172,7 @@ export class GuestAgentLinks {
         fail(422, "command_rejected", error.message);
       }
       sequence += 1;
-      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
+      this.db.prepare("INSERT INTO events (room_id, sequence, id, body) VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
       this.store.agentConnections.revokeMember(roomId, member.id);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
       this.store.reminders.retireMember(roomId, member.id);

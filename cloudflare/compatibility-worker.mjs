@@ -42,7 +42,7 @@ export class CompatibilityRoom {
         });
       } catch (error) { rollback = error.message === 'intentional rollback'; }
       const rollbackClean = rollback && sql.exec('SELECT count(*) n FROM rooms').one().n === before;
-      const foreignKey = check('foreign key', () => sql.exec("INSERT INTO events VALUES('missing-room',1,'orphan-event','{}')").toArray());
+      const foreignKey = check('foreign key', () => sql.exec("INSERT INTO events (room_id, sequence, id, body) VALUES('missing-room',1,'orphan-event','{}')").toArray());
       const writeGuard = storage.transactionSync(() => {
         sql.exec('UPDATE room_runtime_version SET version=?', this.env.SCHEMA_VERSION + 1);
         const result = check('old writer rejection', () => sql.exec("INSERT INTO rooms(id,sequence,projection) VALUES('old-writer',0,'{}')").toArray());
