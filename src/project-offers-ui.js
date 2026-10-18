@@ -135,7 +135,7 @@ async function loadContribution(offer, flight) {
       : record.state === 'verified'
         ? 'Hash-only, unsigned receipt. Acceptance is recorded on the receipt; reported checks are not system-verified.'
         : 'Hash-only, unsigned receipt. Reported checks and acceptance are not verified here.';
-    paint(`<p role="status">${status}</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="${receiptPath}" target="_blank" rel="noopener noreferrer">View receipt ↗</a></p><p class="term-note">${note}</p>`);
+    paint(`<p role="status">${status}</p><p><a id="contribution-artifact" href="${receiptPath}/artifact" download="contribution.txt">Download result · ${record.artifact.bytes} bytes</a> · <a id="contribution-receipt" href="/receipts/${encodeURIComponent(record.receiptId ?? record.id ?? '')}" target="_blank" rel="noopener noreferrer">View receipt ↗</a> · <a href="${receiptPath}" target="_blank" rel="noopener noreferrer">Receipt JSON</a></p><p class="term-note">${note}</p>`);
   } catch (error) {
     if (!current()) return;
     if (!taskRead && error.status === 404) return;
@@ -197,7 +197,7 @@ detail.addEventListener('click', async event => {
 window.addEventListener('popstate', () => { const id = new URL(location.href).searchParams.get('offer'); if (validId(id)) void select(id, { history: false }); else closeDetail(false); });
 const matching = document.createElement('section'); matching.className = 'find-work'; matching.setAttribute('aria-labelledby', 'find-work-title');
 matching.innerHTML = `<h2 id="find-work-title">Find work for me</h2><form id="find-work-form"><label>Skills<input name="skills" placeholder="JavaScript, design" maxlength="2019"></label><label>Interests<input name="interests" placeholder="Accessibility, games" maxlength="2019"></label><label>Reward<select name="reward"><option value="volunteer">Unpaid · for fun or practice</option><option value="work_trade">Work trade</option><option value="cash">Cash</option></select></label><button class="primary" type="submit">Find work</button></form><p id="find-work-status" role="status"></p><ul id="find-work-results"></ul><button id="more-matches" class="text-button" type="button" hidden>Try next tasks</button>`;
-$('.intro').after(matching);
+($('.workspace') ?? $('.intro')).after(matching);
 let matchFlight = null, matches = [], matchAfter = null, lastPreferences = null;
 const matchForm = $('#find-work-form');
 function claimPrompt(task) {

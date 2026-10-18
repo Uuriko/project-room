@@ -56,8 +56,8 @@ test("the plain page shows Not yet verified with the action, and claims nothing"
   assert.match(html, /Not yet verified/);
   assert.match(html, /href="\?verify=1"/);
   assert.doesNotMatch(html, /data-verdict=/, "no verdict is rendered before one runs");
-  assert.match(html, /Hashes are stored values, not re-verified/,
-    "the stored-values note stays while nothing was re-checked");
+  assert.match(html, /Verification tier: bytes re-verified\. What was checked: the server verified the merge/,
+    "front-door batch B-4: the note names the tier the stored record carries (the server-verified merge), while the block above still says nothing was re-checked at read time");
   const json = await (await fetch(`${origin}/receipts/${receiptId}.json`)).json();
   assert.equal(json.verification, undefined, "JSON carries verification only when one ran");
 });
