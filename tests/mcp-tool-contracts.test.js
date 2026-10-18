@@ -18,7 +18,7 @@ export const KNOWN_UNCOVERED = Object.freeze(new Set([
   "bounty_submit", "bounty_transfer", "bounty_watch", "get_room_context", 
   "inbox_discard_attachment",
   "inbox_get_attachment", "inbox_list_attachments", "inbox_put_attachment", "public_work_claim",
-  "public_work_finish", "public_work_my_review", "public_work_read_task", "public_work_recommend",
+  "public_work_finish", "public_work_my_adverse_decision", "public_work_my_review", "public_work_read_task", "public_work_recommend",
   "public_work_release", "public_work_renew", "remove_land_item", "report_tip", "room_accept_work",
   "room_acquire_claim", "room_activation_pack", "room_assistant_action", "room_assistant_context",
   "room_begin_work", "room_block_work", "room_cancel_request", "room_clear_halt", "room_close_work_claim",

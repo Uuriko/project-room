@@ -6,6 +6,7 @@ import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
+import { recordAgentParticipationNotice } from './adverse-decision-packets.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
 
 export const publicWorkClaimsSchema = `
@@ -493,6 +494,14 @@ export class PublicWorkClaims {
           }
         }
         this.store.workClaims.set(row.namespace_key, item);
+        // #3615 (R-6): claiming delivers the task terms — including the
+        // recorded approvalPolicy agent-participation notice — to this
+        // identified subject. Record the delivery as a notice event in the
+        // room's record system (no-op for human-only approval modes).
+        // Journal replays return before this path runs, so a retried claim
+        // records no second notice.
+        if (action === 'claim') recordAgentParticipationNotice(this.store, { roomId: row.room_id, taskId: offerId,
+          recipientIdentityId: identity.identityId, approvalPolicyMode: offer.approvalPolicy.mode, termsVersion: row.terms_version });
         const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
         if (action === 'finish') {
           // #3707: a submission after the offer's deadline is refused, even

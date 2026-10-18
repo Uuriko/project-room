@@ -3,6 +3,7 @@ import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
+import { AdverseDecisionPackets } from "./adverse-decision-packets.mjs";
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
 import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
@@ -1456,6 +1457,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.trialTasks = new TrialTasks(this);
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
+    this.adverseDecisionPackets = new AdverseDecisionPackets(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
     this.publicWorkSettlement = new PublicWorkSettlement(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.

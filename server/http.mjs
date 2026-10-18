@@ -1927,6 +1927,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         rate(`public-work-review:${remoteAddress}`, 120);
         return json(res, 200, store.publicWorkReviews.contributorReview(bearer(req), pathId(publicWorkReviewMatch[1])), req.method === "HEAD");
       }
+      // #3615 (R-4): the subject's adverse-decision packet and its correction
+      // route. Same identity-secret door as the contributor review: the
+      // subject needs no room membership, and any other identity gets the
+      // same 404 as a missing record from the service.
+      const adverseDecisionMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/adverse-decision$/.exec(url.pathname);
+      if (adverseDecisionMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+        if ([...url.searchParams].length) reject(422, "invalid_adverse_decision", "No packet query parameters accepted");
+        rate(`public-work-adverse-decision:${remoteAddress}`, 120);
+        return json(res, 200, store.adverseDecisionPackets.packet(bearer(req), pathId(adverseDecisionMatch[1])), req.method === "HEAD");
+      }
+      const adverseCorrectionMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})\/adverse-decision\/correction$/.exec(url.pathname);
+      if (adverseCorrectionMatch) {
+        if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        if ([...url.searchParams].length) reject(422, "invalid_adverse_decision", "No correction query parameters accepted");
+        rate(`public-work-adverse-correction:${remoteAddress}`, 60);
+        const data = await body(req);
+        return json(res, 200, store.adverseDecisionPackets.requestCorrection(bearer(req), pathId(adverseCorrectionMatch[1]), data));
+      }
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {

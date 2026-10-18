@@ -112,7 +112,16 @@ export const EVENT_TYPES = Object.freeze({
   WORK_CLAIM_UPDATED: "work_claim.updated",
   // ACT-1a: a room's starter task and Room Guide were seeded once.
   // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
-  ROOM_STARTER_SEEDED: "room.starter_seeded"
+  ROOM_STARTER_SEEDED: "room.starter_seeded",
+  // #3615 (R-6): an agent-participation notice was delivered to an identified
+  // subject (a public-work claimant, at claim time). The event is the record:
+  // it carries the notice content version, the recipient identity, the
+  // channel and (in the envelope) the delivery timestamp.
+  AGENT_PARTICIPATION_NOTICE_DELIVERED: "agent_participation.notice_delivered",
+  // #3615 (R-4): the subject of an adverse decision asked for a correction of
+  // the recorded data their packet composed. A record, not an adjudication:
+  // it changes no verdict and seats no decider.
+  ADVERSE_DECISION_CORRECTION_REQUESTED: "adverse_decision.correction_requested"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -695,7 +704,9 @@ export function applyEvent(current, incoming) {
     [EVENT_TYPES.DM_CONSENT_CHANGED]: recordDmConsentChange,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
-    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
+    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded,
+    [EVENT_TYPES.AGENT_PARTICIPATION_NOTICE_DELIVERED]: recordAgentParticipationNotice,
+    [EVENT_TYPES.ADVERSE_DECISION_CORRECTION_REQUESTED]: recordAdverseDecisionCorrection
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -1748,6 +1759,39 @@ function recordAccessRequest(state, incoming) {
   const permissions = incoming.data.permissions;
   if (!Array.isArray(permissions)) {
     throw new Error("Event data missing permissions");
+  }
+}
+
+// #3615 (R-6): an agent-participation notice delivered to an identified
+// subject. Validates the envelope and records nothing in the projection —
+// the event row itself is the notice record (content version, recipient,
+// channel, timestamp), and a projection copy would go stale. The subject is
+// a global identity, not a room member, so — like recordAccessRequest —
+// this handler does not require membership.
+function recordAgentParticipationNotice(state, incoming) {
+  void state;
+  requireFields(incoming.data, ["taskId", "recipientIdentityId", "contentVersion", "channel", "approvalPolicyMode", "termsVersion"]);
+  if (!["agent", "human_with_agent_review"].includes(incoming.data.approvalPolicyMode)) {
+    throw new Error("Event data missing approvalPolicyMode");
+  }
+  if (incoming.data.channel !== "public_work_claim") throw new Error("Event data missing channel");
+  if (!Number.isSafeInteger(incoming.data.termsVersion) || incoming.data.termsVersion <= 0) {
+    throw new Error("Event data missing termsVersion");
+  }
+}
+
+// #3615 (R-4): a data-correction request from the subject of an adverse
+// decision. Validates the envelope and records nothing in the projection:
+// the event row is the request record the room's reviewers act on outside
+// the dispute machinery. It carries no verdict and changes no state.
+function recordAdverseDecisionCorrection(state, incoming) {
+  void state;
+  requireFields(incoming.data, ["requestId", "receiptId", "taskId", "field", "note"]);
+  if (!["artifact", "checksReported", "criteriaAttestation", "decisionReason", "other"].includes(incoming.data.field)) {
+    throw new Error("Event data missing field");
+  }
+  if (typeof incoming.data.note !== "string" || !incoming.data.note.trim() || incoming.data.note.length > 1000) {
+    throw new Error("Event data missing note");
   }
 }
 

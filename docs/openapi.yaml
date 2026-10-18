@@ -15526,6 +15526,118 @@ paths:
             type: "string"
       security:
         - identityBearer: []
+  /api/public-work/receipts/{receiptId}/adverse-decision:
+    get:
+      operationId: "getAdverseDecisionPacket"
+      summary: "Read your own adverse-decision packet, without room admission."
+      description: "#3615 (R-4): for a rejected decision or a failed verification recorded against your submission, compose the subject-facing packet from the records alone — the recorded decision reason verbatim as the explanation, criteria outcomes, principal factors drawn only from recorded outcomes, agent-participation disclosure by recorded reviewer kind (never a reviewer identity, the verification reason, or the review fingerprint), the evidence relied on, a data-correction route distinct from a dispute, and the human-review route through the existing bounty dispute/arbiter machinery when a settlement bounty exists. Saved global identity and receipt ownership required; any other identity — including another room member — receives the same 404 as a missing record, as do pending, accepted and revision-requested records (no packet for non-adverse decisions)."
+      responses:
+        200:
+          description: "The subject's adverse-decision packet, composed only of recorded material."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseDecisionPacket"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "No adverse-decision packet for this receipt and submitting identity."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+    head:
+      operationId: "headAdverseDecisionPacket"
+      summary: "Read your own adverse-decision packet, without room admission."
+      description: "#3615 (R-4): headers-only form of getAdverseDecisionPacket."
+      responses:
+        200:
+          description: "The subject's adverse-decision packet exists."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "No adverse-decision packet for this receipt and submitting identity."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+  /api/public-work/receipts/{receiptId}/adverse-decision/correction:
+    post:
+      operationId: "requestAdverseDecisionCorrection"
+      summary: "Record a data-correction request against your own adverse-decision record."
+      description: "#3615 (R-4): the correction path distinct from a dispute. The subject names one recorded field and a note; the request is recorded as an adverse_decision.correction_requested room event in the same record system. It adjudicates nothing and changes no verdict. Idempotent by requestId: a replay returns the recorded request, and a reused requestId with different input is a 409. Subject identity only — any other identity receives the same 404 as a missing record."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdverseDecisionCorrectionRequest"
+      responses:
+        200:
+          description: "The recorded correction request."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseDecisionCorrection"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "No adverse-decision packet for this receipt and submitting identity."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "requestId was used for a different correction request."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
   /api/rooms/{roomId}/public-work/receipts/{receiptId}:
     get:
       operationId: "inspectPublicWorkReview"
@@ -17062,6 +17174,237 @@ components:
               type: "boolean"
             reason:
               type: "string"
+    AdverseDecisionPacket:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "schema"
+        - "receiptId"
+        - "taskId"
+        - "subjectIdentityId"
+        - "adverseBasis"
+        - "explanation"
+        - "decision"
+        - "verification"
+        - "principalFactors"
+        - "criteriaOutcomes"
+        - "agentParticipation"
+        - "evidenceReliedOn"
+        - "correction"
+        - "humanReview"
+        - "generatedAt"
+      properties:
+        schema:
+          const: "adverse-decision-packet/1"
+        receiptId:
+          type: "string"
+        taskId:
+          type: "string"
+        subjectIdentityId:
+          type: "string"
+        adverseBasis:
+          enum:
+            - "rejected"
+            - "verification_failed"
+            - "rejected_and_verification_failed"
+        explanation:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "source"
+            - "text"
+          properties:
+            source:
+              enum:
+                - "recorded_decision_reason"
+                - "recorded_verification_outcome"
+            text:
+              type: "string"
+              nullable: true
+        decision:
+          type: "object"
+          nullable: true
+          additionalProperties: false
+          required:
+            - "decision"
+            - "reason"
+            - "at"
+          properties:
+            decision:
+              const: "rejected"
+            reason:
+              type: "string"
+            at:
+              type: "string"
+              format: "date-time"
+        verification:
+          type: "object"
+          nullable: true
+          additionalProperties: false
+          required:
+            - "verdict"
+            - "reviewerKind"
+            - "at"
+          properties:
+            verdict:
+              type: "string"
+            reviewerKind:
+              type: "string"
+              nullable: true
+            at:
+              type: "string"
+              format: "date-time"
+        principalFactors:
+          type: "array"
+          items:
+            type: "object"
+        criteriaOutcomes:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "attestation"
+            - "reviewerOutcomes"
+            - "executedChecks"
+          properties:
+            attestation:
+              nullable: true
+            reviewerOutcomes:
+              nullable: true
+            executedChecks:
+              type: "array"
+              items:
+                type: "object"
+        agentParticipation:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "approvalPolicyMode"
+            - "verificationReviewerKind"
+            - "decisionActorKind"
+            - "agentsParticipated"
+            - "noticeRecords"
+          properties:
+            approvalPolicyMode:
+              type: "string"
+              nullable: true
+            verificationReviewerKind:
+              type: "string"
+              nullable: true
+            decisionActorKind:
+              type: "string"
+              nullable: true
+            agentsParticipated:
+              type: "boolean"
+            noticeRecords:
+              type: "array"
+              items:
+                type: "object"
+                additionalProperties: false
+                required:
+                  - "contentVersion"
+                  - "channel"
+                  - "approvalPolicyMode"
+                  - "termsVersion"
+                  - "deliveredAt"
+                properties:
+                  contentVersion:
+                    type: "string"
+                  channel:
+                    type: "string"
+                  approvalPolicyMode:
+                    type: "string"
+                  termsVersion:
+                    type: "integer"
+                    minimum: 1
+                  deliveredAt:
+                    type: "string"
+                    format: "date-time"
+        evidenceReliedOn:
+          type: "object"
+          additionalProperties: false
+          required:
+            - "artifactSha256"
+            - "artifactBytes"
+            - "checksReported"
+            - "criteriaAttestation"
+            - "executedChecks"
+            - "termsVersion"
+            - "generation"
+          properties:
+            artifactSha256:
+              type: "string"
+              pattern: "^[a-f0-9]{64}$"
+            artifactBytes:
+              type: "integer"
+              minimum: 0
+            checksReported:
+              type: "array"
+              items:
+                type: "string"
+            criteriaAttestation:
+              nullable: true
+            executedChecks:
+              type: "array"
+              items:
+                type: "object"
+            termsVersion:
+              type: "integer"
+              minimum: 1
+            generation:
+              type: "integer"
+              minimum: 1
+        correction:
+          type: "object"
+        humanReview:
+          type: "object"
+        generatedAt:
+          type: "string"
+          format: "date-time"
+    AdverseDecisionCorrectionRequest:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "requestId"
+        - "field"
+        - "note"
+      properties:
+        requestId:
+          type: "string"
+        field:
+          enum:
+            - "artifact"
+            - "checksReported"
+            - "criteriaAttestation"
+            - "decisionReason"
+            - "other"
+        note:
+          type: "string"
+          minLength: 1
+          maxLength: 1000
+    AdverseDecisionCorrection:
+      type: "object"
+      additionalProperties: false
+      required:
+        - "schema"
+        - "requestId"
+        - "receiptId"
+        - "field"
+        - "recordedAt"
+        - "replayed"
+      properties:
+        schema:
+          const: "adverse-decision-correction/1"
+        requestId:
+          type: "string"
+        receiptId:
+          type: "string"
+        field:
+          type: "string"
+        recordedAt:
+          type: "string"
+          format: "date-time"
+        replayed:
+          type: "boolean"
     ContributorWorkReview:
       type: "object"
       additionalProperties: false
