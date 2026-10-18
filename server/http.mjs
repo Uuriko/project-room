@@ -38,7 +38,8 @@ import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } f
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
-import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
+import { messageInHistory, eventInHistory, indexMessages as indexHistoryMessages, requireExportOwner, recordRoomExport, recordEvidenceRead } from "./history-visibility.mjs"; // PRIV-2
+import { decisionRowsExportText, DECISION_ROWS_SCHEMA } from "./decision-rows.mjs"; // #3616
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
@@ -3948,6 +3949,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const result = publicWorkResultsMatch
             ? store.publicWorkReviews.results(roomId, auth.member.id, { limit: Number(url.searchParams.get("limit") ?? 20), after: url.searchParams.get("after") ?? "" })
             : store.publicWorkReviews.inspect(roomId, auth.member.id, pathId(publicWorkInspectMatch[2]));
+          // #3616 (R-11): a member-side read of verdict/evidence is logged
+          // at the same audit surface as exports (evidence.read). The read
+          // has already succeeded; an audit-append failure (e.g. the room
+          // archived mid-request) must not rewrite its answer.
+          if (req.method === "GET") {
+            try {
+              recordEvidenceRead(store, selected.token, roomId, {
+                surface: publicWorkResultsMatch ? "public-work-results" : "public-work-review",
+                subjectId: publicWorkResultsMatch ? null : pathId(publicWorkInspectMatch[2]),
+              }, fence);
+            } catch { /* the read stands; the export record above is the fail-closed surface */ }
+          }
           return json(res, 200, result, req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
@@ -4088,6 +4101,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           ?? workClaimReviewMatch ?? workClaimReleaseMatch ?? workClaimReassignMatch ?? workClaimRenewMatch
          ;
         return await handleWorkClaims({ req, res, url, store, roomId, auth, workClaimRoute,
+          // #3616: evidence-read audit callback (see recordEvidenceRead);
+          // failures are swallowed by design — the read has succeeded.
+          recordEvidenceRead: (surface, subjectId) => {
+            try { recordEvidenceRead(store, selected.token, roomId, { surface, subjectId }, fence); } catch { return null; }
+          },
           workClaimId: workClaimIdMatch ? pathId(workClaimIdMatch[2]) : null, registry: store.workClaims,
           ...(fetchPullRequest ? { fetchPullRequest } : {}),
           ...(githubToken !== undefined ? { githubToken } : {}),
@@ -4204,6 +4222,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,
+          // #3616: evidence-read audit callback (see recordEvidenceRead).
+          recordEvidenceRead: (surface, subjectId) => {
+            try { recordEvidenceRead(store, selected.token, roomId, { surface, subjectId }, fence); } catch { return null; }
+          },
           credential: selected.mode === "room" ? selected.token : null,
           bountyId: bountyIdMatch ? pathId(bountyIdMatch[2]) : null,
           sybilFlagId: sybilFlagIdMatch ? pathId(sybilFlagIdMatch[2]) : null,
@@ -4521,7 +4543,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // answers with an error instead of an unaudited download.
         requireExportOwner(store, roomId, viewerId, reject);
         const format = url.searchParams.get("format") ?? "jsonl";
-        if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
+        if (!["jsonl", "html", "decision-rows"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default), html, or decision-rows");
+        if (format === "decision-rows") {
+          // #3616 (R-5/R-11): the auditor decision-row export — one row per
+          // verdict (decision-rows/1, server/decision-rows.mjs), never a
+          // whole-store dump. Same owner gate and materialise-then-audit
+          // rule as the formats above; the room.exported record names the
+          // schema, the row count, and the requester.
+          const { header, text } = decisionRowsExportText(store.db, roomId, {
+            exportedAt: new Date(store.now()).toISOString(), requester: viewerId });
+          const bytes = Buffer.from(text, "utf8");
+          recordRoomExport(store, selected.token, roomId, "decision-rows", fence,
+            { schema: DECISION_ROWS_SCHEMA, rowCount: header.rows, requester: viewerId }); // PRIV-2
+          res.writeHead(200, { "Content-Type": "application/x-ndjson; charset=utf-8", "Content-Length": bytes.length,
+            "Content-Disposition": `attachment; filename="room-${roomId}-decision-rows.ndjson"` });
+          return res.end(bytes);
+        }
         if (format === "html") {
           const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), store.redactionMessages(roomId));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");

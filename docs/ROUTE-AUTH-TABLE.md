@@ -148,6 +148,10 @@ identity are never served to non-owners (`docs/MODERATION.md`). `GET /api/rooms/
 one `Content-Length`-framed JSONL body (never a partial 200); with
 `?format=html` it returns the same walk as one escaped, script-free HTML page
 under a `default-src 'none'` Content-Security-Policy, same auth and framing;
+with `?format=decision-rows` it returns the auditor decision-row export
+(`decision-rows/1`, [DECISION-ROWS.md](DECISION-ROWS.md)) — one row per
+verdict, same auth and framing, and its `room.exported` event names the
+schema, row count, and requester;
 `GET /api/rooms/:id/stream` is the SSE feed. `GET /api/rooms/:id/usage` (F5)
 is member-readable like its sibling dashboards because every figure derives
 from data a member already reads (membership snapshot, work-session spend,

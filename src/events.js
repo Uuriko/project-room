@@ -47,6 +47,9 @@ export const EVENT_TYPES = Object.freeze({
   // --- PRIV-2 history visibility and export authority ---
   ROOM_HISTORY_VISIBILITY_SET: "room.history_visibility_set",
   ROOM_EXPORTED: "room.exported",
+  // --- #3616 (R-11): member-side evidence reads recorded at the same
+  // audit surface as the export record. ---
+  EVIDENCE_READ: "evidence.read",
   // --- end PRIV-2 ---
   // --- end PRIV-1 message redaction ---
   REPLY_REQUEST_CANCELLED: REPLY_CANCELLED,
@@ -190,7 +193,7 @@ export const trustOffMessage = targetId =>
 // an owner's explicit "all" still gives guests the full history.
 export const HISTORY_VISIBILITIES = Object.freeze(["all", "since_join"]);
 export const HISTORY_DEFAULTS_VERSION = 1;
-export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html"]);
+export const ROOM_EXPORT_FORMATS = Object.freeze(["jsonl", "html", "decision-rows"]);
 const LINK_GUEST_ID = /^guest-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 export function isHistoryGuestMemberId(memberId) {
   return typeof memberId === "string" && (LINK_GUEST_ID.test(memberId) || memberId.startsWith("guest-agent-"));
@@ -649,6 +652,7 @@ export function applyEvent(current, incoming) {
     // --- PRIV-2 history visibility and export authority ---
     [EVENT_TYPES.ROOM_HISTORY_VISIBILITY_SET]: setHistoryVisibility,
     [EVENT_TYPES.ROOM_EXPORTED]: recordRoomExport,
+    [EVENT_TYPES.EVIDENCE_READ]: recordEvidenceRead,
     // --- end PRIV-2 ---
     [EVENT_TYPES.REPLY_REQUEST_CANCELLED]: cancelReplyRequest,
     // Reactions were removed (2026-10). Old logs still carry
@@ -878,7 +882,25 @@ function setHistoryVisibility(state, incoming) {
 function recordRoomExport(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may export the room");
-  if (!ROOM_EXPORT_FORMATS.includes(incoming.data.format)) throw new Error("Export format is jsonl or html");
+  if (!ROOM_EXPORT_FORMATS.includes(incoming.data.format)) throw new Error("Export format is jsonl, html or decision-rows");
+  // #3616: a decision-row export names what left the room — the schema,
+  // the row count, and the requester (the event actor, restated in the
+  // data so the record is self-describing in the log).
+  if (incoming.data.format === "decision-rows") {
+    if (incoming.data.schema !== "decision-rows/1") throw new Error("Decision-row export must name its schema");
+    if (!Number.isSafeInteger(incoming.data.rowCount) || incoming.data.rowCount < 0) throw new Error("Decision-row export must name its row count");
+    if (incoming.data.requester !== incoming.actorId) throw new Error("Decision-row export requester must be the exporting member");
+  }
+}
+
+// #3616 (R-11): a member-side read of a verdict/evidence surface is itself
+// recorded, at the same audit surface as room.exported. Any current member
+// may be recorded; the record changes no projection field and carries no
+// evidence content — only the surface name and the subject id read.
+function recordEvidenceRead(state, incoming) {
+  requireMember(state, incoming.actorId);
+  if (typeof incoming.data.surface !== "string" || incoming.data.surface.length === 0) throw new Error("Evidence read must name its surface");
+  if (incoming.data.subjectId !== null && typeof incoming.data.subjectId !== "string") throw new Error("Evidence read subject must be an id or null");
 }
 // --- end PRIV-2 writers ---
 

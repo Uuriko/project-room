@@ -28,6 +28,7 @@ export const ACTION_CLASSES = Object.freeze({
   act: Object.freeze([
     T.ROOM_CHARTER_UPDATED, T.ROOM_POLICY_SET, T.ROOM_SPEND_ALLOWANCE_SET, T.ROOM_SPEND_PRICING_SET, T.ROOM_TRUST_SET, T.ROOM_PUBLIC_RECEIPTS_SET,
     T.ROOM_HISTORY_VISIBILITY_SET, T.ROOM_EXPORTED, // PRIV-2 owner setting and export audit record
+    T.EVIDENCE_READ, // #3616: member-side evidence-read audit record (same surface as ROOM_EXPORTED)
     // --- GR2 public acquisition opt-ins ---
     T.ROOM_PUBLIC_PAGE_SET, T.ROOM_JOIN_LINK_SET, T.MEMBER_PUBLIC_NAME_SET, T.WORK_PUBLIC_SET,
     // --- end GR2 ---

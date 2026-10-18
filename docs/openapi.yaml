@@ -1582,7 +1582,7 @@ paths:
                         description: { type: string }
   /api/rooms/{roomId}/export:
     get:
-      summary: Export the event log as JSONL, or as a readable HTML page
+      summary: Export the event log as JSONL, as a readable HTML page, or as auditor decision rows
       description: >-
         Default (format=jsonl): one {sequence, event} per line, ordered.
         Owner-only (403 owner_required for other members). Each export of a
@@ -1597,12 +1597,21 @@ paths:
         evidence links; deleted messages shown as deleted without their text),
         with every value HTML-escaped and a Content-Security-Policy that allows
         only the document's own fixed style block. Same auth and framing rule.
+        format=decision-rows returns the auditor decision-row export
+        (decision-rows/1, docs/DECISION-ROWS.md): a header line naming the
+        schema, room, export time, requester and row count, then one NDJSON
+        row per verdict across public-work reviews, bounty verdicts and
+        settlements, and board claim reviews — fields schema, rowId, roomId,
+        source, decisionKind, subjectId, rubricVersion, rubricHash, outcome,
+        accepted, criteriaSummary, decidedAt, verifierId; no demographic or
+        protected-class field is carried. Its room.exported audit event
+        additionally names the schema, the row count, and the requester.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: format
           in: query
-          description: jsonl (default) or html; anything else is 422 invalid_format
-          schema: { type: string, enum: [jsonl, html], default: jsonl }
+          description: jsonl (default), html, or decision-rows; anything else is 422 invalid_format
+          schema: { type: string, enum: [jsonl, html, decision-rows], default: jsonl }
       responses:
         '401': { description: unauthenticated }
         '403': { description: owner_required - only the room owner exports }
