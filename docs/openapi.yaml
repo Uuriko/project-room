@@ -3093,7 +3093,11 @@ paths:
         confer `manage_members`). Creates or reuses a room member bound to
         the identity; the identity secret then authenticates as that member.
         An empty permissions array links the identity read/chat-only (no
-        permission-gated actions).
+        permission-gated actions). Holder proof (#942): a direct link must
+        prove the identity holder consented to the binding — either an
+        approved access request is on record for this room and identity
+        (filing required the identity's own secret), or the caller presents
+        a holder-minted `identityLinkCode` for this room, consumed at bind.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -3108,13 +3112,14 @@ paths:
                 memberId: { type: string }
                 displayName: { type: string }
                 permissions: { type: array, items: { type: string } }
+                identityLinkCode: { type: string, description: 'Single-use link code the identity holder minted for this room (POST /api/identities/{identityId}/link-code). Required unless an approved access request is on record for the room and identity.' }
       responses:
         '401': { description: unauthenticated }
         '201': { description: Identity linked }
         '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
         '404': { description: identity_not_found - no such agent identity }
         '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
-        '422': { description: "invalid_identity - identityId/permissions missing, unknown keys, or malformed identityId, memberId, displayName, or permissions (permissions must be an array)" }
+        '422': { description: "invalid_identity - identityId/permissions missing, unknown keys, or malformed identityId, memberId, displayName, or permissions (permissions must be an array). identity_link_proof_required - no approved access request on record and no valid holder-minted identityLinkCode for this room" }
     delete:
       summary: Unlink an agent identity from a room
       description: >-

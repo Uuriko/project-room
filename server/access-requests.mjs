@@ -730,6 +730,14 @@ export class AccessRequests {
       // member display names. A unique match attributes the join; anything
       // else joins with no referrer and the approval proceeds unchanged.
       const referrerMemberId = this.store.referrals.matchReferrer(roomId, row.referred_by);
+      // SECURITY-FIX C3 (#942): record the approval BEFORE driving
+      // link(). link() treats an approved access request on record as the
+      // holder proof for the binding (filing was secret-proven under
+      // #2912), so the flip must land first for that exemption to fire.
+      // Flip and link stay inside this one transaction — the pair is
+      // still atomic, and a failed link rolls the approval back too.
+      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
+        .run(now, auth.member.id, requestId);
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,
         displayName: row.display_name,
@@ -737,8 +745,6 @@ export class AccessRequests {
         settleAccessRequests: false,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
-      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
-        .run(now, auth.member.id, requestId);
       // Journal the completed referral in the same transaction, after the
       // new member exists. Exactly-once per referee via the referrals
       // primary key, so a retried approval cannot double-count.

@@ -7,6 +7,7 @@ import { buildReplyCommand } from "../client/reply-actions.mjs";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -114,7 +115,7 @@ test("inbox discovery finds older open requests outside its DM window through ex
   const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
   const store = fixture.store, ownerId = store.authenticate(ownerSecret, roomId).member.id;
   const other = store.identities.create("Other recipient");
-  store.identities.link(ownerSecret, roomId, { identityId: other.identityId, displayName: "Other recipient", permissions: [] });
+  linkWithProof(store, ownerSecret, roomId, other, { displayName: "Other recipient", permissions: [] });
   const ask = (id, secret = ownerSecret, toMemberId = memberId) => store.command(secret, roomId, {
     id, type: "message.posted", data: { messageId: id, body: "Private question " + id, toMemberId, requestKind: "reply" }
   });

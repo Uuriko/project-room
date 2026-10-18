@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function seeded(t) {
   const store = new RoomStore(':memory:');
@@ -18,7 +19,7 @@ function seeded(t) {
   const ada = store.identities.create('Ada');
   const roomId = 'mention-current-state';
   rooms.create(owner.secret, { roomId, title: 'mx', purpose: 'x', kind: 'personal' });
-  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
   const post = (id, body) => store.command(owner.secret, roomId, { id, type: 'message.posted', data: { messageId: id, body } });
   post('m-live', '@Ada live mention');
   post('m-edited', '@Ada PRE-EDIT deploy to prod');
@@ -57,7 +58,7 @@ function paged(t) {
   const ada = store.identities.create('Ada');
   const roomId = 'mention-paging';
   rooms.create(owner.secret, { roomId, title: 'mx', purpose: 'x', kind: 'personal' });
-  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
   const post = (id, body) => store.command(owner.secret, roomId, { id, type: 'message.posted', data: { messageId: id, body } });
   const del = (id) => store.command(owner.secret, roomId, { id: 'del-' + id, type: 'message.deleted', data: { messageId: id, expectedMessageRevision: 0 } });
   for (const id of ['m10', 'm20', 'm30', 'm40', 'm50']) post(id, `@Ada mention ${id}`);

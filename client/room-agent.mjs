@@ -1039,9 +1039,13 @@ export class RoomAgentClient {
     if (!wellFormed) throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity response");
     return value;
   }
-  linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
+  linkIdentity({ identityId, memberId, displayName, permissions, identityLinkCode }, { signal } = {}) {
     return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
-      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
+      ...(displayName === undefined ? {} : { displayName }),
+      // SECURITY-FIX C3 (#942): the holder-minted link code, when the
+      // caller has one. Without it the server refuses a direct link
+      // unless an approved access request is on record.
+      ...(identityLinkCode === undefined ? {} : { identityLinkCode }), permissions }, { signal });
   }
   identityLinks({ signal } = {}) {
     return this.#identityAdmin("/identity-links", undefined, { signal });

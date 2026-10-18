@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-access-"));
@@ -148,9 +149,7 @@ test("unknown identity or room is a bare 404", async t => {
 
 test("already-linked identity cannot request", async t => {
   const { store, requests, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Requesting Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Requesting Agent", permissions: ["accept_work"] });
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_linked"

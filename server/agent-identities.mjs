@@ -659,7 +659,13 @@ export class AgentIdentities {
   // RC-2026-09-18-038: a membership-administration delegate may also link,
   // because decide() drives link() with the approver's token — approving an
   // access request is exactly what the delegation exists for.
-  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, settleAccessRequests = true }, expectedSessionBinding = null) {
+  // SECURITY-FIX C3 (HUNT-ADVERSARY P3, issue #942): a direct link must
+  // prove the identity HOLDER consented to this binding — either an
+  // approved access request is on record for the (room, identity) pair
+  // (filing was secret-proven under #2912), or the caller presents a
+  // holder-minted link code in identityLinkCode, consumed at the commit
+  // point (see requireLinkHolderProof).
+  link(token, roomId, { identityId, memberId, displayName, permissions, referredBy, identityLinkCode, settleAccessRequests = true }, expectedSessionBinding = null) {
     const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
     const authority = this.store.roomAuthority(roomId);
     if (!this.store.delegation.canAdministerMembership(authority, auth, roomId)) fail(403, "access_denied", "Membership administration grant required");
@@ -729,6 +735,7 @@ export class AgentIdentities {
         if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
         this.noteActivated(identityId);
         refreshDirectoryIdentity(this.store, identityId);
+        this.requireLinkHolderProof(roomId, identityId, identityLinkCode);
         return { roomId, identityId, memberId: resolvedMemberId, relinked: true };
       }
       const memberName = displayName?.trim() || identity.displayName;
@@ -755,8 +762,38 @@ export class AgentIdentities {
       if (settleAccessRequests) this.closePendingAccessRequests(roomId, identityId, auth.member.id);
       this.noteActivated(identityId);
       refreshDirectoryIdentity(this.store, identityId);
+      this.requireLinkHolderProof(roomId, identityId, identityLinkCode);
       return { roomId, identityId, memberId: resolvedMemberId };
     });
+  }
+
+  // SECURITY-FIX C3 (HUNT-ADVERSARY P3, issue #942): has this (room,
+  // identity) pair an approved access request on record? Filing a request
+  // requires the identity's own secret (#2912), and approval is recorded
+  // by decide() — which flips the row to 'approved' before it drives
+  // link() — or by the room's auto-approve rule, so an approved row IS
+  // holder proof for this binding and the approval path needs no link
+  // code. Fixtures without the access-request table have no such record.
+  hasApprovedAccessRequest(roomId, identityId) {
+    const table = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='access_requests'").get();
+    if (!table) return false;
+    return Boolean(this.db.prepare(
+      "SELECT 1 FROM access_requests WHERE room_id=? AND identity_id=? AND status='approved'").get(roomId, identityId));
+  }
+
+  // The direct-link gate, called at link()'s commit point: without an
+  // approved access request on record, binding the identity requires
+  // consuming a link code the HOLDER minted for this room (C2's
+  // primitive). Every validation before this point keeps its own error,
+  // and a failed consume throws inside the link transaction, so the
+  // whole link rolls back and a code is burned only by a link that
+  // actually commits. Codes pre-named to a sponsor account never redeem
+  // here: link() acts for a room member, not an enrolling account, so it
+  // cannot present the named sponsor — such codes fail closed with the
+  // same opaque 422 identity_link_proof_required as any proof failure.
+  requireLinkHolderProof(roomId, identityId, identityLinkCode) {
+    if (this.hasApprovedAccessRequest(roomId, identityId)) return;
+    this.consumeLinkCode(identityId, identityLinkCode, { roomId });
   }
 
   // A direct grant used to leave the identity's pending join request in the

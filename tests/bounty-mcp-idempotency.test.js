@@ -23,6 +23,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { issueSpendGrant, remainingSpendCents } from "../server/spend-grants.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const ROOM = "commons";
 const AGENT = "agent";
@@ -272,8 +273,7 @@ test("full membership elsewhere cannot confer bounty writes on a linked guest ta
   const peer = store.identities.create("Guest peer");
   const full = rooms.create(peer.secret, { title: "Full room", purpose: "Fixture", displayName: "Guest peer" });
   const guestId = "guest-agent-fixture";
-  store.identities.link(keys.owner, ROOM, { identityId: peer.identityId,
-    memberId: guestId, displayName: "Guest peer", permissions: [] });
+  linkWithProof(store, keys.owner, ROOM, peer, { memberId: guestId, displayName: "Guest peer", permissions: [] });
   setTier(store.db, ROOM, guestId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   await callHostedStdioTool(store, peer.secret, "bounty_post", { roomId: full.roomId, ...postArgs() });
   const before = store.bountyEscrow.balances(ROOM, guestId);

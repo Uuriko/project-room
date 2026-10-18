@@ -17,6 +17,7 @@ import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { assertNoInternal } from "../server/inbox-internal-notes.mjs";
 import { InboxCollabStore } from "../server/inbox-collab-store.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-collab-http-"));
@@ -35,11 +36,9 @@ function setup(t) {
     purpose: "An agent-owned room.", kind: "personal", displayName: "Den Keeper" });
   const humanKey = state.store.issueAccessKey("commons", "owner");
   const agent = state.store.identities.create("Collab Agent");
-  state.store.identities.link(humanKey, "commons", { identityId: agent.identityId,
-    displayName: "Collab Agent", permissions: ["accept_work"] });
+  linkWithProof(state.store, humanKey, "commons", agent, { displayName: "Collab Agent", permissions: ["accept_work"] });
   const agent2 = state.store.identities.create("Second Agent");
-  state.store.identities.link(humanKey, "commons", { identityId: agent2.identityId,
-    displayName: "Second Agent", permissions: ["accept_work"] });
+  linkWithProof(state.store, humanKey, "commons", agent2, { displayName: "Second Agent", permissions: ["accept_work"] });
   Object.assign(state, { humanKey, agent, agent2, denIdentity });
   state.serve = async () => {
     const server = createRoomServer({ store: state.store });

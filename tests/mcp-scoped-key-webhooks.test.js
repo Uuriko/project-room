@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs"; import { createRoomServer } from "../server/http.mjs"; import { AgentRooms } from "../server/agent-rooms.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 function serve(t) {
   const d = mkdtempSync(join(tmpdir(), "mcp-scoped-webhooks-")); const store = new RoomStore(join(d, "room.sqlite")); installFakeWebhookDns(store);
   const rooms = new AgentRooms(store); const s = createRoomServer({ store });
@@ -29,7 +30,7 @@ async function setup(t) {
   rooms.create(owner.secret, { roomId: "wake-den", title: "W", purpose: "p", kind: "personal", displayName: "Wren" });
   rooms.create(owner.secret, { roomId: "other-den", title: "O", purpose: "p", kind: "personal", displayName: "Wren" });
   const peer = store.identities.create("Lark");
-  for (const roomId of ["wake-den", "other-den"]) store.identities.link(owner.secret, roomId, { identityId: peer.identityId, displayName: "Lark", permissions: [] });
+  for (const roomId of ["wake-den", "other-den"]) linkWithProof(store, owner.secret, roomId, peer, { displayName: "Lark", permissions: [] });
   const scoped = store.agentPlugin.issueApiKey({ identityId: peer.identityId, scopes: ["mcp:wake", "mcp:room:wake-den"] });
   const subs = () => store.db.prepare("SELECT subscription_id AS id, url FROM agent_webhook_subs WHERE agent_id=?").all(peer.identityId);
   const postOther = body => store.command(owner.secret, "other-den", { id: randomUUID(), type: "message.posted", data: { messageId: randomUUID(), body } });

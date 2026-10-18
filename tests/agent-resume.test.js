@@ -6,6 +6,7 @@ import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { resumeAgent } from '../client/agent-resume.mjs';
 import { main } from '../scripts/agent-resume.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const connection = { origin: 'http://127.0.0.1:1234', roomId: 'commons', memberId: 'worker', token: 'A'.repeat(43) };
 const version = 'b'.repeat(64);
@@ -176,7 +177,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const store = new RoomStore(':memory:');
   const rooms = new AgentRooms(store); const owner = store.identities.create('Owen'); const worker = store.identities.create('Worker');
   rooms.create(owner.secret, { roomId: 'commons', title: 'Test', purpose: 'Resume fixture', kind: 'personal' });
-  store.identities.link(owner.secret, 'commons', { identityId: worker.identityId, displayName: 'Worker', permissions: [] });
+  linkWithProof(store, owner.secret, 'commons', worker, { displayName: 'Worker', permissions: [] });
   for (let i = 0; i < 30; i++) store.command(owner.secret, 'commons', { id: `post${i}`, type: 'message.posted', data: { messageId: `msg${i}`, body: 'private-body-sentinel-' + 'x'.repeat(1000) } });
   store.command(owner.secret, 'commons', { id: 'task', type: 'work.proposed', data: { workItemId: 'task', title: 'Review', definitionOfDone: 'Do review', accountableMemberId: worker.identityId, mode: 'read' } });
   const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -213,7 +214,7 @@ test('real HTTP compact resume measures bytes against existing full snapshot and
   const mismatch = await resumeAgent({ connection: { ...config, memberId: owner.identityId } });
   assert.equal(mismatch.connection.status, 'unconfirmed'); assert.equal(mismatch.metrics.requests, 1);
   const aliasIdentity = store.identities.create('Alias');
-  store.identities.link(owner.secret, 'commons', { identityId: aliasIdentity.identityId, memberId: 'custom-linked-member', displayName: 'Alias', permissions: [] });
+  linkWithProof(store, owner.secret, 'commons', aliasIdentity, { memberId: 'custom-linked-member', displayName: 'Alias', permissions: [] });
   const alias = await resumeAgent({ connection: { ...config, token: aliasIdentity.secret, memberId: 'custom-linked-member' } });
   assert.equal(alias.connection.status, 'credential_accepted'); assert.deepEqual(alias.incompleteSources, []);
   assert.equal(alias.authoritySummary.id, 'custom-linked-member');
@@ -237,7 +238,7 @@ test('reply-only resume retains old open requests independently of delta observa
   const store = new RoomStore(':memory:');
   const owner = store.identities.create('Owen'), worker = store.identities.create('Worker');
   new AgentRooms(store).create(owner.secret, { roomId: 'commons', title: 'Replies', purpose: 'Reply fixture', kind: 'personal' });
-  store.identities.link(owner.secret, 'commons', { identityId: worker.identityId, memberId: 'reply-worker', displayName: 'Worker', permissions: [] });
+  linkWithProof(store, owner.secret, 'commons', worker, { memberId: 'reply-worker', displayName: 'Worker', permissions: [] });
   store.dmConsents.request('commons', owner.identityId, 'reply-worker', 'Fixture');
   store.dmConsents.decide('commons', 'reply-worker', owner.identityId, 'approve');
   store.command(owner.secret, 'commons', { id: 'old-open', type: 'message.posted', data: {

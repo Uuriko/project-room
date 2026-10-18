@@ -1,4 +1,5 @@
 import {seedRecordRails} from "./record-rails-fixture.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 // The rows the recovery audit requires. Shared with the cold-start budget so
 // a wake is measured against a store that has every application table, not
 // only the event log. Disposable synthetic data only.
@@ -38,7 +39,8 @@ export async function seedRecoveryCoverage(f) {
   });
   f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
     .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), f.link.link.id, f.now());
-  const { identityId } = f.store.identities.create("Recovery agent");
+  const recoveryAgent = f.store.identities.create("Recovery agent");
+  const { identityId } = recoveryAgent;
   // Opt-in public pages stay empty. The receipt and directory tables still
   // need a row so the recovery audit and the cold-start budget see them.
   const at = new Date(f.now()).toISOString();
@@ -48,7 +50,7 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO public_directory_entries
     (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)
     VALUES ('recovery-public-agent', 'Recovery agent', '', '[]', ?, 1, 1, ?)`).run(identityId, at);
-  f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
+  linkWithProof(f.store, f.keys.owner, "commons", recoveryAgent, { permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
   f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "recovery-work-host", mode: "pull-only", workWakes: true });
   f.store.command(f.keys.owner, "commons", { id: "recovery-work-command", type: "work.proposed", data: { workItemId: "recovery-work",

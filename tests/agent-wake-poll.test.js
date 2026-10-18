@@ -83,6 +83,7 @@ import {
   AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const T0 = 1_750_000_000_000;
 
@@ -294,10 +295,7 @@ test("room-key poll without hostId derives its credential host", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("rk-derive-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: identity.identityId,
-    displayName: "RK derive agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: identity.identityId, displayName: "RK derive agent", permissions: ["accept_work"] });
   const roomKey = f.store.issueAccessKey("commons", identity.identityId);
   assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h", mode: "pull-only" }, roomKey)).status, 200);
   const res = await get(origin, "/api/agent-wakes/poll?waitMs=0", roomKey);
@@ -312,10 +310,7 @@ test("room-key poll without hostId is released promptly when the identity's host
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("rk-cross-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "rkxagent",
-    displayName: "RK cross agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "rkxagent", displayName: "RK cross agent", permissions: ["accept_work"] });
   // The standard-setup shape: the agent's only host is heartbeated by the
   // saved rak_ credential, so it lives under the ak_ namespace.
   const onboarding = f.store.agentPlugin.issueOnboardingMcpToken(
@@ -347,10 +342,7 @@ test("scoped-key poll without hostId is released promptly when the identity's ho
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("ak-cross-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "akxagent",
-    displayName: "AK cross agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "akxagent", displayName: "AK cross agent", permissions: ["accept_work"] });
   // Mirror image: the identity's only host is the room key's pull-only
   // seat (rk_ namespace); the saved rak_ credential polls without hostId.
   const roomKey = f.store.issueAccessKey("commons", "akxagent");
@@ -391,10 +383,7 @@ test("a real mention releases a waiting poll: the wakeable-by-default loop", asy
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-poll-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent",
-    displayName: "Wake Agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent", displayName: "Wake Agent", permissions: ["accept_work"] });
   const scoped = await (await post(origin, "/api/agent-keys",
     { scopes: ["heartbeats:report", "heartbeats:read"] }, identity.secret)).json();
   const credential = scoped.credential;
@@ -512,10 +501,7 @@ test("room-key poll cannot replace an identity-owned host wait", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("isolated-poll-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: identity.identityId,
-    displayName: "Isolated poll agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: identity.identityId, displayName: "Isolated poll agent", permissions: ["accept_work"] });
   const roomKey = f.store.issueAccessKey("commons", identity.identityId);
   assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h", mode: "pull-only" }, roomKey)).status, 200);
   assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h" }, identity.secret)).status, 200);
@@ -538,10 +524,7 @@ test("fresh heartbeating host receives a mention through its active poll", async
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("online-poll-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: identity.identityId,
-    displayName: "Online poll agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: identity.identityId, displayName: "Online poll agent", permissions: ["accept_work"] });
   assert.equal((await post(origin, "/api/agent-heartbeats", { hostId: "h" }, identity.secret)).status, 200);
   const held = get(origin, "/api/agent-wakes/poll?hostId=h&waitMs=1000", identity.secret);
   await new Promise(resolve => setTimeout(resolve, 150));
@@ -566,7 +549,7 @@ test("fresh wakeable host retains between-poll mention across database restart u
   let store = new RoomStore(filename), server;
   const owner = store.identities.create("Gap owner"), worker = store.identities.create("Gap worker");
   new AgentRooms(store).create(owner.secret, { roomId: "gap-room", title: "Gap", purpose: "Wake interval", kind: "personal" });
-  store.identities.link(owner.secret, "gap-room", { identityId: worker.identityId, memberId: "gap-worker", permissions: [] });
+  linkWithProof(store, owner.secret, "gap-room", worker, { memberId: "gap-worker", permissions: [] });
   const linksBefore = store.db.prepare("SELECT * FROM identity_links ORDER BY room_id,identity_id").all();
   const open = async () => {
     server = createRoomServer({ store });
@@ -613,10 +596,7 @@ test("poll returns the opted-in host's pending work wakes, like heartbeat (#3262
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("work-poll-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "workwake",
-    displayName: "Work wake", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "workwake", displayName: "Work wake", permissions: ["accept_work"] });
   const beat = body => post(origin, "/api/agent-heartbeats", body, identity.secret).then(r => r.json());
   await beat({ hostId: "worker", mode: "pull-only", workWakes: true });
   await beat({ hostId: "lurker", mode: "pull-only" });
@@ -651,10 +631,7 @@ test("a work transition releases a waiting poll with the work wake (#3262)", asy
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("work-poll-agent-2");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "workwake",
-    displayName: "Work wake", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "workwake", displayName: "Work wake", permissions: ["accept_work"] });
   await post(origin, "/api/agent-heartbeats", { hostId: "worker", mode: "pull-only", workWakes: true }, identity.secret);
 
   const pollPromise = get(origin, "/api/agent-wakes/poll?hostId=worker&waitMs=10000", identity.secret).then(r => r.json());

@@ -10,6 +10,7 @@ import { DurableDatabase, durableStorage } from './storage.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+import { linkWithProof } from '../tests/helpers/link-with-proof.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
 import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
@@ -97,8 +98,9 @@ export class StoreTestRoom {
     if (path === '/delegation') {
       store.initialize(initialRoom('delegation-worker'));
       const owner = store.issueAccessKey('delegation-worker', 'owner');
-      const { identityId } = store.identities.create('Worker Delegate');
-      store.identities.link(owner, 'delegation-worker', { identityId, permissions: [] });
+      const delegate = store.identities.create('Worker Delegate');
+      const { identityId } = delegate;
+      linkWithProof(store, owner, 'delegation-worker', delegate, { permissions: [] });
       store.delegation.grant(owner, 'delegation-worker', { identityId });
       store.delegation.revoke(owner, 'delegation-worker', { identityId });
       store.delegation.grant(owner, 'delegation-worker', { identityId });

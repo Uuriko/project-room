@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 test("requester cancel removes a pending access request from the owner queue", async t => {
   const directory = mkdtempSync(join(tmpdir(), "project-room-access-cancel-"));
@@ -103,10 +104,7 @@ test("direct link closes the identity's pending access request", async () => {
     requestedPermissions: ["accept_work"],
     requestId: "ar_direct"
   }, identity.secret);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId,
-    permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { permissions: ["accept_work"] });
   assert.equal(requests.list(ownerToken, "commons").length, 0);
   const settled = requests.list(ownerToken, "commons", { status: "approved" });
   assert.equal(settled.length, 1);
@@ -132,11 +130,7 @@ test("approving an already-linked identity records the decision without a second
     requestedPermissions: ["manage_members"],
     requestId: "ar_already"
   }, identity.secret);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId,
-    permissions: ["accept_work"],
-    settleAccessRequests: false
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { permissions: ["accept_work"], settleAccessRequests: false });
   const before = store.roomAuthority("commons").members[identity.identityId].permissions;
   const decided = requests.decide(ownerToken, "commons", "ar_already", { decision: "approve" });
   assert.equal(decided.status, "approved");

@@ -12,6 +12,7 @@ import { auditRecovery } from "../server/recovery.mjs";
 import { messageInHistory, eventInHistory, rowInHistory, indexMessages, historyFloor } from "../server/history-visibility.mjs";
 import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T, event, replay, memberHistoryVisibility, historyVisibility, PERMISSIONS } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // PRIV-2: an owner who chooses "since_join" keeps earlier messages away from
 // members who join later. Every read that can carry a message body
@@ -70,7 +71,7 @@ async function setup(t, { preJoinEvents = 0 } = {}) {
   cmd(T.MEMBER_ADDED, { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const lateKey = store.issueAccessKey("commons", "late-agent");
   const identity = store.identities.create("Late reader");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Late reader", permissions: [] });
+  linkWithProof(store, ownerKey, "commons", identity, { displayName: "Late reader", permissions: [] });
   // An edit after the join still belongs to a message from before it.
   cmd(T.MESSAGE_EDITED, { messageId: "before-question", body: `${BEFORE_EDIT}?`, expectedMessageRevision: 0 });
   cmd(T.MESSAGE_POSTED, { messageId: "after-root", body: AFTER });

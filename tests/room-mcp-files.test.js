@@ -11,6 +11,7 @@ import { attachmentLimits } from "../server/attachment-schema.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { issueSpendGrant } from "../server/spend-grants.mjs";
 import { mcpAttachmentBodyBytes } from "../server/room-attachment-bytes.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const FILE_TOOLS = ["room_put_file", "room_list_files", "room_get_file", "room_discard_file", "room_commit_file"];
@@ -85,9 +86,7 @@ test("enrolled members upload and download room_attachments through hosted MCP",
   const created = rooms.create(owner.secret, {
     roomId: "file-den", title: "File den", purpose: "Room file bytes", kind: "personal", displayName: "File owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "File peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "File peer", permissions: [] });
   const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
   for (const name of FILE_TOOLS) assert.equal(names.includes(name), true);
   const bytes = Buffer.from("room file bytes");
@@ -172,9 +171,7 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   const created = rooms.create(owner.secret, {
     roomId: "commit-den", title: "Commit den", purpose: "Commit a staged file", kind: "personal", displayName: "Commit owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Commit peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "Commit peer", permissions: [] });
   // #953: new agent members default to t1_readonly; peer needs write access for message.posted
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   // Spend-primitive MVP: room_put_file is priced (5 credits); the peer holds
@@ -411,9 +408,7 @@ test("staged files stay with the uploader; DM-committed files stay with the DM p
     roomId: "scope-den", title: "Scope den", purpose: "File visibility scope", kind: "personal", displayName: "Scope owner"
   });
   for (const ident of [peer, third]) {
-    store.identities.link(owner.secret, created.roomId, {
-      identityId: ident.identityId, displayName: ident.displayName, permissions: []
-    });
+    linkWithProof(store, owner.secret, created.roomId, ident, { displayName: ident.displayName, permissions: [] });
     // #953: new agent members default to t1_readonly; members need write access for message.posted
     setTier(store.db, created.roomId, ident.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
@@ -473,9 +468,7 @@ test("a committed DM file whose message is missing from the projection is not ro
     roomId: "orphan-den", title: "Orphan den", purpose: "Missing-message file visibility", kind: "personal", displayName: "Orphan owner"
   });
   for (const ident of [peer, third]) {
-    store.identities.link(owner.secret, created.roomId, {
-      identityId: ident.identityId, displayName: ident.displayName, permissions: []
-    });
+    linkWithProof(store, owner.secret, created.roomId, ident, { displayName: ident.displayName, permissions: [] });
     setTier(store.db, created.roomId, ident.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   store.command(owner.secret, created.roomId, {

@@ -16,6 +16,7 @@ import { RoomStore } from "../server/store.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const secret = "pri_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
 
@@ -673,7 +674,7 @@ async function liveAccessFixture(t) {
   const worker = store.identities.create("Access fixture worker");
   rooms.create(owner.secret, { roomId: "source", title: "Source", purpose: "Alias fixture", kind: "personal" });
   rooms.create(owner.secret, { roomId: "target", title: "Target", purpose: "Access fixture", kind: "personal" });
-  store.identities.link(owner.secret, "source", { identityId: worker.identityId, memberId: "worker-alias", permissions: [] });
+  linkWithProof(store, owner.secret, "source", worker, { memberId: "worker-alias", permissions: [] });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;

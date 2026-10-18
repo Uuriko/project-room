@@ -19,6 +19,7 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 import { planAccountDeletion, executeAccountDeletion } from "../server/account-deletion.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function buildWorld(t, label) {
   const directory = mkdtempSync(join(tmpdir(), `delegate-lifecycle-${label}-`));
@@ -38,9 +39,7 @@ function buildWorld(t, label) {
   // The delegate: linked with ONE permission, so every power it exercises
   // beyond that comes from the two grants.
   const agent = store.identities.create("Delegate Agent");
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: agent.identityId, displayName: "Delegate Agent", permissions: ["accept_work"]
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", agent, { displayName: "Delegate Agent", permissions: ["accept_work"] });
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   store.ownerDelegates.grant(ownerKey, "commons", { identityId: agent.identityId });
   store.delegation.grant(ownerKey, "commons", { identityId: agent.identityId });
@@ -128,9 +127,7 @@ test("a permission bit held from another source survives the grant's death", t =
   // Second delegate whose member already holds invite_member BEFORE the
   // membership grant: the grant confers nothing (added_invite_member = 0).
   const second = store.identities.create("Second Delegate");
-  const linkedSecond = store.identities.link(ownerKey, "commons", {
-    identityId: second.identityId, displayName: "Second Delegate", permissions: ["accept_work"]
-  });
+  const linkedSecond = linkWithProof(store, ownerKey, "commons", second, { displayName: "Second Delegate", permissions: ["accept_work"] });
   setTier(store.db, "commons", linkedSecond.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const secondMember = memberOf(store, linkedSecond.memberId);
   store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED, data: {

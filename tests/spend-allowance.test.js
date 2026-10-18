@@ -12,6 +12,7 @@ import { spendLedger, sessionRecord } from "../src/work-item-session.js";
 import { spendAllowanceReport, enforceSpendAllowance } from "../server/spend-allowance.mjs";
 import { classifyCommand } from "../server/action-classes.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Issue #6 C3: an owner-set room spend allowance. The reducer is owner-only,
 // the ledger derives from the projection, and store.command() refuses any
@@ -223,7 +224,7 @@ test("agent room owner can set the existing room-wide allowance and non-owner ma
   const before = f.store.room(agentRoomId).state.room.spendAllowance;
   assert.equal(before, undefined);
   const peerIdentity = f.store.identities.create("Allowance peer");
-  f.store.identities.link(agentKey, agentRoomId, { identityId: peerIdentity.identityId, permissions: [] });
+  linkWithProof(f.store, agentKey, agentRoomId, peerIdentity, { permissions: [] });
   // A #761 membership-administration grant is deliberately not spend authority.
   f.store.delegation.grant(agentKey, agentRoomId, { identityId: peerIdentity.identityId });
   assert.equal(f.store.delegation.hasGrant(agentRoomId, peerIdentity.identityId), true);

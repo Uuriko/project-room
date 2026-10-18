@@ -13,6 +13,7 @@ import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
   CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
@@ -156,7 +157,7 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
     roomId: "ada-east", title: "Ada east", purpose: "Needs me too", kind: "personal", displayName: "Ada"
   }).roomId;
   for (const roomId of [roomA, roomB]) {
-    store.identities.link(ada.secret, roomId, { identityId: bob.identityId, displayName: "Bob", permissions: [] });
+    linkWithProof(store, ada.secret, roomId, bob, { displayName: "Bob", permissions: [] });
     setTier(store.db, roomId, bob.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const post = (secret, roomId, id, data) => store.command(secret, roomId, {
@@ -290,7 +291,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Requester"), recipient = store.identities.create("Responder");
   const room = rooms.create(owner.secret, { roomId: "core-requests", title: "Core requests", purpose: "Answer in context", kind: "personal", displayName: "Requester" });
-  store.identities.link(owner.secret, room.roomId, { identityId: recipient.identityId, displayName: "Responder", permissions: [] });
+  linkWithProof(store, owner.secret, room.roomId, recipient, { displayName: "Responder", permissions: [] });
   store.command(owner.secret, room.roomId, { id: "core-question", type: "message.posted", data: {
     messageId: "core-question", body: "Which result should we use?", toMemberId: recipient.identityId, requestKind: "reply"
   } });
@@ -327,7 +328,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   const roomId = rooms.create(owner.secret, {
     roomId: "focused-tools", title: "Focused tools", purpose: "Discover appropriate actions", kind: "personal"
   }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: reader.identityId, displayName: "Reader", permissions: [] });
+  linkWithProof(store, owner.secret, roomId, reader, { displayName: "Reader", permissions: [] });
   setTier(store.db, roomId, reader.identityId, "t1_readonly", { updatedBy: "owner", nowMs: Date.now() });
   const before = JSON.stringify(store.room(roomId).state);
   const review = await (await rpc(origin, "tools/list", { focus: "review" }, owner.secret)).json();
@@ -387,7 +388,7 @@ async function claimLinkFixture(t) {
   const fixture = await serve(t), { origin, store, rooms } = fixture;
   const owner = store.identities.create("Claim room owner"), writer = store.identities.create("Claim writer");
   const roomId = rooms.create(owner.secret, { roomId: "claim-links", title: "Claim links", purpose: "Append PR from hosted MCP", kind: "personal" }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: writer.identityId, displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
+  linkWithProof(store, owner.secret, roomId, writer, { displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   const client = new RoomAgentClient({ origin, roomId, token: writer.secret });
   await client.workClaim("hosted-pr", { leaseHours: 6 });

@@ -8,6 +8,7 @@ import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { MemberPermissionRequests } from "../server/member-permission-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "../server/routes/member-permissions.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // These real HTTP/store cases own the room-authenticated member contract.
 // The existing upgrade tests retain identity-secret and recovery coverage.
@@ -19,7 +20,7 @@ async function setup(t, kind = "agent") {
   if (kind === "agent") {
     identity = store.identities.create("Member Requester");
     memberId = identity.identityId;
-    store.identities.link(owner, "commons", { identityId: memberId, permissions: [] });
+    linkWithProof(store, owner, "commons", identity, { permissions: [] });
   } else {
     store.command(owner, "commons", { id: randomUUID(), type: "member.added",
       data: { memberId, displayName: "Human Requester", kind: "human", permissions: [] } });
@@ -244,7 +245,7 @@ test("lapsed member pendings are expired on create and do not consume the cap (#
   store.initialize(initialRoom("commons"));
   const owner = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Member Requester");
-  store.identities.link(owner, "commons", { identityId: identity.identityId, permissions: [] });
+  linkWithProof(store, owner, "commons", identity, { permissions: [] });
   const access = new AccessRequests(store, {
     rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 })
   });

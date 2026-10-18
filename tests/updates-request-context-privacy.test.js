@@ -14,6 +14,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { listOwedReplies } from "../server/updates.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function serve(t, roomId = "commons") {
   const directory = mkdtempSync(join(tmpdir(), "room-req-privacy-"));
@@ -27,7 +28,7 @@ function serve(t, roomId = "commons") {
 function addAgent(store, roomId, token, memberId, displayName) {
   const secret = `pri_${memberId}${"s".repeat(43 - memberId.length)}`;
   const identity = store.identities.create(displayName, { secret });
-  store.identities.link(token, roomId, { identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work"] });
+  linkWithProof(store, token, roomId, identity, { memberId, displayName, permissions: ["accept_work", "complete_work"] });
   return { secret, memberKey: store.issueAccessKey(roomId, memberId) };
 }
 
