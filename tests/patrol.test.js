@@ -239,6 +239,151 @@ test("job wiring: fresh findings surface in job health as a named patrol failure
   } finally { store.close(); }
 });
 
+test("a room whose stored state cannot be processed is parked by name and stops failing the tick", () => {
+  const store = openStore("aaa-poison");
+  try {
+    store.initialize(initialRoom("zzz-healthy"));
+    post(store, "p1", "poison room message", "aaa-poison");
+    post(store, "z1", "healthy one", "zzz-healthy");
+    post(store, "z2", "healthy two", "zzz-healthy");
+    const poisonHead = headOf(store, "aaa-poison");
+    const healthyHead = headOf(store, "zzz-healthy");
+    // The poison shape: the stored projection no longer parses, so the
+    // agreement leg (JSON.parse of the projection at the head) throws on
+    // every attempt, deterministically, at the same cursor position.
+    const goodProjection = store.db.prepare("SELECT projection FROM rooms WHERE id='aaa-poison'").get().projection;
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    assert.ok(goodProjection.length > 0);
+
+    const first = store.patrolTick();
+    assert.equal(first.errors, 1, "a fresh park surfaces once as a named failure");
+    assert.equal(first.parked, 1);
+    assert.match(first.scanError, /patrol could not process a room \(SyntaxError\)/);
+    assert.ok(!first.scanError.includes("aaa-poison"), "the room id stays off the public health surface (#3334)");
+    assert.equal(first.failureDetail.code, "patrol_error");
+    assert.equal(first.failureDetail.errorClass, "SyntaxError", "the summary carries the reason class, not the payload");
+    assert.equal(first.failureDetail.recordClass, "room");
+    // The healthy room was fully patrolled in the same tick.
+    const healthy = patrolStatus(store).rooms.find(room => room.roomId === "zzz-healthy");
+    assert.equal(healthy.sequence, healthyHead, "the healthy room's cursor sits at its head");
+    assert.deepEqual(store.patrolFindings(), []);
+    // The park is durable bookkeeping: room, cursor, head, class, error.
+    const blocks = store.patrolBlocks();
+    assert.equal(blocks.length, 1);
+    assert.equal(blocks[0].roomId, "aaa-poison");
+    assert.equal(blocks[0].headSeq, poisonHead);
+    assert.equal(blocks[0].sequence, 0, "the cursor never advanced past the unprocessable state");
+    assert.equal(blocks[0].errorClass, "SyntaxError");
+    assert.ok(blocks[0].error.length > 0 && blocks[0].error.length <= 200);
+    assert.deepEqual(patrolStatus(store).parked, [{ roomId: "aaa-poison", sequence: 0, headSeq: poisonHead, errorClass: "SyntaxError" }]);
+    // A parked room does not re-arm the job.
+    assert.equal(patrolPending(store), false);
+
+    const second = store.patrolTick();
+    assert.equal(second.errors, undefined, "a standing park does not re-fail the tick");
+    assert.equal(second.scanError, undefined);
+    assert.equal(second.parked, 1, "the standing park rides the tick summary as a count");
+    assert.equal(second.checked, 0, "the parked room is not retried while its head is unchanged");
+    assert.equal(store.patrolBlocks().length, 1, "the park is durable, not re-recorded");
+  } finally { store.close(); }
+});
+
+test("job wiring: after the fresh park, the patrol job records success with the parked count in its summary", async () => {
+  const store = openStore("aaa-poison");
+  try {
+    post(store, "p1", "poison room message", "aaa-poison");
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    const job = jobByName("patrol");
+    const tick = async at => {
+      const outcomes = await runCronJobs(
+        { patrol: () => job.run(store, { deadline: Date.now() + 5000 }) },
+        { now: () => at, log: () => {} }
+      );
+      return applyOutcomes({}, outcomes);
+    };
+    // Tick 1 fails once (the fresh park). Tick 2 must succeed: before the
+    // park existed, every tick failed forever and lastSuccess never moved
+    // (production: 915 consecutive failures, lastSuccess null).
+    const failed = await tick(1_000);
+    const failedEntry = jobHealthView(failed, 1_000).jobs.find(candidate => candidate.name === "patrol");
+    assert.equal(failedEntry.consecutiveFailures, 1);
+    assert.equal(failedEntry.lastSuccessAt, null);
+    const records = await tick(2_000);
+    const entry = jobHealthView(records, 2_000).jobs.find(candidate => candidate.name === "patrol");
+    assert.equal(entry.consecutiveFailures, 0, "the standing park no longer fails the job");
+    assert.ok(entry.lastSuccessAt, "lastSuccess advances once the poison room is parked");
+    assert.equal(entry.lastSummary.parked, 1, "the parked count stays visible in the job summary");
+  } finally { store.close(); }
+});
+
+test("a parked room is retried once its head moves, and a repair unparks it", () => {
+  const store = openStore("aaa-poison");
+  try {
+    post(store, "p1", "first message", "aaa-poison");
+    const goodProjection = store.db.prepare("SELECT projection FROM rooms WHERE id='aaa-poison'").get().projection;
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run("{corrupt-projection");
+    assert.equal(store.patrolTick().errors, 1);
+    assert.equal(store.patrolTick().errors, undefined, "parked: standing ticks succeed");
+
+    // Head moves (a new stored message event): one retry, which throws on
+    // the same corrupt projection — the refreshed park surfaces once more.
+    const movedHead = headOf(store, "aaa-poison") + 1;
+    const raw = makeEvent({
+      id: randomUUID(), idempotencyKey: randomUUID(), type: EVENT_TYPES.MESSAGE_POSTED,
+      actorId: "owner", roomId: "aaa-poison", at: new Date().toISOString(),
+      data: { messageId: "p2", body: "second message" }
+    });
+    store.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run("aaa-poison", movedHead, raw.id, JSON.stringify(raw));
+    store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(movedHead);
+    const retried = store.patrolTick();
+    assert.equal(retried.errors, 1, "the moved head earns one re-diagnosis, surfaced once");
+    assert.equal(store.patrolBlocks()[0].headSeq, movedHead, "the park now names the new head");
+    assert.equal(store.patrolTick().errors, undefined, "and then it is parked again, not wedged");
+
+    // Repair the stored projection in place (the head does not move: the
+    // raw-inserted p2 event is dropped back out so log and projection
+    // agree). An in-place repair is retried by the operator's forced
+    // single-room recheck, which bypasses the park; normal ticks resume
+    // once it has cleared.
+    store.db.prepare("UPDATE rooms SET projection=? WHERE id='aaa-poison'").run(goodProjection);
+    store.db.prepare("DELETE FROM events WHERE room_id='aaa-poison' AND sequence=?").run(movedHead);
+    store.db.prepare("UPDATE rooms SET sequence=? WHERE id='aaa-poison'").run(movedHead - 1);
+    const healed = store.patrolTick({ roomId: "aaa-poison" });
+    assert.equal(healed.errors, undefined);
+    assert.equal(healed.fresh, 0, "the repaired room patrols clean");
+    assert.equal(healed.parked, undefined, "no parks remain in the summary");
+    assert.deepEqual(store.patrolBlocks(), [], "a room that patrols cleanly is unparked");
+    assert.equal(patrolStatus(store).rooms.find(room => room.roomId === "aaa-poison").sequence, headOf(store, "aaa-poison"));
+    post(store, "p2", "second message", "aaa-poison");
+    const resumed = store.patrolTick();
+    assert.equal(resumed.fresh, 0);
+    assert.equal(resumed.errors, undefined, "normal ticks patrol the healed room again");
+  } finally { store.close(); }
+});
+
+test("replacing a room's log with importEvents clears a park recorded against the old log", () => {
+  const store = openStore("alpha");
+  try {
+    post(store, "p1", "first message");
+    // Minted before any park exists, and a park row is recorded directly:
+    // importEvents authenticates against the room, so this test exercises
+    // the store's clear-on-import path itself rather than a poison shape
+    // import could not even authenticate against.
+    const owner = store.issueAccessKey("alpha", "owner");
+    store.patrolTick();
+    store.db.prepare(`INSERT INTO patrol_blocks (room_id, sequence, event_id, head_seq, error_class, error, blocked_at)
+      VALUES ('alpha', 0, NULL, ?, 'SyntaxError', 'recorded against the old log', 1)`).run(headOf(store));
+    assert.equal(store.patrolBlocks().length, 1);
+    const lines = store.db.prepare("SELECT sequence, body FROM events WHERE room_id='alpha' ORDER BY sequence").all()
+      .map(row => ({ sequence: row.sequence, event: JSON.parse(row.body) }));
+    store.importEvents(owner, "alpha", lines);
+    assert.deepEqual(store.patrolBlocks(), [], "the park described the replaced log and does not carry");
+    const result = store.patrolTick();
+    assert.equal(result.errors, undefined);
+    assert.equal(result.fresh, 0, "the imported log patrols clean against its rebuilt projection");
+  } finally { store.close(); }
+});
+
 test("read-only store: the patrol files nothing and never throws", () => {
   const directory = mkdtempSync(join(tmpdir(), "project-room-patrol-ro-"));
   const filename = join(directory, "room.sqlite");
