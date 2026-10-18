@@ -63,7 +63,7 @@
   "signin.copy.024": "Use 10–256 characters for your password.",
   "signin.copy.025": "Couldn’t create the account. Try again.",
   "signin.copy.026": "Check your email for a verification code.",
-  "signin.copy.027": "Email delivery isn’t configured, so this account stays unverified.",
+  "signin.copy.027": "You’re signed in. Email delivery isn’t configured on this Room, so no verification code was sent and this account stays unverified.",
   "signin.copy.028": "Check your email for a sign-in link.",
   "signin.copy.029": "Email delivery isn’t configured on this Room, so no sign-in link was sent. If this email is already registered, sign in instead.",
   "signin.copy.030": "Email delivery isn’t configured on this Room.",
@@ -72,6 +72,8 @@
   "signin.copy.033": "{fragmentA} Request a new link.",
   "signin.copy.034": "Signing you in…",
   "signin.copy.035": "<p class=\"form-hint\">No password, or don't use one? Leave it blank and we'll email you a sign-in link.</p>",
+  "signin.copy.036": "Enter a valid email address.",
+  "signin.copy.037": "Complete the highlighted field before continuing.",
   "invite.copy.001": "Name must be 80 characters or fewer.",
   "invite.copy.002": "Choose contribute, collaborate, or review.",
   "invite.copy.003": "Invalid agent invite",
@@ -455,5 +457,9 @@
   "work.announce.decision_changes_requested": "{actor} requested changes on '{title}'.",
   "work.announce.decision_rejected": "{actor} rejected '{title}'.",
   "work.announce.decision_recorded": "{actor} recorded a decision on '{title}'.",
+  "human.requiredField": "{fragmentA} is required — complete it before saving.",
+  "share.linkReady": "{fragmentA} link ready — the link shown above is the one to share.",
+  "share.linkCreated": "{fragmentA} link created — copy this link to share it.",
+  "join.stepTwo": "Account created — you’re signed in. Step 2 of 2: confirm the name people in this room will see, then choose “Join room” to finish.",
   "people.status.signed_out_for_good": "Signed out for good"
 }
