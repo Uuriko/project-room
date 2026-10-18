@@ -1,4 +1,4 @@
-import { clickChrome, ensureSidebarClosed, openComposerOptions } from '../scripts/room-chrome.mjs';
+import { clickChrome, ensureSidebarClosed, openComposerOptions } from '../../scripts/room-chrome.mjs';
 // Disposable workerd/browser release recovery proof; never provisions live data.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,8 +10,8 @@ import { join } from 'node:path';
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 import { chromium } from 'playwright';
-import { publicAssetPaths } from '../server/public-assets.mjs';
-import { signInFixture } from '../scripts/auth-signin.mjs';
+import { publicAssetPaths } from '../../server/public-assets.mjs';
+import { signInFixture } from '../../scripts/auth-signin.mjs';
 
 for (const touch of [false, true]) test(`release pause/resume preserves exact sends and privacy: ${touch ? 'touch' : 'desktop'}`, { timeout: 90000 }, async () => {
   const socket = createServer();
@@ -22,7 +22,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const persistence = await mkdtemp(join(tmpdir(), 'room-release-pause-'));
-  const release = JSON.parse(await readFile(new URL('./wrangler.jsonc', import.meta.url), 'utf8'));
+  const release = JSON.parse(await readFile(new URL('../../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
   const config = { modules: true, script: bundled.outputFiles[0].text, host: '127.0.0.1', port, https: true,
     compatibilityDate: release.compatibility_date, compatibilityFlags: release.compatibility_flags,
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, durableObjectsPersist: persistence,
@@ -31,7 +31,7 @@ for (const touch of [false, true]) test(`release pause/resume preserves exact se
       // Serve the real release inventory: catalog modules and accessibility
       // assets are app dependencies too, not only src/*.js/css.
       if (!publicAssetPaths.includes(pathname.slice(1))) return new Response(null, { status: 404 });
-      return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
+      return new Response(await readFile(new URL('../..' + pathname, import.meta.url)));
     } } };
   let mf, browser;
   const start = async paused => {
