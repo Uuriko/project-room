@@ -15,9 +15,14 @@
 // transfers with the round; a delivered claim never changes hands in
 // `delivered`; and verify under a reviewed policy fails closed when no
 // delivery exists.
+// Amendment 2026-10-18 (#3753): the lease sweep itself no longer fires
+// while a review stands on the round's current basis — delivered work
+// under review survives lease expiry. F1's first test below is amended
+// to the composed rule: pause while the review is outstanding, full
+// clearing once its basis has moved.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWork, claimWork, updateWork, recordReview, reassignWork, releaseWork, releaseExpired,
+import { createWork, claimWork, updateWork, recordReview, recordCi, reassignWork, releaseWork, releaseExpired,
   canCloseWork, claimHistoryLength, ClaimError } from "../server/work-claims.mjs";
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof ClaimError && error.code === code);
@@ -58,10 +63,22 @@ const buildDelivered = id => {
   return item;
 };
 
-test("F1: the lease sweep clears the round's delivery state — the next owner cannot inherit the bundle", () => {
+test("F1 as amended by #3753: the sweep pauses while the send-back review is outstanding; once its basis moves, the sweep clears the round's delivery state — the next owner cannot inherit the bundle", () => {
   const item = buildSentBack("f1-sweep");
   const aliceDigest = item.delivery.digest;
-  const [swept] = releaseExpired([item], T0 + 25 * H);
+  // #3753 (2026-10-18): dave's changes_requested review still stands on
+  // the round's current basis, so the 24h lapse does NOT release the
+  // claim — the pre-#3753 sweep silently destroyed this delivered work
+  // mid-review. The claim, its delivery, and the review fact survive.
+  const [held] = releaseExpired([item], T0 + 25 * H);
+  assert.equal(held.state, "in_progress");
+  assert.equal(held.owner, "alice");
+  assert.equal(held.delivery.digest, aliceDigest);
+  assert.equal(held.verification?.state, "changes_requested");
+  // Once the review basis moves (a new CI head lands), the pause ends:
+  // the sweep fires and clears the round exactly as F1 requires.
+  const moved = recordCi(held, { state: "success", headSha: "c".repeat(40) }, T0 + 25 * H).item;
+  const [swept] = releaseExpired([moved], T0 + 25 * H);
   assert.equal(swept.state, "unclaimed");
   assert.equal(swept.owner, null);
   assert.equal(swept.delivery, null);

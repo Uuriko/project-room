@@ -1595,9 +1595,23 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
+// #3753: a lease never lapses while a review is outstanding on the
+// round. A changes_requested send-back returns the claim to in_progress
+// with its delivery and the review fact retained; a note-flow claim can
+// carry a current-round review before any delivery exists. Sweeping
+// either shape at the 24h mark silently destroyed delivered work
+// mid-review (the sweep wipes delivery, verification, and reviews), so
+// expiry pauses while any recorded review still stands on the round's
+// CURRENT basis (the issue's fix shape 1: pause the lease while review
+// is outstanding). A review whose basis has moved (new CI head, new
+// delivery) no longer holds the lease, and a delivery with no review
+// outstanding does not either — an abandoned round is still reclaimed,
+// and the sweep still clears its delivery state (bug sweep 2026-10-16
+// F1: the next claimant must never inherit the bundle).
 export function isLeaseExpired(work, now) {
   const item = workOf(work);
   if (!ACTIVE_CLAIM_STATES.includes(item.state) || item.leaseExpiresAt === null) return false;
+  if ((item.reviews ?? []).some(review => currentReviewBasis(review, item))) return false;
   return Date.parse(item.leaseExpiresAt) <= nowMsOf(now);
 }
 // Sweep a list: expired claims are auto-released to unclaimed (owner
