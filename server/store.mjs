@@ -4380,6 +4380,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   changeAccountAccess(accountId, { expectedRevision, active, reason }) {
     if (!validId(accountId)) fail(422, "invalid_account", "Invalid account id");
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof active !== "boolean" || typeof reason !== "string" || !reason.trim() || reason.length > 4096) fail(422, "invalid_account_change", "Account change requires a current revision, active state, and reason");
+    // "account_deleted" is reserved for the completion record written by
+    // executeAccountDeletion (server/account-deletion.mjs); an operator reason
+    // must not be able to pose as deletion evidence (agent_connections verify).
+    if (/^account_deleted/i.test(reason.trim())) fail(422, "reserved_account_reason", "That reason is reserved for completed account deletion");
     return this.transaction(() => {
       const row = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(accountId);
       if (!row) fail(404, "account_not_found", "Account not found");
