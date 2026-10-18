@@ -32,6 +32,8 @@ a{color:var(--blue)}
 .receipt-next p{margin:0}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
+.timeline{margin:0;padding-left:1.25rem}.timeline li{margin:.35rem 0}
+.receipt-proof{margin-top:1.5rem}.receipt-proof summary{cursor:pointer;font-weight:600}
 img,svg,table{max-width:100%}
 @media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}h2 a{min-height:var(--control-min-target-coarse)}}`;
 
@@ -155,6 +157,155 @@ export function renderVerificationBlock(receipt, verification) {
 </section>`;
 }
 
+// Consecutive same-kind journal legs are one movement (a split writes
+// attribute + approve + refund legs under one lot id). Grouping and the
+// from/to/amount summary are shared by the record's Movements row and
+// the timeline below, so both surfaces state a movement the same way.
+function lotMovementGroups(movements) {
+  const groups = [];
+  for (const movement of Array.isArray(movements) ? movements : []) {
+    const current = groups.at(-1);
+    if (current && current.kind === movement.kind) current.legs.push(movement);
+    else groups.push({ kind: movement.kind, legs: [movement] });
+  }
+  return groups;
+}
+
+function movementGroupSummary(group) {
+  const side = entry => `${entry.account} · ${entry.lotState}`;
+  const debits = group.legs.filter(leg => leg.amountMillis < 0);
+  const creditsIn = group.legs.filter(leg => leg.amountMillis > 0);
+  const millis = creditsIn.reduce((sum, leg) => sum + leg.amountMillis, 0)
+    || Math.abs(debits.reduce((sum, leg) => sum + leg.amountMillis, 0));
+  return {
+    millis,
+    froms: debits.length ? debits.map(side).join(", ") : "—",
+    tos: creditsIn.length ? creditsIn.map(side).join(", ") : "—",
+  };
+}
+
+// The receipt replay (#3523): the public receipt page leads with the
+// work as a readable chronological timeline, rendered from the receipt
+// record itself — presentation only, no new machinery, no schema
+// change, so receipts already issued replay exactly as stored.
+//
+// What a timeline can honestly show is bounded by what the public
+// record (project-room-public-receipt/1) actually carries. It carries
+// dated lifecycle facts — the bounty posting (lot.bountyCreatedAt),
+// the merge (mergedAt), the reviewer's verification and decision
+// (review.verifiedAt / decidedAt), the settlement
+// (lot.settlement.settledAt), and the receipt's own record time (at) —
+// plus two ordered-but-undated sets: a public-work receipt's checks
+// (executedChecks / checksReported, stamped on the record, so they
+// ride at the record time) and a lot's journal movements (legs in
+// ledger sequence, so they ride at the lot receipt's record time in
+// that order, amounts included — the only per-step cost the record
+// carries). The record does NOT carry individual tool calls, commands,
+// or per-step costs outside lot movements, so the timeline shows none
+// rather than inventing them. An event whose time the record does not
+// carry (the payout-lot cross-reference on a paid work receipt) sorts
+// after the dated events, timeless, in record order.
+export function receiptTimeline(receipt) {
+  const events = [];
+  const push = (at, kind, label, detail = "") => {
+    events.push({
+      at: typeof at === "string" && Number.isFinite(Date.parse(at)) ? at : null,
+      kind, label, detail, seq: events.length,
+    });
+  };
+  const creditsOf = value => typeof value === "number" && Number.isFinite(value) ? `${value} credits` : null;
+  const lot = receipt.lot ?? null;
+
+  if (lot?.bountyCreatedAt) {
+    push(lot.bountyCreatedAt, "bounty-posted", "Bounty posted", [
+      lot.poster ? `by ${lot.poster}` : "",
+      creditsOf(lot.awardCredits) ? `award ${creditsOf(lot.awardCredits)}` : "",
+    ].filter(Boolean).join(" · "));
+  }
+  if (receipt.mergedAt) {
+    push(receipt.mergedAt, "merged", "Pull request merged",
+      receipt.pullRequest ? prPhrase(receipt.pullRequest) : "");
+  }
+  if (receipt.source === "public-work") {
+    if (receipt.executedChecks?.length) {
+      push(receipt.at, "checks-executed", "Platform-executed checks",
+        receipt.executedChecks.map(check => `${check.name} — ${check.result}`).join("; "));
+    }
+    if (receipt.checksReported?.length) {
+      push(receipt.at, "checks-reported", "Checks the worker reported",
+        receipt.checksReported.join("; "));
+    }
+  }
+  const review = receipt.review ?? null;
+  if (review?.verifiedAt) {
+    push(review.verifiedAt, "review-verified", "Reviewer verification", [
+      review.verificationVerdict ?? "",
+      review.verificationReviewerKind ? `(${review.verificationReviewerKind} reviewer)` : "",
+    ].filter(Boolean).join(" "));
+  }
+  if (review?.decidedAt) {
+    push(review.decidedAt, "review-decided", "Reviewer decision",
+      receipt.state ? outcomeLabel(receipt.state) : "");
+  }
+  if (lot) {
+    for (const group of lotMovementGroups(lot.movements)) {
+      const summary = movementGroupSummary(group);
+      push(receipt.at, "movement", `Ledger movement: ${group.kind}`,
+        `${summary.froms} → ${summary.tos} — ${summary.millis / 1000} credits (${summary.millis} milli-credits)`);
+    }
+    const settlement = lot.settlement ?? {};
+    if (settlement.settledAt) {
+      push(settlement.settledAt, "settlement", "Settlement recorded", [
+        settlement.kind ?? "",
+        creditsOf(settlement.workerCredits) ? `worker received ${creditsOf(settlement.workerCredits)}` : "",
+        creditsOf(settlement.refundCredits) ? `refunded to poster ${creditsOf(settlement.refundCredits)}` : "",
+        settlement.settledBy?.id ? `by ${settlement.settledBy.id}` : "",
+      ].filter(Boolean).join(" · "));
+    }
+  }
+  const recordedDetail = [
+    receipt.agents?.length ? `Agents: ${receipt.agents.join(", ")}` : "",
+    receipt.humans?.length ? `Humans: ${receipt.humans.join(", ")}` : "",
+    receipt.source === "public-work" && receipt.state ? outcomeLabel(receipt.state) : "",
+    verificationLabel(receipt.verification?.state) ?? "",
+  ].filter(Boolean).join(" · ");
+  // The record event exists only when the record carries a real time
+  // for it; a receipt with no valid `at` gets the empty timeline, not
+  // a timeless record line dressed as an event.
+  if (typeof receipt.at === "string" && Number.isFinite(Date.parse(receipt.at))) {
+    push(receipt.at, "recorded",
+      receipt.source === "public-work" ? "Delivery recorded" : "Receipt recorded", recordedDetail);
+  }
+  if (receipt.lotId) {
+    const s = receipt.settlement ?? {};
+    push(null, "payout", "Payout lot", [
+      receipt.lotId,
+      creditsOf(s.amountCredits) ?? "",
+      s.lotState ?? "",
+    ].filter(Boolean).join(" · "));
+  }
+  return events
+    .sort((a, b) => {
+      if (a.at && b.at) return Date.parse(a.at) - Date.parse(b.at) || a.seq - b.seq;
+      if (a.at) return -1;
+      if (b.at) return 1;
+      return a.seq - b.seq;
+    })
+    .map(({ seq, ...event }) => event);
+}
+
+function renderReceiptTimeline(receipt) {
+  const events = receiptTimeline(receipt);
+  const body = events.length
+    ? `<ol class="timeline">${events.map(event => `<li data-kind="${escapeHtml(event.kind)}">${event.at ? `<time datetime="${escapeHtml(event.at)}">${escapeHtml(event.at)}</time> ` : ""}<strong>${escapeHtml(event.label)}</strong>${event.detail ? ` — ${escapeHtml(event.detail)}` : ""}</li>`).join("")}</ol>`
+    : `<p class="meta">No dated events are recorded on this receipt.</p>`;
+  return `<section class="receipt-timeline" aria-label="Timeline">
+<h2>Timeline</h2>
+${body}
+<p class="meta">In time order, from this receipt's own record only. The public record does not carry individual tool calls, commands, or per-step costs, so none are shown; checks and ledger movements appear where the record carries them.</p>
+</section>`;
+}
+
 export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   const description = `${receipt.title}. A public receipt from Project Room.`;
   const room = receipt.room?.title
@@ -220,21 +371,11 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     // it the face misstates the settlement (a split lot headlined as the
     // full award going to the worker though half refunded to the poster,
     // #3765). Movements are the consecutive same-kind journal legs.
-    const groups = [];
-    for (const movement of Array.isArray(l.movements) ? l.movements : []) {
-      const current = groups.at(-1);
-      if (current && current.kind === movement.kind) current.legs.push(movement);
-      else groups.push({ kind: movement.kind, legs: [movement] });
-    }
+    const groups = lotMovementGroups(l.movements);
     const movementsRow = groups.length > 1
       ? `<div><dt>Movements</dt><dd>${groups.map(group => {
-          const debits = group.legs.filter(leg => leg.amountMillis < 0);
-          const creditsIn = group.legs.filter(leg => leg.amountMillis > 0);
-          const millis = creditsIn.reduce((sum, leg) => sum + leg.amountMillis, 0)
-            || Math.abs(debits.reduce((sum, leg) => sum + leg.amountMillis, 0));
-          const froms = debits.length ? debits.map(side).join(", ") : "—";
-          const tos = creditsIn.length ? creditsIn.map(side).join(", ") : "—";
-          return `${escapeHtml(group.kind)}: ${froms} → ${tos} — ${credits(millis / 1000)} (${millis} milli-credits)`;
+          const summary = movementGroupSummary(group);
+          return `${escapeHtml(group.kind)}: ${escapeHtml(summary.froms)} → ${escapeHtml(summary.tos)} — ${credits(summary.millis / 1000)} (${summary.millis} milli-credits)`;
         }).join("<br>")}</dd></div>`
       : "";
     const rows = [
@@ -293,7 +434,10 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
 <body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
+${renderReceiptTimeline(receipt)}
 ${renderVerificationBlock(receipt, verification)}
+<details class="receipt-proof">
+<summary>Proof and record details</summary>
 <dl class="detail">
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
@@ -302,6 +446,7 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
+</details>
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
 <p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>

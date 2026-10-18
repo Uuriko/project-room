@@ -6,6 +6,20 @@
 
 No login. The page is indexable when the URL has no query string.
 
+## Timeline first
+
+A detail page leads with a chronological timeline rendered from the
+receipt's own record: the dated lifecycle facts it carries (bounty
+posting, merge, reviewer verification and decision, settlement, the
+record time), a public-work receipt's checks, and a lot's journal
+movements in ledger order with their amounts. The record does not carry
+individual tool calls, commands, or per-step costs outside lot
+movements, so the timeline shows none. The full record — hashes,
+signed receipt ids, the honesty note — follows in a "Proof and record
+details" block, one click away, content unchanged. This is
+presentation only: the JSON shape is unchanged and receipts already
+issued render the same timeline with no re-minting.
+
 ## Per-room proof page
 
 `/r/<slug>/proof` is one room's shareable proof page (`.json` twin:
