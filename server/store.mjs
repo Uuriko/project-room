@@ -3580,7 +3580,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const cached = this._cachedProjection(roomId);
     if (cached && typeof cached.state?.room?.ownerId === "string"
       && cached.state?.members && typeof cached.state.members === "object") {
-      return { sequence: cached.sequence, ownerId: cached.state.room.ownerId, members: cached.state.members };
+      // The cached members are the frozen projection's own objects;
+      // the storage path below returns fresh objects per call and
+      // callers rely on that (they may hold or mutate the result).
+      // Hand out a deep copy so the cache is never shared or mutated
+      // through an authority result.
+      return { sequence: cached.sequence, ownerId: cached.state.room.ownerId, members: structuredClone(cached.state.members) };
     }
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
@@ -4721,19 +4726,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
     return { ...room, state: { ...room.state, members } };
   }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", { preAuth = null } = {}) {
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
-      // PERF-BUILDS P0-2: the HTTP room funnel has already authenticated
-      // this request (same credential, same session fence) before
-      // routing; when it hands that auth down, don't authenticate a
-      // second time. The hand-down is accepted only for the same room
-      // and only when it carries a member — anything else falls back to
-      // the full authenticate below. Direct store callers (MCP, tests)
-      // pass no preAuth and are unchanged.
-      const auth = preAuth && preAuth.roomId === roomId && preAuth.member
-        ? preAuth
-        : this.authenticate(token, roomId, expectedSessionBinding);
+      // Authentication runs INSIDE this read transaction on purpose: it
+      // is the committed-read recheck — a membership, sponsor, or
+      // credential change that lands after the HTTP funnel's routing
+      // auth but before this read must refuse the read, not be served
+      // from the funnel's earlier result (room-authority tests: "managed
+      // discovery rechecks ... before-committed-read"). P0-2 originally
+      // handed the funnel auth down (preAuth) to skip this call; that
+      // withdrew the recheck and is removed. The recheck stays cheap
+      // because authenticate's roomAuthority read is memory-served.
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!["full", "work"].includes(view)) fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");

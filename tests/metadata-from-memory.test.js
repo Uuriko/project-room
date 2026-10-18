@@ -49,7 +49,14 @@ test("roomAuthority answers from the cached projection when warm, identically to
     assert.equal(textProbes(), before, "a warm roomAuthority must not probe the projection text");
     assert.equal(authority.sequence, warmState.sequence);
     assert.equal(authority.ownerId, ownerId);
-    assert.equal(authority.members, warmState.state.members, "members are the cached frozen members");
+    // Values are the cached projection's members, but never the same
+    // objects: roomAuthority's storage contract hands callers fresh
+    // objects they may hold or mutate, so the warm path returns a deep
+    // copy of the cached frozen members (an earlier version returned
+    // the frozen objects themselves, which broke that contract —
+    // room-authority: "narrow authority preserves exact members ...").
+    assert.deepEqual(JSON.parse(JSON.stringify(authority.members)), JSON.parse(JSON.stringify(warmState.state.members)));
+    assert.notEqual(authority.members, warmState.state.members, "members are a copy, not the cached objects");
     // Cold path (cache dropped) returns the same values from storage.
     store._dropProjectionCache();
     const cold = store.roomAuthority("commons");
@@ -130,20 +137,26 @@ test("stampActivated stamps once per identity per process, not once per call", (
   } finally { store.close(); }
 });
 
-test("snapshot accepts the funnel's preAuth and does not authenticate twice", () => {
+test("snapshot authenticates inside its read transaction (no funnel preAuth hand-down)", () => {
   const { store, ownerToken } = fixture();
   try {
-    const auth = store.authenticate(ownerToken, "commons");
+    // The in-transaction authenticate is the committed-read recheck: a
+    // membership or credential change landing after the HTTP funnel's
+    // routing auth must still refuse the read (room-authority tests:
+    // "managed discovery rechecks ... before-committed-read"). An early
+    // version of this PR handed the funnel auth down to skip the second
+    // authenticate; that withdrew the recheck and was removed. Pin the
+    // corrected contract: snapshot always authenticates, and nothing a
+    // caller passes can stand in for it.
     const original = store.authenticate.bind(store);
-    store.authenticate = () => { throw new Error("second authenticate must not run"); };
+    store.authenticate = () => { throw new Error("in-transaction authenticate must run"); };
     try {
-      const snap = store.snapshot(ownerToken, "commons", null, "full", false, false, "full", { preAuth: auth });
-      assert.equal(snap.viewerId, auth.member.id);
-      // A preAuth for another room is ignored and falls back — which here
-      // means it hits the throwing stub, proving the fallback ran.
       assert.throws(
-        () => store.snapshot(ownerToken, "commons", null, "full", false, false, "full", { preAuth: { ...auth, roomId: "elsewhere" } }),
-        /second authenticate must not run/);
+        () => store.snapshot(ownerToken, "commons", null, "full", false, false, "full"),
+        /in-transaction authenticate must run/);
     } finally { store.authenticate = original; }
+    const snap = store.snapshot(ownerToken, "commons", null, "full", false, false, "full");
+    assert.equal(snap.viewerId, store.authenticate(ownerToken, "commons").member.id);
   } finally { store.close(); }
 });
+
