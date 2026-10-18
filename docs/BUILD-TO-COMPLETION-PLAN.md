@@ -1,5 +1,7 @@
 # Project Room: build-to-completion plan
 
+Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
+
 Plan date: 2026-10-18. Starting local checkpoint: `973260d6`.
 Owner: Codex implementation, coordinating shared lanes before changes.
 Status: planned execution; the overhaul is not finished.

@@ -1,5 +1,7 @@
 # Project Room total backlog
 
+Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicitly narrows earlier feature commitments; the detailed inventory remains evidence, not the active execution queue.
+
 Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 execution/reconciliation tasks, 34 idea experiments, 48 historical native acceptance checks, 208 issue reconciliations, and 195 PR reconciliations. These counts overlap in underlying scope; they are not a count of distinct defects.
 
 This is the full captured inventory, not a priority shortlist. Existing source requirements remain binding. A task to reconcile or qualify a capability does not assert it has never been built. Schema 41 and earlier measured gains are local qualified checkpoints; the overall architecture overhaul remains incomplete.
