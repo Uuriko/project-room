@@ -30,8 +30,31 @@ export function googleSubject(sub) {
 // A same-origin HTML return lets the next load include the session.
 export function googlePostLoginPage(href) {
   if (href !== '/?google=error' && href !== '/?account=1' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(href)) fail('google_callback_invalid');
-  const safe = href.replace(/&/g, '&amp;');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
+  return returnPage(href);
+}
+
+// Commit a Room document before checking the Strict session cookie. A provider
+// page's cross-site navigation cannot carry that cookie. This does not consume
+// OAuth state or adopt its session; complete() still verifies the browser slot.
+export function googleCallbackReturnPage(url) {
+  if (url.pathname !== GOOGLE_CALLBACK_PATH || url.searchParams.has("room_resume")) fail('google_callback_invalid');
+  for (const key of ['state', 'code', 'error']) if (url.searchParams.getAll(key).length > 1) fail('google_callback_invalid');
+  if (!/^[A-Za-z0-9_-]{43}$/.test(url.searchParams.get('state') || '')) fail('google_state_invalid');
+  const params = new URLSearchParams();
+  for (const key of ['state', 'code', 'error']) {
+    const value = url.searchParams.get(key);
+    if (value !== null) {
+      if (!opaque(value)) fail('google_callback_invalid');
+      params.set(key, value);
+    }
+  }
+  params.set('room_resume', '1');
+  return returnPage(GOOGLE_CALLBACK_PATH + '?' + params);
+}
+
+function returnPage(href) {
+  const safe = href.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
 }
 
 export function googleConfig(env = {}, origin) {

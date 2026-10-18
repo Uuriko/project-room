@@ -163,8 +163,8 @@ test("callback success without rooms lands on the account home, session establis
 test("callback with a state mismatch provisions no account", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  await beginFlow(origin);
-  const bad = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${"x".repeat(43)}&code=code-fixture`, { redirect: "manual" });
+  const { slotCookie } = await beginFlow(origin);
+  const bad = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${"x".repeat(43)}&code=code-fixture`, { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
   assert.equal(bad.status, 200);
   assert.match(await bad.text(), /url=\/\?google=error/);
   assert.equal(bad.headers.get("set-cookie") || "", "");
@@ -325,13 +325,18 @@ test("callback with a valid state but no session cookie fails closed", async t =
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
   const attacker = await beginFlow(origin);
   const attackerState = attacker.authorize.searchParams.get("state");
-  // A browser carrying no session cookie cannot be the one that started the
-  // flow, so the completion must fail rather than adopting the state's slot.
+  // A cross-site return gets one same-origin continuation. With no cookie
+  // on that continuation either, it must fail instead of adopting the slot.
   const attack = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture`,
     { redirect: "manual" });
   assert.equal(attack.status, 200);
-  assert.match(await attack.text(), /url=\/\?google=error/);
+  const html = await attack.text();
+  assert.match(html, /room_resume=1/);
+  assert.equal(attack.headers.get("cache-control"), "no-store");
+  assert.equal(attack.headers.get("referrer-policy"), "no-referrer");
+  const continuation = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture&room_resume=1`, { redirect: "manual" });
+  assert.match(await continuation.text(), /url=\/\?google=error/);
   assert.equal(attack.headers.get("set-cookie") || "", "");
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
 });

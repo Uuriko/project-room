@@ -102,7 +102,7 @@ import {
   getReadHorizon, setReadHorizon, listSaved, setSaved
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
-import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
+import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage, googleCallbackReturnPage } from "./google-oauth.mjs";
 import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
@@ -1299,15 +1299,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const signIn = google();
         if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
         rate(`google-callback:${remoteAddress}`, 20);
-        const finishGoogle = href => {
-          const html = googlePostLoginPage(href);
+        const sendGooglePage = html => {
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("Referrer-Policy", "no-referrer");
           res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
           const bytes = Buffer.from(html, "utf8");
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
           return res.end(bytes);
         };
+        const finishGoogle = href => sendGooglePage(googlePostLoginPage(href));
         let stage = "provider";
         try {
+          if (!cookie(req, accountCookieName) && !url.searchParams.has("room_resume") && !url.searchParams.has("error")) {
+            return sendGooglePage(googleCallbackReturnPage(url));
+          }
           // Bind the callback to the browser session that started the flow: a
           // cross-session (or cookie-less) completion fails closed in
           // complete() instead of adopting the state's slot (login CSRF).
