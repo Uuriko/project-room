@@ -348,6 +348,38 @@ function mentionHorizon(store, roomId, memberId, after, through) {
   }
 }
 
+// The per-room attention slice of collectNeedsMe, exported for the room
+// digest (server/room-digest.mjs): the same kinds, the same 140-char clip,
+// the same horizon and retired-mark rules, restricted to seq > after in one
+// room. Items keep the collectNeedsMe shape ({ kind, roomId, seq, id,
+// summary, next }); the digest strips `next` when it composes its rows.
+export function roomAttention(store, roomId, memberId, identityId, after) {
+  const authority = store.roomAuthority(roomId);
+  const member = authority.members?.[memberId];
+  if (!member || member.active === false) return [];
+  if (!(authority.sequence > after)) return [];
+  const state = store.room(roomId).state;
+  let through = mentionHorizon(store, roomId, memberId, after, sessionWatermark(after, authority.sequence));
+  const pendingBonds = identityId ? store.bonds.pendingProposalsFor(identityId) : [];
+  const kinds = [
+    mentionsOf(store, roomId, memberId, after, through),
+    roomDmsOf(store, roomId, memberId, after, state),
+    peerDmsOf(store, roomId, identityId, after),
+    bondRequestsOf(store, roomId, pendingBonds, after),
+    directAsksOf(store, roomId, memberId, after, state),
+    handoffsOf(store, roomId, memberId, after, state)
+  ];
+  const candidates = [];
+  for (const kind of kinds) {
+    if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);
+    for (const item of kind) push(candidates, item);
+  }
+  const retired = retiredNeedsMeKeys(store, roomId, memberId);
+  return candidates
+    .filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`))
+    .sort((a, b) => a.seq - b.seq);
+}
+
 // One read of the claim board, shared by a room's work sections. Each used
 // to list (and JSON-decode) the whole board separately — 80-175ms per read
 // at 400 claims on muse-room scale. Returns null when the list fails, which

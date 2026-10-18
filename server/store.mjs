@@ -49,7 +49,7 @@ import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from ".
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
-import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
@@ -68,7 +68,9 @@ import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
-import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
+import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
+import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
+import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
 import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
 import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
@@ -5242,6 +5244,108 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           evaluatedThrough: built.evaluatedThrough, evaluatedAt: built.evaluatedAt, cursors: built.cursors, ...identity };
       }
       return { ...built, ...identity };
+    });
+  }
+  // C-06 room digest: one bounded read composed from the context, needs-me,
+  // and updates projections plus journal window aggregates. `since` is the
+  // caller's last-handled seq (a wake's seq for the since-wake delta); the
+  // viewer's history floor (PRIV-2) clamps the window and is reported via
+  // `since`/`requestedSince`/`floorApplied`, never silently. Message rows use
+  // the current projection body through messageVisibleToViewer, so deleted,
+  // edited, DM, and pre-join text follows the same rules as every other
+  // summary read. Bodies themselves are never reproduced (see room-digest.mjs).
+  roomDigest(token, roomId, { since = 0, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!Number.isSafeInteger(since) || since < 0) fail(422, "invalid_cursor", "since must be a sequence number");
+      const room = this.room(roomId);
+      const through = room.sequence;
+      if (since > through) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      const viewerId = auth.member.id;
+      const identityId = auth.identityId ?? this.bonds?.identityForMember?.(roomId, viewerId) ?? null;
+      const floor = this.historyFloor(roomId, viewerId, through);
+      const effectiveSince = floor ? Math.max(since, floor.sequence - 1) : since;
+      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, viewerId)?.sequence ?? 0;
+      const context = buildRoomContext({ state: room.state, sequence: through, viewerId, caughtUp, now: this.now() });
+      // Window counts without GROUP BY: a sort inside a query_only read
+      // transaction spills to a temp b-tree this runtime refuses at scale
+      // (verified at 20,000 rows), while per-type COUNT(*) rides the
+      // events_room_type index. Types outside the EVENT_TYPES vocabulary
+      // land in `other`, so the counts still sum exactly to the window total.
+      const byType = {};
+      let counted = 0;
+      const countType = this.db.prepare(
+        "SELECT COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')=?"
+      );
+      for (const type of Object.values(T)) {
+        const { count } = countType.get(roomId, effectiveSince, through, type);
+        if (count > 0) { byType[type] = count; counted += count; }
+      }
+      const eventsInWindow = this.db.prepare(
+        "SELECT COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=?"
+      ).get(roomId, effectiveSince, through).count;
+      if (eventsInWindow > counted) byType.other = eventsInWindow - counted;
+      // Changed work: one descending pass over the window's work_claim.updated
+      // rows; the first sighting of a claim is its latest change. The distinct
+      // total is exact from the same pass.
+      const workRows = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.data.workClaim') AS claimId,
+                json_extract(body,'$.data.action') AS action, json_extract(body,'$.data.claimState') AS state,
+                json_extract(body,'$.data.title') AS title FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='work_claim.updated'
+           AND json_extract(body,'$.data.workClaim') IS NOT NULL
+         ORDER BY sequence DESC`
+      ).all(roomId, effectiveSince, through);
+      const seenClaims = new Set();
+      const workChanged = [];
+      for (const row of workRows) {
+        if (seenClaims.has(row.claimId)) continue;
+        seenClaims.add(row.claimId);
+        if (workChanged.length < 25) workChanged.push({ id: row.claimId, seq: row.seq, action: row.action, state: row.state, title: row.title });
+      }
+      const decisions = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.actorId') AS actorId FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type') IN ('decision.recorded','owner.decision_recorded')
+         ORDER BY sequence DESC LIMIT 10`
+      ).all(roomId, effectiveSince, through);
+      const currentById = indexHistoryMessages(room.state.messages ?? []);
+      const messageRows = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.id') AS eventId, json_extract(body,'$.data.messageId') AS messageId,
+                json_extract(body,'$.data.body') AS body, json_extract(body,'$.data.toMemberId') AS toMemberId,
+                json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.at') AS at FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='message.posted'
+         ORDER BY sequence DESC LIMIT 50`
+      ).all(roomId, effectiveSince, through);
+      const messages = [];
+      for (const row of messageRows) {
+        const id = row.messageId ?? row.eventId;
+        const current = id ? currentById.get(id) : null;
+        const pseudo = current ?? { id, body: row.body, authorId: row.actorId, toMemberId: row.toMemberId, createdAt: row.at };
+        if (!messageVisibleToViewer(pseudo, viewerId, floor)) continue;
+        messages.push({ seq: row.seq, id, actorId: row.actorId, summary: pseudo.body });
+        if (messages.length >= 10) break;
+      }
+      const attention = roomAttention(this, roomId, viewerId, identityId, effectiveSince)
+        .filter(item => !floor || item.seq >= floor.sequence)
+        .map(({ kind, seq, id, summary }) => ({ kind, seq, id, summary }));
+      const projected = projectRoomUpdates(this, roomId, viewerId, identityId);
+      const byKind = {};
+      let actionableTotal = 0;
+      for (const item of projected.items) {
+        if (item.state !== "unread" && item.state !== "read") continue;
+        byKind[item.kind] = (byKind[item.kind] ?? 0) + 1;
+        actionableTotal += 1;
+      }
+      const digest = buildRoomDigest({
+        roomId, viewerId, since: effectiveSince, through, now: this.now(),
+        context, byType, workChanged, workChangedTotal: seenClaims.size,
+        attention, messages, decisions, actionable: { total: actionableTotal, byKind }
+      });
+      return {
+        ...digest,
+        requestedSince: since,
+        ...(floor && effectiveSince !== since ? { floorApplied: true } : {})
+      };
     });
   }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {

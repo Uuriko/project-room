@@ -1883,6 +1883,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/digest"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/directory"
     },
     {
@@ -5430,6 +5434,10 @@
     {
       "method": "GET",
       "path": "/api/rooms/{id}/diagnostics-export"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/digest"
     },
     {
       "method": "GET",
