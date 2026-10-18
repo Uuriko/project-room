@@ -38,3 +38,47 @@ test("an old claim-prs error under a live degraded status is marked not current"
   assert.match(row.lastError, /repo must be/);
   assert.equal(row.lastErrorCurrent, false);
 });
+
+// F6 (CN-8): the degraded state had no age dimension — a rate-limit
+// stretch that began a minute ago read exactly like one running for
+// days. degradedSince stamps the tick that entered the state, holds
+// across ticks that stay degraded, and clears when the state does.
+test("degradedSince stamps the start of the degraded stretch, holds across ticks, and clears on recovery", () => {
+  const tick = (at, summary) => [{ job: "claim-prs", ok: true, at, summary }];
+  const row = (stored, at) => jobHealthView(stored, at).jobs.find(job => job.name === "claim-prs");
+  const t0 = NOW - 170_000;
+  // Healthy ticks carry no stamp.
+  let stored = applyOutcomes({}, tick(t0, { checked: 3, updated: 1 }));
+  assert.equal(row(stored, t0).status, "ok");
+  assert.equal(row(stored, t0).degradedSince, null);
+  // The tick that enters the degraded state stamps it.
+  stored = applyOutcomes(stored, tick(t0 + 30_000, { checked: 0, updated: 0, rateLimited: true }));
+  assert.equal(row(stored, t0 + 30_000).status, "degraded");
+  assert.equal(row(stored, t0 + 30_000).degradedSince, new Date(t0 + 30_000).toISOString());
+  // Later degraded ticks do not move the stamp.
+  stored = applyOutcomes(stored, tick(t0 + 60_000, { checked: 0, updated: 0, rateLimited: true }));
+  stored = applyOutcomes(stored, tick(t0 + 90_000, { checked: 0, updated: 0, rateLimited: true }));
+  assert.equal(row(stored, t0 + 90_000).status, "degraded");
+  assert.equal(row(stored, t0 + 90_000).degradedSince, new Date(t0 + 30_000).toISOString());
+  // Recovery clears the stamp with the state.
+  stored = applyOutcomes(stored, tick(t0 + 120_000, { checked: 2, updated: 1 }));
+  assert.equal(row(stored, t0 + 120_000).status, "ok");
+  assert.equal(row(stored, t0 + 120_000).degraded, null);
+  assert.equal(row(stored, t0 + 120_000).degradedSince, null);
+  // A later stretch gets its own start, not the first stretch's.
+  stored = applyOutcomes(stored, tick(t0 + 150_000, { checked: 0, updated: 0, rateLimited: true }));
+  assert.equal(row(stored, t0 + 150_000).status, "degraded");
+  assert.equal(row(stored, t0 + 150_000).degradedSince, new Date(t0 + 150_000).toISOString());
+});
+
+test("a failing tick ends the degraded stretch and clears its stamp", () => {
+  const t0 = NOW - 120_000;
+  let stored = applyOutcomes({}, [{ job: "claim-prs", ok: true, at: t0, summary: { checked: 0, updated: 0, rateLimited: true } }]);
+  let row = jobHealthView(stored, t0).jobs.find(job => job.name === "claim-prs");
+  assert.equal(row.degradedSince, new Date(t0).toISOString());
+  stored = applyOutcomes(stored, [{ job: "claim-prs", ok: false, at: t0 + 30_000, error: "boom" }]);
+  row = jobHealthView(stored, t0 + 30_000).jobs.find(job => job.name === "claim-prs");
+  assert.equal(row.status, "failing");
+  assert.equal(row.degraded, null);
+  assert.equal(row.degradedSince, null);
+});
