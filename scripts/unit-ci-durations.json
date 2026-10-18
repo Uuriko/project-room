@@ -163,6 +163,7 @@
   "tests/backup-verify.test.js": 59594,
   "tests/begin-scope-retry.test.js": 72635,
   "tests/begin-work.test.js": 13624,
+  "tests/bench-stats.test.js": 3000,
   "tests/board-claim-chat-paint.test.js": 1000,
   "tests/board-empty-copy.test.js": 6234,
   "tests/board-keyboard-nav.test.js": 1000,
