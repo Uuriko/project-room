@@ -485,6 +485,14 @@ function episodeBase({ surface, recordId, roomId }) {
     episodeId: `${surface}:${recordId}`,
     roomId: roomId ?? null,
     surface,
+    // Bright-line producer (ATLAS-DATA D-3): the W4 anonymiser's B4/B9
+    // checks read `contentClasses` off the episode; until the assembler
+    // stamps it, those checks are dead code on real pipeline data. The
+    // class is derived from the surface this episode was assembled from —
+    // the only content classes this assembler can produce are its three
+    // work surfaces; a future dm/inbox surface would stamp its class here
+    // and be excluded downstream by construction.
+    contentClasses: Object.freeze([surface]),
     task: null, claim: null, delivery: null,
     verdicts: Object.freeze([]),
     settlement: null, dispute: null,

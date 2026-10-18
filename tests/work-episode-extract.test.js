@@ -502,3 +502,16 @@ test("stampOf and selfDealingRules units", () => {
     { kind: "payout", account_id: "c", amount: 100 },
   ] }), []);
 });
+
+test("bright-line producer (D-3): every episode carries contentClasses stamped from the surface it was assembled from", async () => {
+  const { episodes } = await assembleWorkEpisodes({ source: kitchenSink().lines() });
+  assert.ok(episodes.length > 0);
+  const surfaces = new Set();
+  for (const ep of episodes) {
+    assert.deepEqual(ep.contentClasses, [ep.surface],
+      `${ep.episodeId}: contentClasses must be the assembler's own surface stamp — the W4 anonymiser's B4/B9 checks read this field`);
+    surfaces.add(ep.surface);
+  }
+  assert.deepEqual([...surfaces].sort(), ["board", "bounty", "public-work"],
+    "the fixture exercises all three surfaces, so all three classes are produced");
+});

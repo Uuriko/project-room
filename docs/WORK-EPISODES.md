@@ -27,6 +27,7 @@ the same null-never-absent discipline as decision-rows/1.
 | `episodeId` | `<surface>:<recordId>` — `bounty:<bounty_id>`, `public-work:<receipt_id>`, `board:<claim_id>` |
 | `roomId` | The room the record belongs to |
 | `surface` | `bounty` \| `public-work` \| `board` |
+| `contentClasses` | The content classes of the episode's source material, stamped by the assembler from the surface it read: `[<surface>]` today. The W4 anonymiser's B4/B9 bright-line checks consume this field; an episode without it is refused downstream (named error), never silently passed |
 | `task` | `{ specHash, criteriaHash, rubricVersion, rewardMillis, termsVersion }` — the ask as pinned when the work was posted. `specHash` is the sha256 of the criteria text (bounty), of the canonical offer terms (public-work), or of the claim's title+criteria (board). `criteriaHash` is the record's own rubric pin where one exists (`bounty_records.rubric_hash`); public-work criteria pins arrive with the citable-criteria work (#4056) and read `null` until then |
 | `claim` | `{ claimantRef, claimedAt, leaseHours, deliveryGeneration }` — who took the work, when, under what lease, and which delivery round the submission belongs to. Fields a surface does not record are `null` (bounties have no lease; public-work records no claim instant) |
 | `delivery` | `{ artefactHash, artefactKind, submittedAt, prUrl }` — the submitted artefact's sha256 and when it landed, from the submission record (bounty `submission_hash`/evidence, the public-work receipt's `artifact`, the board delivery) |
