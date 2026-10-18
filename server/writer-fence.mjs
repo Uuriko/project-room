@@ -541,10 +541,18 @@ const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
 // allowed by the recovery audit but never required. The patrol writes only
 // these tables; older writers have no code path to them.
 const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"]);
+// escrow_keeper_kill (keeper kill flag, server/bounty-epoch-keeper.mjs):
+// the escrow keeper's own halt rows — one global row plus one row per
+// killed room. Purely additive, created lazily by
+// ensureEscrowKeeperKillSchema on the first operator kill — a store the
+// operator has never killed on has no table, so it is allowed by the
+// recovery audit but never required. Only the operator-token surface
+// writes it; older writers have no code path to it.
+const KEEPER_KILL_ADDITIVE_TABLES = Object.freeze(["escrow_keeper_kill"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...KEEPER_KILL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

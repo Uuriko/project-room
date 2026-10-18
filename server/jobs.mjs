@@ -10,7 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
-import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { escrowEpochNextDueAt, escrowKeeperHealth, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
@@ -514,6 +514,11 @@ export const JOBS = Object.freeze([
     // challenge window, an approved one awaiting its sweep, a dispute past
     // its timeout, a deadline refund. One closeEpoch per room per tick:
     // the two-step close (approve, then sweep) is never collapsed.
+    // The keeper kill flag does NOT disable this job: the tick keeps
+    // running and reports killed in its summary, so a deliberate halt
+    // stays observable (and reversible) instead of going silent, and it
+    // never grades as a failure. Health carries the flag state via
+    // keeperKill on this job's entry (both runtimes).
     enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
     disabledReason: () => "No bounty is waiting on an epoch close",
     nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
@@ -873,7 +878,12 @@ export function startNodeScheduler({
           lastSummaryAt: iso(rec.lastSummaryAt),
           lastGrade: rec.lastGrade ?? null,
           consecutiveNoProgressExhaustions: rec.consecutiveNoProgressExhaustions ?? 0,
-          consecutiveFailures: rec.consecutiveFailures ?? 0
+          consecutiveFailures: rec.consecutiveFailures ?? 0,
+          // The escrow keeper's kill flag, read live from the store so a
+          // halt is visible on /api/health/jobs the moment it is set —
+          // state plus since-timestamps, room counts only (no room ids
+          // on this surface). See escrowKeeperHealth.
+          ...(job.name === "escrow-epochs" ? { keeperKill: escrowKeeperHealth(store) } : {})
         };
       });
     },

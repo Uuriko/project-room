@@ -1,4 +1,5 @@
 import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
+import { escrowKeeperHealth } from "../server/bounty-epoch-keeper.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
@@ -235,7 +236,15 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       stale,
       degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
+      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok',
+      // The escrow keeper's kill flag (state + since-timestamps, room
+      // counts only — no room ids on this public surface), read live
+      // from the store when the caller supplied one, so a deliberate
+      // halt is observable here instead of silent. Attached even when
+      // the job is disabled for lack of due work: the flag outlives
+      // the queue. A killed job that keeps ticking successfully still
+      // reads 'ok' above — the halt is a state, not a failure.
+      ...(job.name === 'escrow-epochs' && store ? { keeperKill: escrowKeeperHealth(store) } : {})
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
