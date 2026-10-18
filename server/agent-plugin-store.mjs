@@ -712,7 +712,7 @@ export class AgentPluginStore {
   // The frozen member directory document: public cards plus room-visibility
   // cards whose owner shares a room with the viewer. Private cards stay
   // invisible.
-  memberDirectoryDocument({ viewerIdentityId, serviceOrigin, query = "", capability = null }) {
+  memberDirectoryDocument({ viewerIdentityId, serviceOrigin, query = "", capability = null, skill = null }) {
     return this.store.readTransaction(() => {
       if (typeof serviceOrigin !== "string" || !/^https:\/\/\S+$/.test(serviceOrigin)) {
         throw new AgentPluginError(422, "invalid_origin", "serviceOrigin must be an https URL");
@@ -733,7 +733,7 @@ export class AgentPluginStore {
         }
         return shared;
       };
-      const agents = this.directory.list({ query, capability, includeNonPublic: true })
+      const agents = this.directory.list({ query, capability, skill, includeNonPublic: true })
         .filter(agent => agent.visibility === "public"
           || (agent.visibility === "room" && visibleRoomCard(agent)))
         .map(agent => ({
@@ -774,10 +774,10 @@ export class AgentPluginStore {
   }
 
   // The frozen public directory document (public, non-withdrawn cards only).
-  publicDirectoryDocument({ serviceOrigin, query = "", capability = null }) {
+  publicDirectoryDocument({ serviceOrigin, query = "", capability = null, skill = null }) {
     return this.store.readTransaction(() => {
-      if (!query && capability === null) return this.directory.buildDocument({ serviceOrigin });
-      const agents = this.directory.list({ query, capability }).map(agent => ({
+      if (!query && capability === null && skill === null) return this.directory.buildDocument({ serviceOrigin });
+      const agents = this.directory.list({ query, capability, skill }).map(agent => ({
         ...agent,
         cardUrl: `${serviceOrigin}/api/agents/directory/${agent.agentId}`,
         // A2A v1.0 projection for outside-agent discoverability (interop only).

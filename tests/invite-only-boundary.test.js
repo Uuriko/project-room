@@ -106,6 +106,14 @@ const PROBES = {
   // Agent directory reads: public documents without a credential; an
   // unknown card id reads as 404 unknown_card (never an oracle).
   "GET /api/agent-directory": [undefined, 200],
+  // #650 registry query: GET on the cards collection is the same public
+  // directory document (POST on the same path stays the signed publish).
+  "GET /api/agent-directory/cards": [undefined, 200],
+  // #650 per-room card: anonymously served only for discoverable rooms;
+  // the probe room (commons) is unlisted, so an anonymous caller gets the
+  // uniform 404 room_not_found — identical to a nonexistent room.
+  "GET /api/rooms/{}/agent-card": [undefined, 404],
+  "HEAD /api/rooms/{}/agent-card": [undefined, 404],
   "GET /api/agents/directory": [undefined, 200],
   "GET /api/agents/directory/{}": [undefined, 404],
   // Skill card (RC-2026-09-24-202): public document without a credential;

@@ -487,6 +487,13 @@ export function agentCard() {
       // Canonical source of truth for the deployed revision.
       version: deployed.version
     }),
+    // #650 item 4: the filed deploy-aware field names, at card top level.
+    // Same live values as deployed{} above (stamped server/version.mjs via
+    // deployedInfo(); "dev" when unstamped) — never hardcoded. Envelope
+    // fields: the house signature covers name/description/url/capabilities/
+    // skills/version only, so these do not move the signed bytes.
+    sourceRevision: deployed.revision,
+    buildId: deployed.buildId,
     // QA2 finding P2-5: A2A capabilities.pushNotifications means Task push
     // config. This server does not implement it, so the flag is false even
     // when the generated map says otherwise. Custom wake URLs and webhook

@@ -3,6 +3,7 @@ import {
   verifyCardSignature,
   verifyKeyRotation,
 } from "./agent-card-signing.mjs";
+import { deployFields } from "./version.mjs";
 
 // HTTP-ready agent directory (lane D).
 //
@@ -202,6 +203,11 @@ export function createAgentDirectory({ store, clock, trust, presence, reach, own
     capabilities: Object.freeze([...entry.card.capabilities]),
     skills: Object.freeze([...(entry.card.skills ?? [])]),
     version: entry.card.version,
+    // #650 item 4: deploy-aware fields — the serving build's live stamped
+    // revision/build (server/version.mjs), so a client can tell whether the
+    // directory it is reading is the deployment it expected. Envelope data
+    // about the server, not part of the signed card body.
+    ...deployFields(),
     // The key envelope: any reader can recompute the canonical card body
     // (see agent-card-signing.mjs) and verify the signature offline.
     publicKey: entry.publicKey ?? null,
@@ -327,15 +333,20 @@ export function createAgentDirectory({ store, clock, trust, presence, reach, own
 
   // List card docs. By default only public, non-withdrawn cards (the public
   // document). Pass includeNonPublic:true only for trusted renderers.
-  const list = ({ query = "", capability = null, includeNonPublic = false } = {}) => {
+  const list = ({ query = "", capability = null, skill = null, includeNonPublic = false } = {}) => {
     check(typeof query === "string", "query must be a string");
     check(capability === null || typeof capability === "string", "capability must be a string if given");
+    check(skill === null || typeof skill === "string", "skill must be a string if given");
     const q = query.trim().toLowerCase();
     const docs = [...entries.values()]
       .filter(e => !e.withdrawn)
       .filter(e => includeNonPublic || e.visibility === "public")
       .filter(e => !q || `${e.card.name} ${e.card.description}`.toLowerCase().includes(q))
       .filter(e => capability === null || e.card.capabilities.includes(capability))
+      // #650 item 3: registry query by advertised skill, exact match against
+      // the card's skills[] (same semantics as the capability filter).
+      // Read-only: filtering never mints, alters, or implies trust.
+      .filter(e => skill === null || (e.card.skills ?? []).includes(skill))
       .map(cardDoc);
     return Object.freeze(docs);
   };

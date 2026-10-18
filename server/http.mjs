@@ -2985,6 +2985,29 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (await operatorRoutes(req, res, { url, remoteAddress, requestId: operationId })) return;
       if (await agentPlugin(req, res, { url, remoteAddress })) return;
       if (await nextActionsRoutes(req, res, { url, remoteAddress })) return;
+      // Per-room agent card (#650 item 2): GET /api/rooms/{id}/agent-card.
+      // Handled BEFORE the authenticated room block because visibility is
+      // the gate, not a credential: an active member reads the card, and
+      // anyone reads it when the owner listed the room in the public
+      // directory. Optional member auth is best-effort — every failure
+      // (no credential, bad credential, non-member, missing account
+      // binding) collapses to an anonymous viewer, and RoomDirectory
+      // answers invisible and nonexistent rooms with the identical 404,
+      // so this surface is never an existence oracle. Read-only: the card
+      // grants, joins, and authenticates nothing.
+      const roomAgentCardMatch = /^\/api\/rooms\/([^/]{1,384})\/agent-card$/.exec(url.pathname);
+      if (roomAgentCardMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
+        rate(`room-agent-card:${remoteAddress}`, 120);
+        const cardRoomId = pathId(roomAgentCardMatch[1]);
+        let viewerMemberId = null;
+        try {
+          const selected = roomCredentials(req, url);
+          const fence = selected.mode === "account" ? accountBinding(req, null) : expectedBinding(req);
+          viewerMemberId = roomAuth(selected, cardRoomId, fence)?.member?.id ?? null;
+        } catch { viewerMemberId = null; }
+        return json(res, 200, store.roomDirectory.agentCard(cardRoomId, viewerMemberId), req.method === "HEAD");
+      }
       // Human room URL (H-S1, human-map §8.2): /rooms/:id is the address
       // people paste to each other, but it used to 404 for everyone — the
       // app lives at /#room/:id and joining at /join. A browser asking for

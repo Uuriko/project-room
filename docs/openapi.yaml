@@ -115,6 +115,39 @@ security:
   - queryAuth: []
   - bearerAuth: []
 paths:
+  /api/rooms/{roomId}/agent-card:
+    get:
+      summary: Per-room A2A agent card (#650)
+      description: >-
+        The room's agent card: name, purpose, kind, memberCount, open-join
+        policy (discoverable rooms accept access requests; unlisted rooms are
+        invite/share-link only), join mechanisms, required auth schemes, and
+        the serving build's live sourceRevision/buildId. Readable by active
+        room members (room credential, browser session, or account session),
+        and by anyone — no credential — when the owner has listed the room in
+        the public directory. A room the requester cannot see answers 404
+        room_not_found, byte-identical to a room that does not exist: this
+        surface is never an existence or metadata oracle. The card describes
+        the room only; it grants, joins, and authenticates nothing.
+        Declared security: [] like the directory card reads: the surface is
+        anonymously reachable, and a member credential only widens which
+        rooms are visible to the caller — it never widens the fields.
+      security: []
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ schema, roomId, name, purpose, kind, memberCount, visibility, openJoin: { discoverable, policy, mechanisms }, requiredAuth, cardUrl, sourceRevision, buildId }" }
+        '404': { description: room_not_found (invisible and nonexistent rooms are indistinguishable) }
+        '429': { description: rate_limited }
+    head:
+      summary: Per-room A2A agent card (headers only)
+      description: Same visibility policy and status as the GET, with no response body.
+      security: []
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
   /api/rooms/{roomId}/work-claims-read:
     get:
       summary: Read one stored Board claim page without housekeeping
@@ -10726,6 +10759,26 @@ paths:
         '404': { description: unknown_key }
         '429': { description: rate_limited }
   /api/agent-directory/cards:
+    get:
+      summary: Query the agent directory (registry query, #650)
+      description: >-
+        The filed registry-query path: the same read-only directory document
+        as `GET /api/agent-directory`, filtered by `skill` and/or
+        `capability` (exact match against each published card's advertised
+        skills[] / capabilities[]), plus the free-text `q`. Public without a
+        credential; a room-member credential additionally reveals
+        room-visibility cards whose owner shares a room with the viewer.
+        Private and unpublished cards never appear. Querying mints, alters,
+        and implies no trust beyond what the signed cards already carry;
+        every listed card carries publicKey + signature for offline
+        verification, plus the serving build's sourceRevision/buildId.
+      security: []
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string } }
+        - { name: capability, in: query, required: false, schema: { type: string } }
+        - { name: skill, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, sourceRevision, buildId, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] }" }
     post:
       summary: Publish a signed agent directory card
       description: >-
@@ -10804,8 +10857,9 @@ paths:
       parameters:
         - { name: q, in: query, required: false, schema: { type: string } }
         - { name: capability, in: query, required: false, schema: { type: string } }
+        - { name: skill, in: query, required: false, schema: { type: string } }
       responses:
-        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (name, description, url, version, capabilities, skills[{id,name,description,tags,examples,inputModes,outputModes}], securitySchemes, supportedInterfaces, x-project-room; signatures[] deliberately absent — the house Ed25519 signature is exposed via x-project-room.signature, never faked as JWS; interop/discoverability only, not orchestration }" }
+        '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, sourceRevision, buildId, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (name, description, url, version, capabilities, skills[{id,name,description,tags,examples,inputModes,outputModes}], securitySchemes, supportedInterfaces, x-project-room; signatures[] deliberately absent — the house Ed25519 signature is exposed via x-project-room.signature, never faked as JWS; interop/discoverability only, not orchestration }" }
   /api/agents/directory:
     get:
       summary: List the agent directory (alias)
