@@ -2927,7 +2927,17 @@ export class BountyEscrow {
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
       const now = this.nowMs(), at = isoNow(now);
       const summary = { approved: [], swept: [], refunded: [], released: [], paid: [], expiredUnfunded: [] };
-      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
+      // The snapshot MUST cover every state the epoch keeper's due-scan
+      // (bounty-epoch-keeper.mjs DUE_WHERE) can count as due — including
+      // 'submitted': _keeperPass has the free-miss refund for it, but a
+      // snapshot that never selects the row makes that branch unreachable
+      // from closeEpoch. That omission was the live stall behind the
+      // guardian census F1 finding (2026-10-18): submitted bounties past
+      // their deadline counted due + overdue every tick while no keeper
+      // action could ever touch them (failed stayed 0 — nothing threw;
+      // the rows were simply never read). finalizeBounty was unaffected
+      // (it selects by id), which is why manual closes always worked.
+      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','submitted','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
         // #3275: each bounty's keeper action is atomic. Keeper actions are
