@@ -452,7 +452,18 @@ export class ConversationDrafts {
     if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: isChannelDraftKey(threadId) ? null : threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
-  save(threadId, values) { Object.assign(this.get(threadId), values); }
+  save(threadId, values) {
+    const entry = this.get(threadId);
+    Object.assign(entry, values);
+    // Entry order is last-write order. DraftRecovery persists only the
+    // last 50 text drafts, so the draft a save just touched must sort
+    // newest — otherwise the cap evicts the oldest-created thread even
+    // when it is the one being edited right now. The same object is
+    // re-inserted, keeping the entries.get(key) === draft identity
+    // app.js's send guard relies on; reads (get) never reorder.
+    this.entries.delete(threadId);
+    this.entries.set(threadId, entry);
+  }
   clear(threadId) { this.entries.delete(threadId); }
   hasText() { return [...this.entries.values()].some(draft => draft.body.trim()); }
 }
