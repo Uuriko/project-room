@@ -81,12 +81,13 @@ exception as the receipt card.
   hash, and settlement outcome. Before settlement, and for journal
   lots that are not bounty movements, the id is a 404. The record is
   composed from the credit ledger at read time, not stored as a copy.
-  Unlike the claim and work-item shapes, a lot does not wait for the
-  owner's public-receipts opt-in: it is public once settled. What hides
-  it is the owner's recorded opt-out (the room's own public-receipts
-  setting recorded off), the room's directory receipts switch turned
-  off, or operator unpublish — the same switches that hide the other
-  shapes.
+  Like the claim and work-item shapes, a lot waits for the owner's
+  public-receipts opt-in (#3594): a settled lot is public only while
+  the room's own public-receipts setting is recorded on. Never
+  recording the setting keeps the lot private, exactly like recording
+  it off; the room's directory receipts switch turned off and
+  operator unpublish hide it too — the same switches that hide the
+  other shapes.
 - The setting is `room.public_receipts_set`. It is off until the owner
   records it. A non-owner cannot change it.
 - The room title is shown when the room is in the public directory or has
