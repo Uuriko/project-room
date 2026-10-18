@@ -541,6 +541,20 @@ function diagnoseFromCursor(db, roomId, upTo) {
   return null;
 }
 
+// A fresh park after fillRoom threw: the cursor holds every committed chunk,
+// so the failing event is after it. Replaying from sequence 0 instead can
+// name an older event the backfill already applied under an earlier reducer
+// and will never read again, parking the room on the wrong event.
+function diagnoseFreshBlock(db, roomId) {
+  const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
+  const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
+  if (maxSeq >= head) {
+    const resumed = diagnoseFromCursor(db, roomId, head);
+    if (resumed !== undefined) return resumed;
+  }
+  return diagnoseBlock(db, roomId);
+}
+
 function rediagnoseBlock(db, roomId, blockedSeq) {
   const head = db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId)?.sequence ?? 0;
   const maxSeq = db.prepare("SELECT COALESCE(MAX(sequence), 0) AS n FROM events WHERE room_id=?").get(roomId).n;
@@ -564,9 +578,10 @@ function recordBlock(store, roomId, block) {
     db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at, last_diagnosed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
-        error=excluded.error, head_seq=excluded.head_seq, blocked_at=excluded.blocked_at,
+        error=excluded.error, head_seq=excluded.head_seq,
+        blocked_at=CASE WHEN ? THEN excluded.blocked_at ELSE messages_backfill_blocks.blocked_at END,
         last_diagnosed_at=excluded.last_diagnosed_at`)
-      .run(roomId, block.sequence, block.eventId, block.error, head, now, now);
+      .run(roomId, block.sequence, block.eventId, block.error, head, now, now, fresh ? 1 : 0);
   });
   return fresh;
 }
@@ -882,7 +897,7 @@ export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, de
     } catch (error) {
       if (yieldError) throw yieldError;
       if (!isRoomDataError(error)) throw error;
-      const block = diagnoseBlock(store.db, room.id);
+      const block = diagnoseFreshBlock(store.db, room.id);
       if (!block) throw error; // not a stored-event failure: propagate as before
       // Park the room durably (later calls skip it until the block goes
       // stale) and report it as this call's fresh failure for the unified
