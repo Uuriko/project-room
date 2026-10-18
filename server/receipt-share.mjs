@@ -1,12 +1,14 @@
 // Share layer for public receipts: the graded verdict line every share
-// surface speaks, the pre-filled share text, JSON-LD that mirrors the
-// visible page, the embeddable badge, and the OG-card fields.
+// surface speaks, the pre-filled share text, and JSON-LD that mirrors the
+// visible page. (The generated share posters — the per-receipt OG card
+// and the embeddable badge — were deleted with EXP-5's poster machinery;
+// the pages and their static og:image are what remain.)
 //
 // Consent boundary: nothing here widens publicity. Every consumer resolves
 // the receipt through receipts-live (publicReceiptById / queryRoomProof), so
 // the owner toggle and operator unpublish gate the share surfaces exactly
-// like the page itself — a non-public receipt has no OG card, no badge, and
-// no share block; the routes 404 before this module is asked to render.
+// like the page itself — a non-public receipt has no share block; the
+// routes 404 before this module is asked to render.
 //
 // Honesty: the verdict is graded, never a bare checkmark (proof-ux research,
 // 2026-10-15: a single "Verified" mark reads as a blanket quality verdict).
@@ -57,7 +59,7 @@ const LEVEL_SCOPE = Object.freeze({
 
 const isLot = receipt => receipt?.source === "bounty-lot" && !!receipt?.lot;
 
-// The graded label alone (badge segment, OG badge row). Lot receipts are
+// The graded label alone. Lot receipts are
 // not proofLevelOf's vocabulary: their record is a ledger movement plus a
 // settlement verdict, so the label names exactly that.
 export function proofLabelOf(receipt) {
@@ -147,47 +149,6 @@ export function jsonLdScriptTag(data) {
   return `<script type="application/ld+json">${json}</script>`;
 }
 
-// XML escaping for the badge (same replacement set as the pages'
-// escapeHtml, kept local so this module stays cycle-free).
-const escapeXml = value => String(value ?? "")
-  .replace(/&/g, "&amp;")
-  .replace(/</g, "&lt;")
-  .replace(/>/g, "&gt;")
-  .replace(/"/g, "&quot;")
-  .replace(/'/g, "&#39;");
-
-// Verdana at 11px advances ~6.7px per character for mixed-case text;
-// segment width is the estimate plus padding, the standard badge math.
-const badgeSegmentWidth = text => Math.ceil([...text].length * 6.7) + 12;
-
-// The embeddable badge: two segments, the surface and the graded verdict.
-// The verdict segment always carries the level's words — never a bare
-// checkmark, which the proof-UX research shows gets read as a blanket
-// quality verdict. One hue for every level: the grade is in the text,
-// not in a good/bad color. Colors are the OG card's palette.
-export function receiptBadgeSvg(receipt) {
-  const left = "Project Room receipt";
-  const right = proofLabelOf(receipt);
-  const leftWidth = badgeSegmentWidth(left);
-  const rightWidth = badgeSegmentWidth(right);
-  const width = leftWidth + rightWidth;
-  const accessible = `${cleanText(receipt.title, 110)} — ${verdictLineOf(receipt)}`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="${escapeXml(accessible)}"><title>${escapeXml(accessible)}</title><clipPath id="r"><rect width="${width}" height="20" rx="3" fill="#fff"/></clipPath><g clip-path="url(#r)"><rect width="${leftWidth}" height="20" fill="#292b33"/><rect x="${leftWidth}" width="${rightWidth}" height="20" fill="#5555bd"/></g><g fill="#eeedf1" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11"><text x="${leftWidth / 2}" y="14" text-anchor="middle">${escapeXml(left)}</text><text x="${leftWidth + rightWidth / 2}" y="14" text-anchor="middle">${escapeXml(right)}</text></g></svg>`;
-}
-
-// The badge's canonical image URL (same origin route as the OG card).
-export const receiptBadgeUrl = receipt => `${receiptCanonical(receipt)}/badge.svg`;
-
-// The HTML a worker pastes into a README or portfolio: the badge image
-// wrapped in the receipt link, with the verdict line as its alt text.
-export function receiptEmbedSnippet(receipt) {
-  const alt = `${cleanText(receipt.title, 110).replace(/"/g, "'")} — ${verdictLineOf(receipt)} (Project Room receipt)`;
-  return `<a href="${receiptCanonical(receipt)}"><img src="${receiptBadgeUrl(receipt)}" alt="${alt}"></a>`;
-}
-
-// One-tap share targets for the script-free page: plain anchors, no JS.
-// The X and mail bodies are the visible share text, so what gets posted
-// is exactly what the page shows.
 export function receiptShareLinks(receipt) {
   const canonical = receiptCanonical(receipt);
   const text = shareTextOf(receipt);
@@ -197,22 +158,5 @@ export function receiptShareLinks(receipt) {
     x: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(canonical)}`,
     linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(canonical)}`,
     email: `mailto:?subject=${encodeURIComponent(text)}&body=${encodeURIComponent(`${text}\n${canonical}`)}`,
-  };
-}
-
-const when = value => {
-  const time = Date.parse(value ?? "");
-  return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : "";
-};
-
-// Fields for the runtime OG renderer (server/og-render.mjs): the work,
-// the verdict on its own line, and the honesty footer — the card states
-// the grade before the click, like the page does after it.
-export function receiptOgFields(receipt) {
-  return {
-    title: receipt.title ?? "",
-    subtitle: verdictLineOf(receipt),
-    badges: [proofLabelOf(receipt), receipt.room?.title ?? "", when(receipt.at)].filter(Boolean),
-    footer: "Project Room receipt · hashes are stored values, not re-verified",
   };
 }

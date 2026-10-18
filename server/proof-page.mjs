@@ -185,8 +185,6 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
     description,
     path: `/r/${slug}/proof`,
     jsonLd,
-    ogImage: `${ROOM_ORIGIN}/r/${slug}/proof/og.png`,
-    ogAlt: description,
   })}
 <body><header><p><a href="/">Project Room</a> · <a href="/r/${escapeHtml(slug)}">${escapeHtml(room.title)}</a> · <a href="/receipts">Public receipts</a></p></header>
 <main>
