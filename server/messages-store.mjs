@@ -1144,40 +1144,27 @@ export function restoreArchivedMessages(store, roomId) {
   });
 }
 
-// Bring one archived message back into the projection so the normal delete and
-// redaction path can act on it. The id joins the marker's retainedIds (it is at
-// or below throughSeq but no longer archived) and the archived count drops by
-// one, so the marker, the table and a marker-aware replay all agree. Returns
-// true when the message was restored. Runs inside the caller's command
-// transaction, so a delete the reducer then refuses rolls this back too.
-export function restoreArchivedMessage(store, roomId, messageId) {
-  const marker = archiveMarker(store.db, roomId);
-  const row = archivedMessageRow(store.db, roomId, messageId, marker);
-  return restoreArchivedRows(store, roomId, marker, row ? [row] : []);
-}
-
-// Resolve only the visible referenced ancestry, then materialize it once. This
-// shares the command transaction; a refusal rolls the entire restoration back.
-export function restoreArchivedReference(store, roomId, messageId, actorId) {
-  if (typeof messageId !== 'string' || !messageId) return false;
+// Load the referenced entities into a command-owned context. This performs no
+// writes or cache invalidation: only the accepted command publishes the resulting
+// state. Keep the committed serving projection intact throughout admission.
+// An owner/author deletion may load its private target without loading ancestors;
+// other references only load ancestry visible to the actor.
+export function archivedMessageCommandContext(store, roomId, room, messageId, { actorId, ancestors = true, allowPrivate = false } = {}) {
+  if (typeof messageId !== 'string' || !messageId) return room;
   const marker = archiveMarker(store.db, roomId), rows = [], seen = new Set();
   let reference = messageId;
   while (typeof reference === 'string' && reference && !seen.has(reference)) {
     seen.add(reference);
     const row = archivedMessageRow(store.db, roomId, reference, marker);
-    if (!row || row.to_member_id && row.author_id !== actorId && row.to_member_id !== actorId) break;
+    if (!row || !allowPrivate && row.to_member_id && row.author_id !== actorId && row.to_member_id !== actorId) break;
     rows.push(row);
+    if (!ancestors) break;
     reference = row.reply_to_id;
   }
-  return restoreArchivedRows(store, roomId, marker, rows);
-}
-
-function restoreArchivedRows(store, roomId, marker, rows) {
-  if (!rows.length) return false;
-  const db = store.db, room = store.room(roomId), state = room.state;
+  const db = store.db, state = room.state;
   const live = new Set((state.messages ?? []).map(message=>message.id));
   const missing = rows.filter(row=>!live.has(row.message_id));
-  if (!missing.length) return false;
+  if (!missing.length) return room;
   let replayed;
   const restored = missing.map(row=>{
     const messageId = row.message_id;
@@ -1211,7 +1198,5 @@ function restoreArchivedRows(store, roomId, marker, rows) {
   const messages = [...(state.messages ?? []), ...restored].sort((a,b)=>(seqs.get(a.id) ?? Infinity)-(seqs.get(b.id) ?? Infinity));
   const next = { ...state, messages, messagesArchive: { throughSeq: marker.throughSeq,
     count: Math.max(0, marker.count-restored.length), retainedIds: [...marker.retainedIds,...restoredIds] } };
-  db.prepare('UPDATE rooms SET projection=? WHERE id=?').run(storedProjection(db,roomId,next,{enabled:store.bodiesAtRest}),roomId);
-  store._projectionCache?.clear?.();
-  return true;
+  return { ...room, state: next };
 }

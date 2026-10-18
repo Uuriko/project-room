@@ -3,7 +3,7 @@
 // reference conflicts. Keep these phases separate so existing admission order
 // and error precedence remain stable during the writer migration.
 import { EVENT_TYPES as T } from '../src/events.js';
-import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, restoreArchivedMessage, restoreArchivedReference } from './messages-store.mjs';
+import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, archivedMessageCommandContext } from './messages-store.mjs';
 import { storedProjection } from './projection-at-rest.mjs';
 import { ServiceError } from './service-error.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -24,21 +24,20 @@ const RESTORED_REF_FIELDS = Object.freeze({ ...ARCHIVED_REF_FIELDS,
 });
 
 export function prepareMessageCommand(store, roomId, room, command, actorId) {
-  // The author or the Room owner can still delete an archived message: bring
-  // that one message back into the projection (it stays retained) and let the
-  // normal delete and redaction run. Anyone else falls through to the
-  // archived-message refusal below, which confirms nothing to a non-party.
+  // Preserve deletion admission even when rolling mode is disabled. The owner
+  // may remove an archived private target, but this must not load its ancestry.
   if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
     const archivedRow = archivedMessageRow(store.db, roomId, command.data.messageId);
-    if (archivedRow && (archivedRow.author_id === actorId || room.state.room?.ownerId === actorId)
-        && restoreArchivedMessage(store, roomId, command.data.messageId)) room = store.room(roomId);
+    if (archivedRow && (archivedRow.author_id === actorId || room.state.room?.ownerId === actorId)) {
+      return archivedMessageCommandContext(store, roomId, room, command.data.messageId,
+        { actorId, ancestors: false, allowPrivate: true });
+    }
   }
-  // Normalized-tail mode loads only the referenced archived record and its
-  // ancestor chain for the existing reducer. Visibility is checked before
-  // restoration; permissions and revision checks remain in applyEvent.
+  // The reducer still owns permissions, revisions and receipt withdrawal.
+  // Preparing an entity context never writes an intermediate room projection.
   if (store.messageProjectionWindow !== null) {
-    const reference = command.data?.[RESTORED_REF_FIELDS[command.type]];
-    if (restoreArchivedReference(store, roomId, reference, actorId)) room = store.room(roomId);
+    return archivedMessageCommandContext(store, roomId, room,
+      command.data?.[RESTORED_REF_FIELDS[command.type]], { actorId });
   }
 
   return room;

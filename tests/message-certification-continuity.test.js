@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { prepareMessageCommand } from '../server/message-command-service.mjs';
 import { readConversation } from '../server/conversation-sync.mjs';
 
 function setup(t, enabled = true, window = null, entities = false) {
@@ -274,7 +275,7 @@ test('work and decision commands resolve archived source entities without room r
 });
 
 
-test('a deep archived reply restores its ancestor chain with one projection write',t=>{
+test('a deep archived reply prepares its ancestor chain without an intermediate projection write',t=>{
  const f=setup(t);f.store.roomFlood={consume(){}};
  for(let i=0;i<8;i++)f.post(`chain-${i}`,`Settled note ${i}.`,i?{replyToId:`chain-${i-1}`} : {});
  f.post('chain-tail','Unrelated tail.');f.certify();f.store.archiveMessages('commons',{keepNewest:1,dryRun:false});
@@ -285,7 +286,7 @@ test('a deep archived reply restores its ancestor chain with one projection writ
  f.store.db.prepare=sql=>{if(/^UPDATE rooms SET projection=\? WHERE id=\?$/.test(sql))restores++;return prepare(sql);};
  f.post('deep-reply','Continuing the thread.',{replyToId:'chain-7'});
  f.store.db.prepare=prepare;f.store._replayRoom=replay;
- assert.equal(restores,1,'ancestor restoration serializes the working set once');
+ assert.equal(restores,0,'command preparation must not serialize an intermediate working set');
  assert.equal(f.store.room('commons').state.messages.filter(m=>m.id.startsWith('chain-')).length,9);
  assert.equal(f.store.checkMessagesParity().ok,true);
 });
@@ -533,4 +534,20 @@ test('archive fallback applies same-instant history exclusions before the page l
  const page=f.read({limit:2},late);
  assert.deepEqual(page.messages,expected.messages);assert.equal(page.nextCursor,null);
  assert.throws(()=>f.read({messageId:'before-join-0'},late),error=>error.status===404);
+});
+
+
+test('archived command preparation is ephemeral and leaves the serving projection unchanged',t=>{
+ const f=setup(t); f.store.roomFlood={consume(){}};
+ f.post('context-old','Original intent.'); f.post('context-tail','Other work.'); f.certify();
+ f.store.archiveMessages('commons',{keepNewest:1,dryRun:false}); f.store.messageProjectionWindow=2;
+ const room=f.store.room('commons');
+ const before=f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
+ f.store.transaction(()=>{
+  const context=prepareMessageCommand(f.store,'commons',room,{type:'message.edited',data:{messageId:'context-old'}},'owner');
+  assert.equal(context.state.messages.find(m=>m.id==='context-old').body,'Original intent.');
+  assert.equal(room.state.messages.some(m=>m.id==='context-old'),false,'input context is immutable');
+  assert.equal(f.store.room('commons').state.messages.some(m=>m.id==='context-old'),false,'readers keep the committed working set');
+  assert.equal(f.store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection,before);
+ });
 });
