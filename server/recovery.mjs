@@ -68,6 +68,7 @@ export function auditRecovery(store) {
     const drift = [];
     let eventCount = 0, checkpointCount = 0, checkpointEvents = 0;
     for (const row of store.db.prepare("SELECT id,sequence FROM rooms ORDER BY id").all()) {
+      try {
       const actual = store.room(row.id), rebuilt = store.rebuildProjection(row.id);
       // An archived room's stored projection is compacted; compare the replay compacted the same way.
       compactReplayLikeArchive(store.db, row.id, rebuilt.state);
@@ -171,6 +172,15 @@ export function auditRecovery(store) {
       auditWorkHelp(actual.state, history, checkpoint);
       eventCount += history.length;
       rooms.set(row.id, actual.state);
+      } catch (error) {
+        // A room whose stored projection cannot even be read (a null or
+        // wrong-shaped document, missing collections) must not leak a bare
+        // TypeError out of the audit: name it in the reconciliation report
+        // alongside drifted rooms, so one refusal carries every bad room.
+        // Structural requireState failures keep their abort behaviour.
+        if (error?.message === "Recovery data requires operator reconciliation" || error?.drift) throw error;
+        drift.push({ room: row.id, fields: [`unreadable room (${error?.name ?? "Error"}): ${String(error?.message ?? error).slice(0, 80)}`] });
+      }
     }
     // Drift is reported whole: every drifted room is named before the audit
     // fails, so one refusal carries the full reconciliation summary.
