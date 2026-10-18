@@ -424,6 +424,9 @@ export const unfencedAdditiveTables = Object.freeze([
   // integrity cron writes it; a row names what an operator must repair.
   // Older writers have no path to it. A missing row means not parked.
   "messages_backfill_blocks",
+  // messages_backfill_state: the cursor's replay state when it is too big
+  // for one row, split into parts. Same writer and lifetime as the cursor.
+  "messages_backfill_state",
   // agent_wants_work (BOARD-WAKE-2): an agent's opt-in ready-work filter and
   // its last wake time. Older writers have no path to it. A missing row means
   // off, so a rollback only stops the ready_work wakes.
@@ -533,14 +536,17 @@ const WORK_ITEM_BOARD_ADDITIVE_TABLES = Object.freeze(["work_item_board_backfill
 // created lazily on first record/read — a store that never ran the
 // integrity job has no table, so it is allowed by the recovery audit but
 // never required.
-const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures"]);
+// projection_shape_upgrades (server/legacy-message-shape.mjs): audit rows of
+// the one-time legacy message shape upgrade, created on its first change. A
+// store that never held a legacy record has none; older writers have no path.
+const INTEGRITY_ADDITIVE_TABLES = Object.freeze(["integrity_failures", "projection_shape_upgrades"]);
 // patrol_* (ClueBot phase 1, server/patrol.mjs): the resident patrol's own
 // per-room cursor, claim/message shadows and findings journal. Purely
 // additive, created lazily by ensurePatrolSchema on the first patrol tick
 // — a store the patrol has never run against has none of them, so they are
 // allowed by the recovery audit but never required. The patrol writes only
 // these tables; older writers have no code path to them.
-const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings"]);
+const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", "patrol_messages", "patrol_findings", "patrol_blocks"]);
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
