@@ -40,6 +40,7 @@
     "qa3:sse-contract": "node scripts/qa3/sse-contract.mjs",
     "qa3:board-growth": "node scripts/qa3/board-growth.mjs",
     "detect-flaky": "node scripts/flaky-detect.mjs",
+    "quarantine:propose": "node scripts/quarantine-trigger.mjs",
     "fuzz:mime": "node scripts/fuzz-mime.mjs",
     "test:contributor": "node --test --test-concurrency=1 scripts/selfhost-onboarding-browser-check.mjs scripts/contribution-journey-check.mjs tests/github-work-sync.test.js tests/claim-autolink-http.test.js"
   },
