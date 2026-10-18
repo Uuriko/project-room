@@ -341,3 +341,14 @@ storage behavior already qualified on #4114 or expand into new feature lanes.
 4. Publish the refreshed #4118 head and source-bound qualification. Explain the
    stacked diff and its large-diff justification. Keep #4114's hosted gate separate,
    and leave production release and physical sleep/wake unclaimed.
+
+Continuity integration checkpoint: #4118 includes architecture `aa69cf95`; only
+planning text and the generated manifest conflicted. 51 focused tests pass. Full
+Node24 qualification: 11,174 passed, 24 exact recorded Mac host failures, 8 skipped.
+The affected run found nine baseline host failures and a fixed-delay relay-test
+failure; replacing that delay with the existing bounded wait produced 17 passing
+machine tests. Lint has zero errors. Server/Worker/browser source and Room benchmark
+code are unchanged from #4114; its performance evidence is reused with that scope,
+not represented as another measured speedup. Current main's later `f18cd508`
+escrow/heartbeat change remains outside this pinned stack. Exact-head hosted checks,
+release reconciliation, sleep/wake and the human pilot remain open.
