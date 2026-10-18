@@ -298,7 +298,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     title: receipt.title,
     description,
     path: `/receipts/${receipt.id}`,
-    jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, verification ? { description: provenNote } : {})),
+    jsonLd: jsonLdScriptTag(receiptJsonLd(receipt, { description: provenNote })),
     ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
     ogAlt: verdictLine,
   })}
